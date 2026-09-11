@@ -1330,6 +1330,7 @@ env = project.Environment(toolchain="c")
 # Apply variant settings
 # debug: -O0 -g
 # release: -O2 -DNDEBUG
+# release-fastest: -O3 -DNDEBUG (/O2 /Ob3 on MSVC)
 env.set_variant(variant)
 
 # Add extra flags
@@ -1342,6 +1343,11 @@ project.Default(app)
 
 print(f"Variant: {variant}")
 ```
+
+The variants are `debug`, `release`, `release-fastest`, `relwithdebinfo` and
+`minsizerel`; each toolchain realizes them in its own flags. `release-fastest`
+is the compiler's highest optimization level that doesn't change results, so
+it never turns on fast-math; add that yourself if you want it.
 
 **Usage:**
 ```bash
@@ -1521,7 +1527,10 @@ app_profile = project.Program("app_profile", profile_env)
 **Key points about environments:**
 
 - Each `project.Environment()` call creates a fresh environment with toolchain defaults
-- `env.clone()` creates a deep copy - changes to the clone don't affect the original
+- `env.clone()` creates a deep copy - changes to the clone don't affect the original.
+  A clone has no name; `env.clone(name="host")` gives it one. Two environments
+  need names, and different `build_prefix` settings, before they can hold
+  targets with the same name
 - Environments don't share state - there's no "base" environment that accumulates
 - You can clone at any point and re-tune the clone: `set_variant()` (and other
   exclusive presets) *replace* the previous setting, so
@@ -1591,7 +1600,7 @@ with env.override() as careful:
 
 The file stays part of the target, so it keeps the target's include dirs, defines, and everything inherited from its dependencies — only the environment layer changes.
 
-`env.cc.Object()` (see `examples/17_object_sources`) is another way to apply unique flags: compiling a standalone object that several targets can link directly. It sits outside any target, so no target's usage requirements apply to it, and it can use its own or any environment.
+`env.cc.Object()` (see `examples/17_object_sources`) is another way to apply unique flags: compiling a standalone object that several targets can link directly. It sits outside any target, so no target's usage requirements apply to it, and it can use its own or any environment. Its first argument is the object's path; a relative one is placed in the environment's build directory (under its `build_prefix`, if any), so `env.cc.Object("helper.o", "src/helper.c")` and the example's `build_dir / "helper.o"` land in the same place.
 
 ### Multiple Toolchains
 
@@ -1994,9 +2003,10 @@ env = project.Environment(toolchain=toolchain)
 env.set_variant(variant)
 env.cxx.flags.append("-std=c++17")
 
-# Sync Conan profile with toolchain settings.
-# cppstd can be set explicitly, or inferred from env.cxx.flags.
-conan.sync_profile(toolchain, env=env, build_type=variant.capitalize())
+# Sync Conan profile with toolchain settings. build_type follows the
+# environment's variant; cppstd can be set explicitly, or inferred from
+# env.cxx.flags.
+conan.sync_profile(toolchain, env=env)
 
 # Install packages (cached, only runs when needed)
 packages = conan.install()
@@ -2023,13 +2033,22 @@ project.Default(hello)
 ```python
 conan.sync_profile(
     toolchain,  # Detects compiler, version, OS, arch
-    env=env,  # Infers cppstd from env.cxx.flags (optional)
-    build_type="Release",  # Release, Debug, RelWithDebInfo, MinSizeRel
+    env=env,  # build_type from env.variant; cppstd from env.cxx.flags
+    build_type="Release",  # Overrides the variant: Release, Debug, RelWithDebInfo, MinSizeRel
     cppstd="23",  # Explicit C++ standard (overrides env inference)
 )
 ```
 
+`build_type` follows the environment's variant when you leave it out: `debug` is `Debug`, `release` and `release-fastest` are `Release`, `relwithdebinfo` and `minsizerel` their Conan names. With one environment per variant, one `ConanFinder` per variant (each with its own `output_folder`) gives each its matching packages.
+
 The `cppstd` parameter sets `compiler.cppstd` in the Conan profile, which many packages require. If omitted, it's inferred from `env.cxx.flags` (e.g., `-std=c++23` becomes `compiler.cppstd=23`). You can also use the lower-level `conan.set_profile_setting("compiler.cppstd", "23")` before calling `sync_profile()`.
+
+A conf entry set with `conan.set_profile_conf()`, such as `tools.build:cxxflags`, is not part of Conan's package id: changing it reuses the binary Conan already built unless you tell Conan the conf matters:
+
+```python
+conan.set_profile_conf("tools.build:cxxflags", '["-march=native"]')
+conan.set_profile_conf("tools.info.package_id:confs", '["tools.build:cxxflags"]')
+```
 
 ### The env.use() Helper
 
@@ -2230,7 +2249,7 @@ env.Command(
 )
 ```
 
-Each of the three kinds of path has its own base. `sources=` and `depends=` are relative to the directory of the script that declares the command; in a subdirectory reached through `add_subdirectory` that is the subdirectory, not the project root. `target=` is relative to the build directory of that same script — `build/<subdir>/`, where its programs and libraries also build — and a leading build-dir component is absorbed: `target=project.build_dir / "out.txt"` and `target="out.txt"` mean the same file, so targets may be written either way. (For a file in a literal subdirectory that shares the build directory's name, write the prefix twice: `project.build_dir / "build/browse_py.h"`.) The command's own tokens are the third kind, and worth stating plainly: a *relative* path inside a command is looked for under the build directory, where the command runs. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below.
+Each of the three kinds of path has its own base. `sources=` and `depends=` are relative to the directory of the script that declares the command; in a subdirectory reached through `add_subdirectory` that is the subdirectory, not the project root. `target=` is relative to the build directory of that same script — `build/<subdir>/`, where its programs and libraries also build — and a leading build-dir component is absorbed: `target=project.build_dir / "out.txt"` and `target="out.txt"` mean the same file, so targets may be written either way. (For a file in a literal subdirectory that shares the build directory's name, write the prefix twice: `project.build_dir / "build/browse_py.h"`.) The command's own tokens are the third kind, and worth stating plainly: a *relative* path inside a command is looked for under the build directory, where the command runs. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below. A build-directory path you write into a command yourself, an output directory a tool takes as an argument say, should go through `env.build_relative()`, which puts it under the environment's `build_prefix` the way `target=` is.
 
 **To use a generated file as a source, pass the target.** `sources=` names files in the source tree, so a generated file passed the way its `target=` was — `sources=["gen/parser.c"]` — would erroneously look in the source tree. Using the proper build path works fine: `sources=[project.build_dir / "gen/parser.c"]`. That will also correctly add the dependency. Passing the target is even better; no path to keep in sync:
 
@@ -2318,6 +2337,13 @@ to its depfile. For those, say `target.depends(thing, on_change=True)`
 and every step reruns when it changes, whether or not the step's own
 record mentions it. The opposite, `on_change=False`, says the thing only
 has to exist first and never reruns a step by itself.
+
+A file a command names in a flag is a dependency of that command without
+any `depends()` at all, when pcons knows the file: `write_file()` and
+`configure_file()` register what they write, and the build knows what it
+produces. So `PathToken(prefix="-Wl,--version-script=", path=exports)` in
+`link_flags` relinks when the export list changes. Include and library
+directories are never files, so they're unaffected.
 
 You may pin a dependency to one step if you want, by building that
 step yourself: `obj = env.cc.Object(...)` then `obj.depends(thing)`. For
@@ -2419,6 +2445,26 @@ env.Command(
 ```
 
 The variables are written into the generated build file, in front of the one command they belong to: `env NAME=VALUE` on POSIX, a small pcons helper on Windows (which has no `env`). So they survive a direct `ninja` or `make` run, and no other command sees them. Setting `os.environ` in the build script would do neither — it reaches every command, and only while pcons itself runs. See `examples/73_command_env`.
+
+### Exporting Only Some Symbols
+
+Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file with MSVC and clang-cl.
+
+```python
+plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])
+plugin.set_option("exported_symbols", ["OfxGetPlugin", "OfxGetNumberOfPlugins"])
+```
+
+The names are the C names; pcons adds the Darwin underscore. macOS and Linux
+accept `*` patterns (`"Spark*"`), MSVC doesn't support patterns so it will complain if passed one.
+The list is written under the target's build directory and the link depends
+on it, so changing the list relinks.
+
+If you already have an OS-specific linker def or symbol list file,
+just pass it as a source to the builder: a `.def` in the target's
+sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
+or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
+the link then depends on.
 
 ### Post-Build Commands
 
@@ -2656,6 +2702,16 @@ pcons generate --mermaid             # To stdout
 pcons generate --graph=deps.dot      # DOT format
 ```
 
+The graph shows what the script declares. Three kinds of detail come from a
+finished build instead, and `--graph-detail` asks for them: `headers` (the
+compiler's `.d` files), `scan` (a scanner's own edges, elided by default),
+and `discovered` (the dependencies a scanner found). See
+[Seeing it in the graph](scanners.md#seeing-it-in-the-graph).
+
+```bash
+pcons generate --graph=deps.dot --graph-detail=discovered
+```
+
 ---
 
 ## Command-line reference
@@ -2770,6 +2826,7 @@ opt_level = get_var("OPT_LEVEL", 2)  # int
 scale = get_var("SCALE", 1.0)  # float
 port = get_var("PORT", "ofx")  # str
 prefix = get_var("PREFIX", Path("/usr/local"))  # Path
+ports = get_var("PORTS", ["ofx"])  # list: PORTS=ofx,ae gives ["ofx", "ae"]
 ```
 
 Pass `type=` when there is no default. The result is `None` when the variable is
@@ -3131,7 +3188,90 @@ project.Install(install_dir(env, "program"), [exe])  # -> <prefix>/bin/
 !!! note
     `Install()` accepts a list of sources and copies each to the destination directory. `InstallAs()` takes exactly one source and copies it to the specified path (with optional rename). If you need to install multiple files with renaming, use multiple `InstallAs()` calls.
 
-`InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run.
+`InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run. The depfile lists the directories as well as the files, so a file added or removed anywhere under the source tree re-runs the copy too, and a copy of a file the source no longer holds is removed.
+
+**On Windows**, ninja reads a directory's modification time from the parent
+directory's NTFS index entry, which is refreshed when something opens and
+closes the directory, not when a file is written into it. A build started right
+after a file is added can therefore see the old time and copy the file one
+build late. The next build always sees it, and listing the directory in
+between (a file manager, an editor, `dir`) refreshes the entry at once. Edits
+and removals are unaffected: the file's own entry is refreshed when the writer
+closes it, and a file that is gone is gone.
+
+### Merging Source Trees into One Directory
+
+`OverlayDir` merges the *contents* of several source trees into one directory.
+Use it to assemble a package source directory from a shared tree plus a
+per-application tree, or any other layered staging job:
+
+```python
+stage = project.OverlayDir(
+    env,
+    "stage/app",
+    sources=[shared_dir, app_dir],   # app_dir wins a shared path
+    exclude=["*.orig", ".git"],
+)
+```
+
+How it differs from `InstallDir`:
+
+- **Contents, not the directory.** `InstallDir(dest, "shared")` produces
+  `dest/shared/...`. `OverlayDir(env, dest, sources=["shared"])` puts
+  `shared`'s children directly in `dest`. That is what lets two trees with the
+  same name merge instead of colliding.
+- **Several sources.** `InstallDir` takes exactly one.
+- **The later source wins.** When two trees hold the same relative path, the
+  last one in `sources` is the one that lands. Argument order is the only rule:
+  not modification time, not depth, not which tree looks more specific.
+- **No install prefix.** The destination is a staging directory under the
+  environment's build directory, not an install. There is no `no_prefix=True`
+  to pass.
+- **It takes an environment.** The destination is anchored under *that*
+  environment's build directory.
+
+Relative paths are kept, so `src/com/example/Thing.java` arrives at
+`<dest>/src/com/example/Thing.java`. Two trees can each contribute a different
+child of one shared directory. One target owns the destination and stages all of
+it with a single build edge, whose only output is a stamp. Individual staged
+files are not build targets: `ninja <dest>/x/y.txt` names nothing.
+
+`exclude` patterns are globs matched against the path relative to **each source
+root**, never the destination and never an absolute path. A pattern with no `/`
+matches a name at any depth, one with a `/` is anchored at the root, and
+matching is case sensitive on every platform. An excluded directory takes its
+contents with it. Nothing is excluded by default. A pattern that matches
+nothing is not an error, since source trees differ in what they hold.
+
+An excluded path is dropped from every source tree, so excluding the file that
+would have won a conflict leaves nothing at that path rather than falling back
+to the other tree - falling back would stage the very path you asked to drop.
+
+**Freshness.** Which files win is decided when the edge runs, not when pcons
+runs. The edge reports every directory it walked and every file it copied in a
+depfile, so adding a file anywhere - including deep under `src/com/example/` -
+restages on the next `ninja`, with no hand-run of pcons. Both halves of the
+depfile are needed: a directory's modification time changes when it gains or
+loses an entry, an edit in place changes no directory at all.
+
+On Windows, a file added right before a build can be staged one build late; see
+the note under [Installing Files](#installing-files).
+
+A file another build edge generates into a source tree is staged by the same
+build that writes it. Order the two with `depends()`:
+
+```python
+generated = env.Command(target=str(shared_dir / "version.txt"), ...)
+stage = project.OverlayDir(env, "stage", sources=[shared_dir, app_dir])
+stage.depends(generated)
+```
+
+**Removal.** A file removed from a source tree loses its staged copy, along with
+any directory that leaves empty. Only the files this target staged are removed -
+the stamp records them - so anything else installed into the same destination is
+left alone.
+
+See `examples/78_overlay_dirs` for a working two-tree overlay.
 
 ### Generating pkg-config Files
 
@@ -3327,6 +3467,7 @@ pkg = macos.create_pkg(
 | `background` | Background image for the installer |
 | `scripts_dir` | Directory with `preinstall`/`postinstall` scripts |
 | `sign_identity` | Code signing identity |
+| `depends` | Targets to build before the sources are staged, for a directory source that other targets fill |
 
 #### macOS: `.dmg` Disk Images
 
@@ -4289,6 +4430,12 @@ from pcons.contrib import bundle, platform
 plist = bundle.generate_info_plist("MyPlugin", "1.0.0", bundle_type="BNDL")
 bundle.create_macos_bundle(project, env, plugin, bundle_dir="build/MyPlugin.bundle")
 bundle.create_flat_bundle(project, env, plugin, bundle_dir="build/MyPlugin")
+# Resources under their own names, or renamed on the way in; PkgInfo from a file
+bundle.create_macos_bundle(
+    project, env, plugin, bundle_dir="build/MyPlugin.bundle",
+    resources={"com.example.MyPlugin.png": "art/logo-white.png"},
+    pkginfo=Path("plugin-pkg.info"),
+)
 arch_dir = bundle.get_arch_subdir("darwin", "arm64")  # "MacOS-arm-64"
 
 # Platform utilities

@@ -750,3 +750,86 @@ class TestEnvironmentName:
         env = test_project.Environment(name="mcu")
         env.name = None
         assert env.name is None
+
+
+class TestAssignedFlagsKeepGrouping:
+    """Assigning a plain list to a flag variable keeps it a FlagList, so a
+    FlagPair appended afterwards still reaches the command line as two
+    tokens (#144)."""
+
+    def test_assignment_keeps_the_flaglist(self, test_project, gcc_toolchain):  # noqa: F811
+        from pcons.core.flags import FlagList, FlagPair
+
+        env = test_project.Environment(toolchain=gcc_toolchain)
+        assert isinstance(env.cc.flags, FlagList)
+        env.cc.flags = ["-Wall"]
+        env.cc.flags.append(FlagPair("-x", "c++"))
+
+        assert isinstance(env.cc.flags, FlagList)
+        assert list(env.cc.flags) == ["-Wall", "-x", "c++"]
+        assert env.cc.flags.groups[-1] == FlagPair("-x", "c++")
+
+    def test_assignment_keeps_the_grouping_rules(self, test_project):  # noqa: F811
+        """The separated-argument rules a toolchain declared survive too."""
+        from pcons.core.flags import FlagList
+
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.flags = FlagList([], separated=frozenset({"-include"}))
+        env.cc.flags = ["-include", "pch.h", "-O2"]
+
+        assert env.cc.flags.separated == frozenset({"-include"})
+        assert [g.tokens for g in env.cc.flags.groups] == [
+            ("-include", "pch.h"),
+            ("-O2",),
+        ]
+
+
+class TestBuildRelative:
+    """env.build_relative(): a path as the build tool sees it, under the
+    environment's build_prefix."""
+
+    def test_without_a_prefix_the_path_is_itself(self, test_project):  # noqa: F811
+        env = test_project.Environment()
+        assert env.build_relative("stage/app") == Path("stage/app")
+
+    def test_the_prefix_is_put_in_front(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="rel")
+        env.build_prefix = "release/ae"
+        assert env.build_relative("stage/app") == Path("release/ae/stage/app")
+
+    def test_an_absolute_path_is_left_alone(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="rel")
+        env.build_prefix = "release"
+        absolute = Path("/opt/out/app.pkg")
+        assert env.build_relative(absolute) == absolute
+
+
+class TestCloneName:
+    """clone(name=...) names the clone (#147); a clone has no name otherwise."""
+
+    def test_a_clone_has_no_name_by_default(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="base")
+        assert env.clone().name is None
+
+    def test_clone_takes_a_name(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="base")
+        clone = env.clone(name="host")
+        assert clone.name == "host"
+        assert env.name == "base"
+
+    def test_a_taken_name_is_refused(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="base")
+        from pcons.core.errors import PconsError
+
+        with pytest.raises(PconsError, match="already has an environment named"):
+            env.clone(name="base")
+
+    def test_named_clones_can_hold_the_same_target_name(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="release")
+        env.build_prefix = "release"
+        debug = env.clone(name="debug")
+        debug.build_prefix = "debug"
+        a = test_project.Program("app", env, sources=[])
+        b = test_project.Program("app", debug, sources=[])
+        assert a is not b

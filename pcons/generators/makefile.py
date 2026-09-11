@@ -122,7 +122,7 @@ class MakefileGenerator(BaseGenerator):
 
                     if isinstance(depfile, PathToken):
                         # PathToken: construct path from path + suffix
-                        depfile_path = Path(depfile.path + depfile.suffix)
+                        depfile_path = Path(str(depfile.path) + depfile.suffix)
                         self._depfile_dirs.add(depfile_path.parent)
 
         # Collect from environment-tracked nodes
@@ -533,7 +533,7 @@ class MakefileGenerator(BaseGenerator):
             from pcons.core.subst import PathToken
 
             if isinstance(depfile, PathToken):
-                depfile_actual = depfile.path + depfile.suffix
+                depfile_actual = str(depfile.path) + depfile.suffix
                 command = command.replace(
                     "$out.d", self._strip_build_dir_prefix(depfile_actual)
                 )
@@ -889,7 +889,7 @@ class MakefileGenerator(BaseGenerator):
 
             if isinstance(depfile, PathToken):
                 depfile_path = self._strip_build_dir_prefix(
-                    depfile.path + depfile.suffix
+                    str(depfile.path) + depfile.suffix
                 )
 
         # All target paths for multi-output commands: all_targets (generic

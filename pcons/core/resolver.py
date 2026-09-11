@@ -377,6 +377,35 @@ class Resolver:
         for node in nodes_to_expand:
             self._expand_single_node_command(node)
 
+    def _depend_on_named_files(self, node: FileNode, command: list[Any]) -> None:
+        """Make every file a command names in its flags a dependency of it.
+
+        A ``PathToken`` in a flag (``-Wl,--version-script=exports.txt``, an
+        options file, a response file) is read by the tool but reported by
+        nothing, so the edge would not rerun when the file changed. If the
+        project knows the file -- one the build produces, or one written at
+        configure time by ``write_file`` or ``configure_file`` -- it becomes
+        an implicit dependency here. Directories are never nodes, so an
+        include or library directory is left alone, as is anything the edge
+        already produces or consumes.
+        """
+        project = self.project
+        for token in command:
+            if not isinstance(token, PathToken) or not token.path:
+                continue
+            path = Path(token.path)
+            if token.path_type == "build":
+                path = Path(project.build_dir) / path
+            dep = project._nodes.get(project._canonicalize_path(path))
+            if (
+                not isinstance(dep, FileNode)
+                or dep is node
+                or dep in node.explicit_deps
+                or project.has_child_nodes(dep.path)
+            ):
+                continue
+            node.depends([dep])
+
     def _expand_single_node_command(self, node: FileNode) -> None:
         """Expand the command template for a single node."""
         from pcons.core.environment import Environment
@@ -476,6 +505,7 @@ class Resolver:
         # Tokens stay separate; the generator joins them with shell quoting
         command_tokens = env.subst_list(cmd_template, **extra_vars)
         build_info["command"] = command_tokens
+        self._depend_on_named_files(node, command_tokens)
 
         # Kept beside the command rather than in front of it: generators that
         # report the real compiler (compile_commands.json) leave it out.

@@ -12,12 +12,20 @@ import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
+from pcons.core.target import register_target_option
 
 logger = logging.getLogger(__name__)
+
+register_target_option(
+    "exported_symbols",
+    "symbols a shared library or executable exports, as C names (patterns "
+    "allowed on macOS and Linux); everything else is hidden",
+)
 
 if TYPE_CHECKING:
     from pcons.configure.platform import Platform
@@ -1282,6 +1290,17 @@ class BaseToolchain(ABC):
         """Return additional compile flags for a target type (e.g. -fPIC for
         shared libraries on Linux). Base: none."""
         return []
+
+    def _write_link_input(self, target: Target, suffix: str, text: str) -> Path:
+        """Write a per-target file the link step reads, at configure time.
+
+        Under the target's build directory, so two variants of one target
+        don't share it, and registered with the project by ``write_file``,
+        so the link depends on it and reruns when its content changes.
+        """
+        from pcons.configure.config_file import write_file
+
+        return write_file(Path(target.build_dir) / f"{target.name}{suffix}", text)
 
     def get_link_flags_for_target(
         self,

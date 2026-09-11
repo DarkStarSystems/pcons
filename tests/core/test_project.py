@@ -514,6 +514,24 @@ class TestProjectValidation:
         errors = project.validate()
         assert errors == []
 
+    def test_object_library_outputs_as_sources_are_not_missing(
+        self, tmp_path, gcc_toolchain
+    ):
+        """An ObjectLibrary's objects used as another target's sources are
+        built, not read from disk, so validation does not report them
+        missing before the first build (#145)."""
+        (tmp_path / "a.c").write_text("int a(void) { return 1; }\n")
+        (tmp_path / "main.c").write_text(
+            "int a(void); int main(void) { return a(); }\n"
+        )
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        objs = project.ObjectLibrary("objs", env, sources=["a.c"])
+        project.Program("app", env, sources=["main.c", objs])
+        project.resolve()
+
+        assert project.validate() == []
+
     def test_detect_missing_source(self, tmp_path):
         project = Project("myproject", root_dir=tmp_path)
         target = Target("app")

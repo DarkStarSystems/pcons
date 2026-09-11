@@ -39,7 +39,7 @@ API:
 | `target.add_source(path)` | Add a source file |
 | `target.add_sources(paths)` | Add multiple source files |
 | `target.add_sources(paths, env=e)` | Compile those sources with a different environment; on a source the target already has, sets its environment in place |
-| `target.set_option(key, value)` | Set a builder/toolchain option (e.g. `install_name`) |
+| `target.set_option(key, value)` | Set a builder/toolchain option (e.g. `install_name`, `exported_symbols`) |
 | `target.link(t, "m")` | Link a dependency (or raw lib name) and re-export it to consumers |
 | `target.link_private(t, "m")` | Link a dependency (or raw lib name), keeping it local |
 | `target.depends(*items, on_change=None)` | Build targets or have files first, without linking them; `on_change=True` for a file a step reads but can't report, `False` for one it only needs to exist |
@@ -75,6 +75,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.use_clang_tidy(tool=None, args=())` | Run clang-tidy alongside every C/C++ compile |
 | `env.use(package)` | Apply package settings |
 | `env.clone()` | Create a copy |
+| `env.build_relative(path)` | A relative path as a command sees it: under the environment's `build_prefix`, relative to the build directory |
 | `env.override(**kwargs)` | Context manager for temporary overrides |
 | `env.add_toolchain(toolchain)` | Add additional toolchain (e.g., CUDA) |
 | `env.toolchain` | The primary toolchain this environment was created with |

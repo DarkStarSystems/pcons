@@ -15,7 +15,7 @@ These are building blocks that domain-specific modules can use:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -116,8 +116,8 @@ def create_macos_bundle(
     *,
     bundle_dir: Path | str,
     info_plist: str | Path | None = None,
-    pkginfo: str | bytes | None = None,
-    resources: Sequence[Path | str] | None = None,
+    pkginfo: str | bytes | Path | None = None,
+    resources: Sequence[Path | str] | Mapping[str, Path | str] | None = None,
     arch_subdir: str | None = None,
 ) -> Target:
     """Create a macOS .bundle or .plugin structure.
@@ -146,8 +146,11 @@ def create_macos_bundle(
             the result: ``info_plist=configure_file(tmpl, out, subs)``.
         pkginfo: Contents of the bundle's ``PkgInfo``, if it needs one. Pass
             ``bytes`` when the exact bytes matter — the classic form is 8
-            bytes with no trailing newline, e.g. ``b"BNDL????"``.
-        resources: Optional list of resource files to include.
+            bytes with no trailing newline, e.g. ``b"BNDL????"``. A ``Path``
+            is an existing file to copy in under that name.
+        resources: Resource files to include: a list, copied under their own
+            names, or a mapping of bundle name to source file, for a
+            resource the bundle wants under a different name.
         arch_subdir: Architecture subdirectory name (e.g., "MacOS-x86-64").
             If None, uses standard "MacOS" directory.
 
@@ -179,19 +182,33 @@ def create_macos_bundle(
         if isinstance(info_plist, str):
             info_plist = write_file(staging / "Info.plist", info_plist)
         contents_files.append(info_plist)
-    if pkginfo is not None:
+    if isinstance(pkginfo, Path):
+        project.InstallAs(contents_dir / "PkgInfo", pkginfo)
+    elif pkginfo is not None:
         contents_files.append(write_file(staging / "PkgInfo", pkginfo))
     # One Install for the whole directory: two into the same destination
     # collide on the target name.
     if contents_files:
         project.Install(contents_dir, contents_files)
 
-    # Install resources
     if resources:
-        resources_dir = contents_dir / "Resources"
-        project.Install(resources_dir, resources)
+        _install_resources(project, contents_dir / "Resources", resources)
 
     return installed
+
+
+def _install_resources(
+    project: Project,
+    dest: Path,
+    resources: Sequence[Path | str] | Mapping[str, Path | str],
+) -> None:
+    """Copy *resources* into *dest*: a list under their own names, a mapping
+    under the names it gives."""
+    if isinstance(resources, Mapping):
+        for name, source in resources.items():
+            project.InstallAs(dest / name, source)
+    else:
+        project.Install(dest, resources)
 
 
 def create_flat_bundle(
@@ -201,7 +218,7 @@ def create_flat_bundle(
     *,
     bundle_dir: Path | str,
     dlls: list[Target | Path | str] | None = None,
-    resources: Sequence[Path | str] | None = None,
+    resources: Sequence[Path | str] | Mapping[str, Path | str] | None = None,
 ) -> Target:
     """Create a flat directory bundle (Windows/Linux style).
 
@@ -214,7 +231,8 @@ def create_flat_bundle(
         plugin: The compiled plugin/library target.
         bundle_dir: Bundle output directory.
         dlls: Optional list of DLLs/shared libraries to include.
-        resources: Optional list of resource files to include.
+        resources: Resource files to include: a list, copied under their own
+            names, or a mapping of bundle name to source file.
 
     Returns:
         Target for the installed plugin.
@@ -237,9 +255,8 @@ def create_flat_bundle(
         for dll in dlls:
             project.Install(bundle_path, [dll])
 
-    # Install resources
     if resources:
-        project.Install(bundle_path, resources)
+        _install_resources(project, bundle_path, resources)
 
     return installed
 

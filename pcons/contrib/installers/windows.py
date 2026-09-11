@@ -31,6 +31,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.contrib.installers._helpers import staging_dir
+
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode
@@ -86,6 +88,7 @@ def create_msix(
     sources: Sequence[Target | FileNode | Path | str],
     executable: str | None = None,
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     display_name: str | None = None,
     description: str | None = None,
     processor_architecture: str = "x64",
@@ -112,6 +115,8 @@ def create_msix(
             (e.g. sources=["build/deploy"] -> executable="deploy\\myapp.exe").
             If not specified, defaults to first source file's name.
         output: Output .msix path. Defaults to build/<name>-<version>.msix.
+        depends: Targets that must be built before the sources are staged,
+            for a directory source that other targets populate.
         display_name: Display name shown to users. Defaults to name.
         description: Package description.
         processor_architecture: Target architecture ("x64", "x86", "arm64").
@@ -168,16 +173,21 @@ def create_msix(
     if not executable.lower().endswith(".exe"):
         executable = f"{executable}.exe"
 
-    # Set up staging directory (use relative paths for commands)
-    staging_rel = Path(".msix_staging") / name
+    # All paths below are relative to build_dir, where ninja/make run, and
+    # under the environment's build prefix; Command targets are made
+    # absolute so the environment doesn't prefix them a second time.
+    output = env.build_relative(output)
+    staging_rel = staging_dir(env, "msix", name)
     manifest_rel = staging_rel / "AppxManifest.xml"
 
     # Stage source files into build dir
     stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    if depends:
+        stage_target.depends(*depends)
 
     # Generate AppxManifest.xml (use relative path for target)
     manifest_target = env.Command(
-        target=manifest_rel,
+        target=project.build_dir / manifest_rel,
         source=None,
         command=[
             python_cmd,
@@ -204,7 +214,7 @@ def create_msix(
     # Output a stamp file to track that assets were generated
     assets_stamp = staging_rel / "Assets" / ".stamp"
     assets_target = env.Command(
-        target=assets_stamp,
+        target=project.build_dir / assets_stamp,
         source=None,
         command=[
             python_cmd,
@@ -229,7 +239,7 @@ def create_msix(
     ]
 
     msix_target = env.Command(
-        target=output,
+        target=project.build_dir / output,
         source=[stage_target, manifest_target, assets_target],
         command=makeappx_cmd,
         name=f"msix_{name}",
@@ -269,7 +279,7 @@ def create_msix(
         ]
 
         signed_target = env.Command(
-            target=signed_output,
+            target=project.build_dir / signed_output,
             source=[msix_target],
             command=sign_cmd,
             name=f"sign_{name}",

@@ -114,3 +114,18 @@ def find_android_ndk() -> Path | None:
         if is_android_ndk(candidate):
             return candidate
     return None
+
+
+def refresh_dependency_metadata(*paths: Path) -> None:
+    """List each directory so ninja sees its current modification time.
+
+    NTFS keeps a directory's modification time in the parent's index entry,
+    which ninja reads and which is refreshed when a handle to the directory
+    is opened and closed, not when a file is written into it. A build
+    started right after a write can therefore see the old time; listing the
+    directory refreshes it at once, on every Python and Windows version,
+    without changing a timestamp. Callers pass the directories that gained
+    or lost an entry and still exist.
+    """
+    for path in paths:
+        os.listdir(path)

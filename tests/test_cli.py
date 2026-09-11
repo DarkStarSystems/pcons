@@ -6208,6 +6208,20 @@ class TestGraphOptionsReachTheBuildScript:
         assert _invoke("generate").exit_code == 0
         assert seen[0]["extra_env"] is None
 
+    def test_graph_detail_rides_along(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        result = _invoke(
+            "generate", "--graph", "-", "--graph-detail", "scan,discovered"
+        )
+        assert result.exit_code == 0
+        assert seen[0]["extra_env"] == {
+            "PCONS_GRAPH": "-",
+            "PCONS_GRAPH_DETAIL": "scan,discovered",
+        }
+
 
 class TestJobsReachesConfigure:
     """-j caps configure's own parallel work, not just the build's.

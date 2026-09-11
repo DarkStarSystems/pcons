@@ -288,6 +288,9 @@ class SwiftToolchain(UnixToolchain):
     SWIFT_VARIANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         "debug": (("-Onone", "-g"), ("DEBUG",)),
         "release": (("-O",), ()),
+        # -Ounchecked drops safety checks, which changes behavior, so the
+        # fastest safe level is the same -O.
+        "release-fastest": (("-O",), ()),
         "relwithdebinfo": (("-O", "-g"), ()),
         "minsizerel": (("-Osize",), ()),
     }

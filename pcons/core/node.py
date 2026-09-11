@@ -171,7 +171,13 @@ class Node(ABC):
             for node in (item,) if isinstance(item, Node) else item:
                 # An input is already a dependency; repeating it as an
                 # implicit dep would just duplicate it in the build statement.
-                if node not in self.explicit_deps and node not in self.implicit_deps:
+                # A node never depends on itself: ninja would refuse the
+                # cycle, and no caller can mean it.
+                if (
+                    node is not self
+                    and node not in self.explicit_deps
+                    and node not in self.implicit_deps
+                ):
                     self.implicit_deps.append(node)
 
     def order_after(self, *nodes: Node | Sequence[Node]) -> None:
@@ -186,7 +192,8 @@ class Node(ABC):
         for item in nodes:
             for node in (item,) if isinstance(item, Node) else item:
                 if (
-                    node not in self.explicit_deps
+                    node is not self
+                    and node not in self.explicit_deps
                     and node not in self.implicit_deps
                     and node not in self.order_only_deps
                 ):

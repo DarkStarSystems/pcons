@@ -75,6 +75,23 @@ class TestGccVariants:
         assert "NDEBUG" in cc.defines
         assert env.variant == "release"
 
+    def test_release_fastest_variant(self, test_project):  # noqa: F811
+        """release-fastest is the highest safe level: -O3, and no fast-math."""
+        env = Environment()
+
+        cc = env.add_tool("cc")
+        cc.set("cmd", "gcc")
+        cc.set("flags", [])
+        cc.set("defines", [])
+
+        toolchain = GccToolchain()
+        toolchain.apply_variant(env, "release-fastest")
+
+        assert "-O3" in cc.flags
+        assert not any(f.startswith("-ffast-math") for f in cc.flags)
+        assert "NDEBUG" in cc.defines
+        assert env.variant == "release-fastest"
+
     def test_relwithdebinfo_variant(self, test_project):  # noqa: F811
         """Test GCC relwithdebinfo variant."""
         env = Environment()
@@ -283,3 +300,23 @@ class TestBaseToolchainVariant:
         toolchain = GccToolchain()
         with pytest.raises(ValueError, match="Unknown variant.*custom"):
             toolchain.apply_variant(env, "custom")
+
+
+class TestClangClVariants:
+    """The MSVC-style realization of the same variant names."""
+
+    def test_release_fastest_variant(self, test_project):  # noqa: F811
+        from pcons.toolchains.clang_cl import ClangClToolchain
+
+        env = Environment()
+        for tool in ("cc", "cxx"):
+            cfg = env.add_tool(tool)
+            cfg.set("cmd", "clang-cl")
+            cfg.set("flags", [])
+            cfg.set("defines", [])
+
+        ClangClToolchain().apply_variant(env, "release-fastest")
+
+        assert "/O2" in env.cc.flags
+        assert "/Ob3" in env.cc.flags
+        assert "NDEBUG" in env.cxx.defines

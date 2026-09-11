@@ -731,3 +731,145 @@ class TestInstallersCLI:
         )
         assert result.returncode == 0, f"stderr: {result.stderr}"
         assert output.exists()
+
+
+class TestInstallersUnderABuildPrefix:
+    """An environment with a build_prefix puts its Command targets below
+    the prefix. The installer helpers used to write their staging paths
+    and outputs as literal build-relative text, so pkgbuild wrote where
+    ninja wasn't looking (#143). Platform-independent: the tools are
+    mocked and only build.ninja is read.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.generator import BaseGenerator
+        from pcons.generators.ninja import NinjaGenerator
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        # Command text carries the platform's separators; compare one form.
+        return (tmp_path / "build" / "build.ninja").read_text().replace("\\", "/")
+
+    def test_pkg_paths_agree_under_the_prefix(self, tmp_path: Path, monkeypatch):
+        from pcons.contrib.installers import macos
+
+        monkeypatch.setattr(macos, "_check_tool", lambda *a, **k: None)
+        (tmp_path / "t.txt").write_text("x")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(name="rel")
+        env.build_prefix = "release/ae"
+        pkg = macos.create_pkg(
+            project,
+            env,
+            name="App",
+            version="1.0",
+            identifier="com.example.app",
+            sources=[tmp_path / "t.txt"],
+            install_location="/usr/local",
+        )
+        text = self._ninja(project, tmp_path)
+
+        # Every mention of the staging tree and of the package, in build
+        # statements and in command text alike, sits under the prefix.
+        assert ".pkg_staging" in text
+        assert ".pkg_staging" not in text.replace("release/ae/.pkg_staging", "")
+        assert "App-1.0.pkg" not in text.replace("release/ae/App-1.0.pkg", "")
+        assert pkg.output_nodes[0].path.as_posix().endswith("release/ae/App-1.0.pkg")
+
+    def test_msix_paths_agree_under_the_prefix(self, tmp_path: Path, monkeypatch):
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(
+            windows, "_find_sdk_tool", lambda tool: f"C:/SDK/bin/{tool}"
+        )
+        (tmp_path / "app.exe").write_text("")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(name="rel")
+        env.build_prefix = "release"
+        windows.create_msix(
+            project,
+            env,
+            name="App",
+            version="1.0.0.0",
+            publisher="CN=Example",
+            sources=[tmp_path / "app.exe"],
+            executable="app.exe",
+        )
+        text = self._ninja(project, tmp_path)
+
+        assert ".msix_staging" in text
+        assert ".msix_staging" not in text.replace("release/.msix_staging", "")
+        assert "App.msix" not in text.replace("release/App.msix", "")
+
+    def test_two_environments_package_the_same_name(self, tmp_path: Path, monkeypatch):
+        """Staging is per environment, so a release and a debug build of
+        one installer don't collide on it."""
+        from pcons.contrib.installers import macos
+
+        monkeypatch.setattr(macos, "_check_tool", lambda *a, **k: None)
+        (tmp_path / "t.txt").write_text("x")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        for variant in ("release", "debug"):
+            env = project.Environment(name=variant)
+            env.build_prefix = variant
+            macos.create_pkg(
+                project,
+                env,
+                name="App",
+                version="1.0",
+                identifier="com.example.app",
+                sources=[tmp_path / "t.txt"],
+                install_location="/usr/local",
+            )
+        text = self._ninja(project, tmp_path)
+
+        assert "build release/.pkg_staging/App/payload/t.txt:" in text
+        assert "build debug/.pkg_staging/App/payload/t.txt:" in text
+
+
+class TestInstallerDepends:
+    """depends= orders the staging copy after the targets that fill a
+    directory source (#151), which the helpers otherwise hide."""
+
+    def test_the_staged_copy_waits_for_the_producers(self, tmp_path: Path, monkeypatch):
+        from pcons.contrib.installers import macos
+        from pcons.generators.generator import BaseGenerator
+        from pcons.generators.ninja import NinjaGenerator
+
+        monkeypatch.setattr(macos, "_check_tool", lambda *a, **k: None)
+        tree = tmp_path / "App.bundle"
+        tree.mkdir()
+        (tree / "seed.txt").write_text("x")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        filler = env.Command(
+            target=project.build_dir / "filled.stamp",
+            command="echo fill > $TARGET",
+            name="fill",
+        )
+        macos.create_pkg(
+            project,
+            env,
+            name="App",
+            version="1.0",
+            identifier="com.example.app",
+            sources=[tree],
+            install_location="/Library/Plugins",
+            depends=[filler],
+        )
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        text = (tmp_path / "build" / "build.ninja").read_text().replace("\\", "/")
+        copies = [
+            ln
+            for ln in text.splitlines()
+            if ln.startswith("build ")
+            and ".pkg_staging/App/payload" in ln.split(":")[0]
+        ]
+
+        assert copies
+        assert all("filled.stamp" in ln.split("|", 1)[1] for ln in copies), copies

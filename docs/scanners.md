@@ -238,6 +238,33 @@ The full version is `examples/70_scene_packs`: several scenes per pack (so the
 scan edge gets its pack through `scan_vars` instead of a template), the
 generated scenes, and the rebuild behavior.
 
+## Seeing it in the graph
+
+`pcons generate --graph` (DOT) and `--mermaid` draw the build. A scanner's
+own files — scan infos, manifest, dyndep, exports, argument files — are
+machinery rather than anything you asked to build, so the graph leaves them
+out; the edges they govern carry a `scanned: <scanner>` line under their
+name instead.
+
+`--graph-detail` asks for more, comma-separated:
+
+| Item | Draws |
+|---|---|
+| `scan` | the machinery itself: sources → scan info → collate → dyndep, exports and args files, including each args file reaching the command that reads it |
+| `discovered` | what the last build's dyndep files record: the requires that ordered each edge, and the artifacts it turned out to provide |
+| `headers` | header edges from the compiler's `.d` files |
+
+```bash
+pcons generate --graph=deps.dot --graph-detail=discovered
+dot -Tpng deps.dot -o deps.png
+```
+
+All three read files a build writes, so build first: before that there is
+nothing to report and they draw nothing. `discovered` is the interesting one,
+since those edges are precisely what no build script can state — in
+`examples/26_fortran_modules` it draws `greetings.f90.o` providing
+`modules/greetings.mod` and `main.f90.o` waiting on it.
+
 ## How the C++ and Fortran toolchains use it
 
 C++20 modules and Fortran modules use this method internally, so it should be fully

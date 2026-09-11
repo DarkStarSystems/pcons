@@ -141,6 +141,67 @@ def write_dyndep_entries(
     write_text_if_changed(Path(out_path), "\n".join(lines))
 
 
+def _dyndep_unescape_split(text: str) -> list[str]:
+    """Split one dyndep path list, undoing :func:`_dyndep_escape`.
+
+    Whitespace separates paths unless escaped, so this walks the text rather
+    than splitting it: ``$ `` is a space *in* a path, ``$:`` a colon, ``$$``
+    a dollar.
+    """
+    paths: list[str] = []
+    current: list[str] = []
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char == "$" and i + 1 < len(text):
+            current.append(text[i + 1])
+            i += 2
+            continue
+        if char.isspace():
+            if current:
+                paths.append("".join(current))
+                current = []
+        else:
+            current.append(char)
+        i += 1
+    if current:
+        paths.append("".join(current))
+    return paths
+
+
+def read_dyndep_entries(path: str | Path) -> list[tuple[str, list[str], list[str]]]:
+    """Read back a dyndep file as ``(out, provides, requires)`` entries.
+
+    The inverse of :func:`write_dyndep_entries`, for anyone who wants to see
+    what a build actually discovered — the graph generators draw it. A file
+    that isn't there yet (nothing built) reads as no entries; so does a line
+    this doesn't recognize, since a dyndep file may be written by a custom
+    collate command.
+    """
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    entries: list[tuple[str, list[str], list[str]]] = []
+    # A ninja line continuation is "$" at end of line, and unlike the escapes
+    # above it is not followed by the character it protects.
+    for line in text.replace("$\n", " ").splitlines():
+        line = line.strip()
+        if not line.startswith("build "):
+            continue
+        head, sep, requires_text = line[len("build ") :].partition(": dyndep")
+        if not sep:
+            continue
+        out_text, _, provides_text = head.partition("|")
+        outs = _dyndep_unescape_split(out_text)
+        if not outs:
+            continue
+        requires = _dyndep_unescape_split(requires_text.partition("|")[2])
+        entries.append((outs[0], _dyndep_unescape_split(provides_text), requires))
+    return entries
+
+
 def sanitize_logical_name(name: str) -> str:
     """Turn a logical name into a filename fragment.
 

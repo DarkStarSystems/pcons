@@ -16,7 +16,7 @@ import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.flags import deduplicate_flags
@@ -429,11 +429,27 @@ class ConanFinder(BaseFinder):
         """
         self._profile_conf[key] = value
 
+    #: Conan's build_type for each pcons variant. What a variant means for a
+    #: dependency: an optimized build serves both release flavors.
+    _BUILD_TYPES: ClassVar[dict[str, str]] = {
+        "debug": "Debug",
+        "release": "Release",
+        "release-fastest": "Release",
+        "relwithdebinfo": "RelWithDebInfo",
+        "minsizerel": "MinSizeRel",
+    }
+
+    @classmethod
+    def build_type_for(cls, env: Any) -> str:
+        """Conan's build_type for *env*'s variant; Release when it has none."""
+        variant = getattr(env, "variant", None) if env is not None else None
+        return cls._BUILD_TYPES.get(str(variant).lower(), "Release")
+
     def sync_profile(
         self,
         toolchain: Toolchain | None = None,
         env: Any = None,
-        build_type: str = "Release",
+        build_type: str | None = None,
         cppstd: str | None = None,
     ) -> Path:
         """Generate or update Conan profile from pcons settings.
@@ -441,7 +457,10 @@ class ConanFinder(BaseFinder):
         Args:
             toolchain: Toolchain to use for compiler settings.
             env: Environment for additional settings (optional).
-            build_type: Build type (Release, Debug, etc.).
+            build_type: Build type (Release, Debug, etc.). Left out, it
+                follows *env*'s variant: ``debug`` is Debug, the release
+                flavors are Release, ``relwithdebinfo`` and ``minsizerel``
+                their Conan names; no environment or variant means Release.
             cppstd: C++ standard (e.g., "17", "20", "23"). Sets
                 compiler.cppstd in the profile. Many Conan packages
                 require this. If not provided, inferred from
@@ -456,6 +475,8 @@ class ConanFinder(BaseFinder):
         lines: list[str] = []
         lines.append("[settings]")
 
+        if build_type is None:
+            build_type = self.build_type_for(env)
         settings = self._detect_compiler_settings(toolchain, build_type)
         settings["build_type"] = build_type
 
@@ -704,20 +725,30 @@ class ConanFinder(BaseFinder):
     def _merge_transitive_requires(
         packages: dict[str, PackageDescription],
     ) -> None:
-        """Fold each package's transitive Requires flags into it, in place."""
+        """Fold each package's transitive Requires flags into it, in place.
+
+        Libraries are folded dependents-first, the order a static link
+        needs: a library comes after every library that uses it. With
+        ``Requires: opencv_core opencv_imgproc`` and imgproc requiring
+        core, that is imgproc then core, whatever order the .pc file
+        listed them in. That's the order ``pkg-config --libs`` gives too.
+        """
 
         def closure(name: str, seen: set[str]) -> list[str]:
-            ordered: list[str] = []
-            pkg = packages.get(name)
-            if pkg is None:
-                return ordered
-            for dep in pkg.dependencies:
-                if dep in seen or dep not in packages:
-                    continue
-                seen.add(dep)
-                ordered.append(dep)
-                ordered.extend(closure(dep, seen))
-            return ordered
+            """*name*'s transitive requirements, each before what it requires."""
+            finished: list[str] = []
+
+            def visit(pkg_name: str) -> None:
+                for dep in packages[pkg_name].dependencies:
+                    if dep in seen or dep not in packages:
+                        continue
+                    seen.add(dep)
+                    visit(dep)
+                    finished.append(dep)
+
+            visit(name)
+            finished.reverse()
+            return finished
 
         def dedupe(seq: list[str]) -> list[str]:
             seen: set[str] = set()

@@ -216,6 +216,33 @@ def _ambiguous_target(name: str, where: str, matches: list[Target]) -> KeyError:
     )
 
 
+# What --graph-detail accepts, and the generator option each item sets.
+_GRAPH_DETAIL_ITEMS = {
+    "headers": "include_headers",
+    "scan": "include_scan",
+    "discovered": "include_discovered",
+}
+
+
+def _graph_detail(spec: str | None) -> dict[str, bool]:
+    """Turn a --graph-detail value into generator keyword arguments."""
+    if not spec:
+        return {}
+    options: dict[str, bool] = {}
+    for item in spec.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        option = _GRAPH_DETAIL_ITEMS.get(item)
+        if option is None:
+            raise PconsError(
+                f"Unknown graph detail '{item}'. Choose from: "
+                f"{', '.join(sorted(_GRAPH_DETAIL_ITEMS))}."
+            )
+        options[option] = True
+    return options
+
+
 class Project(_ProjectBuilders):
     """Top-level container for a pcons build.
 
@@ -1431,9 +1458,10 @@ class Project(_ProjectBuilders):
         for target in self._targets:
             for source in target.sources:
                 if isinstance(source, FileNode):
-                    # Only check source files (not generated files)
-
-                    if source.builder is None:
+                    # Only check source files, not generated ones: a file
+                    # with a build edge (an object from an ObjectLibrary
+                    # used as a source, say) is produced by the build.
+                    if source.builder is None and source._build_info is None:
                         p = source.path
                         if not p.is_absolute():
                             p = self.top.root_dir / p
@@ -1559,23 +1587,28 @@ class Project(_ProjectBuilders):
             path = Path(path_str)
             return str(path.with_name(f"{path.stem}-{self.top.name}{path.suffix}"))
 
+        detail = _graph_detail(os.environ.get("PCONS_GRAPH_DETAIL"))
+
         graph_path = os.environ.get("PCONS_GRAPH")
         if graph_path:
             from pcons.generators.dot import DotGenerator
 
-            self._output_graph(DotGenerator, per_project(graph_path), "DOT")
+            self._output_graph(DotGenerator, per_project(graph_path), "DOT", detail)
 
         mermaid_path = os.environ.get("PCONS_MERMAID")
         if mermaid_path:
             from pcons.generators.mermaid import MermaidGenerator
 
-            self._output_graph(MermaidGenerator, per_project(mermaid_path), "Mermaid")
+            self._output_graph(
+                MermaidGenerator, per_project(mermaid_path), "Mermaid", detail
+            )
 
     def _output_graph(
         self,
         generator_class: type,
         output_path_str: str,
         format_name: str,
+        detail: dict[str, bool] | None = None,
     ) -> None:
         """Write a dependency graph to stdout or a file.
 
@@ -1587,6 +1620,7 @@ class Project(_ProjectBuilders):
             generator_class: The generator class to instantiate.
             output_path_str: "-" for stdout, or a file path.
             format_name: Human-readable format name for log messages.
+            detail: Extra ``include_*`` options for the generator.
 
         Raises:
             PconsError: The destination cannot be written. The path came from
@@ -1595,7 +1629,7 @@ class Project(_ProjectBuilders):
         """
         import sys
 
-        gen = generator_class()
+        gen = generator_class(**(detail or {}))
         if output_path_str == "-":
             gen.write(self, sys.stdout)
             return

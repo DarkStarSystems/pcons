@@ -37,6 +37,7 @@ import platform
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from pcons.core.debug import is_enabled, trace
@@ -134,13 +135,19 @@ class PathToken:
     """
 
     prefix: str = ""
-    path: str = ""
+    path: str | Path = ""
     path_type: str = "project"  # "project", "build", or "absolute"
     suffix: str = ""
     #: This token is the program the command runs, not an argument to it, so
     #: it is spelled the way the shell will execute it. See
     #: :func:`pcons.core.paths.executable_form`.
     executable: bool = False
+
+    def __post_init__(self) -> None:
+        # A Path is welcome everywhere else in pcons, so here too; the
+        # generators concatenate, so it is kept as text.
+        if isinstance(self.path, Path):
+            object.__setattr__(self, "path", str(self.path))
 
     def relativize(
         self,
@@ -158,17 +165,16 @@ class PathToken:
             it, and without one such a token renders like any other path:
             which shell runs the build is the generator's to know.
         """
-        if self.path_type in ("build", "absolute"):
-            path = self.path
-        else:
-            path = relativizer(self.path)
+        path = str(self.path)
+        if self.path_type not in ("build", "absolute"):
+            path = relativizer(path)
         if self.executable and executable is not None:
             path = executable(path)
         return self.prefix + path + self.suffix
 
     def __str__(self) -> str:
         """Fallback string representation (no relativization)."""
-        return self.prefix + self.path + self.suffix
+        return self.prefix + str(self.path) + self.suffix
 
 
 @dataclass

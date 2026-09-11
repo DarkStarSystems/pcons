@@ -85,7 +85,7 @@ class TestScopedVars:
 
     def test_an_unsupported_value_is_refused(self) -> None:
         with pytest.raises(ConfigureError, match="SCOPED"):
-            with scoped_vars({"SCOPED": ["a", "b"]}):
+            with scoped_vars({"SCOPED": {"a": 1}}):
                 pass
 
 
@@ -222,7 +222,7 @@ class TestGetVarTypes:
 
     def test_unsupported_type_raises(self, clean_env) -> None:
         with pytest.raises(ConfigureError, match="unsupported type"):
-            get_var("TEST_VAR", type=list)  # type: ignore[call-overload]
+            get_var("TEST_VAR", type=dict)  # type: ignore[call-overload]
 
     def test_non_class_type_raises(self, clean_env) -> None:
         """A value where a class belongs must be reported, not crash."""
@@ -237,7 +237,7 @@ class TestGetVarTypes:
         with pytest.raises(
             ConfigureError, match="expected bool, int, float, str, Path"
         ):
-            get_var("TEST_VAR", [1])  # type: ignore[call-overload]
+            get_var("TEST_VAR", {"a": 1})  # type: ignore[call-overload]
 
     def test_int_from_env(self, clean_env) -> None:
         clean_env.setenv("TEST_VAR", "3")
@@ -355,3 +355,26 @@ class TestPconsVarsPayload:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             assert get_var("TEST_VAR", "default") == "default"
+
+
+class TestListVars:
+    """A list default reads a comma-separated value as a list (#155)."""
+
+    def test_comma_separated_value_becomes_a_list(self, clean_env) -> None:
+        clean_env.setenv("TEST_VAR", "ofx, ae,spark")
+
+        assert get_var("TEST_VAR", ["ofx"]) == ["ofx", "ae", "spark"]
+
+    def test_default_is_returned_unparsed(self, clean_env) -> None:
+        assert get_var("TEST_VAR", ["ofx", "ae"]) == ["ofx", "ae"]
+
+    def test_empty_items_are_dropped(self, clean_env) -> None:
+        clean_env.setenv("TEST_VAR", "ofx,,ae,")
+
+        assert get_var("TEST_VAR", []) == ["ofx", "ae"]
+
+    def test_explicit_type_without_default(self, clean_env) -> None:
+        assert get_var("TEST_VAR", type=list) is None
+
+        clean_env.setenv("TEST_VAR", "a,b")
+        assert get_var("TEST_VAR", type=list) == ["a", "b"]

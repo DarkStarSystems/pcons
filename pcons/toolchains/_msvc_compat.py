@@ -6,10 +6,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.preset import ToolContribution
+from pcons.core.subst import PathToken
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pcons.core.environment import Environment
+    from pcons.core.flags import FlagToken
+    from pcons.core.target import Target
     from pcons.toolchains.build_context import CompileLinkContext
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
@@ -111,6 +116,35 @@ class MsvcCompatibleToolchain(BaseToolchain):
             return SourceHandler("ml", "asm", ".obj", None, None, "asmcmd")
         return None
 
+    def get_link_flags_for_target(
+        self,
+        target: Target,
+        output_name: str,
+        existing_flags: Sequence[FlagToken],
+    ) -> list[FlagToken]:
+        """A module-definition file for ``exported_symbols``.
+
+        MSVC exports by exact name, so a ``*`` pattern can't be honored and
+        is refused rather than silently exporting nothing.
+        """
+        symbols = (
+            target.get_option("exported_symbols")
+            if hasattr(target, "get_option")
+            else None
+        )
+        if not symbols or target.target_type not in ("shared_library", "program"):
+            return []
+        patterns = [s for s in symbols if "*" in s or "?" in s]
+        if patterns:
+            raise ValueError(
+                f"Target '{target.name}': MSVC exports symbols by exact name, "
+                f"so the pattern {patterns[0]!r} in exported_symbols can't be "
+                f"honored. List the names."
+            )
+        text = "EXPORTS\n" + "".join(f"    {s}\n" for s in symbols)
+        path = self._write_link_input(target, ".def", text)
+        return [PathToken(prefix="/DEF:", path=str(path), path_type="absolute")]
+
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
         """Return handler for .def (module definition) and .manifest files."""
         from pcons.tools.toolchain import AuxiliaryInputHandler
@@ -172,6 +206,9 @@ class MsvcCompatibleToolchain(BaseToolchain):
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
         "debug": (["/Od", "/Zi"], ["DEBUG", "_DEBUG"]),
         "release": (["/O2"], ["NDEBUG"]),
+        # /O2 is already "maximize speed"; /Ob3 (VS 2019+) adds the more
+        # aggressive inlining it leaves out. Nothing that changes results.
+        "release-fastest": (["/O2", "/Ob3"], ["NDEBUG"]),
         "relwithdebinfo": (["/O2", "/Zi"], ["NDEBUG"]),
         "minsizerel": (["/O1"], ["NDEBUG"]),
     }
@@ -211,7 +248,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
         if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
-                f"Supported variants: debug, release, relwithdebinfo, minsizerel."
+                f"Supported variants: debug, release, release-fastest, "
+                f"relwithdebinfo, minsizerel."
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))

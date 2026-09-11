@@ -18,6 +18,41 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **The installer helpers now take `depends=`.** `create_pkg`,
+  `create_component_pkg`, `create_dmg` and `create_msix` staged their
+  sources with an internally-generated `Install`, so a directory source
+  that other targets fill had no way to wait for them. `depends=[...]`
+  orders the staging copy after those targets. (#151)
+- **`create_macos_bundle` and `create_flat_bundle` take `resources` as a
+  mapping** of bundle name to source file, so you can rename bundle
+  resources, and `create_macos_bundle` takes `pkginfo` as a `Path` to copy
+  in. (#152)
+- **`target.set_option("exported_symbols", [...])`**: use this to make a shared library
+  or executable export only the named symbols, realized per toolchain as a macOS symbol
+  list, a Linux version script, or an MSVC `.def` file. C names, with
+  patterns on macOS and Linux. The list is written under the target's build
+  directory and the link depends on it. (#149)
+- **A `PathToken` file in a command's flags is now a dependency of that
+  command.** A `PathToken` in a flag (`-Wl,--version-script=exports.txt`, a
+  response file, an options file) is read by the tool, but the command
+  previously didn't rerun when the file changed. Now it does, whenever
+  pcons knows the file. Include and library directories are unaffected. (#150)
+- **A `release-fastest` variant**: the compiler's highest optimization level
+  that doesn't change results (`-O3`; `/O2 /Ob3` on MSVC), realized per
+  toolchain like the other variants and never enabling fast-math. (#153)
+- **`env.clone(name=...)`** names a clone at creation. Named environments
+  are how two targets may share a name, and a clone had no way to get one
+  but assignment afterwards. (#147)
+- **`get_var()` reads a list.** With a list default, a comma-separated
+  value becomes a list: `get_var("PORTS", ["ofx"])` returns `["ofx", "ae"]`
+  for `PORTS=ofx,ae`. `type=list` works without a default. (#155)
+- **`OverlayDir`: merge several source trees into one directory.** Each
+  tree's contents land in the destination keeping their relative paths, the
+  later source wins a shared path, and `exclude=` drops globs matched against
+  each source root. One build-time edge decides membership, so a file added,
+  removed or edited anywhere under a source tree restages on the next build
+  without re-running pcons, and a file another edge generates into a tree is
+  staged by the build that writes it. See `examples/78_overlay_dirs`. (#159)
 - **`env.use_clang_tidy()`**: run clang-tidy alongside every C and C++
   compile, with the compile's own flags, and fail the build on a diagnostic
   the way CMake's `CXX_CLANG_TIDY` does. Composes with `use_compiler_cache()`.
@@ -33,6 +68,13 @@ machinery to support this kind of dynamic dependencies.
   command line through a per-edge args file collate writes at a path fixed at
   configure time. Not C++-specific: there's an example at  `examples/70_scene_packs` 
   that packs "scene" files that reference each other by  name. New doc at `docs/scanners.md`.
+
+- **The dependency graphs know about scanners.** `--graph` and `--mermaid`
+  no longer draw a scanner's dyndep file as if it were a source: the
+  machinery is elided and the edges it governs carry a `scanned: <scanner>`
+  line under their name. A new `--graph-detail` asks for more — `scan` draws the
+  machinery itself, `discovered` draws what the last build's dyndep files
+  actually found, and `headers` draws the compiler's `.d` edges.
 
 - **`env.Command` takes `depfile=` and `deps_style=`.** A custom command can
   now report the files it turned out to read, the way a compiler does:
@@ -103,6 +145,11 @@ machinery to support this kind of dynamic dependencies.
 
 ### Changed
 
+- **`ConanFinder.sync_profile()` takes its `build_type` from the environment's
+  variant** when none is passed: `debug` is `Debug`, the release flavors are
+  `Release`, `relwithdebinfo` and `minsizerel` their Conan names. It used to
+  default to `Release` whatever the variant. The docs also say how to make a
+  conf such as `tools.build:cxxflags` part of Conan's package id. (#156)
 - **`depends()` is now the one way to declare a dependency that is not linked,
   and every dependency edge lives in one list** with the linked libraries,
   so every part of pcons that walks the dependency graph sees the same
@@ -222,6 +269,27 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- An `ObjectLibrary` used as another target's source no longer makes each
+  of its objects an order-only dependency of itself and of every sibling,
+  which ninja refused as a cycle. A node a dependency produces is not one of
+  the consumer's own steps, so it doesn't wait for that dependency, and a
+  node never depends on itself.
+- Conan packages link in dependents-first order. The finder folded a
+  package's `Requires` in the order the `.pc` file listed them, which put
+  `opencv_core` before `opencv_imgproc` and broke static links with GNU ld;
+  a library now follows every library that uses it, as `pkg-config --libs`
+  orders them. (#157)
+- The installer helpers (`create_pkg`, `create_component_pkg`, `create_dmg`,
+  `create_msix`) work in an environment with a `build_prefix`: staging and
+  outputs now sit under the prefix and the command lines say so, where
+  before pkgbuild wrote to one place and ninja looked in another. Staging
+  is also per environment, so two variants can package the same name. (#143)
+- Assigning a plain list to a flag variable (`env.cc.flags = ["-Wall"]`)
+  keeps it a `FlagList`, so a `FlagPair` appended afterwards still reaches
+  the command line as two tokens. (#144)
+- An `ObjectLibrary`'s objects used as another target's sources are no
+  longer reported as missing source files on every run. (#145)
+- `PathToken` accepts a `Path` as well as a string. (#146)
 - **`InstallDir` sees a file added, removed or renamed anywhere under its
   source tree.** It used to notice only the files that existed at configure
   time, so a new file in a subdirectory was never copied. The copy edge now
@@ -343,8 +411,8 @@ machinery to support this kind of dynamic dependencies.
   to say what was meant:
 
   ```python
-  sources=[gen_hello]                          # pass the target itself, or
-  sources=[project.build_dir / "gen/hello.c"]  # name the real path
+  sources = [gen_hello]  # pass the target itself, or
+  sources = [project.build_dir / "gen/hello.c"]  # name the real path
   ```
 
   **Breaking:** scripts naming generated sources that way must be updated.

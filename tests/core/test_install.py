@@ -14,6 +14,7 @@ from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
+from tests.support import refresh_dependency_metadata
 
 
 class TestInstall:
@@ -444,18 +445,6 @@ class TestInstallWithNinja:
                     time.sleep(0.01)
             finally:
                 probe_file.unlink(missing_ok=True)
-
-        def refresh_dependency_metadata(*paths: Path) -> None:
-            """Make directory metadata visible before ninja reads dependencies.
-
-            Windows can leave a directory's NTFS parent-index entry stale after
-            a child changes.  ``os.listdir()`` opens and closes the directory,
-            refreshing the entry that Ninja reads through ``FindFirstFile``
-            without changing timestamps or touching the source tree.  Callers
-            pass only directories that still exist after the mutation.
-            """
-            for path in paths:
-                os.listdir(path)
 
         run_ninja()
         destination = tmp_path / "build" / "staged" / "assets"
@@ -977,7 +966,6 @@ class TestInstallMode:
         reason="Windows has no POSIX mode bits; chmod only toggles read-only",
     )
     def test_the_copy_command_applies_it(self, tmp_path):
-        import os
         import stat
 
         from pcons.util.commands import copy

@@ -41,6 +41,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.contrib.installers._helpers import staging_dir
+
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode
@@ -64,21 +66,24 @@ _RESERVED_STAGING_PREFIXES = frozenset(
 )
 
 
-def _validate_staging_path(project: Project, staging_prefix: str) -> None:
-    """Validate that the staging path doesn't conflict with user build outputs.
+def _validate_staging_path(project: Project, staging_dir: Path | str) -> None:
+    """Validate that an installer's staging directory is unused.
 
-    Checks that no existing targets or nodes in the project have paths that would
-    conflict with the staging directory. This prevents accidental overwrites and
-    ensures installer staging is isolated from user outputs.
+    Checks that no existing targets or nodes in the project have paths
+    under the staging directory. This prevents accidental overwrites and
+    ensures installer staging is isolated from user outputs. Each
+    installer stages under its own directory, so several can share one
+    project.
 
     Args:
         project: The project to check for conflicts.
-        staging_prefix: The staging directory prefix (e.g., ".pkg_staging").
+        staging_dir: The installer's staging directory, relative to the
+            build directory (e.g., ".pkg_staging/MyApp").
 
     Raises:
         ValueError: If a conflict is detected with existing build outputs.
     """
-    staging_path = project.build_dir / staging_prefix
+    staging_path = project.build_dir / staging_dir
 
     # Check for conflicts with existing targets' output nodes
     for target in project.targets:
@@ -110,6 +115,7 @@ def create_component_pkg(
     sources: Sequence[Target | FileNode | Path | str],
     install_location: str = "/Applications",
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     scripts_dir: Path | None = None,
     component_plist: Path | None = None,
     ownership: str = "recommended",
@@ -131,6 +137,8 @@ def create_component_pkg(
             depfile tracking after resolve().
         install_location: Where files install (e.g., "/Applications").
         output: Output .pkg path. Defaults to build/<identifier>-<version>.pkg.
+        depends: Targets that must be built before the sources are staged,
+            for a directory source that other targets populate.
         scripts_dir: Directory containing preinstall/postinstall scripts.
         component_plist: Path to component plist file for bundle settings.
         ownership: File ownership ("recommended", "preserve", "preserve-other").
@@ -150,14 +158,18 @@ def create_component_pkg(
     else:
         output = Path(output)
 
-    # Validate staging path doesn't conflict with user outputs
-    _validate_staging_path(project, ".pkg_staging")
-
-    # Stage files to a temporary directory (rel paths are relative to build_dir)
-    staging_rel = Path(".pkg_staging") / identifier / "payload"
+    # All paths below are relative to build_dir, where ninja/make run, and
+    # under the environment's build prefix; Command targets are made
+    # absolute so the environment doesn't prefix them a second time.
+    output = env.build_relative(output)
+    staging_base = staging_dir(env, "pkg", identifier)
+    _validate_staging_path(project, staging_base)
+    staging_rel = staging_base / "payload"
 
     # Stage source files into build dir
     stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    if depends:
+        stage_target.depends(*depends)
 
     # Build pkgbuild command (paths relative to build_dir where ninja/make run)
     pkgbuild_args = [
@@ -186,7 +198,7 @@ def create_component_pkg(
     pkgbuild_args.append(str(output))
 
     return env.Command(
-        target=output,
+        target=project.build_dir / output,
         source=[stage_target],
         command=pkgbuild_args,
         name=f"pkg_{identifier.replace('.', '_')}",
@@ -203,6 +215,7 @@ def create_pkg(
     sources: Sequence[Target | FileNode | Path | str],
     install_location: str = "/Applications",
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     title: str | None = None,
     welcome: Path | None = None,
     readme: Path | None = None,
@@ -229,6 +242,8 @@ def create_pkg(
             depfile tracking after resolve().
         install_location: Where files install (e.g., "/Applications").
         output: Output .pkg path. Defaults to build/<name>-<version>.pkg.
+        depends: Targets that must be built before the sources are staged,
+            for a directory source that other targets populate.
         title: Installer title. Defaults to name.
         welcome: Path to welcome.rtf or welcome.html.
         readme: Path to readme file.
@@ -260,11 +275,12 @@ def create_pkg(
 
     title = title or name
 
-    # Validate staging path doesn't conflict with user outputs
-    _validate_staging_path(project, ".pkg_staging")
-
-    # Set up staging directories (all paths relative to build_dir)
-    staging_base_rel = Path(".pkg_staging") / name
+    # All paths below are relative to build_dir, where ninja/make run, and
+    # under the environment's build prefix; Command targets are made
+    # absolute so the environment doesn't prefix them a second time.
+    output = env.build_relative(output)
+    staging_base_rel = staging_dir(env, "pkg", name)
+    _validate_staging_path(project, staging_base_rel)
     payload_rel = staging_base_rel / "payload"
     pkg_rel = staging_base_rel / "packages"
     resources_rel = staging_base_rel / "resources"
@@ -276,6 +292,8 @@ def create_pkg(
         name=f"pkg_payload_{name}",
         no_prefix=True,
     )
+    if depends:
+        stage_target.depends(*depends)
 
     # Bundle sources (.app) need a component plist; pkgbuild requires
     # each bundle's payload-relative path in it.
@@ -315,7 +333,7 @@ def create_pkg(
         for bundle in bundle_names:
             bundle_args.extend(["--bundle", bundle])
         plist_target = env.Command(
-            target=component_plist_path,
+            target=project.build_dir / component_plist_path,
             source=None,
             command=[
                 python_cmd,
@@ -338,7 +356,7 @@ def create_pkg(
 
     # Pass Targets directly as sources
     component_target = env.Command(
-        target=component_pkg_path,
+        target=project.build_dir / component_pkg_path,
         source=component_deps,
         command=pkgbuild_args,
         name=f"component_{name}",
@@ -367,7 +385,7 @@ def create_pkg(
         dist_cmd.extend(["--min-os-version", min_os_version])
 
     dist_target = env.Command(
-        target=dist_xml_path,
+        target=project.build_dir / dist_xml_path,
         source=[component_target],
         command=dist_cmd,
         name=f"distribution_{name}",
@@ -408,7 +426,7 @@ def create_pkg(
     productbuild_args.append(str(output))
 
     return env.Command(
-        target=output,
+        target=project.build_dir / output,
         source=productbuild_deps,
         command=productbuild_args,
         name=f"pkg_{name}",
@@ -423,6 +441,7 @@ def create_dmg(
     sources: Sequence[Target | FileNode | Path | str],
     volume_name: str | None = None,
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     format: str = "UDZO",
     applications_symlink: bool = True,
 ) -> Target:
@@ -441,6 +460,8 @@ def create_dmg(
             depfile tracking after resolve().
         volume_name: Volume name. Defaults to name.
         output: Output .dmg path. Defaults to build/<name>.dmg.
+        depends: Targets that must be built before the sources are staged,
+            for a directory source that other targets populate.
         format: DMG format:
             - "UDZO" - zlib compressed (default, good compatibility)
             - "UDBZ" - bzip2 compressed (smaller, slower)
@@ -463,14 +484,17 @@ def create_dmg(
     else:
         output = Path(output)
 
-    # Validate staging path doesn't conflict with user outputs
-    _validate_staging_path(project, ".dmg_staging")
-
-    # Stage files to a temporary directory (path relative to build_dir)
-    staging_rel = Path(".dmg_staging") / name
+    # Paths are relative to build_dir, where ninja/make run, and under the
+    # environment's build prefix; the Command target is made absolute so
+    # the environment doesn't prefix it a second time.
+    output = env.build_relative(output)
+    staging_rel = staging_dir(env, "dmg", name)
+    _validate_staging_path(project, staging_rel)
 
     # Stage source files into build dir
     stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    if depends:
+        stage_target.depends(*depends)
 
     # Build hdiutil command (with optional symlink creation)
     # Paths are relative to build_dir where ninja/make run
@@ -494,7 +518,7 @@ def create_dmg(
         ]
 
     return env.Command(
-        target=output,
+        target=project.build_dir / output,
         source=[stage_target],
         command=hdiutil_cmd,
         name=f"dmg_{name}",

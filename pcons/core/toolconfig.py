@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.flags import FlagList
+
 if TYPE_CHECKING:
     from pcons.core._toolconfig_stubs import _ToolConfigStubs
 else:
@@ -137,6 +139,17 @@ class ToolConfig(_ToolConfigStubs):
                     f'Use {self.name}.{name} = ["{value}"] or '
                     f'{self.name}.{name}.append("{value}").'
                 )
+            # A flag list keeps its grouping rules across an assignment:
+            # ``env.cc.flags = ["-Wall"]`` must not turn the FlagList into
+            # a plain list, or the next FlagPair appended lands as one token.
+            current = vars_dict[name]
+            if isinstance(current, FlagList) and not isinstance(value, FlagList):
+                if isinstance(value, list):
+                    value = FlagList(
+                        value,
+                        separated=current.separated,
+                        passthrough=current.passthrough,
+                    )
             vars_dict[name] = value
 
     def _unknown_variable_message(self, name: str) -> str:
