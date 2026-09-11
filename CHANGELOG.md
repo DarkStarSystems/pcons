@@ -18,6 +18,13 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **`OverlayDir`: merge several source trees into one directory.** Each
+  tree's contents land in the destination keeping their relative paths, the
+  later source wins a shared path, and `exclude=` drops globs matched against
+  each source root. One build-time edge decides membership, so a file added,
+  removed or edited anywhere under a source tree restages on the next build
+  without re-running pcons, and a file another edge generates into a tree is
+  staged by the build that writes it. See `examples/78_overlay_dirs`. (#159)
 - **`env.use_clang_tidy()`**: run clang-tidy alongside every C and C++
   compile, with the compile's own flags, and fail the build on a diagnostic
   the way CMake's `CXX_CLANG_TIDY` does. Composes with `use_compiler_cache()`.

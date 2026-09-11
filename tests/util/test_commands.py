@@ -140,26 +140,29 @@ class TestCopytree:
 
         assert stamp.exists()
 
-    def test_copytree_manifest_removes_only_prior_files(self, tmp_path: Path) -> None:
+    def test_copytree_stamp_removes_only_prior_files(self, tmp_path: Path) -> None:
+        """The stamp records what was copied, so a file the source no
+        longer holds loses its copy and nothing else is touched."""
         src = tmp_path / "src"
         src.mkdir()
         (src / "old.txt").write_text("old")
         dest = tmp_path / "dest"
         (dest / "unrelated").mkdir(parents=True)
         (dest / "unrelated" / "keep.txt").write_text("keep")
-        manifest = tmp_path / "tree.manifest"
+        stamp = tmp_path / "tree.stamp"
 
-        copytree(str(src), str(dest), manifest=str(manifest))
+        copytree(str(src), str(dest), stamp=str(stamp))
+        assert stamp.read_text() == "old.txt\n"
         (src / "old.txt").unlink()
         (src / "new.txt").write_text("new")
 
-        copytree(str(src), str(dest), manifest=str(manifest))
+        copytree(str(src), str(dest), stamp=str(stamp))
 
         assert not (dest / "old.txt").exists()
         assert (dest / "new.txt").read_text() == "new"
         assert (dest / "unrelated" / "keep.txt").read_text() == "keep"
 
-    def test_copytree_manifest_removes_empty_stale_directories(
+    def test_copytree_stamp_removes_empty_stale_directories(
         self, tmp_path: Path
     ) -> None:
         src = tmp_path / "src"
@@ -167,54 +170,34 @@ class TestCopytree:
         old = src / "old" / "nested" / "file.txt"
         old.write_text("old")
         dest = tmp_path / "dest"
-        manifest = tmp_path / "tree.manifest"
+        stamp = tmp_path / "tree.stamp"
 
-        copytree(str(src), str(dest), manifest=str(manifest))
+        copytree(str(src), str(dest), stamp=str(stamp))
         old.unlink()
         (src / "old" / "nested").rmdir()
         (src / "old").rmdir()
 
-        copytree(str(src), str(dest), manifest=str(manifest))
+        copytree(str(src), str(dest), stamp=str(stamp))
 
         assert not (dest / "old").exists()
 
-    def test_copytree_manifest_recovers_from_corrupt_state(
+    def test_copytree_takes_an_old_touched_stamp_in_stride(
         self, tmp_path: Path
     ) -> None:
+        """A stamp from before it recorded anything is empty: nothing is
+        removed on the first run after the change, and it is written from
+        then on."""
         src = tmp_path / "src"
         src.mkdir()
         (src / "current.txt").write_text("current")
         dest = tmp_path / "dest"
-        manifest = tmp_path / "tree.manifest"
-        manifest.write_text("not json")
+        stamp = tmp_path / "tree.stamp"
+        stamp.write_text("")
 
-        copytree(str(src), str(dest), manifest=str(manifest))
+        copytree(str(src), str(dest), stamp=str(stamp))
+        assert stamp.read_text() == "current.txt\n"
 
         assert (dest / "current.txt").read_text() == "current"
-
-    def test_copytree_cli_accepts_manifest_option(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        src = tmp_path / "src"
-        src.mkdir()
-        (src / "file.txt").write_text("content")
-        dest = tmp_path / "dest"
-        manifest = tmp_path / "tree.manifest"
-        monkeypatch.setattr(
-            "sys.argv",
-            [
-                "pcons.util.commands",
-                "copytree",
-                "--manifest",
-                str(manifest),
-                str(src),
-                str(dest),
-            ],
-        )
-
-        assert main() == 0
-        assert (dest / "file.txt").read_text() == "content"
-        assert manifest.exists()
 
     def test_copytree_depfile_escapes_spaces(self, tmp_path: Path) -> None:
         """Test that source paths with spaces are escaped in the depfile.

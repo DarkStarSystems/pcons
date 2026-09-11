@@ -3113,7 +3113,16 @@ project.Install(install_dir(env, "program"), [exe])  # -> <prefix>/bin/
 !!! note
     `Install()` accepts a list of sources and copies each to the destination directory. `InstallAs()` takes exactly one source and copies it to the specified path (with optional rename). If you need to install multiple files with renaming, use multiple `InstallAs()` calls.
 
-`InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run.
+`InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run. The depfile lists the directories as well as the files, so a file added or removed anywhere under the source tree re-runs the copy too, and a copy of a file the source no longer holds is removed.
+
+**On Windows**, ninja reads a directory's modification time from the parent
+directory's NTFS index entry, which is refreshed when something opens and
+closes the directory, not when a file is written into it. A build started right
+after a file is added can therefore see the old time and copy the file one
+build late. The next build always sees it, and listing the directory in
+between (a file manager, an editor, `dir`) refreshes the entry at once. Edits
+and removals are unaffected: the file's own entry is refreshed when the writer
+closes it, and a file that is gone is gone.
 
 ### Merging Source Trees into One Directory
 
@@ -3170,13 +3179,8 @@ restages on the next `ninja`, with no hand-run of pcons. Both halves of the
 depfile are needed: a directory's modification time changes when it gains or
 loses an entry, an edit in place changes no directory at all.
 
-On Windows that modification time reaches ninja through the parent directory's
-NTFS index entry, which is refreshed lazily. A build started in the same instant
-as the write can therefore read the old stamp and stage the file on the build
-after it instead. Waiting a moment is enough, and so is anything that lists the
-directory in between - a file manager, an editor, `dir`. Edits and removals are
-unaffected: the file's own entry is refreshed when the writer closes it, and a
-file that is gone is gone.
+On Windows, a file added right before a build can be staged one build late; see
+the note under [Installing Files](#installing-files).
 
 A file another build edge generates into a source tree is staged by the same
 build that writes it. Order the two with `depends()`:

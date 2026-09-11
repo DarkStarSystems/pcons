@@ -333,8 +333,6 @@ class InstallTool(StandaloneTool):
                 "copytree",
                 "--depfile",
                 TargetPath(suffix=".d"),
-                "--manifest",
-                TargetPath(suffix=".manifest"),
                 "--stamp",
                 TargetPath(),
                 SourcePath(),
@@ -497,9 +495,6 @@ class InstallNodeFactory(PendingSourceFactory):
                 "depfile": PathToken(
                     path=str(stamp_path), path_type="build", suffix=".d"
                 ),
-                "manifest": PathToken(
-                    path=str(stamp_path), path_type="build", suffix=".manifest"
-                ),
                 "deps_style": "gcc",
                 "description": "INSTALLDIR $out",
                 "context": context,
@@ -522,15 +517,6 @@ class InstallNodeFactory(PendingSourceFactory):
         the overlay command when it runs, so a file another edge generates
         into a source tree is staged by the build that writes it.
         """
-        from pcons.core.errors import BuilderError
-
-        for node in sources:
-            if not (self.project.root_dir / node.path).is_dir():
-                raise BuilderError(
-                    f"OverlayDir source is not a directory: {node.path}",
-                    location=target.defined_at,
-                )
-
         try:
             rel_dest = dest_dir.relative_to(target.build_dir)
         except ValueError:
@@ -663,9 +649,6 @@ class InstallNodeFactory(PendingSourceFactory):
                 "sources": [source_node],
                 "depfile": PathToken(
                     path=str(stamp_path), path_type="build", suffix=".d"
-                ),
-                "manifest": PathToken(
-                    path=str(stamp_path), path_type="build", suffix=".manifest"
                 ),
                 "deps_style": "gcc",
                 "description": "INSTALLDIR $out",

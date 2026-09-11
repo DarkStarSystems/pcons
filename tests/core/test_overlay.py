@@ -6,7 +6,6 @@ everything here is read back out of the staged directory after a real build.
 Asserting on the target's output nodes would only say what pcons intended.
 """
 
-import os
 import shutil
 import subprocess
 import sys
@@ -15,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from pcons.core.errors import BuilderError
 from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
+from tests.support import refresh_dependency_metadata
 
 
 def write(path: Path, text: str) -> Path:
@@ -148,22 +147,6 @@ def generated_project(root: Path) -> Path:
     return root / "build" / "stage"
 
 
-def refresh_dependency_metadata(*paths: Path) -> None:
-    """Make directory metadata visible before ninja reads dependencies.
-
-    Windows keeps a directory's modification time in its parent's NTFS index
-    entry, which is what ninja reads through ``FindFirstFile``, and that entry
-    is refreshed lazily. ``os.listdir()`` opens and closes the directory, which
-    refreshes it at once without changing a timestamp or touching the source
-    tree. Measured on Windows: the entry settles on its own about half a second
-    after the write, so it is a build starting in the same instant as the write
-    that reads the old stamp. Callers pass the directories that gained or lost
-    an entry and still exist.
-    """
-    for path in paths:
-        os.listdir(path)
-
-
 def run_pcons(root: Path) -> str:
     """Configure and build from scratch, as a user typing `pcons` would."""
     result = subprocess.run(
@@ -270,14 +253,19 @@ class TestOverlayGraph:
         with pytest.raises(Exception, match="one producer"):
             project.resolve()
 
-    def test_missing_source_directory_is_an_error(self, tmp_path):
+    def test_a_source_tree_need_not_exist_yet(self, tmp_path):
+        """A tree another edge creates exists only once the build runs, so
+        pcons doesn't look for it; the overlay command refuses a missing
+        source when it runs (see tests/util/test_commands.py)."""
         shared, _ = make_trees(tmp_path)
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(name="host")
-        project.OverlayDir(env, "stage", sources=[shared, tmp_path / "absent"])
+        stage = project.OverlayDir(env, "stage", sources=[shared, tmp_path / "absent"])
 
-        with pytest.raises(BuilderError, match="not a directory"):
-            project.resolve()
+        project.resolve()
+
+        inputs = {n.path.name for n in stage.output_nodes[0].explicit_deps}
+        assert inputs == {shared.name, "absent"}
 
     def test_the_generated_rule_is_one_overlay_edge(self, tmp_path):
         shared, app = make_trees(tmp_path)

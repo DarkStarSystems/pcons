@@ -16,7 +16,6 @@ Usage in build rules:
 from __future__ import annotations
 
 import fnmatch
-import json
 import os
 import shutil
 import subprocess
@@ -71,7 +70,7 @@ def _write_depfile(depfile: str, target: str, deps: Sequence[Path]) -> None:
     depfile_path.parent.mkdir(parents=True, exist_ok=True)
     escaped = [_escape_depfile_path(str(d).replace("\\", "/")) for d in deps]
     deps_str = " \\\n  ".join(escaped)
-    target_str = target.replace("\\", "/")
+    target_str = _escape_depfile_path(target.replace("\\", "/"))
     with open(depfile_path, "w", encoding="utf-8") as f:
         f.write(f"{target_str}: \\\n  {deps_str}\n")
 
@@ -134,7 +133,6 @@ def copytree(
     depfile: str | None = None,
     stamp: str | None = None,
     replace: bool = False,
-    manifest: str | None = None,
 ) -> None:
     """Copy a directory tree, optionally writing dependency state and a stamp.
 
@@ -144,14 +142,19 @@ def copytree(
     prefix — and deleting it wholesale would take other people's files with
     it. Pass *replace* to get the destination cleared first.
 
+    *stamp* doubles as the record of what was copied, the way it does for
+    :func:`overlay`: a file the previous run copied that the source no longer
+    holds is removed, along with any directory that leaves empty, and nothing
+    else at the destination is touched.
+
     Args:
         src: Source directory path.
         dest: Destination directory path.
-        depfile: Optional path to write a ninja depfile listing source files.
-        stamp: Optional stamp file to touch after copy (for ninja build tracking).
+        depfile: Optional ninja depfile, listing the source root and every
+            directory and file under it. Directories are deliberate: their
+            modification times notice an added or removed entry.
+        stamp: Optional stamp file, written with the copied file list.
         replace: Delete the destination tree first, rather than merging.
-        manifest: Optional JSON path recording files copied by this edge. Files
-            previously recorded but absent on a later run are removed.
     """
     src_path = Path(src)
     dest_path = Path(dest)
@@ -159,67 +162,26 @@ def copytree(
     if not src_path.is_dir():
         raise ValueError(f"Source is not a directory: {src}")
 
-    current_files = {
-        str(item.relative_to(src_path)).replace("\\", "/")
-        for item in src_path.rglob("*")
-        if item.is_file()
+    entries = sorted(src_path.rglob("*"))
+    current = {
+        item.relative_to(src_path).as_posix() for item in entries if item.is_file()
     }
-    if manifest:
-        manifest_path = Path(manifest)
-        if manifest_path.exists():
-            try:
-                decoded = json.loads(manifest_path.read_text())
-                previous_files = (
-                    {item for item in decoded if isinstance(item, str)}
-                    if isinstance(decoded, list)
-                    else set()
-                )
-            except (OSError, TypeError, ValueError):
-                previous_files = set()
-            for relative in previous_files - current_files:
-                stale = dest_path / relative
-                if stale.is_file() or stale.is_symlink():
-                    stale.unlink()
-                parent = stale.parent
-                while parent != dest_path:
-                    try:
-                        parent.rmdir()
-                    except OSError:
-                        break
-                    parent = parent.parent
+
+    for rel in sorted(_staged_before(stamp) - current):
+        stale = dest_path / rel
+        if stale.is_file() or stale.is_symlink():
+            stale.unlink()
+        _prune_empty(stale, dest_path)
 
     if replace and dest_path.exists():
         shutil.rmtree(dest_path)
     _merge_tree(src_path, dest_path)
 
-    # Write depfile if requested
     if depfile:
-        depfile_path = Path(depfile)
-        depfile_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_depfile(depfile, stamp or str(dest_path), [src_path, *entries])
 
-        # Track the root and every current descendant. Directories are
-        # intentional dependencies: their mtimes notice additions/removals,
-        # including files in directories created after configuration.
-        source_entries = [src_path, *src_path.rglob("*")]
-        source_files = [str(item).replace("\\", "/") for item in source_entries]
-
-        # Ninja depfile format, with the stamp file (or dest) as the target
-        target_str = _escape_depfile_path((stamp or str(dest_path)).replace("\\", "/"))
-        escaped_files = [_escape_depfile_path(f) for f in source_files]
-        deps_str = " \\\n  ".join(escaped_files)
-        with open(depfile_path, "w", encoding="utf-8") as f:
-            f.write(f"{target_str}: \\\n  {deps_str}\n")
-
-    if manifest:
-        manifest_path = Path(manifest)
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(json.dumps(sorted(current_files)), encoding="utf-8")
-
-    # Touch stamp file if specified
     if stamp:
-        stamp_path = Path(stamp)
-        stamp_path.parent.mkdir(parents=True, exist_ok=True)
-        stamp_path.touch()
+        _write_stamp(stamp, sorted(current))
 
 
 def _overlay_excluded(rel_path: Path, patterns: Sequence[str]) -> bool:
@@ -285,6 +247,13 @@ def _staged_before(stamp: str | None) -> set[str]:
         return set()
     text = stamp_path.read_text(encoding="utf-8")
     return {line for line in text.splitlines() if line}
+
+
+def _write_stamp(stamp: str, staged: Sequence[str]) -> None:
+    """Write the stamp, holding the destination-relative paths staged."""
+    stamp_path = Path(stamp)
+    stamp_path.parent.mkdir(parents=True, exist_ok=True)
+    stamp_path.write_text("".join(f"{rel}\n" for rel in staged), encoding="utf-8")
 
 
 def _prune_empty(path: Path, stop: Path) -> None:
@@ -364,11 +333,7 @@ def overlay(
         )
 
     if stamp:
-        stamp_path = Path(stamp)
-        stamp_path.parent.mkdir(parents=True, exist_ok=True)
-        stamp_path.write_text(
-            "".join(f"{rel}\n" for rel in sorted(winners)), encoding="utf-8"
-        )
+        _write_stamp(stamp, sorted(winners))
 
 
 def run_with_env(args: list[str]) -> int:
@@ -447,7 +412,6 @@ def main() -> int:
         depfile = None
         stamp = None
         replace = False
-        manifest = None
         positional: list[str] = []
         i = 0
         while i < len(args):
@@ -456,12 +420,6 @@ def main() -> int:
                 i += 2
             elif args[i].startswith("--depfile="):
                 depfile = args[i].split("=", 1)[1]
-                i += 1
-            elif args[i] == "--manifest" and i + 1 < len(args):
-                manifest = args[i + 1]
-                i += 2
-            elif args[i].startswith("--manifest="):
-                manifest = args[i].split("=", 1)[1]
                 i += 1
             elif args[i] == "--stamp" and i + 1 < len(args):
                 stamp = args[i + 1]
@@ -479,12 +437,12 @@ def main() -> int:
         if len(positional) != 2:
             print(
                 "Usage: python -m pcons.util.commands copytree "
-                "[--depfile FILE] [--manifest FILE] [--stamp FILE] "
+                "[--depfile FILE] [--stamp FILE] "
                 "[--replace] <src> <dest>",
                 file=sys.stderr,
             )
             return 1
-        copytree(positional[0], positional[1], depfile, stamp, replace, manifest)
+        copytree(positional[0], positional[1], depfile, stamp, replace)
         return 0
 
     elif cmd == "overlay":
