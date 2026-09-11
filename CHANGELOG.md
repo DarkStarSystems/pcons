@@ -18,6 +18,10 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **`create_macos_bundle` and `create_flat_bundle` take `resources` as a
+  mapping** of bundle name to source file, for a resource the bundle wants
+  under a different name, and `create_macos_bundle` takes `pkginfo` as a
+  `Path` to copy in. (#152)
 - **`target.set_option("exported_symbols", [...])`**: a shared library
   exports only the named symbols, realized per toolchain as a macOS symbol
   list, a Linux version script, or an MSVC `.def` file. C names, with

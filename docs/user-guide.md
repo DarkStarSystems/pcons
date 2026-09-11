@@ -4394,6 +4394,12 @@ from pcons.contrib import bundle, platform
 plist = bundle.generate_info_plist("MyPlugin", "1.0.0", bundle_type="BNDL")
 bundle.create_macos_bundle(project, env, plugin, bundle_dir="build/MyPlugin.bundle")
 bundle.create_flat_bundle(project, env, plugin, bundle_dir="build/MyPlugin")
+# Resources under their own names, or renamed on the way in; PkgInfo from a file
+bundle.create_macos_bundle(
+    project, env, plugin, bundle_dir="build/MyPlugin.bundle",
+    resources={"com.example.MyPlugin.png": "art/logo-white.png"},
+    pkginfo=Path("plugin-pkg.info"),
+)
 arch_dir = bundle.get_arch_subdir("darwin", "arm64")  # "MacOS-arm-64"
 
 # Platform utilities
