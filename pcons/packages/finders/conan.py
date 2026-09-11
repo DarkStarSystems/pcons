@@ -704,20 +704,33 @@ class ConanFinder(BaseFinder):
     def _merge_transitive_requires(
         packages: dict[str, PackageDescription],
     ) -> None:
-        """Fold each package's transitive Requires flags into it, in place."""
+        """Fold each package's transitive Requires flags into it, in place.
+
+        Libraries are folded dependents-first, the order a static link
+        needs: a library comes after every library that uses it. With
+        ``Requires: opencv_core opencv_imgproc`` and imgproc requiring
+        core, that is imgproc then core, whatever order the .pc file
+        listed them in. That's the order ``pkg-config --libs`` gives too.
+        """
 
         def closure(name: str, seen: set[str]) -> list[str]:
-            ordered: list[str] = []
-            pkg = packages.get(name)
-            if pkg is None:
-                return ordered
-            for dep in pkg.dependencies:
-                if dep in seen or dep not in packages:
-                    continue
-                seen.add(dep)
-                ordered.append(dep)
-                ordered.extend(closure(dep, seen))
-            return ordered
+            """*name*'s transitive requirements, each before what it requires."""
+            finished: list[str] = []
+
+            def visit(pkg_name: str) -> None:
+                pkg = packages.get(pkg_name)
+                if pkg is None:
+                    return
+                for dep in pkg.dependencies:
+                    if dep in seen or dep not in packages:
+                        continue
+                    seen.add(dep)
+                    visit(dep)
+                    finished.append(dep)
+
+            visit(name)
+            finished.reverse()
+            return finished
 
         def dedupe(seq: list[str]) -> list[str]:
             seen: set[str] = set()

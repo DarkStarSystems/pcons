@@ -1125,3 +1125,35 @@ class TestConanFinderIntegration:
         result = finder._run_conan("--version", check=False)
         assert result.returncode == 0
         assert "Conan" in result.stdout or "conan" in result.stdout.lower()
+
+
+class TestTransitiveRequiresLinkOrder:
+    """Libraries are folded dependents-first, the order a static link needs
+    (#157): with ``Requires: opencv_core opencv_imgproc`` and imgproc
+    requiring core, imgproc comes before core, and core before zlib."""
+
+    def test_a_library_follows_every_library_that_uses_it(self, tmp_path: Path):
+        gen = tmp_path / "build" / "generators"
+        gen.mkdir(parents=True)
+        (gen / "opencv.pc").write_text(
+            "Name: opencv\nVersion: 4.10.0\nLibs:\n"
+            "Requires: opencv_core opencv_imgproc\n"
+        )
+        (gen / "opencv_core.pc").write_text(
+            "Name: opencv_core\nVersion: 4.10.0\nLibs: -lopencv_core\nRequires: zlib\n"
+        )
+        (gen / "opencv_imgproc.pc").write_text(
+            "Name: opencv_imgproc\nVersion: 4.10.0\nLibs: -lopencv_imgproc\n"
+            "Requires: opencv_core\n"
+        )
+        (gen / "zlib.pc").write_text("Name: zlib\nVersion: 1.3\nLibs: -lz\n")
+
+        finder = ConanFinder(output_folder=tmp_path)
+        packages = finder._parse_pkgconfig_files()
+
+        assert packages["opencv"].libraries == ["opencv_imgproc", "opencv_core", "z"]
+        assert packages["opencv_imgproc"].libraries == [
+            "opencv_imgproc",
+            "opencv_core",
+            "z",
+        ]

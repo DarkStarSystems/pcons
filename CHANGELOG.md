@@ -242,6 +242,11 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- Conan packages link in dependents-first order. The finder folded a
+  package's `Requires` in the order the `.pc` file listed them, which put
+  `opencv_core` before `opencv_imgproc` and broke static links with GNU ld;
+  a library now follows every library that uses it, as `pkg-config --libs`
+  orders them. (#157)
 - The installer helpers (`create_pkg`, `create_component_pkg`, `create_dmg`,
   `create_msix`) work in an environment with a `build_prefix`: staging and
   outputs now sit under the prefix and the command lines say so, where
@@ -374,8 +379,8 @@ machinery to support this kind of dynamic dependencies.
   to say what was meant:
 
   ```python
-  sources=[gen_hello]                          # pass the target itself, or
-  sources=[project.build_dir / "gen/hello.c"]  # name the real path
+  sources = [gen_hello]  # pass the target itself, or
+  sources = [project.build_dir / "gen/hello.c"]  # name the real path
   ```
 
   **Breaking:** scripts naming generated sources that way must be updated.
