@@ -97,3 +97,29 @@ class TestPkgInfoFromAFile:
         assert not (
             tmp_path / "build" / ".bundle_staging" / "MyPlugin.bundle" / "PkgInfo"
         ).exists()
+
+
+class TestTheReturnedTargetStandsForTheBundle:
+    def test_it_depends_on_the_other_installs(self, tmp_path: Path) -> None:
+        (tmp_path / "logo.png").write_bytes(b"png")
+        (tmp_path / "plugin-pkg.info").write_bytes(b"BNDL????")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        installed = bundle.create_macos_bundle(
+            project,
+            env,
+            _plugin(project, env),
+            bundle_dir="MyPlugin.bundle",
+            info_plist=bundle.generate_info_plist("MyPlugin", "1.0.0"),
+            pkginfo=tmp_path / "plugin-pkg.info",
+            resources=["logo.png"],
+        )
+
+        project.resolve()
+        covered = {
+            node.path.name
+            for dep in installed.dependencies
+            for node in dep.output_nodes
+        }
+        assert {"Info.plist", "PkgInfo", "logo.png"} <= covered

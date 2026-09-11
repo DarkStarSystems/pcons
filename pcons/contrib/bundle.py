@@ -155,7 +155,10 @@ def create_macos_bundle(
             If None, uses standard "MacOS" directory.
 
     Returns:
-        Target for the installed plugin within the bundle.
+        Target for the installed plugin within the bundle. It depends on the
+        bundle's other installs (Info.plist, PkgInfo, resources), so
+        ``project.Default(bundle)`` or ``create_pkg(depends=[bundle])``
+        covers the whole bundle.
 
     Example:
         >>> plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])
@@ -172,6 +175,7 @@ def create_macos_bundle(
 
     # Install the plugin binary
     installed = project.Install(binary_dir, [plugin])
+    parts: list[Target] = []
 
     # Install Info.plist. Content given as a string is written here, at
     # configure time, so the bundle costs no extra rule or process and the
@@ -183,17 +187,21 @@ def create_macos_bundle(
             info_plist = write_file(staging / "Info.plist", info_plist)
         contents_files.append(info_plist)
     if isinstance(pkginfo, Path):
-        project.InstallAs(contents_dir / "PkgInfo", pkginfo)
+        parts.append(project.InstallAs(contents_dir / "PkgInfo", pkginfo))
     elif pkginfo is not None:
         contents_files.append(write_file(staging / "PkgInfo", pkginfo))
     # One Install for the whole directory: two into the same destination
     # collide on the target name.
     if contents_files:
-        project.Install(contents_dir, contents_files)
+        parts.append(project.Install(contents_dir, contents_files))
 
     if resources:
-        _install_resources(project, contents_dir / "Resources", resources)
+        parts.extend(_install_resources(project, contents_dir / "Resources", resources))
 
+    # The returned target stands for the whole bundle: Default(bundle) or
+    # depends=[bundle] covers the plist, PkgInfo and resources too.
+    if parts:
+        installed.depends(*parts)
     return installed
 
 
@@ -201,14 +209,14 @@ def _install_resources(
     project: Project,
     dest: Path,
     resources: Sequence[Path | str] | Mapping[str, Path | str],
-) -> None:
+) -> list[Target]:
     """Copy *resources* into *dest*: a list under their own names, a mapping
-    under the names it gives."""
+    under the names it gives. Returns the install targets made."""
     if isinstance(resources, Mapping):
-        for name, source in resources.items():
-            project.InstallAs(dest / name, source)
-    else:
-        project.Install(dest, resources)
+        return [
+            project.InstallAs(dest / name, source) for name, source in resources.items()
+        ]
+    return [project.Install(dest, resources)]
 
 
 def create_flat_bundle(
@@ -249,15 +257,17 @@ def create_flat_bundle(
 
     # Install the plugin
     installed = project.Install(bundle_path, [plugin])
+    parts: list[Target] = []
 
     # Install additional DLLs
     if dlls:
-        for dll in dlls:
-            project.Install(bundle_path, [dll])
+        parts.extend(project.Install(bundle_path, [dll]) for dll in dlls)
 
     if resources:
-        _install_resources(project, bundle_path, resources)
+        parts.extend(_install_resources(project, bundle_path, resources))
 
+    if parts:
+        installed.depends(*parts)
     return installed
 
 

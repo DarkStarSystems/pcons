@@ -269,6 +269,12 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- `project.Command()` takes `tool=` like `env.Command()` does; it raised
+  "unexpected keyword argument" before.
+- `create_macos_bundle()` and `create_flat_bundle()` return a target that
+  depends on the bundle's other installs (Info.plist, PkgInfo, resources,
+  DLLs), so `Default(bundle)` or `create_pkg(depends=[bundle])` covers the
+  whole bundle instead of the plugin binary alone.
 - An `ObjectLibrary` used as another target's source no longer makes each
   of its objects an order-only dependency of itself and of every sibling,
   which ninja refused as a cycle. A node a dependency produces is not one of
