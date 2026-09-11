@@ -2410,11 +2410,7 @@ The variables are written into the generated build file, in front of the one com
 
 ### Exporting Only Some Symbols
 
-A plugin should export its host's entry points and nothing else, and
-`-fvisibility=hidden` can't hide a dependency that marks its own API
-default-visibility. Name the symbols and each toolchain realizes it in its
-linker's form: a symbol list on macOS, a version script on Linux, a `.def`
-file with MSVC and clang-cl.
+Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file with MSVC and clang-cl.
 
 ```python
 plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])
@@ -2422,14 +2418,15 @@ plugin.set_option("exported_symbols", ["OfxGetPlugin", "OfxGetNumberOfPlugins"])
 ```
 
 The names are the C names; pcons adds the Darwin underscore. macOS and Linux
-accept `*` patterns (`"Spark*"`), MSVC exports by exact name and refuses one.
+accept `*` patterns (`"Spark*"`), MSVC doesn't support patterns so it will complain if passed one.
 The list is written under the target's build directory and the link depends
 on it, so changing the list relinks.
 
-A file you already have goes in the way its linker takes it: a `.def` among
-the target's sources on MSVC and clang-cl (it becomes `/DEF:`), and a version
-script or symbol list as a `PathToken` in `link_flags` on Linux and macOS,
-which the link then depends on.
+If you already have an OS-specific linker def or symbol list file,
+just pass it as a source to the builder: a `.def` in the target's
+sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
+or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
+the link then depends on.
 
 ### Post-Build Commands
 
