@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 from pcons.core.preset import Preset, ToolContribution
-from pcons.core.subst import TargetPath
+from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 
 logger = logging.getLogger(__name__)
@@ -716,6 +716,19 @@ class Toolchain(Protocol):
         """Return additional compile flags needed for the target type."""
         ...
 
+    def link_group_tokens(
+        self, archives: Sequence[PathToken]
+    ) -> list[FlagToken] | None:
+        """How this linker takes archives that need each other's symbols.
+
+        Static libraries may link each other in a cycle. A linker that
+        rescans its archives (Apple's ld, MSVC's link) needs nothing and
+        answers None: the archives stay ordinary link inputs. GNU ld and
+        lld need them grouped, and answer the tokens to put on the link
+        line in their place.
+        """
+        ...
+
     def get_link_flags_for_target(
         self,
         target: Target,
@@ -1290,6 +1303,12 @@ class BaseToolchain(ABC):
         """Return additional compile flags for a target type (e.g. -fPIC for
         shared libraries on Linux). Base: none."""
         return []
+
+    def link_group_tokens(
+        self, archives: Sequence[PathToken]
+    ) -> list[FlagToken] | None:
+        """Archives in a link cycle stay plain link inputs. Base: None."""
+        return None
 
     def _write_link_input(self, target: Target, suffix: str, text: str) -> Path:
         """Write a per-target file the link step reads, at configure time.

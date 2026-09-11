@@ -233,6 +233,9 @@ class Resolver:
         # Register Command factory (env.Command doesn't use builder registry)
         self._builder_factories["Command"] = CommandNodeFactory(project)
 
+        # Targets being resolved right now; see _resolve_target.
+        self._resolving: set[int] = set()
+
     def resolve(self) -> None:
         """Resolve all targets in build order, then expand command templates."""
         trace("resolve", "Starting resolution phase")
@@ -283,8 +286,11 @@ class Resolver:
 
     def _resolve_target(self, target: Target) -> None:
         """Resolve a single target via its registered factory."""
-        if target._resolved:
+        if target._resolved or id(target) in self._resolving:
             return
+        # Static libraries may link each other in a cycle; resolving one
+        # never needs the other's outputs, so the second visit is a no-op.
+        self._resolving.add(id(target))
 
         trace("resolve", "Resolving target: %s", target.name)
 
@@ -328,6 +334,7 @@ class Resolver:
             )
 
         target._resolved = True
+        self._resolving.discard(id(target))
 
     def _resolve_pending_sources(self, target: Target) -> None:
         """Let the target's factory create its nodes from its Target sources,

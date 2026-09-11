@@ -1,0 +1,24 @@
+# Test configuration for the static-library-cycle example
+
+[test]
+description = "Two static libraries that call each other link in a cycle: no build order between them, and the archives reach the linker grouped where it needs that (GNU ld) and plain where it does not"
+
+expected_outputs = [
+    "build/liblexer.a",
+    "build/libparser.a",
+    "build/main",
+]
+
+[verify]
+commands = [
+    { run = "./build/main", expect_stdout = "3 tokens" },
+]
+
+[[rebuild]]
+description = "Nothing changed: nothing to do"
+expect_no_work = true
+
+[skip]
+# The xcode generator links a program with its direct dependencies only, so
+# main would be linked without liblexer.a (as in 04_transitive_deps).
+generators = ["xcode"]

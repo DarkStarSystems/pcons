@@ -340,10 +340,10 @@ class TestSameNameInTwoEnvironments:
         self, tmp_path, gcc_toolchain
     ):
         project = Project("t", root_dir=tmp_path)
-        a = project.StaticLibrary(
+        a = project.SharedLibrary(
             "a", project.Environment(toolchain=gcc_toolchain, name="mcu")
         )
-        b = project.StaticLibrary(
+        b = project.SharedLibrary(
             "b", project.Environment(toolchain=gcc_toolchain, name="host")
         )
         a.private.link_libs.append(b)
@@ -356,10 +356,10 @@ class TestSameNameInTwoEnvironments:
 
     def test_detect_cycles_reports_both_qualified_names(self, tmp_path, gcc_toolchain):
         project = Project("t", root_dir=tmp_path)
-        a = project.StaticLibrary(
+        a = project.SharedLibrary(
             "a", project.Environment(toolchain=gcc_toolchain, name="mcu")
         )
-        b = project.StaticLibrary(
+        b = project.SharedLibrary(
             "b", project.Environment(toolchain=gcc_toolchain, name="host")
         )
         a.private.link_libs.append(b)

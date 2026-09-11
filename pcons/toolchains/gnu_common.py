@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
-from pcons.core.subst import SourcePath, TargetPath
+from pcons.core.subst import NodeVar, SourcePath, TargetPath
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -78,6 +78,9 @@ def _link_tail() -> list[object]:
         "-o",
         TargetPath(),
         SourcePath(),
+        # Archives that link each other in a cycle, grouped; see
+        # UnixToolchain.link_group_tokens. Empty on every other edge.
+        NodeVar("LINK_GROUPS"),
         "${prefix(link.Lprefix, link.libdirs)}",
         "${prefix(link.lprefix, link.libs)}",
         "${prefix(link.Fprefix, link.frameworkdirs)}",
