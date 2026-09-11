@@ -3,6 +3,10 @@
 [test]
 description = "Build a Python extension using the pyproject.toml backend and run its tests"
 
+# Runs conan at generate time, so on a Windows runner it pays the cold
+# start that has blown the default 60s; the same budget 01_hello_c carries.
+timeout = 180
+
 # Files that should exist after the build
 expected_outputs = [
     "build/pcons_hello_ext.cpython-*.so",
