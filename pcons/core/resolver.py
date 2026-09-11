@@ -23,6 +23,8 @@ flags, etc. can be customized after target creation.
 from __future__ import annotations
 
 import logging
+import os
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,7 +32,7 @@ from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode, Node
-from pcons.core.subst import PathToken, TargetPath
+from pcons.core.subst import PathToken, TargetPath, ToolPath
 
 logger = logging.getLogger(__name__)
 
@@ -108,12 +110,48 @@ class NoOpFactory(PendingSourceFactory):
 
 
 class CommandNodeFactory(PendingSourceFactory):
-    """Factory for resolving Command target pending sources.
+    """Factory for the targets ``env.Command`` declares.
 
-    Command targets (created by env.Command) already have output_nodes
-    from GenericCommandBuilder. This factory wires up pending source
-    dependencies and updates build_info.
+    Command targets already have output_nodes from GenericCommandBuilder,
+    so this factory has two jobs on the build_info those nodes carry:
+    ``resolve`` turns whatever the command line names into paths, and
+    ``resolve_pending`` wires up sources given as Targets.
     """
+
+    def resolve(
+        self,
+        target: Target,
+        env: Environment | None,  # noqa: ARG002
+    ) -> None:
+        """Replace each Target or Node written into the command with its path.
+
+        ``env.Command(command=[tool, ...])`` names what runs the command, and
+        the token survives declaration as the object itself. The resolver
+        resolves a target's dependencies before dispatching here, and
+        ``env.Command`` recorded the tool and every Target written into the
+        list with ``depends()``, so the outputs those tokens stand for exist
+        by the time this runs. Each becomes a ``PathToken`` the generators
+        render the way they render every other path they produce.
+
+        The dependency edge is not made here: ``env.Command`` already made it,
+        which keeps the tool out of ``$SOURCES`` and leaves the caller's
+        indices meaning what they meant.
+        """
+        from pcons.core.target import Target as TargetClass
+
+        if not target.output_nodes:
+            return
+        build_info = target.output_nodes[0]._build_info or {}
+        command = build_info.get("command")
+        if not command or not any(
+            isinstance(token, (TargetClass, FileNode, ToolPath)) for token in command
+        ):
+            return
+        tool = (getattr(target, "_builder_data", None) or {}).get("tool")
+        build_info["command"] = [
+            _resolved_command_token(target, token, tool, program=index == 0)
+            for index, token in enumerate(command)
+        ]
 
     def resolve_pending(self, target: Target) -> None:
         """Add each source Target's outputs as dependencies of the command's
@@ -481,3 +519,86 @@ class Resolver:
             "  Expanded command: %s",
             command_tokens[:10] if len(command_tokens) > 10 else command_tokens,
         )
+
+
+def _resolved_command_token(
+    owner: Target, token: Any, tool: Any, *, program: bool = False
+) -> Any:
+    """One command token with whatever stands for a path turned into one.
+
+    @param owner The Command target whose command line this token sits in.
+    @param token The token as the script wrote it.
+    @param tool What ``tool=`` named, if anything.
+    @param program This token is the first of the line, so a Target or
+        FileNode here is what runs and is spelled to run.
+    @return The token, with anything standing for a path turned into a
+        ``PathToken``.
+    """
+    from pcons.core.target import Target as TargetClass
+
+    if isinstance(token, (TargetClass, FileNode)):
+        path = _command_path(owner, token)
+        return replace(path, executable=True) if program else path
+    if isinstance(token, ToolPath):
+        return _tool_token(owner, tool, token)
+    return token
+
+
+def _tool_token(owner: Target, tool: Any, marker: ToolPath) -> Any:
+    """What ``$TOOL`` stands for, spelled so the shell will run it.
+
+    A tool this build produces is a path, and the only one whose spelling
+    pcons owns. Anything else is the caller's own word for a program that
+    already exists — an absolute path to an installed tool, or a bare name
+    for ``$PATH`` — and passes through, since rewriting either would only
+    break it.
+    """
+    from pcons.core.target import Target as TargetClass
+
+    if isinstance(tool, TargetClass):
+        path = _command_path(owner, tool)
+        return replace(
+            path, prefix=marker.prefix, suffix=marker.suffix, executable=True
+        )
+    text = str(tool)
+    if os.path.isabs(text):
+        return PathToken(
+            prefix=marker.prefix,
+            path=text,
+            path_type="absolute",
+            suffix=marker.suffix,
+            executable=True,
+        )
+    return f"{marker.prefix}{text}{marker.suffix}"
+
+
+def _command_path(owner: Target, token: Target | FileNode) -> PathToken:
+    """The path a Target or FileNode written into *owner*'s command stands for.
+
+    A target has to name one file for this to mean anything, so one that
+    builds several says which of them it meant rather than having a choice
+    made for it.
+    """
+    from pcons.core.errors import PconsError
+    from pcons.core.target import Target as TargetClass
+
+    if not isinstance(token, TargetClass):
+        return PathToken(path=str(token.path), path_type="project")
+
+    outputs = token.output_nodes
+    if not outputs:
+        raise PconsError(
+            f"command for '{owner.qualified_name}' names target "
+            f"'{token.qualified_name}', which builds no file.",
+            location=owner.defined_at,
+        )
+    if len(outputs) > 1:
+        names = ", ".join(str(n.path) for n in outputs)
+        raise PconsError(
+            f"command for '{owner.qualified_name}' names target "
+            f"'{token.qualified_name}', which builds several files "
+            f"({names}), so which one to run is not decided. Write the "
+            f"one that is meant: {token.name}.output_nodes[0].",
+            location=owner.defined_at,
+        )
+    return PathToken(path=str(outputs[0].path), path_type="project")

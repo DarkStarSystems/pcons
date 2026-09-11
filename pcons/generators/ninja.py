@@ -1369,7 +1369,10 @@ class NinjaGenerator(BaseGenerator):
                 result.append(f"${token.name}")
             elif isinstance(token, PathToken):
                 result.append(
-                    token.relativize(lambda p: self._relativize_path_for_ninja(p, cwd))
+                    token.relativize(
+                        lambda p: self._relativize_path_for_ninja(p, cwd),
+                        executable=self._executable_form,
+                    )
                 )
             else:
                 s = str(token)

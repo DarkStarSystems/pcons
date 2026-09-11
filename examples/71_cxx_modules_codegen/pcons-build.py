@@ -25,8 +25,6 @@ generated source; the link to `m` is what puts the module's exports in scope,
 and the compile order between the two is discovered, not declared.
 """
 
-import platform
-
 from pcons import Project, get_var
 
 project = Project("cxx_modules_codegen")
@@ -41,14 +39,10 @@ env.cxx.set_standard("c++20")
 mod = project.StaticLibrary("m", env, sources=["src/mod.cppm"])
 gen = project.Program("gen", env, sources=["src/gen.cpp"])
 
-# A POSIX shell looks a bare name up on $PATH, where the build directory is
-# not; cmd.exe searches the current directory and has no `./`.
-run = "" if platform.system() == "Windows" else "./"
-
 generated = env.Command(
     target=project.build_dir / "generated.cpp",
-    source=[gen],
-    command=f"{run}${{SOURCES[0]}} $TARGET",
+    tool=gen,
+    command="$TOOL $TARGET",
     name="generate",
 )
 

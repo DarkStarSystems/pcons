@@ -94,6 +94,18 @@ class BaseGenerator:
     def name(self) -> str:
         return self._name
 
+    @staticmethod
+    def _executable_form(path: str) -> str:
+        """Spell *path* so the shell that runs this build will execute it.
+
+        @param path A path as this generator renders it.
+        @return The same path in the form the host shell executes.
+        """
+        from pcons.configure.platform import get_platform
+        from pcons.core.paths import executable_form
+
+        return executable_form(path, windows=get_platform().is_windows)
+
     def generate(
         self,
         project: Project,

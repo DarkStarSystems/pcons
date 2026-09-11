@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from pcons.core.node import BuildInfo, FileNode, Node, OutputInfo
 from pcons.core.project import Project
-from pcons.core.subst import PathToken, SourcePath, TargetPath
+from pcons.core.subst import PathToken, SourcePath, TargetPath, ToolPath
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
@@ -629,7 +629,7 @@ _PLAIN_VARIABLE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_.]*\}$")
 #: The substitutions env.Command() understands, for error messages.
 _SUPPORTED_SUBSTITUTIONS = (
     "$SOURCE, $SOURCES, $TARGET, $TARGETS, ${SOURCES[n]}, ${TARGETS[n]}, "
-    "${SOURCES[n:m]} (slices, with either end optional), $SRCDIR, "
+    "${SOURCES[n:m]} (slices, with either end optional), $TOOL, $SRCDIR, "
     "${VARIABLE}, and $$ for a literal dollar"
 )
 
@@ -641,15 +641,19 @@ _SUPPORTED_SUBSTITUTIONS = (
 _MARKER = re.compile(
     r"\$(?:"
     r"\{(?:(?P<sliced>SOURCES|TARGETS)\[(\d*)(?::(\d*))?\]"
-    r"|(?P<braced>SOURCES|TARGETS|SOURCE|TARGET))\}"
-    r"|(?P<bare>SOURCES|TARGETS|SOURCE|TARGET)\b"
+    r"|(?P<braced>SOURCES|TARGETS|SOURCE|TARGET|TOOL))\}"
+    r"|(?P<bare>SOURCES|TARGETS|SOURCE|TARGET|TOOL)\b"
     r")"
 )
 
 
-def _marker_from_match(token: str, match: re.Match[str]) -> SourcePath | TargetPath:
-    """Build the marker a matched $SOURCE/$TARGET substitution stands for."""
+def _marker_from_match(
+    token: str, match: re.Match[str]
+) -> SourcePath | TargetPath | ToolPath:
+    """Build the marker a matched $SOURCE/$TARGET/$TOOL substitution stands for."""
     kind = match.group("sliced") or match.group("braced") or match.group("bare")
+    if kind == "TOOL":
+        return ToolPath()
     marker = SourcePath if kind.startswith("SOURCE") else TargetPath
 
     if match.group("sliced") is None:  # bare $SOURCES / ${TARGET} — all of them
@@ -771,6 +775,9 @@ def _tokenize_one(token: Any) -> Any:
     if not prefix and not suffix:
         return marker
 
+    if isinstance(marker, ToolPath):
+        return replace(marker, prefix=prefix, suffix=suffix)
+
     # Text attached to a marker that can expand to several paths belongs to
     # each of them -- "-i${SOURCES[0:]}" means -ione.c -itwo.c, not one -i
     # welded to the first path. Saying so as a full slice makes the
@@ -884,7 +891,7 @@ class GenericCommandBuilder(BaseBuilder):
 
     def __init__(
         self,
-        command: str | list[str],
+        command: str | Sequence[Any],
         *,
         rule_name: str | None = None,
         restat: bool = False,
@@ -938,7 +945,7 @@ class GenericCommandBuilder(BaseBuilder):
         self._depfile = depfile
         self._deps_style = deps_style
 
-    def _tokenize_command(self, command: str | list[str]) -> list:
+    def _tokenize_command(self, command: str | Sequence[Any]) -> list:
         """Convert command string to tokenized list with typed markers.
 
         Converts $SOURCE/$TARGET patterns to SourcePath()/TargetPath()
@@ -1004,7 +1011,7 @@ class GenericCommandBuilder(BaseBuilder):
 
         expanded: list = []
         for token in self._command:
-            if isinstance(token, (SourcePath, TargetPath)):
+            if isinstance(token, (SourcePath, TargetPath, ToolPath)):
                 expanded.append(
                     replace(
                         token, prefix=expand(token.prefix), suffix=expand(token.suffix)

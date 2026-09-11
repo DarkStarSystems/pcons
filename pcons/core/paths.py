@@ -234,3 +234,22 @@ def execution_relative(
             return "."
 
     return str(path_obj).replace("\\", "/")
+
+
+def executable_form(path: str, *, windows: bool) -> str:
+    """Spell *path* so the shell running the build will execute it.
+
+    The companion of :func:`execution_relative`, which says where a file is;
+    this says how to run it from there. A POSIX shell looks a bare name up on
+    ``$PATH`` and never in the working directory, so a path without a
+    directory needs a ``./``. cmd.exe does search the working directory, but
+    reads a leading ``/`` as the start of a switch, so it needs the
+    separators the other way round.
+
+    Always the same answer for the same input, so both generators agree.
+    """
+    if os.path.isabs(path):
+        return path.replace("/", "\\") if windows else path
+    if windows:
+        return path.replace("/", "\\")
+    return path if path.startswith((".", "/")) else f"./{path}"

@@ -814,7 +814,9 @@ class MakefileGenerator(BaseGenerator):
             if isinstance(token, (SourcePath, TargetPath)):
                 result.append(token)
             elif isinstance(token, PathToken):
-                result.append(token.relativize(relativize))
+                result.append(
+                    token.relativize(relativize, executable=self._executable_form)
+                )
             else:
                 s = str(token)
                 # $SRCDIR becomes the absolute project root (make runs from

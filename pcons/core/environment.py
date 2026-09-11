@@ -58,7 +58,7 @@ _SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
 
 
 def _warn_if_source_reads_as_singular(
-    command: str | list[str], sources: int, at: SourceLocation
+    command: str | Sequence[Any], sources: int, at: SourceLocation
 ) -> None:
     """Flag ``$SOURCE`` written where more than one source will land.
 
@@ -1440,8 +1440,9 @@ class Environment(_EnvironmentStubs):
         self,
         *,
         target: str | Path | list[str | Path],
+        tool: Target | str | Path | None = None,
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
-        command: str | list[str] = "",
+        command: str | Sequence[str | Target | FileNode] = "",
         name: str | None = None,
         depends: str | Path | Sequence[str | Path] | None = None,
         restat: bool = False,
@@ -1477,6 +1478,26 @@ class Environment(_EnvironmentStubs):
                     the prefix explicitly: ``project.build_dir / "build/x.h"``.
                     An absolute path outside the build directory is an
                     external output, produced in place.
+            tool: The program that runs this command, written ``$TOOL`` in
+                    *command*. A ``Target`` becomes an implicit dependency,
+                    never a source, so ``$SOURCES`` keeps meaning what the
+                    command consumes and the indices a caller wrote keep
+                    their files. It is spelled the way the shell will run
+                    it, so no ``./`` is written by hand and the same script
+                    works on every platform. A tool from another environment
+                    carries that environment's own output directory, which
+                    is what makes a host tool usable in a cross build.
+
+                    A ``str`` or ``Path`` is for a tool this build does not
+                    produce: an absolute path to an installed program, or a
+                    bare name looked up on ``$PATH``. Neither adds a
+                    dependency, since there is nothing to build.
+
+                    This is the convenience form for naming a program by
+                    string. A command written as a list can name its program
+                    directly, by putting the ``Target`` or ``FileNode``
+                    first, which spells it the same way; where both are
+                    given, index 0 is what runs.
             source: Input file(s) that the command depends on. Can be Targets
                    (whose output files become sources), paths, or None. A
                    relative path is read from the directory of the script
@@ -1502,6 +1523,24 @@ class Environment(_EnvironmentStubs):
                     or "--out=$TARGET". Attached to a form that expands to
                     several paths, the text repeats on each of them.
                     Any other $variable is expanded from this environment.
+
+                    In the list form, a token may be a ``Target`` or a
+                    ``FileNode`` instead of a string: it expands to that
+                    output's path, as seen from where the command runs, and
+                    becomes an implicit dependency of this command, so the
+                    build produces it first and re-runs when it changes. It
+                    does not join ``$SOURCES``, so the indices a caller
+                    already wrote keep their meaning. A ``Target`` with
+                    several outputs is ambiguous and raises; name the one
+                    that is meant, ``tool.output_nodes[0]``.
+
+                    First in the list, such a token is the program the
+                    command runs, and is spelled the way the shell will run
+                    it, exactly as ``tool=`` is: no ``./`` written by hand
+                    and no platform conditional. Anywhere else it is an
+                    argument and stays a plain path. Passing ``tool=`` as
+                    well leaves index 0 the program; ``$TOOL`` is then one
+                    more path on the line.
 
                     **The command runs in the build directory**, unlike
                     ``sources=`` (read from the declaring script's
@@ -1624,6 +1663,15 @@ class Environment(_EnvironmentStubs):
                 command="./${SOURCES[0]} --out=$TARGET ${SOURCES[1:]}"
             )
 
+            # Name the tool that runs it. $SOURCES stays the real inputs,
+            # and nothing writes a "./" or a platform conditional.
+            atlas = env.Command(
+                target="atlas.bin",
+                tool=packer,
+                source=sprites,
+                command="$TOOL --out=$TARGET $SOURCES",
+            )
+
             # Can be passed to Install() since it's a Target
             project.Install("dist/", [generated])
         """
@@ -1631,6 +1679,13 @@ class Environment(_EnvironmentStubs):
         from pcons.core.errors import PconsError
         from pcons.core.node import FileNode
         from pcons.core.target import Target as TargetClass
+
+        command_deps: list[TargetClass | FileNode] = []
+        if not isinstance(command, str):
+            command = list(command)
+            command_deps = [
+                token for token in command if isinstance(token, (TargetClass, FileNode))
+            ]
 
         if depfile is not None and not depfile.startswith("."):
             raise PconsError(
@@ -1707,6 +1762,23 @@ class Environment(_EnvironmentStubs):
             deps_style=deps_style,
         )
 
+        from pcons.core.subst import ToolPath
+
+        names_tool = any(isinstance(t, ToolPath) for t in builder.command)
+        if names_tool and tool is None:
+            raise PconsError(
+                "$TOOL in a command names the program tool= gives it, and "
+                "this command has no tool=.",
+                location=get_caller_location(),
+            )
+        if tool is not None and not names_tool:
+            raise PconsError(
+                f"tool={tool!r} is never run: the command has no $TOOL. "
+                f"Write it where the program goes, or drop tool= and list "
+                f"the tool under source= or depends=.",
+                location=get_caller_location(),
+            )
+
         # Nodes up front, so the declared order below can splice Targets back
         # into their positions; the builder passes existing nodes through.
         normalized = builder._normalize_sources(immediate_sources, self)
@@ -1754,6 +1826,14 @@ class Environment(_EnvironmentStubs):
                 src if isinstance(src, TargetClass) else next(normalized_iter)
                 for src in source_list
             ]
+
+        for dep in command_deps:
+            cmd_target.depends(dep)
+
+        if tool is not None:
+            cmd_target._builder_data["tool"] = tool
+            if isinstance(tool, TargetClass):
+                cmd_target.depends(tool)
 
         # Apply extra implicit dependencies
         if depends is not None:
