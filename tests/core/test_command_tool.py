@@ -236,3 +236,23 @@ def test_text_attached_to_the_marker_comes_along(tmp_path: Path, gcc_toolchain) 
     argv = as_ninja_command("cp", f"--helper={tool}")
 
     assert f"{argv} $in $out" in _ninja(project)
+
+
+def test_project_command_takes_a_tool_too(tmp_path: Path, gcc_toolchain) -> None:
+    """project.Command() forwards tool= to env.Command(); the two entry
+    points take the same arguments."""
+    (tmp_path / "gen.c").write_text("int main(void) { return 0; }\n")
+    (tmp_path / "in.txt").write_text("")
+    project = Project("demo", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(toolchain=gcc_toolchain)
+    gen = project.Program("gen", env, sources=["gen.c"])
+    run = project.Command(
+        "run",
+        env,
+        target=project.build_dir / "out.txt",
+        tool=gen,
+        source=["in.txt"],
+        command="$TOOL $SOURCE $TARGET",
+    )
+
+    assert gen in run.dependencies

@@ -291,8 +291,9 @@ class CommandBuilder:
         env: Environment,
         *,
         target: str | Path | list[str | Path],
+        tool: Target | str | Path | None = None,
         source: str | Path | list[str | Path] | None = None,
-        command: str | list[str] = "",
+        command: str | Sequence[Any] = "",
         restat: bool = False,
         write_if_different: bool = False,
         cwd: str | Path | None = None,
@@ -314,6 +315,7 @@ class CommandBuilder:
             name: Target name for `ninja <name>`.
             env: Environment to use.
             target: Output file(s).
+            tool: The program that runs the command, written ``$TOOL``.
             source: Input file(s).
             command: The shell command to run.
             restat: Re-check the output timestamp after running.
@@ -331,6 +333,7 @@ class CommandBuilder:
         # Delegate to env.Command which handles all the complexity
         return env.Command(
             target=target,
+            tool=tool,
             source=source,
             command=command,
             name=name,
