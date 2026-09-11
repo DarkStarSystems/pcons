@@ -1521,7 +1521,10 @@ app_profile = project.Program("app_profile", profile_env)
 **Key points about environments:**
 
 - Each `project.Environment()` call creates a fresh environment with toolchain defaults
-- `env.clone()` creates a deep copy - changes to the clone don't affect the original
+- `env.clone()` creates a deep copy - changes to the clone don't affect the original.
+  A clone has no name; `env.clone(name="host")` gives it one. Two environments
+  need names, and different `build_prefix` settings, before they can hold
+  targets with the same name
 - Environments don't share state - there's no "base" environment that accumulates
 - You can clone at any point and re-tune the clone: `set_variant()` (and other
   exclusive presets) *replace* the previous setting, so
@@ -1591,7 +1594,7 @@ with env.override() as careful:
 
 The file stays part of the target, so it keeps the target's include dirs, defines, and everything inherited from its dependencies — only the environment layer changes.
 
-`env.cc.Object()` (see `examples/17_object_sources`) is another way to apply unique flags: compiling a standalone object that several targets can link directly. It sits outside any target, so no target's usage requirements apply to it, and it can use its own or any environment.
+`env.cc.Object()` (see `examples/17_object_sources`) is another way to apply unique flags: compiling a standalone object that several targets can link directly. It sits outside any target, so no target's usage requirements apply to it, and it can use its own or any environment. Its first argument is the object's path; a relative one is placed in the environment's build directory (under its `build_prefix`, if any), so `env.cc.Object("helper.o", "src/helper.c")` and the example's `build_dir / "helper.o"` land in the same place.
 
 ### Multiple Toolchains
 
@@ -2752,6 +2755,7 @@ opt_level = get_var("OPT_LEVEL", 2)  # int
 scale = get_var("SCALE", 1.0)  # float
 port = get_var("PORT", "ofx")  # str
 prefix = get_var("PREFIX", Path("/usr/local"))  # Path
+ports = get_var("PORTS", ["ofx"])  # list: PORTS=ofx,ae gives ["ofx", "ae"]
 ```
 
 Pass `type=` when there is no default. The result is `None` when the variable is

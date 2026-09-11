@@ -20,11 +20,18 @@ from pcons.core.errors import ConfigureError
 from pcons.core.invocation import run_recorded
 
 # Types get_var can convert a raw variable string into.
-VarValue: TypeAlias = bool | int | float | str | Path
+VarValue: TypeAlias = bool | int | float | str | Path | list[str]
 
 _TRUE_VALUES = frozenset({"1", "on", "yes", "true", "y"})
 _FALSE_VALUES = frozenset({"0", "off", "no", "false", "n"})
-_SUPPORTED_TYPES: tuple[builtins.type[VarValue], ...] = (bool, int, float, str, Path)
+_SUPPORTED_TYPES: tuple[builtins.type[VarValue], ...] = (
+    bool,
+    int,
+    float,
+    str,
+    Path,
+    list,
+)
 _SUPPORTED_NAMES = ", ".join(t.__name__ for t in _SUPPORTED_TYPES)
 
 # Internal storage for CLI variables (parsed PCONS_VARS for the current run).
@@ -142,6 +149,10 @@ def _resolve_var_type(
 def _coerce_var(name: str, raw: str, target: builtins.type[VarValue]) -> VarValue:
     """Convert a raw variable string to ``target``, or raise."""
     text = raw.strip()
+    if target is list:
+        # A list is written comma-separated on the command line:
+        # ``ports=ofx,ae``. Whitespace around an item is not part of it.
+        return [item.strip() for item in text.split(",") if item.strip()]
     if target is Path:
         if not text:
             raise ConfigureError(f"{name}={raw!r} is not a valid path; it is empty")
@@ -279,6 +290,10 @@ def get_var(name: str, default: Path) -> Path: ...
 
 
 @overload
+def get_var(name: str, default: list[str]) -> list[str]: ...
+
+
+@overload
 def get_var(
     name: str, default: None = None, *, type: builtins.type[bool]
 ) -> bool | None: ...
@@ -309,6 +324,12 @@ def get_var(
 
 
 @overload
+def get_var(
+    name: str, default: None = None, *, type: builtins.type[list]
+) -> list[str] | None: ...
+
+
+@overload
 def get_var(name: str, default: None) -> str | None: ...
 
 
@@ -328,6 +349,7 @@ def get_var(
         use_cuda = get_var('USE_CUDA', False)
         opt_level = get_var('OPT_LEVEL', 2)
         prefix = get_var('PREFIX', Path('/usr/local'))
+        ports = get_var('PORTS', ['ofx'])   # PORTS=ofx,ae -> ['ofx', 'ae']
 
     The default's type drives the conversion, so `get_var('X', False)` returns a
     bool and `get_var('X', 2)` returns an int. Pass `type=` when there is no
