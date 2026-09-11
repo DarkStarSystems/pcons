@@ -18,6 +18,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **`env.clone(name=...)`** names a clone at creation. Named environments
+  are how two targets may share a name, and a clone had no way to get one
+  but assignment afterwards. (#147)
 - **`get_var()` reads a list.** With a list default, a comma-separated
   value becomes a list: `get_var("PORTS", ["ofx"])` returns `["ofx", "ae"]`
   for `PORTS=ofx,ae`. `type=list` works without a default. (#155)

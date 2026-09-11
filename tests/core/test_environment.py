@@ -803,3 +803,33 @@ class TestBuildRelative:
         env.build_prefix = "release"
         absolute = Path("/opt/out/app.pkg")
         assert env.build_relative(absolute) == absolute
+
+
+class TestCloneName:
+    """clone(name=...) names the clone (#147); a clone has no name otherwise."""
+
+    def test_a_clone_has_no_name_by_default(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="base")
+        assert env.clone().name is None
+
+    def test_clone_takes_a_name(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="base")
+        clone = env.clone(name="host")
+        assert clone.name == "host"
+        assert env.name == "base"
+
+    def test_a_taken_name_is_refused(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="base")
+        from pcons.core.errors import PconsError
+
+        with pytest.raises(PconsError, match="already has an environment named"):
+            env.clone(name="base")
+
+    def test_named_clones_can_hold_the_same_target_name(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="release")
+        env.build_prefix = "release"
+        debug = env.clone(name="debug")
+        debug.build_prefix = "debug"
+        a = test_project.Program("app", env, sources=[])
+        b = test_project.Program("app", debug, sources=[])
+        assert a is not b

@@ -1521,7 +1521,10 @@ app_profile = project.Program("app_profile", profile_env)
 **Key points about environments:**
 
 - Each `project.Environment()` call creates a fresh environment with toolchain defaults
-- `env.clone()` creates a deep copy - changes to the clone don't affect the original
+- `env.clone()` creates a deep copy - changes to the clone don't affect the original.
+  A clone has no name; `env.clone(name="host")` gives it one. Two environments
+  need names, and different `build_prefix` settings, before they can hold
+  targets with the same name
 - Environments don't share state - there's no "base" environment that accumulates
 - You can clone at any point and re-tune the clone: `set_variant()` (and other
   exclusive presets) *replace* the previous setting, so

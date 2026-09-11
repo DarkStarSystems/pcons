@@ -645,14 +645,22 @@ class Environment(_EnvironmentStubs):
 
         return Namespace(data)
 
-    def clone(self) -> Environment:
+    def clone(self, *, name: str | None = None) -> Environment:
         """Create a deep copy of this environment.
 
         Tool configurations are cloned so modifications don't affect
         the original.
 
+        Args:
+            name: A name for the clone. A clone has none otherwise, and
+                two environments need names, and different ``build_prefix``
+                settings, before they can hold targets with the same name.
+
         Returns:
             A new Environment with copied configuration.
+
+        Raises:
+            PconsError: If *name* is already taken in the project.
         """
         tools = self._get_tools()
         vars_dict = self._get_vars()
@@ -671,10 +679,10 @@ class Environment(_EnvironmentStubs):
 
         # Clone tool configurations
         new_tools = new_env._get_tools()
-        for name, config in tools.items():
+        for tool_name, config in tools.items():
             cloned = config.clone()
             cloned._env = new_env
-            new_tools[name] = cloned
+            new_tools[tool_name] = cloned
 
         # Rebind BuilderMethod instances to reference the new environment
         # (BuilderMethod stores env reference for node registration)
@@ -711,9 +719,11 @@ class Environment(_EnvironmentStubs):
             # Register cloned env so its nodes are found by generators
             project._environments.append(new_env)
 
-        # Don't copy name - cloned env should get a new name if needed
-        # (otherwise two envs could generate the same ninja rule names)
+        # The name isn't copied: two environments with one name would
+        # generate the same ninja rule names. The caller may give one.
         new_env._name = None
+        if name is not None:
+            new_env.name = name
 
         # Don't copy created_nodes - new environment starts fresh
 
