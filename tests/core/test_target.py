@@ -1159,3 +1159,28 @@ class TestUnknownUsageRequirements:
         with pytest.raises(AttributeError, match="link_dirs"):
             target.private.lib_dirs.append("/opt/lib")
         assert project is not None
+
+
+class TestLinkRefusesAPathShapedString:
+    """A string given to link() is a library name; a path-shaped one used to
+    become -l/opt/vendor/lib/libfoo.a and fail inside the linker (#123)."""
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "/opt/vendor/lib/libfoo.a",
+            "vendor/libfoo.a",
+            "libfoo.a",
+            "foo.lib",
+            "lib\\foo.lib",
+        ],
+    )
+    def test_a_path_is_refused_at_generate_time(self, test_project, bad):  # noqa: F811
+        target = Target("app", target_type="program")
+        with pytest.raises(TypeError, match="looks like a file path"):
+            target.link(bad)
+
+    def test_a_library_name_is_still_a_name(self, test_project):  # noqa: F811
+        target = Target("app", target_type="program")
+        target.link("m", "pthread", "boost_system")
+        assert list(target.public.link_libs) == ["m", "pthread", "boost_system"]

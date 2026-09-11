@@ -269,6 +269,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- `link("/opt/vendor/lib/libfoo.a")` is refused at generate time with a
+  message saying what to do; the string became `-l/opt/vendor/lib/libfoo.a`
+  and failed inside the linker. (#123)
 - `project.Command()` takes `tool=` like `env.Command()` does; it raised
   "unexpected keyword argument" before.
 - `create_macos_bundle()` and `create_flat_bundle()` return a target that
