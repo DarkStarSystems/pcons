@@ -172,6 +172,9 @@ class MsvcCompatibleToolchain(BaseToolchain):
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
         "debug": (["/Od", "/Zi"], ["DEBUG", "_DEBUG"]),
         "release": (["/O2"], ["NDEBUG"]),
+        # /O2 is already "maximize speed"; /Ob3 (VS 2019+) adds the more
+        # aggressive inlining it leaves out. Nothing that changes results.
+        "release-fastest": (["/O2", "/Ob3"], ["NDEBUG"]),
         "relwithdebinfo": (["/O2", "/Zi"], ["NDEBUG"]),
         "minsizerel": (["/O1"], ["NDEBUG"]),
     }
@@ -211,7 +214,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
         if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
-                f"Supported variants: debug, release, relwithdebinfo, minsizerel."
+                f"Supported variants: debug, release, release-fastest, "
+                f"relwithdebinfo, minsizerel."
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
