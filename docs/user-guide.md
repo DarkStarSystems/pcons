@@ -2300,6 +2300,13 @@ and every step reruns when it changes, whether or not the step's own
 record mentions it. The opposite, `on_change=False`, says the thing only
 has to exist first and never reruns a step by itself.
 
+A file a command names in a flag is a dependency of that command without
+any `depends()` at all, when pcons knows the file: `write_file()` and
+`configure_file()` register what they write, and the build knows what it
+produces. So `PathToken(prefix="-Wl,--version-script=", path=exports)` in
+`link_flags` relinks when the export list changes. Include and library
+directories are never files, so they're unaffected.
+
 You may pin a dependency to one step if you want, by building that
 step yourself: `obj = env.cc.Object(...)` then `obj.depends(thing)`. For
 an ordinary compile-and-link target that doesn't buy you anything,

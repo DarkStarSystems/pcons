@@ -142,6 +142,23 @@ def configure_file(
     return write_file(output, text)
 
 
+def _register(path: Path) -> Path:
+    """Tell the project about a file written at configure time.
+
+    The build then knows the file the way it knows a generated one: a
+    command whose flags name it (a ``PathToken``) depends on it, and
+    ``target.depends(path)`` finds it. Outside a project there is nothing
+    to tell.
+    """
+    from pcons.core.project import Project
+
+    try:
+        Project.current().node(path)
+    except ValueError:
+        pass
+    return path
+
+
 def _anchor(path: Path | str) -> Path:
     """A relative path taken from the project root, like every other in pcons.
 
@@ -189,7 +206,7 @@ def write_file(output: Path | str, content: str | bytes) -> Path:
         plist = write_file(build_dir / "Info.plist", generate_info_plist(...))
         project.Install(contents_dir, [plist])
     """
-    output = _anchor(output)
+    output = _register(_anchor(output))
     output.parent.mkdir(parents=True, exist_ok=True)
 
     if isinstance(content, bytes):

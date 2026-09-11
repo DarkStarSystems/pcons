@@ -18,6 +18,13 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **A file a command names in its flags is a dependency of that command.**
+  A `PathToken` in a flag (`-Wl,--version-script=exports.txt`, a response
+  file, an options file) is read by the tool and reported by nothing, so
+  the command never reran when the file changed. Now it does, whenever
+  pcons knows the file: one the build produces, or one `write_file` or
+  `configure_file` wrote, which now register their output with the
+  project. Include and library directories are unaffected. (#150)
 - **A `release-fastest` variant**: the compiler's highest optimization level
   that doesn't change results (`-O3`; `/O2 /Ob3` on MSVC), realized per
   toolchain like the other variants and never enabling fast-math. (#153)
