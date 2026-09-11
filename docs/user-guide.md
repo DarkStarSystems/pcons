@@ -1330,6 +1330,7 @@ env = project.Environment(toolchain="c")
 # Apply variant settings
 # debug: -O0 -g
 # release: -O2 -DNDEBUG
+# release-fastest: -O3 -DNDEBUG (/O2 /Ob3 on MSVC)
 env.set_variant(variant)
 
 # Add extra flags
@@ -1342,6 +1343,11 @@ project.Default(app)
 
 print(f"Variant: {variant}")
 ```
+
+The variants are `debug`, `release`, `release-fastest`, `relwithdebinfo` and
+`minsizerel`; each toolchain realizes them in its own flags. `release-fastest`
+is the compiler's highest optimization level that doesn't change results, so
+it never turns on fast-math; add that yourself if you want it.
 
 **Usage:**
 ```bash

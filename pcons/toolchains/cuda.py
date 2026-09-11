@@ -88,6 +88,9 @@ class CudaToolchain(BaseToolchain):
     CUDA_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
         "debug": (["-g", "-G", "-O0"], ["DEBUG", "_DEBUG"]),
         "release": (["-O3"], ["NDEBUG"]),
+        # nvcc's release is already its highest level; the name exists so a
+        # script can set it on every toolchain in the environment.
+        "release-fastest": (["-O3"], ["NDEBUG"]),
         "relwithdebinfo": (["-O2", "-lineinfo"], ["NDEBUG"]),
         "profile": (["-O3", "-lineinfo"], ["NDEBUG"]),
         "minsizerel": (["-O1"], ["NDEBUG"]),
@@ -101,7 +104,8 @@ class CudaToolchain(BaseToolchain):
         if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
-                f"Supported CUDA variants: debug, release, relwithdebinfo, "
+                f"Supported CUDA variants: debug, release, release-fastest, "
+                f"relwithdebinfo, "
                 f"profile, minsizerel."
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))

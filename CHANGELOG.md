@@ -18,6 +18,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **A `release-fastest` variant**: the compiler's highest optimization level
+  that doesn't change results (`-O3`; `/O2 /Ob3` on MSVC), realized per
+  toolchain like the other variants and never enabling fast-math. (#153)
 - **`env.clone(name=...)`** names a clone at creation. Named environments
   are how two targets may share a name, and a clone had no way to get one
   but assignment afterwards. (#147)

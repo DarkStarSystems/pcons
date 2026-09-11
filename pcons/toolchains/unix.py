@@ -432,6 +432,9 @@ class UnixToolchain(BaseToolchain):
     UNIX_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
         "debug": (["-O0", "-g"], ["DEBUG", "_DEBUG"]),
         "release": (["-O2"], ["NDEBUG"]),
+        # The compiler's highest safe optimization level. Nothing that
+        # changes results, so no fast-math: a script that wants it says so.
+        "release-fastest": (["-O3"], ["NDEBUG"]),
         "relwithdebinfo": (["-O2", "-g"], ["NDEBUG"]),
         "minsizerel": (["-Os"], ["NDEBUG"]),
     }
@@ -491,7 +494,8 @@ class UnixToolchain(BaseToolchain):
         if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
-                f"Supported variants: debug, release, relwithdebinfo, minsizerel."
+                f"Supported variants: debug, release, release-fastest, "
+                f"relwithdebinfo, minsizerel."
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
