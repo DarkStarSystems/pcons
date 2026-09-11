@@ -18,6 +18,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **A generate names the variant it configured**: `Generated build files
+  for variant debug` on the terminal, or one entry per environment when
+  they differ. Nothing is printed when no environment set a variant. (#125)
 - **The installer helpers now take `depends=`.** `create_pkg`,
   `create_component_pkg`, `create_dmg` and `create_msix` staged their
   sources with an internally-generated `Install`, so a directory source

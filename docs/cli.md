@@ -35,7 +35,9 @@ a command, name it before any `--`; a command's own `--` (as in
 
 ### `pcons generate`
 
-Generate build files without building.
+Generate build files without building. When the build script set a variant,
+one line says which (`Generated build files for variant debug`), or one entry
+per environment when they differ; a script that sets none prints nothing.
 
 | Option | |
 |---|---|
