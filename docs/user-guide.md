@@ -3432,6 +3432,7 @@ pkg = macos.create_pkg(
 | `background` | Background image for the installer |
 | `scripts_dir` | Directory with `preinstall`/`postinstall` scripts |
 | `sign_identity` | Code signing identity |
+| `depends` | Targets to build before the sources are staged, for a directory source that other targets fill |
 
 #### macOS: `.dmg` Disk Images
 

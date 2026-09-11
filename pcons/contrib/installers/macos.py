@@ -115,6 +115,7 @@ def create_component_pkg(
     sources: Sequence[Target | FileNode | Path | str],
     install_location: str = "/Applications",
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     scripts_dir: Path | None = None,
     component_plist: Path | None = None,
     ownership: str = "recommended",
@@ -136,6 +137,8 @@ def create_component_pkg(
             depfile tracking after resolve().
         install_location: Where files install (e.g., "/Applications").
         output: Output .pkg path. Defaults to build/<identifier>-<version>.pkg.
+        depends: Targets that must be built before the sources are staged,
+            for a directory source that other targets populate.
         scripts_dir: Directory containing preinstall/postinstall scripts.
         component_plist: Path to component plist file for bundle settings.
         ownership: File ownership ("recommended", "preserve", "preserve-other").
@@ -165,6 +168,8 @@ def create_component_pkg(
 
     # Stage source files into build dir
     stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    if depends:
+        stage_target.depends(*depends)
 
     # Build pkgbuild command (paths relative to build_dir where ninja/make run)
     pkgbuild_args = [
@@ -210,6 +215,7 @@ def create_pkg(
     sources: Sequence[Target | FileNode | Path | str],
     install_location: str = "/Applications",
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     title: str | None = None,
     welcome: Path | None = None,
     readme: Path | None = None,
@@ -236,6 +242,8 @@ def create_pkg(
             depfile tracking after resolve().
         install_location: Where files install (e.g., "/Applications").
         output: Output .pkg path. Defaults to build/<name>-<version>.pkg.
+        depends: Targets that must be built before the sources are staged,
+            for a directory source that other targets populate.
         title: Installer title. Defaults to name.
         welcome: Path to welcome.rtf or welcome.html.
         readme: Path to readme file.
@@ -284,6 +292,8 @@ def create_pkg(
         name=f"pkg_payload_{name}",
         no_prefix=True,
     )
+    if depends:
+        stage_target.depends(*depends)
 
     # Bundle sources (.app) need a component plist; pkgbuild requires
     # each bundle's payload-relative path in it.
@@ -431,6 +441,7 @@ def create_dmg(
     sources: Sequence[Target | FileNode | Path | str],
     volume_name: str | None = None,
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     format: str = "UDZO",
     applications_symlink: bool = True,
 ) -> Target:
@@ -449,6 +460,8 @@ def create_dmg(
             depfile tracking after resolve().
         volume_name: Volume name. Defaults to name.
         output: Output .dmg path. Defaults to build/<name>.dmg.
+        depends: Targets that must be built before the sources are staged,
+            for a directory source that other targets populate.
         format: DMG format:
             - "UDZO" - zlib compressed (default, good compatibility)
             - "UDBZ" - bzip2 compressed (smaller, slower)
@@ -480,6 +493,8 @@ def create_dmg(
 
     # Stage source files into build dir
     stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    if depends:
+        stage_target.depends(*depends)
 
     # Build hdiutil command (with optional symlink creation)
     # Paths are relative to build_dir where ninja/make run

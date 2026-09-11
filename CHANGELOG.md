@@ -18,6 +18,11 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **The installer helpers take `depends=`.** `create_pkg`, `create_component_pkg`,
+  `create_dmg` and `create_msix` stage their sources with an `Install` the
+  script never sees, so a directory source that other targets fill had no
+  way to wait for them; `depends=[...]` orders the staging copy after those
+  targets. (#151)
 - **`create_macos_bundle` and `create_flat_bundle` take `resources` as a
   mapping** of bundle name to source file, for a resource the bundle wants
   under a different name, and `create_macos_bundle` takes `pkginfo` as a

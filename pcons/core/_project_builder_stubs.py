@@ -98,6 +98,7 @@ if TYPE_CHECKING:
             sources: Sequence[Target | FileNode | Path | str],
             install_location: str = '/Applications',
             output: str | Path | None = None,
+            depends: Sequence[Target] | None = None,
             scripts_dir: Path | None = None,
             component_plist: Path | None = None,
             ownership: str = 'recommended',
@@ -114,6 +115,7 @@ if TYPE_CHECKING:
             sources: Sequence[Target | FileNode | Path | str],
             volume_name: str | None = None,
             output: str | Path | None = None,
+            depends: Sequence[Target] | None = None,
             format: str = 'UDZO',
             applications_symlink: bool = True,
         ) -> Target:
@@ -127,7 +129,7 @@ if TYPE_CHECKING:
             *,
             bundle_dir: Path | str,
             dlls: list[Target | Path | str] | None = None,
-            resources: Sequence[Path | str] | None = None,
+            resources: Sequence[Path | str] | Mapping[str, Path | str] | None = None,
         ) -> Target:
             """Create a flat directory bundle (cross-platform)"""
             ...
@@ -182,8 +184,8 @@ if TYPE_CHECKING:
             *,
             bundle_dir: Path | str,
             info_plist: str | Path | None = None,
-            pkginfo: str | bytes | None = None,
-            resources: Sequence[Path | str] | None = None,
+            pkginfo: str | bytes | Path | None = None,
+            resources: Sequence[Path | str] | Mapping[str, Path | str] | None = None,
             arch_subdir: str | None = None,
         ) -> Target:
             """Create a macOS .bundle or .plugin structure [darwin only]"""
@@ -209,6 +211,7 @@ if TYPE_CHECKING:
             sources: Sequence[Target | FileNode | Path | str],
             executable: str | None = None,
             output: str | Path | None = None,
+            depends: Sequence[Target] | None = None,
             display_name: str | None = None,
             description: str | None = None,
             processor_architecture: str = 'x64',
@@ -250,6 +253,7 @@ if TYPE_CHECKING:
             sources: Sequence[Target | FileNode | Path | str],
             install_location: str = '/Applications',
             output: str | Path | None = None,
+            depends: Sequence[Target] | None = None,
             title: str | None = None,
             welcome: Path | None = None,
             readme: Path | None = None,

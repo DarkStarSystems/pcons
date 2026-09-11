@@ -88,6 +88,7 @@ def create_msix(
     sources: Sequence[Target | FileNode | Path | str],
     executable: str | None = None,
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     display_name: str | None = None,
     description: str | None = None,
     processor_architecture: str = "x64",
@@ -114,6 +115,8 @@ def create_msix(
             (e.g. sources=["build/deploy"] -> executable="deploy\\myapp.exe").
             If not specified, defaults to first source file's name.
         output: Output .msix path. Defaults to build/<name>-<version>.msix.
+        depends: Targets that must be built before the sources are staged,
+            for a directory source that other targets populate.
         display_name: Display name shown to users. Defaults to name.
         description: Package description.
         processor_architecture: Target architecture ("x64", "x86", "arm64").
@@ -179,6 +182,8 @@ def create_msix(
 
     # Stage source files into build dir
     stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    if depends:
+        stage_target.depends(*depends)
 
     # Generate AppxManifest.xml (use relative path for target)
     manifest_target = env.Command(
