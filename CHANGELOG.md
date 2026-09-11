@@ -136,6 +136,11 @@ machinery to support this kind of dynamic dependencies.
 
 ### Changed
 
+- **`ConanFinder.sync_profile()` takes its `build_type` from the environment's
+  variant** when none is passed: `debug` is `Debug`, the release flavors are
+  `Release`, `relwithdebinfo` and `minsizerel` their Conan names. It used to
+  default to `Release` whatever the variant. The docs also say how to make a
+  conf such as `tools.build:cxxflags` part of Conan's package id. (#156)
 - **`depends()` is now the one way to declare a dependency that is not linked,
   and every dependency edge lives in one list** with the linked libraries,
   so every part of pcons that walks the dependency graph sees the same

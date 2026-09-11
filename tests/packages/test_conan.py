@@ -1171,3 +1171,39 @@ class TestTransitiveRequiresLinkOrder:
         packages = finder._parse_pkgconfig_files()
 
         assert packages["app"].libraries == ["app"]
+
+
+class TestBuildTypeFollowsTheVariant:
+    """sync_profile() derives Conan's build_type from env.variant (#156)."""
+
+    @pytest.mark.parametrize(
+        ("variant", "build_type"),
+        [
+            ("debug", "Debug"),
+            ("release", "Release"),
+            ("release-fastest", "Release"),
+            ("relwithdebinfo", "RelWithDebInfo"),
+            ("minsizerel", "MinSizeRel"),
+        ],
+    )
+    def test_each_variant(  # noqa: F811
+        self, tmp_path: Path, test_project, variant: str, build_type: str
+    ):
+        env = test_project.Environment()
+        env.set_variant(variant)
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.sync_profile(env=env)
+
+        assert f"build_type={build_type}" in finder.profile_path.read_text()
+
+    def test_no_environment_means_release(self, tmp_path: Path):
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.sync_profile()
+        assert "build_type=Release" in finder.profile_path.read_text()
+
+    def test_an_explicit_build_type_wins(self, tmp_path: Path, test_project):  # noqa: F811
+        env = test_project.Environment()
+        env.set_variant("debug")
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.sync_profile(env=env, build_type="Release")
+        assert "build_type=Release" in finder.profile_path.read_text()
