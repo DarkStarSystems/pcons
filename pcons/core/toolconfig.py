@@ -249,7 +249,8 @@ class ToolConfig(_ToolConfigStubs):
         new_vars: dict[str, Any] = {}
         for key, value in vars_dict.items():
             if isinstance(value, list):
-                new_vars[key] = list(value)
+                # list.copy() keeps a FlagList's grouping; list(value) would not.
+                new_vars[key] = value.copy()
             elif isinstance(value, dict):
                 new_vars[key] = dict(value)
             else:

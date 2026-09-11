@@ -769,6 +769,21 @@ class TestAssignedFlagsKeepGrouping:
         assert list(env.cc.flags) == ["-Wall", "-x", "c++"]
         assert env.cc.flags.groups[-1] == FlagPair("-x", "c++")
 
+    def test_clone_keeps_the_flaglist(self, test_project, gcc_toolchain):  # noqa: F811
+        """A clone's flags are still a FlagList, so a FlagPair appended to the
+        clone reaches the command line as two tokens."""
+        from pcons.core.flags import FlagList, FlagPair
+
+        env = test_project.Environment(toolchain=gcc_toolchain)
+        env.cc.flags.append(FlagPair("-include", "pch.h"))
+
+        clone = env.clone(name="clone")
+        clone.cc.flags.append(FlagPair("-x", "c++"))
+
+        assert isinstance(clone.cc.flags, FlagList)
+        assert list(clone.cc.flags) == ["-include", "pch.h", "-x", "c++"]
+        assert clone.cc.flags.groups[-1] == FlagPair("-x", "c++")
+
     def test_assignment_keeps_the_grouping_rules(self, test_project):  # noqa: F811
         """The separated-argument rules a toolchain declared survive too."""
         from pcons.core.flags import FlagList
