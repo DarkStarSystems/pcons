@@ -18,6 +18,11 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **`target.set_option("exported_symbols", [...])`**: a shared library
+  exports only the named symbols, realized per toolchain as a macOS symbol
+  list, a Linux version script, or an MSVC `.def` file. C names, with
+  patterns on macOS and Linux. The list is written under the target's build
+  directory and the link depends on it. (#149)
 - **A file a command names in its flags is a dependency of that command.**
   A `PathToken` in a flag (`-Wl,--version-script=exports.txt`, a response
   file, an options file) is read by the tool and reported by nothing, so

@@ -2408,6 +2408,29 @@ env.Command(
 
 The variables are written into the generated build file, in front of the one command they belong to: `env NAME=VALUE` on POSIX, a small pcons helper on Windows (which has no `env`). So they survive a direct `ninja` or `make` run, and no other command sees them. Setting `os.environ` in the build script would do neither — it reaches every command, and only while pcons itself runs. See `examples/73_command_env`.
 
+### Exporting Only Some Symbols
+
+A plugin should export its host's entry points and nothing else, and
+`-fvisibility=hidden` can't hide a dependency that marks its own API
+default-visibility. Name the symbols and each toolchain realizes it in its
+linker's form: a symbol list on macOS, a version script on Linux, a `.def`
+file with MSVC and clang-cl.
+
+```python
+plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])
+plugin.set_option("exported_symbols", ["OfxGetPlugin", "OfxGetNumberOfPlugins"])
+```
+
+The names are the C names; pcons adds the Darwin underscore. macOS and Linux
+accept `*` patterns (`"Spark*"`), MSVC exports by exact name and refuses one.
+The list is written under the target's build directory and the link depends
+on it, so changing the list relinks.
+
+A file you already have goes in the way its linker takes it: a `.def` among
+the target's sources on MSVC and clang-cl (it becomes `/DEF:`), and a version
+script or symbol list as a `PathToken` in `link_flags` on Linux and macOS,
+which the link then depends on.
+
 ### Post-Build Commands
 
 Add commands that run after a target is built using `target.post_build()`:

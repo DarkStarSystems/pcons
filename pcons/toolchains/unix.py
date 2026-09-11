@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import get_platform
 from pcons.core.preset import Preset, ToolContribution
-from pcons.core.subst import TargetPath
+from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 from pcons.tools.toolchain import BaseToolchain
 from pcons.util.macos import apple_sdk_for_triple
@@ -364,9 +364,56 @@ class UnixToolchain(BaseToolchain):
         rule and they share one. Writing the filename in would give each
         shared library a private copy of the whole link rule.
         """
-        if target.target_type != "shared_library":
+        if target.target_type not in ("shared_library", "program"):
             return []
+        flags = self._exported_symbols_flags(target)
+        if target.target_type == "shared_library":
+            flags = [*self._install_name_flags(target, existing_flags), *flags]
+        return flags
 
+    def _exported_symbols_flags(self, target: Target) -> list[FlagToken]:
+        """The linker's own way to export only the named symbols.
+
+        For a shared library or an executable that plugins call back into.
+        macOS takes a symbol list (``-exported_symbols_list``), Linux a
+        version script; both accept ``*`` patterns. Names are the C names:
+        the Darwin underscore is added here. The file is written under the
+        target's build directory and, being registered, the link depends
+        on it.
+        """
+        symbols = (
+            target.get_option("exported_symbols")
+            if hasattr(target, "get_option")
+            else None
+        )
+        if not symbols:
+            return []
+        platform = get_platform()
+        if platform.is_macos:
+            text = "".join(
+                f"{s}\n" if s.startswith("_") else f"_{s}\n" for s in symbols
+            )
+            path = self._write_link_input(target, ".exports", text)
+            return [
+                PathToken(
+                    prefix="-Wl,-exported_symbols_list,",
+                    path=str(path),
+                    path_type="absolute",
+                )
+            ]
+        if platform.is_linux:
+            text = "{ global: " + " ".join(f"{s};" for s in symbols) + " local: *; };\n"
+            path = self._write_link_input(target, ".version", text)
+            return [
+                PathToken(
+                    prefix="-Wl,--version-script=", path=str(path), path_type="absolute"
+                )
+            ]
+        return []
+
+    def _install_name_flags(
+        self, target: Target, existing_flags: Sequence[FlagToken]
+    ) -> list[FlagToken]:
         explicit = (
             target.get_option("install_name") if hasattr(target, "get_option") else None
         )
