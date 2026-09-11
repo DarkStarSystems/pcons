@@ -18,6 +18,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **`get_var()` reads a list.** With a list default, a comma-separated
+  value becomes a list: `get_var("PORTS", ["ofx"])` returns `["ofx", "ae"]`
+  for `PORTS=ofx,ae`. `type=list` works without a default. (#155)
 - **`OverlayDir`: merge several source trees into one directory.** Each
   tree's contents land in the destination keeping their relative paths, the
   later source wins a shared path, and `exclude=` drops globs matched against

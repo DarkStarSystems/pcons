@@ -2752,6 +2752,7 @@ opt_level = get_var("OPT_LEVEL", 2)  # int
 scale = get_var("SCALE", 1.0)  # float
 port = get_var("PORT", "ofx")  # str
 prefix = get_var("PREFIX", Path("/usr/local"))  # Path
+ports = get_var("PORTS", ["ofx"])  # list: PORTS=ofx,ae gives ["ofx", "ae"]
 ```
 
 Pass `type=` when there is no default. The result is `None` when the variable is
