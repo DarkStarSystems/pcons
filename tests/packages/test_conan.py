@@ -1157,3 +1157,17 @@ class TestTransitiveRequiresLinkOrder:
             "opencv_core",
             "z",
         ]
+
+    def test_a_requirement_without_a_pc_file_is_skipped(self, tmp_path: Path):
+        """A system package pkg-config would resolve, but Conan wrote no .pc
+        for, contributes nothing and breaks nothing."""
+        gen = tmp_path / "build" / "generators"
+        gen.mkdir(parents=True)
+        (gen / "app.pc").write_text(
+            "Name: app\nVersion: 1\nLibs: -lapp\nRequires: libm\n"
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        packages = finder._parse_pkgconfig_files()
+
+        assert packages["app"].libraries == ["app"]

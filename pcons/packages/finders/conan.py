@@ -718,10 +718,7 @@ class ConanFinder(BaseFinder):
             finished: list[str] = []
 
             def visit(pkg_name: str) -> None:
-                pkg = packages.get(pkg_name)
-                if pkg is None:
-                    return
-                for dep in pkg.dependencies:
+                for dep in packages[pkg_name].dependencies:
                     if dep in seen or dep not in packages:
                         continue
                     seen.add(dep)
