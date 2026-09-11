@@ -145,6 +145,10 @@ machinery to support this kind of dynamic dependencies.
 
 ### Changed
 
+- **Breaking:** `HeaderOnlyLibrary(name, env, ...)` takes the environment
+  second, like every other builder, and `include_dirs` is keyword-only. It
+  was `(name, include_dirs)`, so `HeaderOnlyLibrary("h", env)` tracebacked
+  inside pcons. `env` may still be left out. (#124)
 - **`ConanFinder.sync_profile()` takes its `build_type` from the environment's
   variant** when none is passed: `debug` is `Debug`, the release flavors are
   `Release`, `relwithdebinfo` and `minsizerel` their Conan names. It used to

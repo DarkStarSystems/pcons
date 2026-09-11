@@ -138,7 +138,9 @@ if TYPE_CHECKING:
         def HeaderOnlyLibrary(
             self,
             name: str,
-            include_dirs: list[str | Path] | None = None,
+            env: Env | None = None,
+            *,
+            include_dirs: Sequence[str | Path] | None = None,
         ) -> Target:
             """Create a header-only (interface) library target."""
             ...

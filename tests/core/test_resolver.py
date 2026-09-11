@@ -1663,3 +1663,21 @@ class TestObjectLibraryAsSource:
         node.depends([node])
         node.order_after([node])
         assert node.implicit_deps == [] and node.order_only_deps == []
+
+
+class TestHeaderOnlyLibrarySignature:
+    """HeaderOnlyLibrary takes (name, env, ...) like every other builder
+    (#124); include_dirs is keyword-only."""
+
+    def test_env_is_the_second_positional(self, tmp_path):
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(name="host")
+        headers = project.HeaderOnlyLibrary("headers", env, include_dirs=["include"])
+        assert headers.env is env
+        assert headers.target_type == "interface"
+        assert [p.name for p in headers.public.include_dirs] == ["include"]
+
+    def test_env_may_be_left_out(self, tmp_path):
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        headers = project.HeaderOnlyLibrary("headers")
+        assert headers.target_type == "interface"
