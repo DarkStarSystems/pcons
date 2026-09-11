@@ -39,7 +39,7 @@ API:
 | `target.add_source(path)` | Add a source file |
 | `target.add_sources(paths)` | Add multiple source files |
 | `target.add_sources(paths, env=e)` | Compile those sources with a different environment; on a source the target already has, sets its environment in place |
-| `target.set_option(key, value)` | Set a builder/toolchain option (e.g. `install_name`) |
+| `target.set_option(key, value)` | Set a builder/toolchain option (e.g. `install_name`, `exported_symbols`) |
 | `target.link(t, "m")` | Link a dependency (or raw lib name) and re-export it to consumers |
 | `target.link_private(t, "m")` | Link a dependency (or raw lib name), keeping it local |
 | `target.depends(*items, on_change=None)` | Build targets or have files first, without linking them; `on_change=True` for a file a step reads but can't report, `False` for one it only needs to exist |

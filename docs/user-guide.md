@@ -2300,6 +2300,13 @@ and every step reruns when it changes, whether or not the step's own
 record mentions it. The opposite, `on_change=False`, says the thing only
 has to exist first and never reruns a step by itself.
 
+A file a command names in a flag is a dependency of that command without
+any `depends()` at all, when pcons knows the file: `write_file()` and
+`configure_file()` register what they write, and the build knows what it
+produces. So `PathToken(prefix="-Wl,--version-script=", path=exports)` in
+`link_flags` relinks when the export list changes. Include and library
+directories are never files, so they're unaffected.
+
 You may pin a dependency to one step if you want, by building that
 step yourself: `obj = env.cc.Object(...)` then `obj.depends(thing)`. For
 an ordinary compile-and-link target that doesn't buy you anything,
@@ -2400,6 +2407,26 @@ env.Command(
 ```
 
 The variables are written into the generated build file, in front of the one command they belong to: `env NAME=VALUE` on POSIX, a small pcons helper on Windows (which has no `env`). So they survive a direct `ninja` or `make` run, and no other command sees them. Setting `os.environ` in the build script would do neither — it reaches every command, and only while pcons itself runs. See `examples/73_command_env`.
+
+### Exporting Only Some Symbols
+
+Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file with MSVC and clang-cl.
+
+```python
+plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])
+plugin.set_option("exported_symbols", ["OfxGetPlugin", "OfxGetNumberOfPlugins"])
+```
+
+The names are the C names; pcons adds the Darwin underscore. macOS and Linux
+accept `*` patterns (`"Spark*"`), MSVC doesn't support patterns so it will complain if passed one.
+The list is written under the target's build directory and the link depends
+on it, so changing the list relinks.
+
+If you already have an OS-specific linker def or symbol list file,
+just pass it as a source to the builder: a `.def` in the target's
+sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
+or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
+the link then depends on.
 
 ### Post-Build Commands
 
@@ -3402,6 +3429,7 @@ pkg = macos.create_pkg(
 | `background` | Background image for the installer |
 | `scripts_dir` | Directory with `preinstall`/`postinstall` scripts |
 | `sign_identity` | Code signing identity |
+| `depends` | Targets to build before the sources are staged, for a directory source that other targets fill |
 
 #### macOS: `.dmg` Disk Images
 
@@ -4364,6 +4392,12 @@ from pcons.contrib import bundle, platform
 plist = bundle.generate_info_plist("MyPlugin", "1.0.0", bundle_type="BNDL")
 bundle.create_macos_bundle(project, env, plugin, bundle_dir="build/MyPlugin.bundle")
 bundle.create_flat_bundle(project, env, plugin, bundle_dir="build/MyPlugin")
+# Resources under their own names, or renamed on the way in; PkgInfo from a file
+bundle.create_macos_bundle(
+    project, env, plugin, bundle_dir="build/MyPlugin.bundle",
+    resources={"com.example.MyPlugin.png": "art/logo-white.png"},
+    pkginfo=Path("plugin-pkg.info"),
+)
 arch_dir = bundle.get_arch_subdir("darwin", "arm64")  # "MacOS-arm-64"
 
 # Platform utilities

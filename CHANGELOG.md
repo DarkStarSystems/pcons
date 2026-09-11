@@ -18,15 +18,25 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
-- **A `release-fastest` variant**: the compiler's highest optimization level
-  that doesn't change results (`-O3`; `/O2 /Ob3` on MSVC), realized per
-  toolchain like the other variants and never enabling fast-math. (#153)
-- **`env.clone(name=...)`** names a clone at creation. Named environments
-  are how two targets may share a name, and a clone had no way to get one
-  but assignment afterwards. (#147)
-- **`get_var()` reads a list.** With a list default, a comma-separated
-  value becomes a list: `get_var("PORTS", ["ofx"])` returns `["ofx", "ae"]`
-  for `PORTS=ofx,ae`. `type=list` works without a default. (#155)
+- **The installer helpers now take `depends=`.** `create_pkg`,
+  `create_component_pkg`, `create_dmg` and `create_msix` staged their
+  sources with an internally-generated `Install`, so a directory source
+  that other targets fill had no way to wait for them. `depends=[...]`
+  orders the staging copy after those targets. (#151)
+- **`create_macos_bundle` and `create_flat_bundle` take `resources` as a
+  mapping** of bundle name to source file, so you can rename bundle
+  resources, and `create_macos_bundle` takes `pkginfo` as a `Path` to copy
+  in. (#152)
+- **`target.set_option("exported_symbols", [...])`**: use this to make a shared library
+  or executable export only the named symbols, realized per toolchain as a macOS symbol
+  list, a Linux version script, or an MSVC `.def` file. C names, with
+  patterns on macOS and Linux. The list is written under the target's build
+  directory and the link depends on it. (#149)
+- **A `PathToken` file in a command's flags is now a dependency of that
+  command.** A `PathToken` in a flag (`-Wl,--version-script=exports.txt`, a
+  response file, an options file) is read by the tool, but the command
+  previously didn't rerun when the file changed. Now it does, whenever
+  pcons knows the file. Include and library directories are unaffected. (#150)
 - **`OverlayDir`: merge several source trees into one directory.** Each
   tree's contents land in the destination keeping their relative paths, the
   later source wins a shared path, and `exclude=` drops globs matched against

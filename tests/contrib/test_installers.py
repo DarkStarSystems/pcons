@@ -827,3 +827,49 @@ class TestInstallersUnderABuildPrefix:
 
         assert "build release/.pkg_staging/App/payload/t.txt:" in text
         assert "build debug/.pkg_staging/App/payload/t.txt:" in text
+
+
+class TestInstallerDepends:
+    """depends= orders the staging copy after the targets that fill a
+    directory source (#151), which the helpers otherwise hide."""
+
+    def test_the_staged_copy_waits_for_the_producers(self, tmp_path: Path, monkeypatch):
+        from pcons.contrib.installers import macos
+        from pcons.generators.generator import BaseGenerator
+        from pcons.generators.ninja import NinjaGenerator
+
+        monkeypatch.setattr(macos, "_check_tool", lambda *a, **k: None)
+        tree = tmp_path / "App.bundle"
+        tree.mkdir()
+        (tree / "seed.txt").write_text("x")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        filler = env.Command(
+            target=project.build_dir / "filled.stamp",
+            command="echo fill > $TARGET",
+            name="fill",
+        )
+        macos.create_pkg(
+            project,
+            env,
+            name="App",
+            version="1.0",
+            identifier="com.example.app",
+            sources=[tree],
+            install_location="/Library/Plugins",
+            depends=[filler],
+        )
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        text = (tmp_path / "build" / "build.ninja").read_text().replace("\\", "/")
+        copies = [
+            ln
+            for ln in text.splitlines()
+            if ln.startswith("build ")
+            and ".pkg_staging/App/payload" in ln.split(":")[0]
+        ]
+
+        assert copies
+        assert all("filled.stamp" in ln.split("|", 1)[1] for ln in copies), copies
