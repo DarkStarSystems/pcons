@@ -8,16 +8,20 @@ Usage in build rules:
     python -m pcons.util.commands copy <src> <dest>
     python -m pcons.util.commands concat <src1> <src2> ... <dest>
     python -m pcons.util.commands copytree [--depfile FILE] [--stamp FILE] <src> <dest>
+    python -m pcons.util.commands overlay [--depfile FILE] [--stamp FILE]
+        [--exclude PATTERN] <dest> <src> [src...]
     python -m pcons.util.commands env NAME=VALUE ... <command> [args...]
 """
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 
@@ -61,18 +65,40 @@ def _escape_depfile_path(path: str) -> str:
     return path.replace(" ", "\\ ")
 
 
+def _write_depfile(depfile: str, target: str, deps: Sequence[Path]) -> None:
+    """Write a ninja depfile naming *deps* as the inputs of *target*."""
+    depfile_path = Path(depfile)
+    depfile_path.parent.mkdir(parents=True, exist_ok=True)
+    escaped = [_escape_depfile_path(str(d).replace("\\", "/")) for d in deps]
+    deps_str = " \\\n  ".join(escaped)
+    target_str = target.replace("\\", "/")
+    with open(depfile_path, "w", encoding="utf-8") as f:
+        f.write(f"{target_str}: \\\n  {deps_str}\n")
+
+
+def _is_current(source: Path, target: Path) -> bool:
+    """Whether *target* already holds *source*, by size and modification time.
+
+    Same size and no older than the source is what make and rsync take as
+    identical. It matters at scale: without it one touched file re-copies the
+    whole tree.
+    """
+    if not target.exists():
+        return False
+    source_stat, target_stat = source.stat(), target.stat()
+    return (
+        source_stat.st_size == target_stat.st_size
+        and source_stat.st_mtime <= target_stat.st_mtime
+    )
+
+
 def _merge_tree(
     src: Path,
     dest: Path,
     _ancestors: frozenset[Path] = frozenset(),
     _root: Path | None = None,
 ) -> None:
-    """Copy *src* over *dest*, skipping files that are already identical.
-
-    Same size and no older than the source is taken as identical, the check
-    make and rsync use. It matters at scale: without it one touched file
-    re-copies the whole tree, which for a few hundred MB of assets is a
-    multi-second stall on any filesystem without copy-on-write.
+    """Copy *src* over *dest*, skipping files :func:`_is_current` accepts.
 
     A symlinked directory is descended into and copied as a real one, which
     is what ``shutil.copytree`` does: a macOS framework is built out of them
@@ -97,13 +123,8 @@ def _merge_tree(
         if item.is_dir():
             _merge_tree(item, target, ancestors, root)
             continue
-        if target.exists():
-            source_stat, target_stat = item.stat(), target.stat()
-            if (
-                source_stat.st_size == target_stat.st_size
-                and source_stat.st_mtime <= target_stat.st_mtime
-            ):
-                continue
+        if _is_current(item, target):
+            continue
         shutil.copy2(item, target)
 
 
@@ -201,6 +222,155 @@ def copytree(
         stamp_path.touch()
 
 
+def _overlay_excluded(rel_path: Path, patterns: Sequence[str]) -> bool:
+    """Whether an overlay entry is filtered out by one of *patterns*.
+
+    A pattern holding no ``/`` matches an entry's name at any depth; one
+    holding a ``/`` is anchored at the source root. Matching is case
+    sensitive on every platform, so a build description means the same thing
+    wherever it runs.
+
+    Args:
+        rel_path: File or directory path, relative to its source root.
+        patterns: Glob patterns, as passed to ``OverlayDir(exclude=...)``.
+
+    Returns:
+        True when the entry is excluded, and with it everything under it.
+    """
+    text = rel_path.as_posix()
+    return any(
+        fnmatch.fnmatchcase(text, pattern)
+        or ("/" not in pattern and fnmatch.fnmatchcase(rel_path.name, pattern))
+        for pattern in patterns
+    )
+
+
+def _overlay_walk(
+    root: Path, exclude: Sequence[str]
+) -> Iterator[tuple[Path, list[str]]]:
+    """Walk *root*, yielding every surviving directory and the files it holds.
+
+    An excluded directory is pruned rather than emptied, so it costs no walk
+    and never reaches the depfile — which is what keeps ``exclude=[".git"]``
+    from re-running the overlay on every commit.
+
+    Args:
+        root: Tree to walk, an existing directory.
+        exclude: Glob patterns to drop, matched against paths relative to
+            *root*.
+
+    Yields:
+        An absolute directory path and its file names, sorted.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = Path(dirpath)
+        rel = here.relative_to(root)
+        dirnames[:] = sorted(
+            name for name in dirnames if not _overlay_excluded(rel / name, exclude)
+        )
+        yield (
+            here,
+            sorted(
+                name for name in filenames if not _overlay_excluded(rel / name, exclude)
+            ),
+        )
+
+
+def _staged_before(stamp: str | None) -> set[str]:
+    """The destination-relative paths the previous overlay run wrote."""
+    if not stamp:
+        return set()
+    stamp_path = Path(stamp)
+    if not stamp_path.is_file():
+        return set()
+    text = stamp_path.read_text(encoding="utf-8")
+    return {line for line in text.splitlines() if line}
+
+
+def _prune_empty(path: Path, stop: Path) -> None:
+    """Remove the directories above *path* that it left empty, below *stop*."""
+    for parent in path.parents:
+        if parent == stop:
+            return
+        try:
+            parent.rmdir()
+        except OSError:
+            return
+
+
+def overlay(
+    dest: str,
+    sources: Sequence[str],
+    exclude: Sequence[str] = (),
+    depfile: str | None = None,
+    stamp: str | None = None,
+) -> None:
+    """Merge several source trees into *dest*, later sources winning.
+
+    Each tree's contents land in *dest* keeping their relative paths. When
+    two trees hold the same relative path the later one in *sources* wins.
+
+    Membership is decided here, at build time, so a file another build edge
+    wrote into a source tree is staged by the build that wrote it, and a file
+    added by hand is staged by the build tool alone.
+
+    *stamp* doubles as the record of what was staged: it holds the list of
+    destination-relative paths the previous run produced. That is what lets
+    this run delete the copies that no longer win or no longer exist without
+    touching anything else the destination holds.
+
+    Args:
+        dest: Destination directory, created if missing.
+        sources: Source tree roots, in increasing precedence.
+        exclude: Glob patterns dropped from every source tree.
+        depfile: Optional ninja depfile listing every directory walked and
+            every file copied.
+        stamp: Optional stamp file, written with the staged file list.
+
+    Raises:
+        ValueError: If a source is not a directory.
+    """
+    dest_path = Path(dest)
+    winners: dict[str, Path] = {}
+    walked: list[Path] = []
+
+    for source in sources:
+        root = Path(source)
+        if not root.is_dir():
+            raise ValueError(f"Overlay source is not a directory: {source}")
+        for directory, filenames in _overlay_walk(root, exclude):
+            walked.append(directory)
+            for name in filenames:
+                item = directory / name
+                winners[item.relative_to(root).as_posix()] = item
+
+    dest_path.mkdir(parents=True, exist_ok=True)
+
+    for rel in sorted(_staged_before(stamp) - set(winners)):
+        stale = dest_path / rel
+        stale.unlink(missing_ok=True)
+        _prune_empty(stale, dest_path)
+
+    for rel, source_file in sorted(winners.items()):
+        target = dest_path / rel
+        if _is_current(source_file, target):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_file, target)
+
+    if depfile:
+        _write_depfile(
+            depfile, stamp or str(dest_path), walked + sorted(winners.values())
+        )
+
+    if stamp:
+        stamp_path = Path(stamp)
+        stamp_path.parent.mkdir(parents=True, exist_ok=True)
+        stamp_path.write_text(
+            "".join(f"{rel}\n" for rel in sorted(winners)), encoding="utf-8"
+        )
+
+
 def run_with_env(args: list[str]) -> int:
     """Run a command with extra environment variables, env(1)-style.
 
@@ -238,7 +408,7 @@ def main() -> int:
         print(
             "Usage: python -m pcons.util.commands <command> [args...]", file=sys.stderr
         )
-        print("Commands: copy, concat, copytree, env", file=sys.stderr)
+        print("Commands: copy, concat, copytree, overlay, env", file=sys.stderr)
         return 1
 
     cmd = sys.argv[1]
@@ -315,6 +485,47 @@ def main() -> int:
             )
             return 1
         copytree(positional[0], positional[1], depfile, stamp, replace, manifest)
+        return 0
+
+    elif cmd == "overlay":
+        args = sys.argv[2:]
+        depfile = None
+        stamp = None
+        exclude: list[str] = []
+        positional = []
+        i = 0
+        while i < len(args):
+            if args[i] in ("--depfile", "--stamp", "--exclude") and i + 1 < len(args):
+                value = args[i + 1]
+                if args[i] == "--depfile":
+                    depfile = value
+                elif args[i] == "--stamp":
+                    stamp = value
+                else:
+                    exclude.append(value)
+                i += 2
+            elif args[i].startswith(("--depfile=", "--stamp=", "--exclude=")):
+                flag, value = args[i].split("=", 1)
+                if flag == "--depfile":
+                    depfile = value
+                elif flag == "--stamp":
+                    stamp = value
+                else:
+                    exclude.append(value)
+                i += 1
+            else:
+                positional.append(args[i])
+                i += 1
+
+        if len(positional) < 2:
+            print(
+                "Usage: python -m pcons.util.commands overlay "
+                "[--depfile FILE] [--stamp FILE] [--exclude PATTERN] "
+                "<dest> <src> [src...]",
+                file=sys.stderr,
+            )
+            return 1
+        overlay(positional[0], positional[1:], exclude, depfile, stamp)
         return 0
 
     elif cmd == "env":

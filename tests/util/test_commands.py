@@ -4,9 +4,19 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
-from pcons.util.commands import _escape_depfile_path, concat, copy, copytree, main
+import pytest
+
+from pcons.util.commands import (
+    _escape_depfile_path,
+    concat,
+    copy,
+    copytree,
+    main,
+    overlay,
+)
 
 
 class TestCopy:
@@ -307,6 +317,205 @@ class TestCopytreeMerges:
         copytree(str(src), str(dest))
 
         assert (dest / "a.txt").read_text() == "changed\n"
+
+
+def depfile_deps(depfile: Path) -> set[str]:
+    """The dependency paths a written depfile names, unescaped."""
+    _, deps_part = depfile.read_text().split(":", 1)
+    deps_part = deps_part.replace("\\\n", " ")
+    tokens = re.split(r"(?<!\\) ", deps_part)
+    return {t.strip().replace("\\ ", " ") for t in tokens if t.strip()}
+
+
+def posix(path: Path) -> str:
+    """The path as the depfile spells it."""
+    return str(path).replace("\\", "/")
+
+
+def overlay_trees(tmp_path: Path) -> tuple[Path, Path, Path]:
+    """Two trees sharing one path and one directory, plus a destination."""
+    shared, app = tmp_path / "shared", tmp_path / "app"
+    (shared / "res").mkdir(parents=True)
+    (app / "res").mkdir(parents=True)
+    (shared / "both.txt").write_text("shared\n")
+    (shared / "res" / "a.txt").write_text("a\n")
+    (app / "both.txt").write_text("app\n")
+    (app / "res" / "b.txt").write_text("b\n")
+    return shared, app, tmp_path / "stage"
+
+
+class TestOverlay:
+    """The overlay command: N trees merged into one directory at build time."""
+
+    def test_the_later_source_wins(self, tmp_path: Path) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+
+        overlay(str(dest), [str(shared), str(app)])
+
+        assert (dest / "both.txt").read_text() == "app\n"
+        assert (dest / "res" / "a.txt").read_text() == "a\n"
+        assert (dest / "res" / "b.txt").read_text() == "b\n"
+
+    def test_a_missing_source_is_an_error(self, tmp_path: Path) -> None:
+        shared, _, dest = overlay_trees(tmp_path)
+
+        with pytest.raises(ValueError, match="not a directory"):
+            overlay(str(dest), [str(shared), str(tmp_path / "absent")])
+
+    def test_the_depfile_names_directories_and_copied_files(
+        self, tmp_path: Path
+    ) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        depfile = tmp_path / "deps.d"
+
+        overlay(str(dest), [str(shared), str(app)], depfile=str(depfile))
+
+        deps = depfile_deps(depfile)
+        assert posix(shared / "res") in deps
+        assert posix(app / "res") in deps
+        assert posix(app / "both.txt") in deps
+
+    def test_a_shadowed_file_is_not_a_dependency(self, tmp_path: Path) -> None:
+        """Editing a file another tree shadows changes nothing in the stage."""
+        shared, app, dest = overlay_trees(tmp_path)
+        depfile = tmp_path / "deps.d"
+
+        overlay(str(dest), [str(shared), str(app)], depfile=str(depfile))
+
+        assert posix(shared / "both.txt") not in depfile_deps(depfile)
+
+    def test_an_excluded_directory_is_nowhere_in_the_depfile(
+        self, tmp_path: Path
+    ) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        (shared / ".git" / "objects").mkdir(parents=True)
+        (shared / ".git" / "objects" / "ab").write_text("blob\n")
+        depfile = tmp_path / "deps.d"
+
+        overlay(str(dest), [str(shared), str(app)], [".git"], depfile=str(depfile))
+
+        assert not [d for d in depfile_deps(depfile) if ".git" in d]
+
+    def test_the_stamp_records_what_was_staged(self, tmp_path: Path) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert stamp.read_text().split() == ["both.txt", "res/a.txt", "res/b.txt"]
+
+    def test_a_file_that_no_longer_exists_is_removed(self, tmp_path: Path) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        (shared / "res" / "a.txt").unlink()
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert not (dest / "res" / "a.txt").exists()
+        assert (dest / "res" / "b.txt").exists()
+
+    def test_a_directory_left_empty_is_removed(self, tmp_path: Path) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        (shared / "res" / "a.txt").unlink()
+        (app / "res" / "b.txt").unlink()
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert not (dest / "res").exists()
+        assert dest.is_dir()
+
+    def test_a_file_the_overlay_never_staged_is_left_alone(
+        self, tmp_path: Path
+    ) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+        (dest / "theirs.txt").write_text("not ours\n")
+
+        (shared / "res" / "a.txt").unlink()
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert (dest / "theirs.txt").read_text() == "not ours\n"
+
+    def test_an_unchanged_file_is_not_recopied(self, tmp_path: Path) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        overlay(str(dest), [str(shared), str(app)])
+        before = (dest / "both.txt").stat().st_mtime_ns
+
+        overlay(str(dest), [str(shared), str(app)])
+
+        assert (dest / "both.txt").stat().st_mtime_ns == before
+
+
+class TestOverlayCommandLine:
+    """The overlay command as main() dispatches it.
+
+    The generated build file only ever writes --exclude=PATTERN and the
+    two-token --depfile / --stamp, so the other spellings and the usage
+    errors are reachable only from a hand-run command line.
+    """
+
+    def _run(self, monkeypatch, *args: str) -> int:
+        monkeypatch.setattr(sys, "argv", ["commands", *args])
+        return main()
+
+    def test_the_command_list_names_overlay(self, monkeypatch, capsys) -> None:
+        code = self._run(monkeypatch)
+
+        assert code == 1
+        assert "copy, concat, copytree, overlay, env" in capsys.readouterr().err
+
+    def test_a_separate_exclude_argument_filters(self, tmp_path, monkeypatch) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        (shared / "both.txt.orig").write_text("editor leftover\n")
+
+        code = self._run(
+            monkeypatch,
+            "overlay",
+            "--exclude",
+            "*.orig",
+            str(dest),
+            str(shared),
+            str(app),
+        )
+
+        assert code == 0
+        assert not (dest / "both.txt.orig").exists()
+        assert (dest / "both.txt").read_text() == "app\n"
+
+    def test_depfile_and_stamp_take_the_equals_spelling(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        depfile, stamp = tmp_path / "deps.d", tmp_path / "stage.stamp"
+
+        code = self._run(
+            monkeypatch,
+            "overlay",
+            f"--depfile={depfile}",
+            f"--stamp={stamp}",
+            str(dest),
+            str(shared),
+            str(app),
+        )
+
+        assert code == 0
+        assert posix(app / "both.txt") in depfile_deps(depfile)
+        assert stamp.read_text().split() == ["both.txt", "res/a.txt", "res/b.txt"]
+
+    def test_a_destination_with_no_source_is_a_usage_error(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        dest = tmp_path / "stage"
+
+        code = self._run(monkeypatch, "overlay", str(dest))
+
+        assert code == 1
+        assert "<dest> <src> [src...]" in capsys.readouterr().err
+        assert not dest.exists()
 
 
 class TestCopytreeSymlinks:

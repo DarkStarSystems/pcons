@@ -3115,6 +3115,85 @@ project.Install(install_dir(env, "program"), [exe])  # -> <prefix>/bin/
 
 `InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run.
 
+### Merging Source Trees into One Directory
+
+`OverlayDir` merges the *contents* of several source trees into one directory.
+Use it to assemble a package source directory from a shared tree plus a
+per-application tree, or any other layered staging job:
+
+```python
+stage = project.OverlayDir(
+    env,
+    "stage/app",
+    sources=[shared_dir, app_dir],   # app_dir wins a shared path
+    exclude=["*.orig", ".git"],
+)
+```
+
+How it differs from `InstallDir`:
+
+- **Contents, not the directory.** `InstallDir(dest, "shared")` produces
+  `dest/shared/...`. `OverlayDir(env, dest, sources=["shared"])` puts
+  `shared`'s children directly in `dest`. That is what lets two trees with the
+  same name merge instead of colliding.
+- **Several sources.** `InstallDir` takes exactly one.
+- **The later source wins.** When two trees hold the same relative path, the
+  last one in `sources` is the one that lands. Argument order is the only rule:
+  not modification time, not depth, not which tree looks more specific.
+- **No install prefix.** The destination is a staging directory under the
+  environment's build directory, not an install. There is no `no_prefix=True`
+  to pass.
+- **It takes an environment.** The destination is anchored under *that*
+  environment's build directory.
+
+Relative paths are kept, so `src/com/example/Thing.java` arrives at
+`<dest>/src/com/example/Thing.java`. Two trees can each contribute a different
+child of one shared directory. One target owns the destination and stages all of
+it with a single build edge, whose only output is a stamp. Individual staged
+files are not build targets: `ninja <dest>/x/y.txt` names nothing.
+
+`exclude` patterns are globs matched against the path relative to **each source
+root**, never the destination and never an absolute path. A pattern with no `/`
+matches a name at any depth, one with a `/` is anchored at the root, and
+matching is case sensitive on every platform. An excluded directory takes its
+contents with it. Nothing is excluded by default. A pattern that matches
+nothing is not an error, since source trees differ in what they hold.
+
+An excluded path is dropped from every source tree, so excluding the file that
+would have won a conflict leaves nothing at that path rather than falling back
+to the other tree - falling back would stage the very path you asked to drop.
+
+**Freshness.** Which files win is decided when the edge runs, not when pcons
+runs. The edge reports every directory it walked and every file it copied in a
+depfile, so adding a file anywhere - including deep under `src/com/example/` -
+restages on the next `ninja`, with no hand-run of pcons. Both halves of the
+depfile are needed: a directory's modification time changes when it gains or
+loses an entry, an edit in place changes no directory at all.
+
+On Windows that modification time reaches ninja through the parent directory's
+NTFS index entry, which is refreshed lazily. A build started in the same instant
+as the write can therefore read the old stamp and stage the file on the build
+after it instead. Waiting a moment is enough, and so is anything that lists the
+directory in between - a file manager, an editor, `dir`. Edits and removals are
+unaffected: the file's own entry is refreshed when the writer closes it, and a
+file that is gone is gone.
+
+A file another build edge generates into a source tree is staged by the same
+build that writes it. Order the two with `depends()`:
+
+```python
+generated = env.Command(target=str(shared_dir / "version.txt"), ...)
+stage = project.OverlayDir(env, "stage", sources=[shared_dir, app_dir])
+stage.depends(generated)
+```
+
+**Removal.** A file removed from a source tree loses its staged copy, along with
+any directory that leaves empty. Only the files this target staged are removed -
+the stamp records them - so anything else installed into the same destination is
+left alone.
+
+See `examples/78_overlay_dirs` for a working two-tree overlay.
+
 ### Generating pkg-config Files
 
 To make a pcons-built library consumable by downstream CMake or pkg-config projects, generate a `.pc` file:

@@ -1,0 +1,3 @@
+name = demo
+origin = shared tree
+timeout = 30

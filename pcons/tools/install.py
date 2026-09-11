@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Install tool (copy command templates) and the Install/InstallAs/InstallDir
-builders.
+"""Install tool (copy command templates) and the Install/InstallAs/InstallDir/
+OverlayDir builders.
 
 Users can customize the copy commands via the tool namespace
 (env.install.copycmd) or override destdir per InstallDir target.
@@ -14,8 +14,9 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
+from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode, PathRole
 from pcons.core.resolver import PendingSourceFactory
@@ -193,6 +194,17 @@ def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path
     return prefix / dest
 
 
+def _exclude_flags(exclude: Sequence[str]) -> dict[str, list[str]]:
+    """``--exclude`` tokens for the overlay command, one per pattern.
+
+    ``--exclude=PATTERN`` rather than two tokens: extra command flags are
+    appended one at a time and dropped when already present, so a repeated
+    bare ``--exclude`` would swallow every pattern after the first.
+    """
+    flags = [f"--exclude={pattern}" for pattern in exclude]
+    return {"extra_command_flags": flags} if flags else {}
+
+
 def _mode_flags(target: Target) -> dict[str, list[str]]:
     """``--mode`` tokens for the copy command, when a mode was asked for.
 
@@ -214,7 +226,7 @@ def _make_install_target(
     project: Project,
     target_name: str,
     builder_name: str,
-    builder_data: dict[str, str],
+    builder_data: dict[str, Any],
     sources: Sequence[Target | Node | Path | str],
     *,
     defined_at: SourceLocation,
@@ -278,14 +290,16 @@ class InstallTool(StandaloneTool):
     """Tool for file and directory installation operations.
 
     Provides cross-platform copy commands using Python helpers.
-    The Install, InstallAs, and InstallDir builders reference these
-    command templates.
+    The Install, InstallAs, InstallDir and OverlayDir builders reference
+    these command templates.
 
     Variables:
         copycmd: Command template for single file copy (list of tokens).
                  Default: [python, -m, pcons.util.commands, copy, $$SOURCE, $$TARGET]
         copytreecmd: Command template for directory tree copy (list of tokens).
                      Default: [python, -m, pcons.util.commands, copytree, ...]
+        overlaycmd: Command template for the OverlayDir merge (list of tokens).
+                    Default: [python, -m, pcons.util.commands, overlay, ...]
         destdir: Default destination directory for InstallDir.
 
     Example:
@@ -326,6 +340,18 @@ class InstallTool(StandaloneTool):
                 SourcePath(),
                 "$install.destdir",
             ],
+            "overlaycmd": [
+                python_cmd,
+                "-m",
+                "pcons.util.commands",
+                "overlay",
+                "--depfile",
+                TargetPath(suffix=".d"),
+                "--stamp",
+                TargetPath(),
+                "$install.destdir",
+                SourcePath(),
+            ],
             "destdir": "",
         }
 
@@ -347,7 +373,7 @@ class InstallNodeFactory(PendingSourceFactory):
             return
 
         builder_name = target._builder_name
-        if builder_name not in ("Install", "InstallAs", "InstallDir"):
+        if builder_name not in ("Install", "InstallAs", "InstallDir", "OverlayDir"):
             return
 
         resolved_sources = self._resolve_sources(target)
@@ -361,6 +387,10 @@ class InstallNodeFactory(PendingSourceFactory):
         elif builder_name == "InstallDir":
             dest_dir = Path(target._builder_data["dest_dir"])
             self._create_install_dir_node(target, resolved_sources, dest_dir)
+        elif builder_name == "OverlayDir":
+            dest_dir = Path(target._builder_data["dest_dir"])
+            exclude = cast("Sequence[str]", target._builder_data.get("exclude", ()))
+            self._create_overlay_nodes(target, resolved_sources, dest_dir, exclude)
 
     def _get_install_env(self, target: Target) -> Environment | None:
         """Get the target's env, or any project env with the install tool."""
@@ -478,6 +508,63 @@ class InstallNodeFactory(PendingSourceFactory):
         )
 
         installed_nodes.append(stamp_node)
+
+    def _create_overlay_nodes(
+        self,
+        target: Target,
+        sources: list[FileNode],
+        dest_dir: Path,
+        exclude: Sequence[str],
+    ) -> None:
+        """Create the one stamp node an OverlayDir target builds.
+
+        The merged set is not enumerated here. Which files win is decided by
+        the overlay command when it runs, so a file another edge generates
+        into a source tree is staged by the build that writes it.
+        """
+        from pcons.core.errors import BuilderError
+
+        for node in sources:
+            if not (self.project.root_dir / node.path).is_dir():
+                raise BuilderError(
+                    f"OverlayDir source is not a directory: {node.path}",
+                    location=target.defined_at,
+                )
+
+        try:
+            rel_dest = dest_dir.relative_to(target.build_dir)
+        except ValueError:
+            rel_dest = dest_dir
+
+        stamp_path = target.build_dir / ".stamps" / _stamp_name_for(rel_dest)
+        stamp_node = self.project.node(stamp_path)
+        stamp_node.add_inputs(sources)
+
+        env = self._get_install_env(target)
+        context = InstallContext.from_target(
+            target, env, destdir=str(rel_dest).replace("\\", "/")
+        )
+
+        stamp_node._build_info = cast(
+            BuildInfo,
+            {
+                "tool": "install",
+                "command_var": "overlaycmd",
+                "sources": list(sources),
+                "depfile": PathToken(
+                    path=str(stamp_path), path_type="build", suffix=".d"
+                ),
+                "deps_style": "gcc",
+                "restat": True,
+                "description": "OVERLAY $out",
+                "context": context,
+                "env": env,
+                **_exclude_flags(exclude),
+            },
+        )
+
+        target._install_nodes = [stamp_node]
+        target.output_nodes.append(stamp_node)
 
     def _create_install_as_node(
         self, target: Target, sources: list[FileNode], dest: Path
@@ -758,3 +845,112 @@ class InstallDirBuilder:
             [source],
             defined_at=get_caller_location(),
         )
+
+
+@builder(
+    "OverlayDir",
+    target_type="interface",
+    factory_class=InstallNodeFactory,
+    requires_env=True,
+)
+class OverlayDirBuilder:
+    """Merge several source trees into one directory, later sources winning.
+
+    Each source tree's *contents* land directly in the destination, keeping
+    their relative paths, so ``a/tree/x/y.txt`` and ``b/tree/x/z.txt`` both
+    arrive under ``<dest>/x/``. The source directory's own name is not
+    appended; that is what separates this from :class:`InstallDirBuilder`,
+    whose callers rely on the name being appended.
+
+    When two trees hold the same relative path, the later one in *sources*
+    wins. Argument order is the only rule, so the call site shows the answer.
+
+    One target owns the destination and stages all of it with a single build
+    edge, whose only output is a stamp. Individual staged files are therefore
+    not build targets: ``ninja <dest>/x/y.txt`` names nothing, and the tool
+    removes a stale copy itself rather than leaving it to ``ninja -t clean``.
+
+    The destination is a staging directory in the build tree, anchored under
+    *env*'s build directory, and the install prefix is never applied. This is
+    file staging, not an install.
+
+    Which files win is decided when that edge runs, not when pcons runs, so a
+    file another edge generates into a source tree is staged by the same build
+    that writes it — declare the ordering with ``depends()``. The edge reports
+    every directory it walked and every file it copied in a depfile, so adding,
+    removing or editing a file anywhere under a source tree restages on the
+    next build with no hand-run of pcons: directories catch an add or a
+    removal, files catch an edit in place.
+
+    Removing a file from a source tree removes its staged copy, along with any
+    directory that leaves empty. Only the files this target staged are
+    candidates — the stamp records them — so anything else installed into the
+    same destination is left alone.
+
+    *exclude* drops entries from every source tree before they are merged.
+    Patterns are globs matched against the path relative to *each source
+    root*, never the destination and never an absolute path, because the
+    roots are the only thing the caller named. A pattern holding no ``/``
+    matches a name at any depth, one holding a ``/`` is anchored at the
+    root, and matching is case sensitive everywhere. An excluded directory
+    takes its contents with it. Nothing is excluded by default: a staging
+    directory holds what the caller said it holds, and a silent filter is
+    worse than a visible one.
+
+    Example::
+
+        stage = project.OverlayDir(
+            env,
+            "stage/app",
+            sources=[shared_dir, app_dir],
+            exclude=["*.orig", ".git"],
+        )
+    """
+
+    @staticmethod
+    def create_target(
+        project: Project,
+        env: Environment,
+        dest_dir: Path | str,
+        sources: Sequence[Path | str | FileNode | Target],
+        *,
+        name: str | None = None,
+        exclude: Sequence[str] = (),
+    ) -> Target:
+        """Create an OverlayDir target.
+
+        Args:
+            project: The project to add the target to.
+            env: Environment whose build directory the destination is
+                anchored under.
+            dest_dir: Destination directory, relative to that build
+                directory.
+            sources: Source tree roots, in increasing precedence: the last
+                one wins a path the others also hold.
+            name: Optional name for the target.
+            exclude: Glob patterns dropped from every source tree, matched
+                against paths relative to each source root. A pattern
+                matching nothing is not an error: source trees legitimately
+                differ in what they hold.
+
+        Returns:
+            A Target whose one output is the stamp of the staged tree.
+        """
+        dest_dir = Path(dest_dir)
+        target_name = _deduplicate_target_name(
+            project,
+            name or _install_target_name(project, dest_dir, "overlay"),
+            named_by_caller=name is not None,
+        )
+        anchored = anchor_target_paths(env, [dest_dir], target_name=target_name)[0]
+
+        target = _make_install_target(
+            project,
+            target_name,
+            "OverlayDir",
+            {"dest_dir": str(anchored), "exclude": list(exclude)},
+            list(sources),
+            defined_at=get_caller_location(),
+        )
+        target._env = env
+        return target
