@@ -847,3 +847,24 @@ class TestNinjaPathVariableQuoting:
         )
 
         assert line == 'clang-cl /c /Fo$out "-I$topdir/My Headers" $in'
+
+
+class TestPathTokenAcceptsPath:
+    """A PathToken may be built from a Path, like everything else in pcons
+    (#146); the generators see text either way."""
+
+    def test_a_path_is_kept_as_text(self):
+        from pathlib import Path
+
+        from pcons.core.subst import PathToken
+
+        token = PathToken(prefix="-I", path=Path("src") / "include")
+        assert token.path == str(Path("src") / "include")
+        assert token.relativize(lambda p: f"$topdir/{p}") == "-I$topdir/" + str(
+            Path("src") / "include"
+        )
+
+    def test_str_still_works(self):
+        from pcons.core.subst import PathToken
+
+        assert str(PathToken("-I", "src/include")) == "-Isrc/include"

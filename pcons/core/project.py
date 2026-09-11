@@ -1458,9 +1458,10 @@ class Project(_ProjectBuilders):
         for target in self._targets:
             for source in target.sources:
                 if isinstance(source, FileNode):
-                    # Only check source files (not generated files)
-
-                    if source.builder is None:
+                    # Only check source files, not generated ones: a file
+                    # with a build edge (an object from an ObjectLibrary
+                    # used as a source, say) is produced by the build.
+                    if source.builder is None and source._build_info is None:
                         p = source.path
                         if not p.is_absolute():
                             p = self.top.root_dir / p

@@ -67,6 +67,16 @@ def check_tool(tool: str, hint: str | None = None) -> str:
     return path
 
 
+def staging_dir(env: Environment, kind: str, name: str) -> Path:
+    """The build-relative staging directory for one installer.
+
+    ``<prefix>/.<kind>_staging/<name>``: under the environment's build
+    prefix, so two environments packaging the same name don't share it,
+    and per installer, so one project can hold several.
+    """
+    return env.build_relative(Path(f".{kind}_staging") / name)
+
+
 def stage_files(
     project: Project,
     env: Environment,  # noqa: ARG001 - kept for API consistency

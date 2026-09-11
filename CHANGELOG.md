@@ -236,6 +236,17 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- The installer helpers (`create_pkg`, `create_component_pkg`, `create_dmg`,
+  `create_msix`) work in an environment with a `build_prefix`: staging and
+  outputs now sit under the prefix and the command lines say so, where
+  before pkgbuild wrote to one place and ninja looked in another. Staging
+  is also per environment, so two variants can package the same name. (#143)
+- Assigning a plain list to a flag variable (`env.cc.flags = ["-Wall"]`)
+  keeps it a `FlagList`, so a `FlagPair` appended afterwards still reaches
+  the command line as two tokens. (#144)
+- An `ObjectLibrary`'s objects used as another target's sources are no
+  longer reported as missing source files on every run. (#145)
+- `PathToken` accepts a `Path` as well as a string. (#146)
 - **`InstallDir` sees a file added, removed or renamed anywhere under its
   source tree.** It used to notice only the files that existed at configure
   time, so a new file in a subdirectory was never copied. The copy edge now

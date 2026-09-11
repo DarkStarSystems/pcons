@@ -382,6 +382,29 @@ class Environment(_EnvironmentStubs):
         result = base / prefix if prefix else base
         return result / subdir if subdir.parts else result
 
+    def build_relative(self, path: Path | str) -> Path:
+        """*path* as the build tool sees it, under this environment's prefix.
+
+        Commands run in the build directory, so a path written into command
+        text is relative to it. A relative *path* is anchored in this
+        environment's build directory, ``build_prefix`` and all, and comes
+        back relative to the build directory: the mirror image of what a
+        relative ``target=`` gets, which anchors the path for the node graph.
+        An absolute path is returned as it is.
+
+        Example:
+            env.build_prefix = "release"
+            env.build_relative("stage/app")   # Path("release/stage/app")
+        """
+        path = Path(path)
+        if path.is_absolute():
+            return path
+        try:
+            prefix = self._effective_build_dir().relative_to(self._build_dir_base)
+        except ValueError:
+            prefix = Path()
+        return prefix / path
+
     def _effective_build_dir(self) -> Path:
         """This environment's own build directory.
 
