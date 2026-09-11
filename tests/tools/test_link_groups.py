@@ -193,6 +193,21 @@ class TestTheLinkLine:
         libs = f"{_archive(a)} {_archive(b)}"
         assert libs in _link_edge(text, "main")[0].split(" | ", 1)[0]
 
+    def test_make_leaves_nothing_behind_without_a_cycle(
+        self, tmp_path, gcc_toolchain, linux_platform
+    ):
+        """The link template names LINK_GROUPS on every edge; an edge that
+        does not set it must not get an empty argument."""
+        project, env = _project(tmp_path, gcc_toolchain)
+        a = project.StaticLibrary("a", env, sources=["a.c"])
+        project.Program("main", env, sources=["main.c"]).link(a)
+
+        text = _generate(project, MakefileGenerator())
+
+        (link,) = [ln for ln in text.splitlines() if " -o main" in ln]
+        assert "''" not in link and '""' not in link
+        assert link.rstrip().endswith(_archive(a))
+
     def test_make_expands_the_group_in_place(
         self, tmp_path, gcc_toolchain, linux_platform
     ):
