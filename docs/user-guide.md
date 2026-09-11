@@ -3160,6 +3160,14 @@ restages on the next `ninja`, with no hand-run of pcons. Both halves of the
 depfile are needed: a directory's modification time changes when it gains or
 loses an entry, an edit in place changes no directory at all.
 
+On Windows that modification time reaches ninja through the parent directory's
+NTFS index entry, which is refreshed lazily. A build started in the same instant
+as the write can therefore read the old stamp and stage the file on the build
+after it instead. Waiting a moment is enough, and so is anything that lists the
+directory in between - a file manager, an editor, `dir`. Edits and removals are
+unaffected: the file's own entry is refreshed when the writer closes it, and a
+file that is gone is gone.
+
 A file another build edge generates into a source tree is staged by the same
 build that writes it. Order the two with `depends()`:
 

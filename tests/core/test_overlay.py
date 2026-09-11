@@ -6,6 +6,7 @@ everything here is read back out of the staged directory after a real build.
 Asserting on the target's output nodes would only say what pcons intended.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -145,6 +146,22 @@ def generated_project(root: Path) -> Path:
     write(root / "mk.py", GENERATOR)
     write(root / "pcons-build.py", GENERATED_BUILD_SCRIPT)
     return root / "build" / "stage"
+
+
+def refresh_dependency_metadata(*paths: Path) -> None:
+    """Make directory metadata visible before ninja reads dependencies.
+
+    Windows keeps a directory's modification time in its parent's NTFS index
+    entry, which is what ninja reads through ``FindFirstFile``, and that entry
+    is refreshed lazily. ``os.listdir()`` opens and closes the directory, which
+    refreshes it at once without changing a timestamp or touching the source
+    tree. Measured on Windows: the entry settles on its own about half a second
+    after the write, so it is a build starting in the same instant as the write
+    that reads the old stamp. Callers pass the directories that gained or lost
+    an entry and still exist.
+    """
+    for path in paths:
+        os.listdir(path)
 
 
 def run_pcons(root: Path) -> str:
@@ -355,7 +372,9 @@ class TestOverlayFreshness:
         stage = freshness_project(tmp_path)
         run_pcons(tmp_path)
 
-        write(tmp_path / "shared/src/com/example/New.java", "class New {}\n")
+        deep = tmp_path / "shared/src/com/example"
+        write(deep / "New.java", "class New {}\n")
+        refresh_dependency_metadata(deep)
         output = run_ninja(tmp_path)
 
         assert "Regenerating" not in output
@@ -365,7 +384,9 @@ class TestOverlayFreshness:
         stage = freshness_project(tmp_path)
         run_pcons(tmp_path)
 
-        write(tmp_path / "shared/src/com/example/util/Util.java", "class Util {}\n")
+        deep = tmp_path / "shared/src/com/example"
+        write(deep / "util/Util.java", "class Util {}\n")
+        refresh_dependency_metadata(deep)
         run_ninja(tmp_path)
 
         assert (stage / "src/com/example/util/Util.java").exists()
