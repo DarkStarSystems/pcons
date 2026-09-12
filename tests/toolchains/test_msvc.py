@@ -21,6 +21,7 @@ from pcons.toolchains.msvc import (
     _host_arch_dirs,
     _sorted_version_dirs,
     _version_sort_key,
+    find_msvc_toolset_version,
 )
 
 
@@ -736,3 +737,31 @@ class TestFindMsvcBinDirHostAware:
 
         assert result is not None
         assert result.parent.parent.parent.name == "14.10.0"
+
+
+class TestFindMsvcToolsetVersion:
+    """find_msvc_toolset_version: a vcvars shell's VCToolsVersion first,
+    else the newest toolset under the vswhere install."""
+
+    def test_vcvars_env_wins(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("VCToolsVersion", "14.38.33130")
+        monkeypatch.setattr(
+            "pcons.toolchains.msvc._find_msvc_install", lambda: tmp_path
+        )
+        (tmp_path / "VC" / "Tools" / "MSVC" / "14.44.35207").mkdir(parents=True)
+        assert find_msvc_toolset_version() == "14.38.33130"
+
+    def test_newest_installed_toolset(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("VCToolsVersion", raising=False)
+        monkeypatch.setattr(
+            "pcons.toolchains.msvc._find_msvc_install", lambda: tmp_path
+        )
+        vc_tools = tmp_path / "VC" / "Tools" / "MSVC"
+        for version in ("14.9.1", "14.44.35207", "14.40.33807"):
+            (vc_tools / version).mkdir(parents=True)
+        assert find_msvc_toolset_version() == "14.44.35207"
+
+    def test_no_install(self, monkeypatch):
+        monkeypatch.delenv("VCToolsVersion", raising=False)
+        monkeypatch.setattr("pcons.toolchains.msvc._find_msvc_install", lambda: None)
+        assert find_msvc_toolset_version() is None

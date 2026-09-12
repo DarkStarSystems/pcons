@@ -276,6 +276,12 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- **The Conan profile for clang-cl** now carries the MSVC runtime settings
+  (`compiler.runtime`, `runtime_type`, `runtime_version`), no `libcxx`, and
+  the conf that makes Conan build with clang-cl and Ninja. It used to
+  describe clang-cl as GNU clang with `libstdc++11`, so Conan chose MinGW
+  Makefiles and `-m64` and every source build failed. A clang targeting
+  MinGW keeps the GNU profile and gets a warning.
 - `link("/opt/vendor/lib/libfoo.a")` is refused at generate time with a
   message saying what to do; the string became `-l/opt/vendor/lib/libfoo.a`
   and failed inside the linker. (#123)

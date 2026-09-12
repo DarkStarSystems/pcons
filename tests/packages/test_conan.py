@@ -1005,6 +1005,139 @@ class TestConanFinderWithToolchain:
         assert settings["compiler.runtime"] == "dynamic"
         assert settings["compiler.runtime_type"] == "Debug"
 
+    @staticmethod
+    def _windows_finder(tmp_path: Path) -> ConanFinder:
+        finder = ConanFinder(output_folder=tmp_path)
+        finder._platform = MagicMock(is_macos=False, is_linux=False, is_windows=True)
+        finder._platform.arch = "x86_64"
+        return finder
+
+    @staticmethod
+    def _clang_version_run(target: str):
+        def mock_run(cmd, **kwargs):
+            assert cmd[1] == "--version"
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = (
+                f"clang version 18.1.8\nTarget: {target}\nThread model: posix\n"
+            )
+            result.stderr = ""
+            return result
+
+        return mock_run
+
+    def test_detect_compiler_settings_with_clang_cl_toolchain(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """clang-cl is Conan's compiler=clang with the MSVC runtime settings
+        and no libcxx; without the runtime Conan builds packages as MinGW
+        clang. runtime_version comes from the installed MSVC toolset.
+        """
+        finder = self._windows_finder(tmp_path)
+        toolchain = _FakeToolchain("clang-cl", cc_cmd="C:/LLVM/bin/clang-cl.exe")
+        monkeypatch.setenv("VCToolsVersion", "14.44.35207")
+
+        with patch(
+            "subprocess.run",
+            side_effect=self._clang_version_run("x86_64-pc-windows-msvc"),
+        ):
+            settings = finder._detect_compiler_settings(toolchain, build_type="Debug")
+
+        assert settings["compiler"] == "clang"
+        assert settings["compiler.version"] == "18"
+        assert settings["compiler.runtime"] == "dynamic"
+        assert settings["compiler.runtime_type"] == "Debug"
+        assert settings["compiler.runtime_version"] == "v144"
+        assert "compiler.libcxx" not in settings
+
+    def test_mingw_clang_keeps_gnu_settings_and_warns(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A clang targeting MinGW is not verified with Conan: it keeps the
+        GNU settings (which is how Conan reads clang without a runtime) and
+        says so.
+        """
+        finder = self._windows_finder(tmp_path)
+        toolchain = _FakeToolchain("llvm", cc_cmd="C:/msys64/clang64/bin/clang.exe")
+
+        with (
+            patch(
+                "subprocess.run",
+                side_effect=self._clang_version_run("x86_64-w64-windows-gnu"),
+            ),
+            caplog.at_level("WARNING"),
+        ):
+            settings = finder._detect_compiler_settings(toolchain, build_type="Release")
+
+        assert settings["compiler"] == "clang"
+        assert settings["compiler.libcxx"] == "libstdc++11"
+        assert "compiler.runtime" not in settings
+        assert "MinGW" in caplog.text and "x86_64-w64-windows-gnu" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("toolset", "expected"),
+        [
+            ("14.0.24215", "v140"),
+            ("14.16.27023", "v141"),
+            ("14.29.30133", "v142"),
+            ("14.38.33130", "v143"),
+            ("14.44.35207", "v144"),
+            (None, "v144"),
+        ],
+    )
+    def test_conan_runtime_version_mapping(
+        self, toolset: str | None, expected: str
+    ) -> None:
+        """An MSVC toolset version maps to Conan's v14x runtime_version."""
+        assert ConanFinder._conan_runtime_version(toolset) == expected
+
+    def test_sync_profile_clang_cl_conf(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A clang-cl profile also carries the conf Conan needs to build
+        with clang-cl rather than GNU clang: the compiler executables (which
+        is how Conan recognizes clang-cl) and the Ninja generator in place
+        of its MinGW Makefiles default. User conf still wins.
+        """
+        finder = self._windows_finder(tmp_path)
+        toolchain = _FakeToolchain("clang-cl", cc_cmd="clang-cl")
+        finder.set_profile_conf(
+            "tools.cmake.cmaketoolchain:generator", "NMake Makefiles"
+        )
+        monkeypatch.setenv("VCToolsVersion", "14.44.35207")
+
+        with patch(
+            "subprocess.run",
+            side_effect=self._clang_version_run("x86_64-pc-windows-msvc"),
+        ):
+            profile = finder.sync_profile(toolchain, build_type="Release")
+
+        content = profile.read_text()
+        assert "compiler.runtime_version=v144" in content
+        assert "compiler.libcxx" not in content
+        assert (
+            'tools.build:compiler_executables={"c": "clang-cl", "cpp": "clang-cl"}'
+            in content
+        )
+        assert "tools.cmake.cmaketoolchain:generator=NMake Makefiles" in content
+        assert "CC=clang-cl" in content
+
+    def test_sync_profile_unix_clang_has_no_conf(self, tmp_path: Path) -> None:
+        """The clang-cl conf is Windows-only; a Linux clang profile is as before."""
+        finder = ConanFinder(output_folder=tmp_path)
+        finder._platform = MagicMock(is_macos=False, is_linux=True, is_windows=False)
+        finder._platform.arch = "x86_64"
+        toolchain = _FakeToolchain("llvm", cc_cmd="clang")
+
+        with patch(
+            "subprocess.run",
+            side_effect=self._clang_version_run("x86_64-pc-linux-gnu"),
+        ):
+            content = finder.sync_profile(toolchain).read_text()
+
+        assert "compiler.libcxx=libstdc++11" in content
+        assert "[conf]" not in content
+
     @pytest.mark.parametrize(
         ("cl_version", "expected"),
         [

@@ -235,6 +235,25 @@ def _find_msvc_bin_dir() -> Path | None:
     return None
 
 
+def find_msvc_toolset_version() -> str | None:
+    """The installed MSVC toolset version, e.g. "14.44.35207".
+
+    A vcvars shell sets VCToolsVersion; otherwise the newest toolset under
+    the Visual Studio install vswhere finds. None when neither is available.
+    """
+    version = os.environ.get("VCToolsVersion")
+    if version:
+        return version
+    vs_path = _find_msvc_install()
+    if vs_path is None:
+        return None
+    vc_tools = vs_path / "VC" / "Tools" / "MSVC"
+    if not vc_tools.exists():
+        return None
+    version_dirs = _sorted_version_dirs(vc_tools)
+    return version_dirs[0].name if version_dirs else None
+
+
 # Arch names as they appear as MSVC/SDK path components
 # (bin/Host<host>/<arch>, lib/<arch>, Lib/<sdkver>/um/<arch>).
 _ARCH_DIR_MAP: dict[str, str] = {

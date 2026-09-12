@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shlex
@@ -22,6 +23,9 @@ from pcons.configure.platform import get_platform
 from pcons.core.flags import deduplicate_flags
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.base import BaseFinder
+from pcons.toolchains.msvc import find_msvc_toolset_version
+
+logger = logging.getLogger(__name__)
 
 # Flags whose argument is the next token, deduped as a (flag, arg) unit. The
 # flag literal repeats legitimately (macOS frameworks: -framework A -framework
@@ -238,21 +242,19 @@ class ConanFinder(BaseFinder):
                     settings["compiler"] = "gcc"
                     settings["compiler.libcxx"] = "libstdc++11"
             elif "clang" in compiler_name or "llvm" in compiler_name:
+                settings["compiler"] = "clang"
                 if self._platform.is_macos:
                     settings["compiler"] = "apple-clang"
                     settings["compiler.libcxx"] = "libc++"
+                elif self._platform.is_windows:
+                    settings.update(
+                        self._windows_clang_settings(compiler_cmd, build_type)
+                    )
                 else:
-                    settings["compiler"] = "clang"
                     settings["compiler.libcxx"] = "libstdc++11"
             elif "msvc" in compiler_name:
                 settings["compiler"] = "msvc"
-                # Conan 2 requires compiler.runtime (and runtime_type) for
-                # msvc. pcons links the dynamic CRT (/MD, /MDd); the debug
-                # vs. release runtime follows the build type.
-                settings["compiler.runtime"] = "dynamic"
-                settings["compiler.runtime_type"] = (
-                    "Debug" if build_type == "Debug" else "Release"
-                )
+                settings.update(self._msvc_runtime_settings(build_type))
         else:
             # Default to system compiler detection
             if self._platform.is_macos:
@@ -268,6 +270,81 @@ class ConanFinder(BaseFinder):
                 settings["compiler.version"] = version
 
         return settings
+
+    def _windows_clang_settings(
+        self, compiler_cmd: str | None, build_type: str
+    ) -> dict[str, str]:
+        """Settings for clang on Windows: the MSVC runtime it links against.
+
+        Conan reads ``compiler=clang`` with no runtime as MinGW clang and
+        builds packages with GNU flags. Clang-cl, and LLVM clang targeting
+        the MSVC ABI as it does on Windows, need the runtime settings and no
+        libcxx. A clang targeting MinGW is not a toolchain pcons has
+        verified against Conan: it keeps the GNU settings, with a warning.
+        """
+        _, target = self._clang_version_info(compiler_cmd)
+        if target and "msvc" not in target:
+            logger.warning(
+                "Conan profile: %s targets %s, not the MSVC ABI. pcons has not "
+                "verified MinGW clang with Conan; the profile assumes "
+                "compiler.libcxx=libstdc++11. Override it with "
+                "set_profile_setting() if your clang uses libc++.",
+                compiler_cmd,
+                target,
+            )
+            return {"compiler.libcxx": "libstdc++11"}
+        settings = self._msvc_runtime_settings(build_type)
+        settings["compiler.runtime_version"] = self._conan_runtime_version(
+            find_msvc_toolset_version()
+        )
+        return settings
+
+    @staticmethod
+    def _msvc_runtime_settings(build_type: str) -> dict[str, str]:
+        """The runtime settings Conan 2 requires for msvc, and for clang
+        targeting MSVC. pcons links the dynamic CRT (/MD, /MDd); the debug
+        vs. release runtime follows the build type.
+        """
+        return {
+            "compiler.runtime": "dynamic",
+            "compiler.runtime_type": "Debug" if build_type == "Debug" else "Release",
+        }
+
+    @staticmethod
+    def _conan_runtime_version(toolset_version: str | None) -> str:
+        """Conan's ``compiler.runtime_version`` for an MSVC toolset version:
+        "14.44.35207" is v144, "14.29.30133" is v142. Without a toolset to
+        ask, assume the one current Visual Studio ships.
+        """
+        match = re.match(r"14\.(\d)", toolset_version or "")
+        return f"v14{match.group(1)}" if match else "v144"
+
+    @staticmethod
+    def _clang_version_info(
+        compiler_cmd: str | None,
+    ) -> tuple[str | None, str | None]:
+        """(major version, target triple) from ``clang --version``, whose
+        output starts "clang version 18.1.8\\nTarget: x86_64-pc-windows-msvc"
+        (Apple: "Apple clang version 15.0.0 ..."). Either is None when the
+        compiler can't be run or doesn't report it.
+        """
+        try:
+            result = subprocess.run(
+                [compiler_cmd or "clang", "--version"],
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None, None
+        if result.returncode != 0:
+            return None, None
+        version = target = None
+        for line in result.stdout.splitlines():
+            if version is None and (match := re.search(r"\bversion (\d+)", line)):
+                version = match.group(1)
+            elif line.startswith("Target:"):
+                target = line.split(":", 1)[1].strip()
+        return version, target
 
     @staticmethod
     def _infer_cppstd(env: Any) -> str | None:
@@ -350,19 +427,7 @@ class ConanFinder(BaseFinder):
         cmd = compiler_cmd or _name_to_binary.get(compiler, compiler)
         try:
             if compiler in ("apple-clang", "clang"):
-                result = subprocess.run(
-                    [cmd, "--version"],
-                    capture_output=True,
-                    text=True,
-                )
-                if result.returncode == 0:
-                    # Parse "Apple clang version X.Y.Z" or "clang version X.Y.Z"
-                    for line in result.stdout.split("\n"):
-                        if "version" in line.lower():
-                            parts = line.split()
-                            for i, part in enumerate(parts):
-                                if part == "version" and i + 1 < len(parts):
-                                    return parts[i + 1].split(".")[0]
+                return self._clang_version_info(cmd)[0]
             elif compiler == "gcc":
                 result = subprocess.run(
                     [cmd, "--version"],
@@ -472,6 +537,11 @@ class ConanFinder(BaseFinder):
         """
         self.output_folder.mkdir(parents=True, exist_ok=True)
 
+        cc_cmd = cxx_cmd = None
+        if toolchain is not None:
+            cc_cmd = self._get_toolchain_compiler_cmd(toolchain, "cc")
+            cxx_cmd = self._get_toolchain_compiler_cmd(toolchain, "cxx")
+
         lines: list[str] = []
         lines.append("[settings]")
 
@@ -494,13 +564,10 @@ class ConanFinder(BaseFinder):
         # [buildenv] CC/CXX so Conan builds packages with the same
         # compiler as the toolchain
         buildenv: dict[str, str] = {}
-        if toolchain is not None:
-            cc_cmd = self._get_toolchain_compiler_cmd(toolchain, "cc")
-            cxx_cmd = self._get_toolchain_compiler_cmd(toolchain, "cxx")
-            if cc_cmd:
-                buildenv["CC"] = cc_cmd
-            if cxx_cmd:
-                buildenv["CXX"] = cxx_cmd
+        if cc_cmd:
+            buildenv["CC"] = cc_cmd
+        if cxx_cmd:
+            buildenv["CXX"] = cxx_cmd
 
         if buildenv:
             lines.append("")
@@ -508,11 +575,12 @@ class ConanFinder(BaseFinder):
             for key, value in sorted(buildenv.items()):
                 lines.append(f"{key}={value}")
 
-        if self._profile_conf:
+        conf = {**self._default_conf(settings, cc_cmd, cxx_cmd), **self._profile_conf}
+        if conf:
             lines.append("")
             lines.append("[conf]")
-            for key, value in sorted(self._profile_conf.items()):
-                if isinstance(value, list):
+            for key, value in sorted(conf.items()):
+                if isinstance(value, (list, dict)):
                     lines.append(f"{key}={json.dumps(value)}")
                 else:
                     lines.append(f"{key}={value}")
@@ -521,6 +589,27 @@ class ConanFinder(BaseFinder):
         self.profile_path.write_text(profile_content)
 
         return self.profile_path
+
+    @staticmethod
+    def _default_conf(
+        settings: dict[str, str], cc_cmd: str | None, cxx_cmd: str | None
+    ) -> dict[str, Any]:
+        """Conf entries the settings alone can't express.
+
+        Conan tells clang-cl from clang by the compiler executables, and
+        without them builds packages with GNU flags (-m64, -std=). Its
+        default CMake generator for clang on Windows is MinGW Makefiles;
+        pcons has Ninja on hand.
+        """
+        if settings.get("compiler") != "clang" or "compiler.runtime" not in settings:
+            return {}
+        conf: dict[str, Any] = {"tools.cmake.cmaketoolchain:generator": "Ninja"}
+        executables = {
+            lang: cmd for lang, cmd in (("c", cc_cmd), ("cpp", cxx_cmd)) if cmd
+        }
+        if executables:
+            conf["tools.build:compiler_executables"] = executables
+        return conf
 
     def _get_toolchain_compiler_cmd(
         self, toolchain: Toolchain, tool_name: str
