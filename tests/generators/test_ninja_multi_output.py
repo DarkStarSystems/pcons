@@ -213,7 +213,11 @@ class TestNinjaMultiOutput:
         )
         assert "/OUT:$target_0" in command
         assert "/IMPLIB:$target_1" in command
-        assert command.count("-Map=$target_") == 3
+        # Indexed markers put the command in indexed mode, where an unindexed
+        # marker is the primary output: one map file for the link, not one
+        # per output.
+        assert command.count("-Map=") == 1
+        assert "-Map=$target_0.map" in command
 
     def test_secondary_nodes_not_written(self, tmp_path):
         """Test that secondary nodes don't get their own build statements."""

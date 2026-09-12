@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.generators.ninja."""
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -69,8 +71,24 @@ class TestNinjaGenerator:
         BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "build.ninja").read_text()
-        assert "-Wl,-Map=$target_0.map" in content
+        # A link has one output and defines no $target_N, so the flag rides
+        # on $out and the rule stays shared between programs.
+        assert "-Wl,-Map=$out.map" in content
+        assert "$target_0" not in content
         assert "TargetPath(" not in content
+
+        ninja = shutil.which("ninja")
+        if ninja is None:
+            pytest.skip("ninja not installed")
+        dry_run = subprocess.run(
+            [ninja, "-C", str(tmp_path / "build"), "-n", "-v"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        program = app.output_nodes[0].path.name  # app, or app.exe on Windows
+        assert f"-Wl,-Map={program}.map" in dry_run
+        assert "-Map=.map" not in dry_run
 
     def test_embedded_target_does_not_rewrite_bare_multi_output_target(self, tmp_path):
         project = Project("test", root_dir=tmp_path, build_dir="build")

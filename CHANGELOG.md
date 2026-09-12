@@ -294,6 +294,12 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- **`${TARGET}` and `$TARGET` in a compile or link flag expand to the
+  output**, so `link_flags += ["-Wl,-Map=${TARGET}.map"]` puts a map file
+  next to the program. `${TARGET}` used to reach the command line as a
+  Python repr and `$TARGET` raised "undefined variable". Text attached to
+  `$SOURCE`/`$TARGET` in a command with several inputs or outputs repeats
+  per path; one such substitution per argument. (#122, thanks @rootsec1)
 - **`create_macos_bundle()` and `create_flat_bundle()` assemble the bundle
   under the build directory**, where `bundle_dir` says. They went through
   `Install()` without opting out of the install prefix, so the bundle landed

@@ -203,11 +203,18 @@ class NinjaGenerator(BaseGenerator):
                 if flag not in command_tokens:
                     command_tokens.append(flag)
             all_targets = build_info.get("all_targets") or []
-            outputs = build_info.get("outputs") or {}
+            # $out holds the explicit outputs only; an implicit one (a Swift
+            # module, an MSVC export file) is written after "|" and is not a
+            # path that attached text or a slice should reach.
+            explicit_outputs = [
+                info
+                for info in (build_info.get("outputs") or {}).values()
+                if isinstance(info, dict) and not info.get("implicit", False)
+            ]
             relativized_tokens = self._relativize_command_tokens(
                 cast(list[str], command_tokens),
                 source_count=len(build_info.get("sources") or []),
-                target_count=len(all_targets) or len(outputs) or 1,
+                target_count=len(all_targets) or len(explicit_outputs) or 1,
                 cwd=cwd,
             )
             # Launcher tokens are a program and its arguments, not paths in the
@@ -1346,6 +1353,11 @@ class NinjaGenerator(BaseGenerator):
                     continue
                 if token.index is not None or has_indexed_source:
                     ninja_var = f"$source_{token.index or 0}"
+                elif (token.prefix or token.suffix) and source_count > 1:
+                    # Text attached to $in would wrap the whole list; it
+                    # belongs to each input, so name them one by one.
+                    result.extend(self._slice_refs(token, "source", source_count))
+                    continue
                 else:
                     ninja_var = "$in"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
@@ -1365,6 +1377,12 @@ class NinjaGenerator(BaseGenerator):
                     continue
                 if token.index is not None or has_indexed_target:
                     ninja_var = f"$target_{token.index or 0}"
+                elif (token.prefix or token.suffix) and target_count > 1:
+                    # Same for attached text and several outputs. Only such
+                    # edges define $target_N; a link or compile has one
+                    # output and keeps $out, so its rule stays shared.
+                    result.extend(self._slice_refs(token, "target", target_count))
+                    continue
                 else:
                     ninja_var = "$out"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")

@@ -729,13 +729,12 @@ def _expand_attached_text(
 def _attach_path_marker(
     marker: SourcePath | TargetPath, prefix: str, suffix: str
 ) -> SourcePath | TargetPath:
-    """Attach surrounding text without erasing the marker's typed fields."""
-    if (
-        marker.index is None
-        and not marker.is_slice
-        and not (isinstance(marker, TargetPath) and marker.basename)
-    ):
-        marker = replace(marker, start=0)
+    """Attach surrounding text without erasing the marker's typed fields.
+
+    The marker stays unindexed: the generator renders it as ``$out`` with
+    the text attached on a one-output edge, which is every compile and link,
+    and repeats it per path only on an edge with several outputs.
+    """
     return replace(
         marker,
         prefix=prefix + marker.prefix,

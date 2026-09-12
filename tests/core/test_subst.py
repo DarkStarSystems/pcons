@@ -239,7 +239,7 @@ class TestEmbeddedTargetMarker:
     def test_embedded_target_stays_typed(self, reference):
         result = subst([f"-Wl,-Map={reference}.map"], {"TARGET": TargetPath()})
 
-        assert result == [TargetPath(prefix="-Wl,-Map=", suffix=".map", start=0)]
+        assert result == [TargetPath(prefix="-Wl,-Map=", suffix=".map")]
 
     def test_embedded_target_preserves_marker_fields(self):
         marker = TargetPath(index=1, prefix="inner-", suffix=".tmp")
@@ -264,9 +264,7 @@ class TestEmbeddedTargetMarker:
             {"TARGET": TargetPath()},
         )
 
-        assert result == [
-            TargetPath(prefix=f"{srcdir_sentinel}/", suffix=".map", start=0)
-        ]
+        assert result == [TargetPath(prefix=f"{srcdir_sentinel}/", suffix=".map")]
 
     def test_whole_token_target_is_unchanged(self):
         marker = TargetPath()
@@ -290,7 +288,7 @@ class TestEmbeddedTargetMarker:
             },
         )
 
-        assert result == [TargetPath(prefix="-Wl,-Map=report-", suffix=".map", start=0)]
+        assert result == [TargetPath(prefix="-Wl,-Map=report-", suffix=".map")]
 
     @pytest.mark.parametrize("marker", [SourcePath(), TargetPath()])
     @pytest.mark.parametrize(
@@ -306,7 +304,7 @@ class TestEmbeddedTargetMarker:
     ):
         result = subst([expression], {"PATH": marker})
 
-        assert result == [replace(marker, prefix=prefix, suffix=suffix, start=0)]
+        assert result == [replace(marker, prefix=prefix, suffix=suffix)]
 
 
 class TestSubstFunctions:
