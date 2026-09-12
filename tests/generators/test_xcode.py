@@ -225,6 +225,24 @@ class TestXcodeGeneratorDependencies:
         # Should have dependency objects
         assert "PBXTargetDependency" in content
 
+    def test_static_libraries_in_a_cycle_get_no_edge_between_them(self, tmp_path):
+        """Xcode refuses a cycle of target dependencies; two static libraries
+        that link each other need no build order, so only the program's
+        dependency edge is written."""
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
+        a = Target("a", target_type="static_library")
+        b = Target("b", target_type="static_library")
+        a.link(b)
+        b.link(a)
+        app = Target("myapp", target_type="program")
+        app.link(a)
+
+        XcodeGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
+        assert content.count("isa = PBXTargetDependency") == 1
+
     def test_library_dep_added_to_link_phase(self, tmp_path):
         """Test that a library dependency's product is in the frameworks link phase."""
         project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)

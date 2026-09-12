@@ -212,10 +212,16 @@ class NinjaGenerator(BaseGenerator):
             # Launcher tokens are a program and its arguments, not paths in the
             # graph, so they are passed through as written rather than
             # rewritten for the execution directory. Quoting still applies.
+            # A template may name a per-edge variable this edge never set
+            # (a link's LINK_GROUPS, say); ninja expands it empty, so it is
+            # a ninja variable here too, not text to escape.
+            named = {t.name for t in command_tokens if isinstance(t, NodeVar)}
             command = to_shell_command(
                 [*launcher, *relativized_tokens],
                 shell="ninja",
-                extra_ninja_vars=frozenset(cast(dict, build_info.get("vars") or {})),
+                extra_ninja_vars=frozenset(
+                    {*cast(dict, build_info.get("vars") or {}), *named}
+                ),
             )
         else:
             command = command_raw

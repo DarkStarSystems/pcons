@@ -799,8 +799,11 @@ class MakefileGenerator(BaseGenerator):
         expanded: list = []
         for token in tokens:
             if isinstance(token, NodeVar):
-                value = (node_vars or {}).get(token.name, "")
-                expanded.extend(value if isinstance(value, list) else [value])
+                # A variable the edge does not set contributes nothing, not
+                # an empty argument.
+                value = (node_vars or {}).get(token.name)
+                if value:
+                    expanded.extend(value if isinstance(value, list) else [value])
             else:
                 expanded.append(token)
         tokens = expanded

@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.errors import PconsError
-from pcons.core.node import FileNode, Node
+from pcons.core.graph import strongly_connected_components
+from pcons.core.node import BuildInfo, FileNode, Node
 from pcons.core.subst import PathToken, TargetPath
 from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
+    from pcons.core.subst import FlagToken
     from pcons.core.target import Target
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler, Toolchain
 
@@ -714,17 +716,7 @@ class CompileLinkFactory:
 
         lib_node = self.project.node(lib_path)
         lib_node.add_inputs(target.intermediate_nodes)
-
-        link_language, context = self._setup_link_node(target, env, lib_node)
-
-        lib_node._build_info = {
-            "tool": "link",
-            "command_var": "sharedcmd",
-            "language": link_language,
-            "sources": target.intermediate_nodes,
-            "context": context,
-            "env": env,
-        }
+        info = self._setup_link_node(target, env, lib_node, "sharedcmd")
 
         import sys
 
@@ -740,7 +732,7 @@ class CompileLinkFactory:
                 import_name,
                 "static_library" if archive_directory is not None else "shared_library",
             )
-            lib_node._build_info["outputs"] = {
+            info["outputs"] = {
                 "primary": {"path": lib_path, "suffix": lib_path.suffix},
                 "import_lib": {"path": import_lib_path, "suffix": ".lib"},
             }
@@ -762,17 +754,7 @@ class CompileLinkFactory:
 
         prog_node = self.project.node(prog_path)
         prog_node.add_inputs(target.intermediate_nodes)
-
-        link_language, context = self._setup_link_node(target, env, prog_node)
-
-        prog_node._build_info = {
-            "tool": "link",
-            "command_var": "progcmd",
-            "language": link_language,
-            "sources": target.intermediate_nodes,
-            "context": context,
-            "env": env,
-        }
+        info = self._setup_link_node(target, env, prog_node, "progcmd")
 
         # Generic multi-output support for Program builders.
         from pcons.core.builder import MultiOutputBuilder
@@ -802,7 +784,7 @@ class CompileLinkFactory:
                         "output_name": spec.name,
                     }
                     target.output_nodes.append(sec_node)
-                prog_node._build_info["outputs"] = outputs_dict
+                info["outputs"] = outputs_dict
 
         target.output_nodes.append(prog_node)
         env.register_node(prog_node)
@@ -816,11 +798,11 @@ class CompileLinkFactory:
         target: Target,
         env: Environment,
         output_node: FileNode,
-    ) -> tuple[str, CompileLinkContext]:
-        """Set up dependencies, auxiliary inputs, and link context for an output node.
-
-        Shared logic for both shared library and program output creation.
-        """
+        command_var: str,
+    ) -> BuildInfo:
+        """Give a shared library or program output node its dependencies,
+        auxiliary inputs, link context and build info, and return the
+        build info for the caller to extend."""
         builder_data = getattr(target, "_builder_data", {}) or {}
         auxiliary_inputs = builder_data.get("auxiliary_inputs", [])
         auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
@@ -830,8 +812,13 @@ class CompileLinkFactory:
             for d in self._collect_dependency_outputs(target)
             if _is_link_input(d.path) and d.path not in auxiliary_input_paths
         ]
-        if dep_libs:
+        link_groups = self._link_groups(target, env, dep_libs)
+        if link_groups is None:
             output_node.add_inputs(dep_libs)
+        else:
+            # The archives are on the command line through LINK_GROUPS
+            # instead; the link still waits for them.
+            output_node.depends(dep_libs)
 
         # Whatever else the link must wait for without it being on the
         # command line: see _dependency_wait_outputs.
@@ -889,7 +876,59 @@ class CompileLinkFactory:
             output_name=output_node.path.name,
         )
 
-        return link_language, context
+        info: BuildInfo = {
+            "tool": "link",
+            "command_var": command_var,
+            "language": link_language,
+            "sources": target.intermediate_nodes,
+            "context": context,
+            "env": env,
+        }
+        if link_groups is not None:
+            info["vars"] = {"LINK_GROUPS": link_groups}
+        output_node._build_info = info
+        return info
+
+    def _link_groups(
+        self, target: Target, env: Environment, dep_libs: list[FileNode]
+    ) -> list[FlagToken] | None:
+        """The link inputs from *target*'s dependencies as the linker wants
+        them when some link each other in a cycle, or None when they can go
+        on the command line as they are.
+
+        Static libraries may depend on each other (see LINKABLE_IN_A_CYCLE);
+        a linker that resolves symbols in one pass needs such archives in a
+        group. One group spans from the first cycle member to the last, in
+        the order the libraries already have. Nesting groups is not allowed,
+        and a group is never wrong, so the libraries between them are simply
+        included. What the group looks like is the toolchain's to say.
+        """
+        toolchain = env._toolchain
+        if toolchain is None:
+            return None
+        closure = target.transitive_link_dependencies()
+        cyclic = {
+            id(node)
+            for members in strongly_connected_components(
+                closure, lambda t: t.linked_targets()
+            )
+            if len(members) > 1
+            for member in members
+            for node in member.output_nodes
+        }
+        span = [i for i, node in enumerate(dep_libs) if id(node) in cyclic]
+        if len(span) < 2:
+            return None
+        first, last = span[0], span[-1]
+
+        def tokens(nodes: list[FileNode]) -> list[PathToken]:
+            rel = self.project._path_resolver.make_execution_relative
+            return [PathToken(path=rel(n.path), path_type="build") for n in nodes]
+
+        group = toolchain.link_group_tokens(tokens(dep_libs[first : last + 1]))
+        if group is None:
+            return None
+        return [*tokens(dep_libs[:first]), *group, *tokens(dep_libs[last + 1 :])]
 
     def _order_compiles_after_dependency_outputs(self, target: Target) -> None:
         """Order every compile in *target* after the non-link outputs its

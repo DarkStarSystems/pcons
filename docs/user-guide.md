@@ -1188,6 +1188,25 @@ Key points:
 !!! note "`link()` / `link_private()` vs. the `link_libs` lists"
      `target.link(...)` and `target.link_private(...)` are the recommended high-level forms. They are exactly equivalent to appending to `target.public.link_libs` and `target.private.link_libs` respectively — those lists remain fully supported as the low-level form, and accept the same `Target` objects and library-name strings.
 
+#### Static Libraries That Need Each Other
+
+Two static libraries may link each other:
+
+```python
+lexer.link(parser)
+parser.link(lexer)
+```
+
+That is a dependency cycle, and for static libraries it is allowed. Neither has
+to be built before the other (compiling one needs only the other's headers),
+and the linker gets both archives in the form it wants: wrapped in
+`-Wl,--start-group ... -Wl,--end-group` for GNU ld and lld, which search an
+archive once, and as they are for Apple's ld and MSVC's link, which rescan.
+Object libraries and header-only libraries may be in such a cycle too. A
+program or shared library may not, since it would have to be built before its
+own dependency; a cycle through one is an error that says which target is the
+problem. See `examples/85_static_lib_cycle`.
+
 #### System Include Directories
 
 Vendored third-party headers are a special case: you want them found, but you don't want their warnings, and you certainly don't want `-Werror` failing your build on code you can't change. Every compiler has a second kind of include path for this — `-isystem` on GCC/Clang, `/external:I` on MSVC (pcons adds `/external:W0` alongside it), `-imsvc` on clang-cl. In pcons it's `system_includes`, on the tool or as a usage requirement:

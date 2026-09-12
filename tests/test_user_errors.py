@@ -344,10 +344,10 @@ class TestDependencyMistakes:
     """Users making dependency-related errors."""
 
     def test_circular_dependency(self, project_env):
-        """Two targets depending on each other."""
+        """Two shared libraries linking each other. (Static libraries may.)"""
         project, env = project_env
-        lib_a = project.StaticLibrary("liba", env, sources=["src/lib.c"])
-        lib_b = project.StaticLibrary("libb", env, sources=["src/main.c"])
+        lib_a = project.SharedLibrary("liba", env, sources=["src/lib.c"])
+        lib_b = project.SharedLibrary("libb", env, sources=["src/main.c"])
         lib_a.public.link_libs.append(lib_b)
         lib_b.public.link_libs.append(lib_a)
         errors = project.validate()
@@ -358,8 +358,8 @@ class TestDependencyMistakes:
         order, so nothing downstream of it could be built even if the build
         files were written."""
         project, env = project_env
-        lib_a = project.StaticLibrary("liba", env, sources=["src/lib.c"])
-        lib_b = project.StaticLibrary("libb", env, sources=["src/main.c"])
+        lib_a = project.SharedLibrary("liba", env, sources=["src/lib.c"])
+        lib_b = project.SharedLibrary("libb", env, sources=["src/main.c"])
         lib_a.public.link_libs.append(lib_b)
         lib_b.public.link_libs.append(lib_a)
         with pytest.raises(DependencyCycleError):

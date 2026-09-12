@@ -371,6 +371,15 @@ class UnixToolchain(BaseToolchain):
             flags = [*self._install_name_flags(target, existing_flags), *flags]
         return flags
 
+    def link_group_tokens(
+        self, archives: Sequence[PathToken]
+    ) -> list[FlagToken] | None:
+        """GNU ld and lld resolve a cycle of archives only inside a group;
+        Apple's ld rescans on its own and takes no group option."""
+        if get_platform().is_macos:
+            return None
+        return ["-Wl,--start-group", *archives, "-Wl,--end-group"]
+
     def _exported_symbols_flags(self, target: Target) -> list[FlagToken]:
         """The linker's own way to export only the named symbols.
 

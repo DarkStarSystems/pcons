@@ -146,10 +146,15 @@ class DependencyCycleError(PconsError):
         self,
         cycle: list[str],
         location: SourceLocation | None = None,
+        *,
+        reason: str | None = None,
     ) -> None:
         self.cycle = cycle
         cycle_str = " -> ".join(cycle)
-        super().__init__(f"dependency cycle: {cycle_str}", location)
+        message = f"dependency cycle: {cycle_str}"
+        if reason:
+            message = f"{message} ({reason})"
+        super().__init__(message, location)
 
 
 class DuplicateTargetError(PconsError):

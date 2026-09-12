@@ -604,8 +604,7 @@ class Target:
                 (
                     *self._dependency_targets(),
                     *(t for t in pending if isinstance(t, Target)),
-                    *(t for t in self.public.link_libs if isinstance(t, Target)),
-                    *(t for t in self.private.link_libs if isinstance(t, Target)),
+                    *self.linked_targets(),
                 )
             )
         )
@@ -1230,12 +1229,13 @@ class Target:
         (e.g. {'c', 'cxx'}); used to pick the linker."""
         languages = set(self.required_languages)
         visited: set[str] = {self.qualified_name}
-
-        for dep in self.dependencies:
-            if dep.qualified_name not in visited:
-                visited.add(dep.qualified_name)
-                languages.update(dep.get_all_languages())
-
+        pending: list[Target] = [self]
+        while pending:
+            for dep in pending.pop().dependencies:
+                if dep.qualified_name not in visited:
+                    visited.add(dep.qualified_name)
+                    languages.update(dep.required_languages)
+                    pending.append(dep)
         return languages
 
     def transitive_dependencies(self) -> list[Target]:
@@ -1244,6 +1244,12 @@ class Target:
         and links, and theirs, through public edges. A dependency's private
         link_libs stay with it."""
         return self._closure(for_link=False)
+
+    def linked_targets(self, *, private: bool = True) -> list[Target]:
+        """The targets this one links: its public link_libs, and its
+        private ones unless *private* is False."""
+        libs = [*self.public.link_libs, *(self.private.link_libs if private else [])]
+        return [t for t in libs if isinstance(t, Target)]
 
     def transitive_link_dependencies(self) -> list[Target]:
         """Every target whose output is a link input of this one (DFS order,
@@ -1260,9 +1266,7 @@ class Target:
             # A dependency's *private* link_libs do not propagate to consumers,
             # so we only follow public ones when recursing.
             deps = [] if for_link else target._dependency_targets()
-            deps += [t for t in target.public.link_libs if isinstance(t, Target)]
-            if include_private:
-                deps += [t for t in target.private.link_libs if isinstance(t, Target)]
+            deps += target.linked_targets(private=include_private)
             return deps
 
         def _collect(target: Target, *, include_private: bool) -> None:

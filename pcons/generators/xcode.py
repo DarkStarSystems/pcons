@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.errors import PconsError
+from pcons.core.graph import strongly_connected_components
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
@@ -119,6 +120,7 @@ class XcodeGenerator(BaseGenerator):
         self._objects = {}
         self._frameworks_phase_ids = {}
         self._product_ref_ids = {}
+        self._cycle_unit: dict[int, int] = {}
 
         # Relative path from output_dir to project root, for source file paths
         import os
@@ -149,6 +151,16 @@ class XcodeGenerator(BaseGenerator):
         for target in project.targets:
             self._configure_build_settings(target)
 
+        # Static libraries that link each other have no build order between
+        # them (see graph.LINKABLE_IN_A_CYCLE), and Xcode refuses a cycle of
+        # target dependencies, so the edges inside such a cycle are left out.
+        self._cycle_unit = {
+            id(member): number
+            for number, members in enumerate(
+                strongly_connected_components(project.targets, lambda t: t.dependencies)
+            )
+            for member in members
+        }
         for target in project.targets:
             self._setup_dependencies(target)
 
@@ -874,6 +886,8 @@ class XcodeGenerator(BaseGenerator):
 
         for dep in dep_targets:
             if dep.name not in self._target_ids:
+                continue
+            if self._cycle_unit.get(id(dep)) == self._cycle_unit[id(target)]:
                 continue
 
             dep_target = self._xcode_project.get_target_by_name(dep.name)

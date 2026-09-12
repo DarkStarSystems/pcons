@@ -18,6 +18,15 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **Static libraries may link each other.** Two static libraries that call
+  into each other can each `link()` the other; that cycle is no longer an
+  error, since neither has to be built before the other and every linker
+  can resolve it. On Linux the archives reach GNU ld wrapped in
+  `-Wl,--start-group ... -Wl,--end-group`; Apple's ld and MSVC's link
+  rescan archives on their own and get them as they are. Object libraries
+  and header-only libraries may be in such a cycle too. A cycle through a
+  program or shared library is still an error, and the message now says
+  which target is the problem. See `examples/85_static_lib_cycle`. (#120)
 - **A generate names the variant it configured**: `Generated build files
   for variant debug` on the terminal, or one entry per environment when
   they differ. Nothing is printed when no environment set a variant. (#125)

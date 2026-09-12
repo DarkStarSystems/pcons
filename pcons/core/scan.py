@@ -559,7 +559,7 @@ class ScannerResolver:
         # collate shares ONE ninja rule (a rule is identified by its command
         # text; a literal path here would mint a rule per target). Custom
         # collate commands get the same variable.
-        collate_vars: dict[str, str] = {"SCAN_MANIFEST": manifest_rel}
+        collate_vars: dict[str, object] = {"SCAN_MANIFEST": manifest_rel}
         if scanner.collate_command is not None:
             collate_cmd = list(scanner.collate_command)
         else:
