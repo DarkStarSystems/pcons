@@ -207,13 +207,16 @@ class MsvcCompatibleToolchain(BaseToolchain):
     # default is the static release CRT, which with _DEBUG defined pairs
     # with the debug STL and fails to link. Dynamic is also what CMake and
     # Conan (compiler.runtime=dynamic) build with, so packages match.
+    # Debug info is /Z7, in the object itself: /Zi has every parallel
+    # cl.exe write one shared PDB, which fails (C1041) without /FS or a
+    # per-target /Fd. The linker's /DEBUG still produces the final PDB.
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
-        "debug": (["/Od", "/Zi", "/MDd"], ["DEBUG", "_DEBUG"]),
+        "debug": (["/Od", "/Z7", "/MDd"], ["DEBUG", "_DEBUG"]),
         "release": (["/O2", "/MD"], ["NDEBUG"]),
         # /O2 is already "maximize speed"; /Ob3 (VS 2019+) adds the more
         # aggressive inlining it leaves out. Nothing that changes results.
         "release-fastest": (["/O2", "/Ob3", "/MD"], ["NDEBUG"]),
-        "relwithdebinfo": (["/O2", "/Zi", "/MD"], ["NDEBUG"]),
+        "relwithdebinfo": (["/O2", "/Z7", "/MD"], ["NDEBUG"]),
         "minsizerel": (["/O1", "/MD"], ["NDEBUG"]),
     }
 
@@ -257,7 +260,10 @@ class MsvcCompatibleToolchain(BaseToolchain):
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
-        return [
+        contribs = [
             ToolContribution("cc", flags=tuple(flags), defines=tuple(defines)),
             ToolContribution("cxx", flags=tuple(flags), defines=tuple(defines)),
         ]
+        if "/Z7" in flags:
+            contribs.append(ToolContribution("link", flags=("/DEBUG",)))
+        return contribs

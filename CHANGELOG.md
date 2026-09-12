@@ -148,6 +148,12 @@ machinery to support this kind of dynamic dependencies.
 
 ### Changed
 
+- **The `debug` and `relwithdebinfo` variants compile with `/Z7` on MSVC and
+  clang-cl**, not `/Zi`. `/Zi` has every parallel `cl.exe` write the same
+  compiler PDB, and most of them fail with C1041 unless `/FS` or a
+  per-target `/Fd` is added. `/Z7` keeps the debug info in each object,
+  which is also what compiler caches need. The linker's `/DEBUG` produces
+  the PDB as before.
 - **MSVC's C++ compiler gets `/Zc:__cplusplus` by default.** Without it
   cl.exe reports `__cplusplus` as `199711L` whatever `/std:` says, so
   headers that check the standard version take their C++98 branch.
@@ -279,6 +285,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- **clang-cl's `debug` and `relwithdebinfo` variants link with `/DEBUG`**, so
+  the build produces a PDB. Only MSVC added the linker flag before; the
+  compiled-in debug info went nowhere on clang-cl.
 - **MSVC and clang-cl variants select the CRT**: `/MDd` for `debug`, `/MD`
   for the others. No variant passed one before, so cl.exe's default static
   release CRT met the debug variant's `_DEBUG`, which selects the debug STL,

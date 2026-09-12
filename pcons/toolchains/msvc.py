@@ -1221,15 +1221,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         )
         return {std_key: exports_rel}, None
 
-    def _variant_contributions(
-        self, variant: str, **kwargs: Any
-    ) -> list[ToolContribution]:
-        """MSVC variant flags, plus the /DEBUG linker flag for debug builds."""
-        contribs = super()._variant_contributions(variant, **kwargs)
-        if variant.lower() in ("debug", "relwithdebinfo"):
-            contribs.append(ToolContribution("link", flags=("/DEBUG",)))
-        return contribs
-
     def create_build_context(
         self,
         target: Target,

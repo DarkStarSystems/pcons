@@ -346,3 +346,31 @@ class TestClangClVariants:
         assert crt in env.cc.flags
         assert crt in env.cxx.flags
         assert len([f for f in env.cxx.flags if f.startswith("/M")]) == 1
+
+    @pytest.mark.parametrize("toolchain_name", ["msvc", "clang-cl"])
+    @pytest.mark.parametrize(
+        ("variant", "has_debug_info"),
+        [("debug", True), ("relwithdebinfo", True), ("release", False)],
+    )
+    def test_debug_info_lands_in_objects_and_the_linker_writes_the_pdb(
+        self, test_project, toolchain_name: str, variant: str, has_debug_info: bool
+    ):  # noqa: F811
+        """/Z7 keeps debug info in each object (no shared compiler PDB for
+        parallel cl.exe to fight over); the linker's /DEBUG then produces
+        the PDB. Both toolchains, since clang-cl links with the same flags."""
+        from pcons.toolchains.clang_cl import ClangClToolchain
+        from pcons.toolchains.msvc import MsvcToolchain
+
+        env = Environment()
+        for tool in ("cc", "cxx", "link"):
+            cfg = env.add_tool(tool)
+            cfg.set("cmd", "x")
+            cfg.set("flags", [])
+            cfg.set("defines", [])
+        toolchain = MsvcToolchain() if toolchain_name == "msvc" else ClangClToolchain()
+
+        toolchain.apply_variant(env, variant)
+
+        assert ("/Z7" in env.cxx.flags) is has_debug_info
+        assert ("/DEBUG" in env.link.flags) is has_debug_info
+        assert "/Zi" not in env.cxx.flags

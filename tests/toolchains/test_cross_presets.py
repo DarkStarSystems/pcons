@@ -542,7 +542,7 @@ class TestCrossPresetApplication:
         toolchain.apply_variant(env, "debug")
 
         assert "/Od" in env.cc.flags
-        assert "/Zi" in env.cxx.flags
+        assert "/Z7" in env.cxx.flags
         assert "DEBUG" in env.cc.defines
         assert "_DEBUG" in env.cxx.defines
 
