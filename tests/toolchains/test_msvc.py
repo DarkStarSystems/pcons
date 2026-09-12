@@ -13,6 +13,7 @@ from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.msvc import (
     MsvcAssembler,
     MsvcCompiler,
+    MsvcCxxCompiler,
     MsvcLibrarian,
     MsvcLinker,
     MsvcResourceCompiler,
@@ -35,6 +36,12 @@ class TestMsvcCompiler:
         cxx = MsvcCompiler(name="cxx", language="cxx")
         assert cxx.name == "cxx"
         assert cxx.language == "cxx"
+
+    def test_cxx_reports_cplusplus_correctly(self):
+        """cl.exe reports __cplusplus as 199711L unless /Zc:__cplusplus is
+        given; the C++ compiler passes it, the C compiler has no use for it."""
+        assert "/Zc:__cplusplus" in MsvcCxxCompiler().default_vars()["flags"]
+        assert "/Zc:__cplusplus" not in MsvcCompiler().default_vars()["flags"]
 
     def test_default_vars(self):
         cc = MsvcCompiler()

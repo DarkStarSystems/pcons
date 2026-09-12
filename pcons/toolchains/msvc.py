@@ -463,7 +463,10 @@ class MsvcCxxCompiler(MsvcCompiler):
     def default_vars(self) -> dict[str, object]:
         return {
             "cmd": "cl.exe",
-            "flags": ["/nologo"],
+            # Without /Zc:__cplusplus, cl.exe reports __cplusplus as 199711L
+            # whatever /std: says, and standard-version checks in headers
+            # take the C++98 branch.
+            "flags": ["/nologo", "/Zc:__cplusplus"],
             "iprefix": "/I",
             "includes": [],
             "isysprefix": "/external:I",

@@ -148,6 +148,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Changed
 
+- **MSVC's C++ compiler gets `/Zc:__cplusplus` by default.** Without it
+  cl.exe reports `__cplusplus` as `199711L` whatever `/std:` says, so
+  headers that check the standard version take their C++98 branch.
 - **Breaking:** `HeaderOnlyLibrary(name, env, ...)` takes the environment
   second, like every other builder, and `include_dirs` is keyword-only. It
   was `(name, include_dirs)`, so `HeaderOnlyLibrary("h", env)` tracebacked
