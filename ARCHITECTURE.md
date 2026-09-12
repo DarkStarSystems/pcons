@@ -1327,6 +1327,47 @@ This is sufficient for most cases and much simpler. The tradeoff:
 - Touching a file without changing it triggers rebuild (rare in practice)
 - Ninja handles this well and is battle-tested
 
+### Configure Enumerates Nothing It Does Not Own
+> **Status: Partially implemented** - `Scanner`, the module maps and Qt automoc follow the rule. `InstallDir` has the right consumer shape but an incomplete depfile; `pcons/tools/cargo.py` does not follow it at all.
+
+**A set read from the filesystem is decided by a build-time edge that reports what it read in a
+depfile, and its consumer is one static edge: a stamp, an aggregator, or a dyndep. Configure may
+enumerate nothing it does not own.**
+
+Configure runs before every generator does. A build script that walks a directory to decide a set
+cannot see a file another edge is about to write, and ordering does not repair that: the decision
+is upstream of every build edge. Adding `depends()` orders the consumer, it cannot un-decide a list
+already chosen. The rule moves the enumeration into the build and leaves configure a single edge
+whose existence does not depend on the answer.
+
+Four existing shapes. Copy one instead of inventing a fifth:
+
+| consumer | its static edge | the set is decided by |
+|---|---|---|
+| `InstallDir` (`pcons/tools/install.py`) | a stamp | `copytree` at build time, reported in a depfile |
+| `Scanner` (`pcons/core/scan.py`) | a collate edge writing a ninja dyndep | the scan tool at build time, reported in scan-info JSON |
+| C++20 and Fortran module maps | the compile edge, reading a collate-written args file | the same collate |
+| Qt automoc (`pcons/toolchains/qt/_automoc.py`) | a `mocs_compilation.cpp` aggregator TU | the same tool at build time, reported in a depfile |
+
+Two conditions, both load-bearing:
+
+- **The depfile names directories, not only files.** A file that does not exist yet cannot be in a
+  list of files, so the reader must report every directory it listed. The build tool stats those and
+  re-runs the edge when one gains an entry. `tests/core/test_depfile_directories.py` proves both
+  halves on ninja and on make: with the directories the edge re-runs, with only the files it does
+  not. `copytree` reports files alone, so `InstallDir` copies a changed file but never notices a new
+  one.
+- **The consumer edge exists at configure time and does not vary with the set.** Ninja dyndep adds
+  inputs and outputs to an edge that already exists, it cannot create one. A design with one build
+  edge per set member has decided the set at configure time whatever else it does.
+
+A build-time reader that stands in for other edges inherits their dependencies through
+`FileNode.wait_for()` in `pcons/core/node.py`, so a generated input reaches it through the node
+graph rather than through an existence check.
+
+**Known violation:** `pcons/tools/cargo.py` globs `**/*.rs` at configure time to list cargo's
+inputs. Same fix: a depfile written after cargo runs.
+
 ### Error Handling
 > **Status: Implemented** - Custom error hierarchy with source location tracking.
 

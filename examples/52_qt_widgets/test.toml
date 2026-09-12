@@ -10,9 +10,9 @@ timeout = 180
 
 expected_outputs = [
     "build/qt.qt_widgets/src/moc_mainwindow.cpp",
+    "build/qt.qt_widgets/mocs_compilation.cpp",
     "build/qt.qt_widgets/src/ui_mainwindow.h",
     "build/qt.qt_widgets/qrc_resources.cpp",
-    "build/qt.qt_widgets/scan.ok",
     "build/qt_widgets",
 ]
 

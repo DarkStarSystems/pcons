@@ -7,9 +7,13 @@ tool paths and the generated build.ninja is inspected directly.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from pcons.core.node import FileNode
 from pcons.core.project import Project
+from pcons.toolchains.qt.builders import _declare_implicit_output
 
 from ._qt_test_utils import (
     cxx_env_with_qt,
@@ -17,6 +21,18 @@ from ._qt_test_utils import (
     generate_ninja,
     qt_only_env,
 )
+
+
+def _automoc_spec(tmp_path, target="app"):
+    """The automoc spec generation wrote for *target*, as a dict.
+
+    What the moc set is gets decided at build time; what configure still
+    decides — the source list, the include dirs, moc's flags — lands here.
+    """
+    import json
+
+    path = tmp_path / "build" / f"qt.{target}" / "automoc.json"
+    return json.loads(path.read_text())
 
 
 def _make_project(tmp_path, monkeypatch):
@@ -146,34 +162,27 @@ class TestQtProgram:
         )
         content = generate_ninja(project).replace("\\", "/")
 
-        # automoc: window.h found via #include scan -> moc edge.
-        assert "build qt.app/src/moc_window.cpp: qt_moccmd" in content
+        assert "build qt.app/mocs_compilation.cpp: qt_automoccmd" in content
         # autouic / autorcc edges.
         assert "build qt.app/src/ui_form.h: qt_uiccmd" in content
         assert "build qt.app/qrc_res.cpp: qt_rcccmd" in content
         # Generated moc/qrc TUs compile into the target.
-        assert "moc_window.cpp.o" in content
+        assert "mocs_compilation.cpp.o" in content
         assert "qrc_res.cpp.o" in content
-        # Scan staleness guard with depfile.
-        assert "build qt.app/scan.ok: qt_scancheckcmd" in content
-        assert "scan-manifest.json" in content
         # Generated-header dir is on the compile include path.
         assert "qt.app" in content
         # ui_form.h is an implicit dep of compiles (waits before compiling).
         assert "ui_form.h" in content
 
-    def test_scan_manifest_written(self, tmp_path, monkeypatch):
+    def test_automoc_spec_written(self, tmp_path, monkeypatch):
         project = _make_project(tmp_path, monkeypatch)
         _widgets_tree(tmp_path)
         env = cxx_env_with_qt(project)
-        project.QtProgram("app", env, sources=["src/main.cpp"])
-        manifest = tmp_path / "build" / "qt.app" / "scan-manifest.json"
-        assert manifest.exists()
-        import json
-
-        data = json.loads(manifest.read_text())
-        assert data["target"] == "app"
-        assert any(p.endswith("window.h") for p in data["moc_headers"])
+        project.QtProgram("app", env, sources=["src/main.cpp", "src/window.h"])
+        spec = _automoc_spec(tmp_path)
+        assert spec["target"] == "app"
+        assert any(p.endswith("main.cpp") for p in spec["sources"])
+        assert any(p.endswith("window.h") for p in spec["sources"])
 
     def test_automoc_off(self, tmp_path, monkeypatch):
         project = _make_project(tmp_path, monkeypatch)
@@ -181,27 +190,16 @@ class TestQtProgram:
         env = cxx_env_with_qt(project)
         project.QtProgram("app", env, sources=["src/main.cpp"], automoc=False)
         content = generate_ninja(project)
-        assert "moc_window" not in content
-        assert "scan.ok" not in content
+        assert "qt_automoccmd" not in content
+        assert "mocs_compilation" not in content
+        assert not (tmp_path / "build" / "qt.app" / "automoc.json").exists()
 
     def test_no_moc_exclusion(self, tmp_path, monkeypatch):
         project = _make_project(tmp_path, monkeypatch)
         _widgets_tree(tmp_path)
         env = cxx_env_with_qt(project)
         project.QtProgram("app", env, sources=["src/main.cpp"], no_moc=["src/window.h"])
-        content = generate_ninja(project)
-        assert "moc_window" not in content
-
-    def test_missing_moc_include_is_hard_error(self, tmp_path, monkeypatch):
-        from pcons.toolchains.qt import MocIncludeError
-
-        project = _make_project(tmp_path, monkeypatch)
-        (tmp_path / "src" / "bad.cpp").write_text(
-            "#include <QObject>\nclass B : public QObject { Q_OBJECT };\n"
-        )
-        env = cxx_env_with_qt(project)
-        with pytest.raises(MocIncludeError, match=r'#include "bad\.moc"'):
-            project.QtProgram("app", env, sources=["src/bad.cpp"])
+        assert any(p.endswith("window.h") for p in _automoc_spec(tmp_path)["no_moc"])
 
     def test_requires_qt_toolchain(self, tmp_path, monkeypatch):
         from pcons.toolchains import find_c_toolchain
@@ -227,12 +225,10 @@ class TestMocSeesTargetFlags:
         (tmp_path / "inc").mkdir()
         env.cxx.includes.append("inc")
         project.QtProgram("app", env, sources=["src/main.cpp"])
-        content = generate_ninja(project).replace("\\", "/")
-        moc_line = next(
-            line for line in content.splitlines() if "/fake/bin/moc" in line
-        )
-        assert "-DMYFEATURE=1" in moc_line
-        assert "inc" in moc_line
+        generate_ninja(project)
+        moc_args = " ".join(_automoc_spec(tmp_path)["moc_args"]).replace("\\", "/")
+        assert "-DMYFEATURE=1" in moc_args
+        assert "inc" in moc_args
 
     def test_scanner_sees_link_targets_public_include_dirs(self, tmp_path, monkeypatch):
         # The modern multi-library layout: Q_OBJECT header lives in a
@@ -251,8 +247,10 @@ class TestMocSeesTargetFlags:
         mylib = project.StaticLibrary("mylib", env, sources=["src/widget.cpp"])
         mylib.public.include_dirs.append(libinc)
         project.QtProgram("app", env, sources=["src/main.cpp"], link=[mylib])
-        content = generate_ninja(project).replace("\\", "/")
-        assert "moc_engine.cpp" in content
+        generate_ninja(project)
+        spec = _automoc_spec(tmp_path)
+        wanted = Path("libs") / "mylib" / "inc"
+        assert any(Path(p).parts[-3:] == wanted.parts for p in spec["include_dirs"])
 
     def test_header_in_sources_scanned_not_linked(self, tmp_path, monkeypatch):
         project = _make_project(tmp_path, monkeypatch)
@@ -260,7 +258,7 @@ class TestMocSeesTargetFlags:
         env = cxx_env_with_qt(project)
         project.QtProgram("app", env, sources=["src/main.cpp", "src/window.h"])
         content = generate_ninja(project).replace("\\", "/")
-        assert "moc_window.cpp" in content
+        assert any(p.endswith("window.h") for p in _automoc_spec(tmp_path)["sources"])
         # The header itself must not appear as a link input.
         link_line = next(
             line
@@ -456,3 +454,16 @@ class TestTargetEnvironment:
         assert on_host.qualified_name == "qtb::assets@host"
         assert on_cross.qualified_name == "qtb::assets@cross"
         assert len(project.environments) == before
+
+
+class TestImplicitOutputs:
+    """A second output only exists on an edge that already writes one."""
+
+    def test_a_node_no_edge_produced_declares_nothing(self):
+        source = FileNode("src/thing.h")
+        metatypes = FileNode("build/qt.app/app_metatypes.json")
+
+        _declare_implicit_output(source, metatypes)
+
+        assert source._build_info is None
+        assert metatypes._build_info is None

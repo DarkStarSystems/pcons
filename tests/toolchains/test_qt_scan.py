@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from pcons.toolchains.qt.scan import MocIncludeError, QtScanner
+from pcons.toolchains.qt.scan import MocIncludeError, QtScanner, output_rel_dir
 
 
 @pytest.fixture
@@ -232,3 +234,19 @@ class TestIncludeCycle:
         scanner = QtScanner(tree)
         scan = scanner.scan_target_sources([tree / "src" / "cyc.cpp"])
         assert [p.name for p in scan.moc_headers] == ["a.h"]
+
+
+class TestOutputLayout:
+    """Where a generated file lands: its source's directory, mirrored."""
+
+    def test_a_project_source_mirrors_its_relative_directory(self, tmp_path):
+        header = tmp_path / "src" / "ui" / "widget.h"
+        assert output_rel_dir(header, tmp_path) == ("src", "ui")
+
+    def test_a_source_outside_the_project_mirrors_its_absolute_path(self, tmp_path):
+        outside = tmp_path.parent / "vendor" / "lib" / "thing.h"
+
+        parts = output_rel_dir(outside, tmp_path)
+
+        assert parts[-2:] == ("vendor", "lib")
+        assert not Path(*parts).is_absolute()

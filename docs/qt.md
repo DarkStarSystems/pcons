@@ -33,16 +33,19 @@ pcons deliberately fixes the well-known pain points of CMake + Qt:
 
 | CMake + Qt | pcons |
 |---|---|
-| Opaque `<target>_autogen` step; mystery rebuilds | Every moc/uic/rcc run is a plain, visible ninja edge (`ninja -t commands`) |
-| `mocs_compilation.cpp` aggregate: touching one moc'ed header recompiles all moc output | Each `moc_*.cpp` is its own translation unit |
-| Build-time source scanning on every build | Scan happens once, when pcons generates; builds run zero scanning |
-| Silent no-op when a `.cpp` has `Q_OBJECT` but no `#include "foo.moc"` | Hard error at generate time, with the exact line to add |
-| Adding `Q_OBJECT` without re-running CMake → undefined-vtable link errors | A cheap guard edge fails the build with *"re-run pcons"* naming the file |
+| Opaque `<target>_autogen` step; mystery rebuilds | One `qt_automoccmd` edge per target, plus a plain visible edge per uic/rcc run (`ninja -t commands`) |
+| AUTOMOC re-parses the target's sources on every build | The automoc edge runs only when its depfile says a scanned file or directory changed |
+| Line-anchored regex misses `class C : public QObject { Q_OBJECT };` | Comments and string literals are stripped first, so the macro is found anywhere |
+| Silent no-op when a `.cpp` has `Q_OBJECT` but no `#include "foo.moc"` | Hard error, with the exact line to add |
 
-Incremental correctness comes from the tools' own depfiles: moc runs with
-`--output-dep-file` (re-runs when any transitively-included header
-changes), rcc with `--depfile` (re-runs when a file listed in the .qrc
-changes), and uic is a pure `input → output` rule.
+pcons keeps CMake's one good idea here — a single `mocs_compilation.cpp`
+translation unit — because the moc set has to be decided while the build
+runs, and a set of ninja edges cannot be.
+
+Incremental correctness comes from the tools' own depfiles: automoc rolls
+the scan's reads and every moc `--output-dep-file` into one depfile, rcc
+uses `--depfile` (re-runs when a file listed in the .qrc changes), and uic
+is a pure `input → output` rule.
 
 ## Discovery: find_qt()
 
@@ -134,28 +137,40 @@ They are `app@host` and `app@mcu`, in separate build directories.
 
 `QtProgram` scans the target's sources, their same-basename headers, and
 the closure of project-local `#include "..."` files for `Q_OBJECT`,
-`Q_GADGET`, and `Q_NAMESPACE` — at **generate time**, mtime-cached, never
-during the build. Unlike CMake's line-anchored regex, declarations like
-`class C : public QObject { Q_OBJECT };` on one line are found too.
+`Q_GADGET`, and `Q_NAMESPACE`. Unlike CMake's line-anchored regex,
+declarations like `class C : public QObject { Q_OBJECT };` on one line are
+found too.
 
-Because the scan runs when pcons runs, a header that *gains* `Q_OBJECT`
-afterward would be missed — so each Qt target also gets a tiny
-`scan.ok` build edge whose depfile covers every scanned file and
-directory. When the scan result would change, the build stops:
+Which files need moc is a fact about their *contents*, so the scan runs
+**at build time**, in one `qt_automoccmd` edge per target. That edge runs
+the scan, runs moc, and writes one aggregate translation unit,
+`build/qt.<target>/mocs_compilation.cpp`, which `#include`s every
+`moc_*.cpp` it produced. Its depfile names every file read and every
+directory listed, so ninja re-runs it exactly when the answer could
+change: a header that gains `Q_OBJECT`, or a new header appearing in a
+scanned directory, is picked up by `ninja` alone with no pcons re-run.
 
+A **generated** `Q_OBJECT` header therefore works like any other input:
+
+```python
+gen = env.Command(target=..., source=..., command=[...])
+app = project.QtProgram("myapp", env, sources=["main.cpp"], link=[qt.Core])
+app.depends(gen)  # orders the automoc edge after the generator
 ```
-pcons Qt: the moc scan for target 'myapp' is out of date:
-  src/newthing.h now needs moc (header gained a Qt macro)
 
-Re-run pcons to regenerate the build files.
-```
+The scan is mtime-cached in `build/qt.<target>/qt-scan-cache.json`, so a
+re-run over an unchanged tree reads nothing. Ninja does not know the
+individual `moc_*.cpp` and `*.moc` files, so the automoc edge owns them:
+it deletes the ones it no longer produces, and leaves the aggregate TU
+untouched when the moc set has not changed, so an ordinary header edit
+costs one moc run and one recompile.
 
 Escape hatches: `automoc=False`, `autouic=False`, `autorcc=False`, and
 `no_moc=["src/weird.h"]`.
 
 A `.cpp` file with `Q_OBJECT` needs its moc output included at the end
-of the file (`#include "myfile.moc"`); pcons errors at generate time if
-the include is missing.
+of the file (`#include "myfile.moc"`); the automoc edge fails the build
+if the include is missing.
 
 ## Resources without .qrc XML
 
@@ -207,7 +222,7 @@ generated automatically for GCC/Clang).
 | QtProgram("app", ...) codegen | `build/qt.app/<source-relative-dir>/` |
 | Low-level builders (default) | `build/qt.gen/<source-relative-dir>/` |
 | QtResources | `build/qt.res/` |
-| Scan manifest + stamp | `build/qt.app/scan-manifest.json`, `scan.ok` |
+| automoc spec + aggregate TU | `build/qt.app/automoc.json`, `mocs_compilation.cpp` |
 
 ## Current limitations
 
@@ -226,7 +241,7 @@ Worth knowing before porting a large CMake project:
 - **Prebuilt Qt-based SDKs:** the automoc scan follows includes into
   directories you list in `env.cxx.includes` — including out-of-project
   ones. Headers from a *prebuilt* Qt-based SDK reached that way would
-  get spurious moc edges; exclude them with `no_moc=[...]`. (Libraries
+  get moc'ed spuriously; exclude them with `no_moc=[...]`. (Libraries
   found via `find_package`/`find_qt` are excluded automatically.)
 - **pcons cannot see what the target Qt was built with.** moc, uic and
   rcc run on the build machine, from the host Qt, and their output is
@@ -253,7 +268,8 @@ Worth knowing before porting a large CMake project:
   big-resource two-pass rcc, lupdate's automatic per-target source
   collection, and Designer plugin builds. Branch switches that change
   the source list need a pcons re-run (there is no CMake-style
-  self-regeneration yet); the scan guard reports this for moc changes.
+  self-regeneration yet). A source *gaining* or *losing* `Q_OBJECT` does
+  not: the automoc edge notices that on its own.
 
 ## Platform notes
 
