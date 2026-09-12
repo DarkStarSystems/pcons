@@ -14,7 +14,11 @@ there are real-world cases they could not express. Runtime scanners
 allow fully dynamic fine-grain multi-phase builds including generated
 source files, with proper dependency management throughout. Most of
 this now requires the Ninja back-end because Makefiles don't have the
-machinery to support this kind of dynamic dependencies.
+machinery to support this kind of dynamic dependency.
+
+This release also includes many other new features and lots of fixes,
+including a few unavoidable breaking changes, hopefully minor. Please
+read the whole changelog!
 
 ### Added
 
@@ -24,12 +28,11 @@ machinery to support this kind of dynamic dependencies.
   can resolve it. On Linux the archives reach GNU ld wrapped in
   `-Wl,--start-group ... -Wl,--end-group`; Apple's ld and MSVC's link
   rescan archives on their own and get them as they are. Object libraries
-  and header-only libraries may be in such a cycle too. A cycle through a
-  program or shared library is still an error, and the message now says
-  which target is the problem. See `examples/85_static_lib_cycle`. (#120)
-- **A generate names the variant it configured**: `Generated build files
+  and header-only libraries may be in such a cycle too.
+  See `examples/85_static_lib_cycle`. (#120)
+- **Pcons now prints the variant it's using**: `Generated build files
   for variant debug` on the terminal, or one entry per environment when
-  they differ. Nothing is printed when no environment set a variant. (#125)
+  they differ. (#125)
 - **The installer helpers now take `depends=`.** `create_pkg`,
   `create_component_pkg`, `create_dmg` and `create_msix` staged their
   sources with an internally-generated `Install`, so a directory source
@@ -51,20 +54,16 @@ machinery to support this kind of dynamic dependencies.
   pcons knows the file. Include and library directories are unaffected. (#150)
 - **A `release-fastest` variant**: the compiler's highest optimization level
   that doesn't change results (`-O3`; `/O2 /Ob3` on MSVC), realized per
-  toolchain like the other variants and never enabling fast-math. (#153)
+  toolchain like the other variants. (#153)
 - **`env.clone(name=...)`** names a clone at creation. Named environments
-  are how two targets may share a name, and a clone had no way to get one
-  but assignment afterwards. (#147)
-- **`get_var()` reads a list.** With a list default, a comma-separated
+  are how two targets may share a target name. (#147)
+- **`get_var()` supports list args.** With a list default, a comma-separated
   value becomes a list: `get_var("PORTS", ["ofx"])` returns `["ofx", "ae"]`
   for `PORTS=ofx,ae`. `type=list` works without a default. (#155)
 - **`OverlayDir`: merge several source trees into one directory.** Each
   tree's contents land in the destination keeping their relative paths, the
   later source wins a shared path, and `exclude=` drops globs matched against
-  each source root. One build-time edge decides membership, so a file added,
-  removed or edited anywhere under a source tree restages on the next build
-  without re-running pcons, and a file another edge generates into a tree is
-  staged by the build that writes it. See `examples/78_overlay_dirs`. (#159)
+  each source root. See `examples/78_overlay_dirs`. (#159)
 - **`env.use_clang_tidy()`**: run clang-tidy alongside every C and C++
   compile, with the compile's own flags, and fail the build on a diagnostic
   the way CMake's `CXX_CLANG_TIDY` does. Composes with `use_compiler_cache()`.
@@ -100,7 +99,7 @@ machinery to support this kind of dynamic dependencies.
   in the build script, which reaches everything. `examples/73_command_env`.
   (#109)
 
-- **Multiple environments in one project: each decides where its targets
+- **Multiple environments in one project: each can decide where its targets
   are built.** A firmware image and the host tools that build it, or a cross
   build and a host build, can now share one script and even one target name
   without their outputs colliding. Nothing changes for a project that sets
@@ -108,18 +107,14 @@ machinery to support this kind of dynamic dependencies.
   - `env.build_prefix` puts everything an environment writes (objects, link
     outputs, `env.Command()` targets) under `build/<prefix>/`. Below that,
     `env.runtime_directory`, `env.library_directory` and
-    `env.archive_directory` place programs, shared libraries and static
-    libraries by kind, like the CMake variables. All four are relative to the
-    build directory and empty by default. The toolchain still decides the
-    `lib` prefix and the `.a` / `.lib` suffix, so these are directories, not
-    a replacement for `output_prefix`.
+    `env.archive_directory` can be used to place programs, shared libraries and static
+    libraries by kind, like the CMake variables. All four dirs are relative to the
+    build directory and empty by default.
   - Two targets may share a name when both environments are named and their
     `build_prefix` differs. Where a target is looked up by its string name
     rather than held as a `Target`, the name can carry the environment to
     say which one: `<target>@<env>`, as in `pcons build common@mcu`,
     `project.get_target("common@mcu")`, or the full form `sub::common@mcu`.
-    A bare name that matches targets in several environments is an error
-    rather than a silent pick.
   - `add_subdirectory(dir, env=...)` builds an included directory in that
     environment. Include the same directory twice with two environments to
     build it for both; the included script needs no change, since its
@@ -140,11 +135,10 @@ machinery to support this kind of dynamic dependencies.
   `examples/75_multi_env` show all of this. (#96, #118)
 
 - **A cross build's outputs are named and installed for the platform it
-  targets.** `env.target` is a `Platform` derived from the cross preset's
-  triple, or the host when there is no preset. The toolchain consults it, so
+  targets.** New attribute `env.target` is a `Platform` derived from the cross preset's
+  triple, or the host when there is no preset. Toolchains consult it, so
   a mingw cross produces `foo.exe` and `foo.dll`, and a cross-built DLL
-  installs beside its executable rather than into `lib`. A project that set
-  `output_suffix` per target to get this can drop it.
+  installs beside its executable rather than into `lib`. 
   - `android()` takes `stl=` (`"c++_shared"` by default, the NDK's own
     default; also `"c++_static"` and `"none"`).
   - Linking Qt for Android works: its libraries carry the ABI in their names
@@ -158,18 +152,11 @@ machinery to support this kind of dynamic dependencies.
 ### Changed
 
 - **The `debug` and `relwithdebinfo` variants compile with `/Z7` on MSVC and
-  clang-cl**, not `/Zi`. `/Zi` has every parallel `cl.exe` write the same
-  compiler PDB, and most of them fail with C1041 unless `/FS` or a
-  per-target `/Fd` is added. `/Z7` keeps the debug info in each object,
-  which is also what compiler caches need. The linker's `/DEBUG` produces
-  the PDB as before.
+  clang-cl**, not `/Zi`. This is the modern standard.
 - **MSVC's C++ compiler gets `/Zc:__cplusplus` by default.** Without it
-  cl.exe reports `__cplusplus` as `199711L` whatever `/std:` says, so
-  headers that check the standard version take their C++98 branch.
+  cl.exe reports `__cplusplus` as `199711L` whatever `/std:` says (!!).
 - **Breaking:** `HeaderOnlyLibrary(name, env, ...)` takes the environment
-  second, like every other builder, and `include_dirs` is keyword-only. It
-  was `(name, include_dirs)`, so `HeaderOnlyLibrary("h", env)` tracebacked
-  inside pcons. `env` may still be left out. (#124)
+  second, like every other builder, and `include_dirs` is now keyword-only. (#124)
 - **`ConanFinder.sync_profile()` takes its `build_type` from the environment's
   variant** when none is passed: `debug` is `Debug`, the release flavors are
   `Release`, `relwithdebinfo` and `minsizerel` their Conan names. It used to
@@ -180,9 +167,7 @@ machinery to support this kind of dynamic dependencies.
   so every part of pcons that walks the dependency graph sees the same
   graph. Several fixes in this release were each one place that did not
   (#104, #111, #129, #139). What changes for a build script:
-  - **Breaking:** `add_dependency()` is gone; write `depends()`. It had
-    become the same edge, and on an install, archive or `env.Command`
-    target it used to be accepted and do nothing.
+  - **Breaking:** `add_dependency()` is gone; write `depends()`. 
   - Each step in a builder decides how tightly it holds a dependency.
     A compile with a depfile becomes order-only: a generated header it
     doesn't include won't recompile it, and neither does a linker
@@ -193,12 +178,7 @@ machinery to support this kind of dynamic dependencies.
     that shows much of this, including one input a depfile can't see.
     For a file a step reads but never reports (a response file, a
     sanitizer ignore-list), `depends(file, on_change=True)` makes every
-    step rerun when it changes; `on_change=False` makes it exist-first only.
-  - A linked target's dependencies reach its consumers uniformly: the
-    generators, generated sources and files a library `depends()` on order
-    the compiles of every target that links it, whether the library is
-    compiled, header-only or an imported wrapper, and its public usage
-    requirements propagate.
+    step rerun when it changes (standard implicit dependency); `on_change=False` makes it exist-first only (order-only dependency).
   - **Breaking:** `depends(..., propagate=False)` is gone. It chose which
     steps a dependency reached; the rule above makes that choice automatic per step.
   - A dependency cycle through `depends()` is reported by the build-order
@@ -307,17 +287,13 @@ machinery to support this kind of dynamic dependencies.
 - **clang-cl's `debug` and `relwithdebinfo` variants link with `/DEBUG`**, so
   the build produces a PDB. Only MSVC added the linker flag before; the
   compiled-in debug info went nowhere on clang-cl.
-- **MSVC and clang-cl variants select the CRT**: `/MDd` for `debug`, `/MD`
-  for the others. No variant passed one before, so cl.exe's default static
-  release CRT met the debug variant's `_DEBUG`, which selects the debug STL,
-  and links failed on `_free_dbg` and friends. The dynamic CRT is also what
-  Conan packages are built against.
+- **MSVC and clang-cl variants select the CRT**: `/MDd` for `debug`, `/MD` for
+  the others. Previously cl.exe's default static release CRT was used,
+  even with the debug variant's `_DEBUG`, which selects the debug STL.
+  The dynamic CRT is also what Conan packages are built against.
 - **The Conan profile for clang-cl** now carries the MSVC runtime settings
   (`compiler.runtime`, `runtime_type`, `runtime_version`), no `libcxx`, and
-  the conf that makes Conan build with clang-cl and Ninja. It used to
-  describe clang-cl as GNU clang with `libstdc++11`, so Conan chose MinGW
-  Makefiles and `-m64` and every source build failed. A clang targeting
-  MinGW keeps the GNU profile and gets a warning.
+  the conf that makes Conan build with clang-cl and Ninja. 
 - `link("/opt/vendor/lib/libfoo.a")` is refused at generate time with a
   message saying what to do; the string became `-l/opt/vendor/lib/libfoo.a`
   and failed inside the linker. (#123)
@@ -384,7 +360,7 @@ machinery to support this kind of dynamic dependencies.
   things. `env.name = ...` after creation now refuses a taken name, as the
   constructor does. (#118)
 - `target.public.include_dirs += ["inc"]` (and `+=` on any other usage
-  requirement list) threw away what it added and said nothing. Only `+=`
+  requirement list) silently threw away what it added. Only `+=`
   was affected; `.append()` and `.extend()` always worked. (#108)
 - `depends()` on an interface target such as `HeaderOnlyLibrary` was
   accepted and silently dropped. The target builds nothing of its own, so
