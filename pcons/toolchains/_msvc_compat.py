@@ -202,15 +202,19 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """Return flags whose argument is a path."""
         return self.PATH_FLAGS
 
-    # Variant flags per build type (compile_flags, defines).
+    # Variant flags per build type (compile_flags, defines). Every variant
+    # picks the dynamic CRT, debug or release to match its defines: cl.exe's
+    # default is the static release CRT, which with _DEBUG defined pairs
+    # with the debug STL and fails to link. Dynamic is also what CMake and
+    # Conan (compiler.runtime=dynamic) build with, so packages match.
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
-        "debug": (["/Od", "/Zi"], ["DEBUG", "_DEBUG"]),
-        "release": (["/O2"], ["NDEBUG"]),
+        "debug": (["/Od", "/Zi", "/MDd"], ["DEBUG", "_DEBUG"]),
+        "release": (["/O2", "/MD"], ["NDEBUG"]),
         # /O2 is already "maximize speed"; /Ob3 (VS 2019+) adds the more
         # aggressive inlining it leaves out. Nothing that changes results.
-        "release-fastest": (["/O2", "/Ob3"], ["NDEBUG"]),
-        "relwithdebinfo": (["/O2", "/Zi"], ["NDEBUG"]),
-        "minsizerel": (["/O1"], ["NDEBUG"]),
+        "release-fastest": (["/O2", "/Ob3", "/MD"], ["NDEBUG"]),
+        "relwithdebinfo": (["/O2", "/Zi", "/MD"], ["NDEBUG"]),
+        "minsizerel": (["/O1", "/MD"], ["NDEBUG"]),
     }
 
     def _cxx_standard_flag(self, standard: int) -> str:

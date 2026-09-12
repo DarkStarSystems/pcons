@@ -319,4 +319,30 @@ class TestClangClVariants:
 
         assert "/O2" in env.cc.flags
         assert "/Ob3" in env.cc.flags
+        assert "/MD" in env.cc.flags
         assert "NDEBUG" in env.cxx.defines
+
+    @pytest.mark.parametrize(
+        ("variant", "crt"),
+        [("debug", "/MDd"), ("release", "/MD"), ("relwithdebinfo", "/MD")],
+    )
+    def test_variant_selects_matching_dynamic_crt(
+        self, test_project, variant: str, crt: str
+    ):  # noqa: F811
+        """A variant names its CRT: cl.exe's default static release CRT
+        with the debug variant's _DEBUG pairs with the debug STL and fails
+        to link, and Conan packages are built against the dynamic one."""
+        from pcons.toolchains.msvc import MsvcToolchain
+
+        env = Environment()
+        for tool in ("cc", "cxx"):
+            cfg = env.add_tool(tool)
+            cfg.set("cmd", "cl.exe")
+            cfg.set("flags", [])
+            cfg.set("defines", [])
+
+        MsvcToolchain().apply_variant(env, variant)
+
+        assert crt in env.cc.flags
+        assert crt in env.cxx.flags
+        assert len([f for f in env.cxx.flags if f.startswith("/M")]) == 1

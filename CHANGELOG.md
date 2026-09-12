@@ -276,6 +276,11 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- **MSVC and clang-cl variants select the CRT**: `/MDd` for `debug`, `/MD`
+  for the others. No variant passed one before, so cl.exe's default static
+  release CRT met the debug variant's `_DEBUG`, which selects the debug STL,
+  and links failed on `_free_dbg` and friends. The dynamic CRT is also what
+  Conan packages are built against.
 - **The Conan profile for clang-cl** now carries the MSVC runtime settings
   (`compiler.runtime`, `runtime_type`, `runtime_version`), no `libcxx`, and
   the conf that makes Conan build with clang-cl and Ninja. It used to
