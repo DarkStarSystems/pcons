@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -1187,7 +1187,37 @@ def _generate(
     if exit_code != 0:
         return exit_code, []
 
-    return 0, [p for p in _projects if p.is_top_level]
+    tops = [p for p in _projects if p.is_top_level]
+    variants = _variants_in_use(tops)
+    if variants:
+        click.echo(variants)
+    return 0, tops
+
+
+def _variants_in_use(projects: Sequence[Any]) -> str:
+    """One line saying what a generate configured, for the terminal.
+
+    Coming back to a build directory, nothing else says what it builds.
+    Empty when no environment set a variant, so a script that never calls
+    ``set_variant`` prints nothing. Several environments with different
+    variants are listed with the environment that holds each.
+    """
+    seen: dict[str, list[str]] = {}
+    for project in projects:
+        for env in getattr(project, "environments", []):
+            variant = getattr(env, "variant", None)
+            if not variant or variant == "default":
+                continue
+            seen.setdefault(variant, []).append(env.name or "")
+    if not seen:
+        return ""
+    if len(seen) == 1:
+        return f"Generated build files for variant {next(iter(seen))}"
+    parts = []
+    for variant, envs in seen.items():
+        named = ", ".join(n for n in envs if n)
+        parts.append(f"{variant} ({named})" if named else variant)
+    return "Generated build files for variants " + ", ".join(parts)
 
 
 def _watch(

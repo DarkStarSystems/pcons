@@ -732,7 +732,7 @@ app.link_private(lib)
 | `Program()` | Executable | Applications, tools |
 | `StaticLibrary()` | .a / .lib | Code reuse, no runtime dependency |
 | `SharedLibrary()` | .so / .dylib / .dll | Plugins, shared code |
-| `HeaderOnlyLibrary()` | None | Template libraries |
+| `HeaderOnlyLibrary(name, env)` | None | Template libraries |
 
 Note that, like CMake, targets have public and private libs and include_dirs. Public includes and libs are propagated to other targets that use this one.
 

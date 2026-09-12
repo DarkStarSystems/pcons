@@ -8030,3 +8030,54 @@ class TestTheCacheIsOpenedOnce:
         assert after is not before
         assert after.get("vars") == {"URL": "from-cli"}
         assert before.get("vars") is None
+
+
+class TestGenerateNamesTheVariant:
+    """A generate says which variant it configured (#125)."""
+
+    def test_the_variant_is_named(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\n"
+            "project = Project('v')\n"
+            "env = project.Environment()\n"
+            "env.set_variant('debug')\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("generate")
+        assert result.exit_code == 0
+        assert "Generated build files for variant debug" in result.output
+
+    def test_differing_environments_are_listed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\n"
+            "project = Project('v')\n"
+            "host = project.Environment(name='host')\n"
+            "host.set_variant('debug')\n"
+            "mcu = project.Environment(name='mcu')\n"
+            "mcu.set_variant('release')\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("generate")
+        assert result.exit_code == 0
+        assert (
+            "Generated build files for variants debug (host), release (mcu)"
+            in result.output
+        )
+
+    def test_no_variant_prints_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\nproject = Project('v')\nproject.Environment()\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("generate")
+        assert result.exit_code == 0
+        assert "Generated" not in result.output

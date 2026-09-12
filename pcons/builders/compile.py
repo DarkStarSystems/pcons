@@ -248,14 +248,22 @@ class HeaderOnlyLibraryBuilder:
     def create_target(
         project: Project,
         name: str,
-        include_dirs: list[str | Path] | None = None,
+        env: Environment | None = None,
+        *,
+        include_dirs: Sequence[str | Path] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a HeaderOnlyLibrary target.
 
+        The signature matches the other builders, ``(name, env, ...)``, so
+        the call reads the same. There is no compile step, so *env* only
+        says which environment the target belongs to, which is what tells
+        two same-named targets apart (``name@env``).
+
         Args:
             project: The project to add the target to.
             name: Target name (e.g., "my_headers").
+            env: The environment the target belongs to, optional.
             include_dirs: Include directories to propagate to dependents.
             defined_at: Source location where this was defined (auto-captured).
 
@@ -267,6 +275,7 @@ class HeaderOnlyLibraryBuilder:
             target_type="interface",
             defined_at=defined_at or get_caller_location(),
             project=project,
+            env=env,
         )
         target._builder_name = "HeaderOnlyLibrary"
 

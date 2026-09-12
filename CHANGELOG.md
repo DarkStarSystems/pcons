@@ -18,6 +18,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **A generate names the variant it configured**: `Generated build files
+  for variant debug` on the terminal, or one entry per environment when
+  they differ. Nothing is printed when no environment set a variant. (#125)
 - **The installer helpers now take `depends=`.** `create_pkg`,
   `create_component_pkg`, `create_dmg` and `create_msix` staged their
   sources with an internally-generated `Install`, so a directory source
@@ -145,6 +148,10 @@ machinery to support this kind of dynamic dependencies.
 
 ### Changed
 
+- **Breaking:** `HeaderOnlyLibrary(name, env, ...)` takes the environment
+  second, like every other builder, and `include_dirs` is keyword-only. It
+  was `(name, include_dirs)`, so `HeaderOnlyLibrary("h", env)` tracebacked
+  inside pcons. `env` may still be left out. (#124)
 - **`ConanFinder.sync_profile()` takes its `build_type` from the environment's
   variant** when none is passed: `debug` is `Debug`, the release flavors are
   `Release`, `relwithdebinfo` and `minsizerel` their Conan names. It used to
@@ -269,6 +276,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- `link("/opt/vendor/lib/libfoo.a")` is refused at generate time with a
+  message saying what to do; the string became `-l/opt/vendor/lib/libfoo.a`
+  and failed inside the linker. (#123)
 - `project.Command()` takes `tool=` like `env.Command()` does; it raised
   "unexpected keyword argument" before.
 - `create_macos_bundle()` and `create_flat_bundle()` return a target that
