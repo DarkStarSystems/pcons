@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.generators.ninja."""
 
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -53,6 +55,86 @@ class TestNinjaGenerator:
         content = (tmp_path / "out" / "build.ninja").read_text()
         # builddir is always "." since the ninja file is inside the build directory
         assert "builddir = ." in content
+
+    @pytest.mark.parametrize("reference", ["${TARGET}", "$TARGET"])
+    def test_embedded_target_in_link_flag_reaches_generated_command(
+        self, tmp_path, gcc_toolchain, reference
+    ):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+        app = project.Program("app", env, sources=["main.c"])
+        app.private.link_flags.append(f"-Wl,-Map={reference}.map")
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        # A link has one output and defines no $target_N, so the flag rides
+        # on $out and the rule stays shared between programs.
+        assert "-Wl,-Map=$out.map" in content
+        assert "$target_0" not in content
+        assert "TargetPath(" not in content
+
+        ninja = shutil.which("ninja")
+        if ninja is None:
+            pytest.skip("ninja not installed")
+        dry_run = subprocess.run(
+            [ninja, "-C", str(tmp_path / "build"), "-n", "-v"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        program = app.output_nodes[0].path.name  # app, or app.exe on Windows
+        assert f"-Wl,-Map={program}.map" in dry_run
+        assert "-Map=.map" not in dry_run
+
+    def test_embedded_target_does_not_rewrite_bare_multi_output_target(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target=["a.txt", "b.txt"],
+            source=[],
+            command=["tool", "-o", "$TARGET", "-Map=${TARGET}.map"],
+        )
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        command = next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("command = tool ")
+        )
+        assert "tool -o $out" in command
+        assert command.count("-Map=$target_") == 2
+        assert "$target_0.map" in command
+        assert "$target_1.map" in command
+
+    def test_embedded_source_does_not_rewrite_bare_multi_input_source(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target="out.txt",
+            source=["a.txt", "b.txt"],
+            command=["tool", "-i", "$SOURCE", "--dep=${SOURCE}.d"],
+        )
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        command = next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("command = tool ")
+        )
+        assert "tool -i $in" in command
+        assert command.count("--dep=$source_") == 2
 
 
 class TestNinjaBuildStatements:

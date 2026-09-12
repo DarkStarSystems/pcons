@@ -2255,6 +2255,8 @@ First in the list, that token is the program, spelled to run just as `$TOOL` is.
 
 Text attached to a form that expands to *several* paths repeats on each of them, which is what such a flag always means: `-i${SOURCES[1:]}` becomes `-ione.def -itwo.def`, not one `-i` welded to the first path.
 
+An attached substitution does not change any other substitution in the command. For a command with multiple outputs, `-o $TARGET -Map=${TARGET}.map` still passes every output after `-o`, then emits one `-Map=` argument per output. A compile or link has one output, so the same form in a flag names it: `app.private.link_flags += ["-Wl,-Map=${TARGET}.map"]` puts the map file next to the program. One substitution per argument: `${SOURCE}` and `${TARGET}` in the same token is an error.
+
 A slice is the right tool when the input count is a property of the project rather than of the rule — adding a `.def` file above changes nothing in the build script. See `examples/59_codegen_sources`, which also shows why a glob needs `project.add_configure_dependency()` on the directory it read.
 
 Use `$SRCDIR` to reference files in the source tree that aren't listed as sources. Since the build runs from the build directory, relative paths to source-tree files won't resolve correctly without this:

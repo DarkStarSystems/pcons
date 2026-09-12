@@ -36,7 +36,7 @@ from __future__ import annotations
 import platform
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -389,6 +389,8 @@ _MISSING = object()
 
 # Sentinel character to represent literal $ during expansion (replaced at the end)
 _DOLLAR_SENTINEL = "\x00"
+# Sentinel used while text around a typed source/target marker is expanded.
+_PATH_MARKER_SENTINEL = "\x02pcons-path-marker\x02"
 
 
 # =============================================================================
@@ -555,7 +557,18 @@ def _expand_token(
     )
     if var_match:
         var_name = var_match.group(1) or var_match.group(2)
-        value = _lookup_var(var_name, namespace, expanding, location)
+        try:
+            value = _lookup_var(var_name, namespace, expanding, location)
+        except MissingVariableError:
+            fallback = (
+                _bare_marker_fallback(var_name, namespace, expanding, location)
+                if var_match.group(2)
+                else None
+            )
+            if fallback is None:
+                raise
+            marker, suffix = fallback
+            return _attach_path_marker(marker, "", suffix)
 
         if isinstance(value, list):
             # List variable as entire token -> multiple tokens
@@ -590,7 +603,10 @@ def _expand_token(
         return str_value
 
     # Token contains mixed content - expand inline
+    embedded_marker: SourcePath | TargetPath | None = None
+
     def replace_match(match: re.Match[str]) -> str:
+        nonlocal embedded_marker
         if match.group(1):  # $$
             # Use sentinel to protect literal $ from further expansion
             return _DOLLAR_SENTINEL
@@ -606,7 +622,18 @@ def _expand_token(
             )
 
         var_name = match.group(4) or match.group(5)
-        value = _lookup_var(var_name, namespace, expanding, location)
+        try:
+            value = _lookup_var(var_name, namespace, expanding, location)
+            marker_suffix = ""
+        except MissingVariableError:
+            fallback = (
+                _bare_marker_fallback(var_name, namespace, expanding, location)
+                if match.group(5)
+                else None
+            )
+            if fallback is None:
+                raise
+            value, marker_suffix = fallback
 
         if isinstance(value, list):
             raise SubstitutionError(
@@ -614,9 +641,25 @@ def _expand_token(
                 f"Use ${{prefix(...)}} or make it the entire token.",
                 location,
             )
+        if isinstance(value, (SourcePath, TargetPath)):
+            if embedded_marker is not None:
+                raise SubstitutionError(
+                    f"Token {token!r} has more than one source/target substitution. "
+                    "Give each one its own argument.",
+                    location,
+                )
+            embedded_marker = value
+            return _PATH_MARKER_SENTINEL + marker_suffix
         return str(value)
 
     subst_result: str = _TOKEN_PATTERN.sub(replace_match, token)
+
+    if embedded_marker is not None:
+        prefix, suffix = subst_result.split(_PATH_MARKER_SENTINEL)
+        prefix = _expand_attached_text(prefix, namespace, expanding, location, token)
+        suffix = _expand_attached_text(suffix, namespace, expanding, location, token)
+        return _attach_path_marker(embedded_marker, prefix, suffix)
+
     final_result: CommandToken | list[CommandToken] = subst_result
 
     if "$" in subst_result and subst_result != token:
@@ -637,6 +680,66 @@ def _expand_token(
         final_result = processed
 
     return final_result
+
+
+def _bare_marker_fallback(
+    var_name: str,
+    namespace: Namespace,
+    expanding: set[str],
+    location: SourceLocation | None,
+) -> tuple[SourcePath | TargetPath, str] | None:
+    """Read ``$TARGET.map`` as ``$TARGET`` plus a suffix when appropriate.
+
+    Dots normally belong to namespaced variable names. Only a failed lookup
+    falls back, and only when the longest existing prefix is a typed path
+    marker, so ordinary dotted variables retain their current meaning.
+    """
+    parts = var_name.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        prefix_name = ".".join(parts[:end])
+        try:
+            value = _lookup_var(prefix_name, namespace, expanding, location)
+        except MissingVariableError:
+            continue
+        if isinstance(value, (SourcePath, TargetPath)):
+            return value, "." + ".".join(parts[end:])
+    return None
+
+
+def _expand_attached_text(
+    text: str,
+    namespace: Namespace,
+    expanding: set[str],
+    location: SourceLocation | None,
+    token: str,
+) -> str:
+    """Finish recursive expansion of text attached to one path marker."""
+    if "$" in text:
+        expanded = _expand_token(text, namespace, expanding, location)
+        if not isinstance(expanded, str):
+            raise SubstitutionError(
+                f"Text attached to the source/target substitution in {token!r} "
+                "must expand to one string.",
+                location,
+            )
+        text = expanded
+    return text.replace(_DOLLAR_SENTINEL, "$")
+
+
+def _attach_path_marker(
+    marker: SourcePath | TargetPath, prefix: str, suffix: str
+) -> SourcePath | TargetPath:
+    """Attach surrounding text without erasing the marker's typed fields.
+
+    The marker stays unindexed: the generator renders it as ``$out`` with
+    the text attached on a one-output edge, which is every compile and link,
+    and repeats it per path only on an edge with several outputs.
+    """
+    return replace(
+        marker,
+        prefix=prefix + marker.prefix,
+        suffix=marker.suffix + suffix,
+    )
 
 
 def _lookup_var(
@@ -709,6 +812,8 @@ def _call_function(
                 result.append(PathToken(prefix, item.path, "project"))
             elif isinstance(item, BuildPath):
                 result.append(PathToken(prefix, item.path, "build"))
+            elif isinstance(item, (SourcePath, TargetPath)):
+                result.append(_attach_path_marker(item, prefix, ""))
             else:
                 result.append(prefix + str(item))
         return result
@@ -722,7 +827,12 @@ def _call_function(
         suffix = str(_resolve_arg(args[1], namespace, expanding, location))
         items = items if isinstance(items, list) else [items]
         items = _expand_items(items, namespace, expanding, location)
-        suffix_result: list[CommandToken] = [str(item) + suffix for item in items]
+        suffix_result: list[CommandToken] = [
+            _attach_path_marker(item, "", suffix)
+            if isinstance(item, (SourcePath, TargetPath))
+            else str(item) + suffix
+            for item in items
+        ]
         return suffix_result
 
     elif func_name == "wrap":
@@ -736,7 +846,10 @@ def _call_function(
         items = items if isinstance(items, list) else [items]
         items = _expand_items(items, namespace, expanding, location)
         wrap_result: list[CommandToken] = [
-            prefix + str(item) + suffix for item in items
+            _attach_path_marker(item, prefix, suffix)
+            if isinstance(item, (SourcePath, TargetPath))
+            else prefix + str(item) + suffix
+            for item in items
         ]
         return wrap_result
 

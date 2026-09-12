@@ -651,6 +651,50 @@ class TestMakefileMatchesNinja:
 
         assert "touch a.txt b.txt" in content
 
+    def test_embedded_target_does_not_rewrite_bare_multi_output_target(
+        self, tmp_path, gcc_toolchain
+    ):
+        def build(project, env):
+            env.Command(
+                target=["a.txt", "b.txt"],
+                source=[],
+                command=["tool", "-o", "$TARGET", "-Map=${TARGET}.map"],
+            )
+
+        content = self._makefile(tmp_path, gcc_toolchain, build)
+        recipe = next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("tool -o ")
+        )
+        assert "tool -o a.txt b.txt" in recipe
+        assert recipe.count("-Map=") == 2
+        assert "-Map=a.txt.map" in recipe
+        assert "-Map=b.txt.map" in recipe
+
+    def test_embedded_source_does_not_rewrite_bare_multi_input_source(
+        self, tmp_path, gcc_toolchain
+    ):
+        def build(project, env):
+            env.Command(
+                target="out.txt",
+                source=["a.txt", "b.txt"],
+                command=["tool", "-i", "$SOURCE", "--dep=${SOURCE}.d"],
+            )
+
+        content = self._makefile(tmp_path, gcc_toolchain, build)
+        recipe = next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("tool -i ")
+        )
+        inputs = recipe.split(" --dep=", 1)[0]
+        assert "a.txt" in inputs
+        assert "b.txt" in inputs
+        assert recipe.count("--dep=") == 2
+        assert "a.txt.d" in recipe
+        assert "b.txt.d" in recipe
+
     def test_extra_command_flags_reach_the_recipe(self, tmp_path, gcc_toolchain):
         """They carry an install mode, and gcc's module-mapper path."""
 

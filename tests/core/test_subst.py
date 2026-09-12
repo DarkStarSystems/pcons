@@ -6,6 +6,7 @@ Shell quoting happens only at the final step via to_shell_command().
 """
 
 import platform
+from dataclasses import replace
 
 import pytest
 
@@ -18,6 +19,8 @@ from pcons.core.subst import (
     MultiCmd,
     Namespace,
     PathToken,
+    SourcePath,
+    TargetPath,
     subst,
     to_shell_command,
 )
@@ -229,6 +232,79 @@ class TestSubstListExpansion:
         with pytest.raises(SubstitutionError) as exc_info:
             subst("prefix$flags", ns)
         assert "prefix" in str(exc_info.value)
+
+
+class TestEmbeddedTargetMarker:
+    @pytest.mark.parametrize("reference", ["${TARGET}", "$TARGET"])
+    def test_embedded_target_stays_typed(self, reference):
+        result = subst([f"-Wl,-Map={reference}.map"], {"TARGET": TargetPath()})
+
+        assert result == [TargetPath(prefix="-Wl,-Map=", suffix=".map")]
+
+    def test_embedded_target_preserves_marker_fields(self):
+        marker = TargetPath(index=1, prefix="inner-", suffix=".tmp")
+
+        result = subst(["outer=${TARGET}.map"], {"TARGET": marker})
+
+        assert result == [TargetPath(index=1, prefix="outer=inner-", suffix=".tmp.map")]
+
+    def test_embedded_basename_target_does_not_become_a_slice(self):
+        result = subst(
+            ["soname=${TARGET}"],
+            {"TARGET": TargetPath(basename=True)},
+        )
+
+        assert result == [TargetPath(prefix="soname=", basename=True)]
+
+    def test_embedded_target_does_not_collide_with_command_srcdir_sentinel(self):
+        srcdir_sentinel = "\x01pcons-srcdir\x01"
+
+        result = subst(
+            [f"{srcdir_sentinel}/${{TARGET}}.map"],
+            {"TARGET": TargetPath()},
+        )
+
+        assert result == [TargetPath(prefix=f"{srcdir_sentinel}/", suffix=".map")]
+
+    def test_whole_token_target_is_unchanged(self):
+        marker = TargetPath()
+
+        assert subst(["$TARGET"], {"TARGET": marker}) == [marker]
+
+    def test_more_than_one_embedded_target_is_rejected(self):
+        with pytest.raises(SubstitutionError, match="more than one.*substitution"):
+            subst(
+                ["${TARGET}.map=${TARGET}"],
+                {"TARGET": TargetPath()},
+            )
+
+    def test_attached_text_is_expanded_recursively(self):
+        result = subst(
+            ["${PFX}${TARGET}.map"],
+            {
+                "PFX": "-Wl,-Map=$STEM",
+                "STEM": "report-",
+                "TARGET": TargetPath(),
+            },
+        )
+
+        assert result == [TargetPath(prefix="-Wl,-Map=report-", suffix=".map")]
+
+    @pytest.mark.parametrize("marker", [SourcePath(), TargetPath()])
+    @pytest.mark.parametrize(
+        ("expression", "prefix", "suffix"),
+        [
+            ("${prefix(-Map=, PATH)}", "-Map=", ""),
+            ("${suffix(PATH, .map)}", "", ".map"),
+            ("${wrap(-Map=, PATH, .map)}", "-Map=", ".map"),
+        ],
+    )
+    def test_affix_functions_preserve_path_marker(
+        self, marker, expression, prefix, suffix
+    ):
+        result = subst([expression], {"PATH": marker})
+
+        assert result == [replace(marker, prefix=prefix, suffix=suffix)]
 
 
 class TestSubstFunctions:
