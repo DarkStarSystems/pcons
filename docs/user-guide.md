@@ -4445,7 +4445,8 @@ Pcons includes built-in helper modules in `pcons.contrib`:
 ```python
 from pcons.contrib import bundle, platform
 
-# Bundle creation helpers
+# Bundle creation helpers. bundle_dir is under the build directory: the
+# bundle is a build product that the installer helpers then package.
 plist = bundle.generate_info_plist("MyPlugin", "1.0.0", bundle_type="BNDL")
 bundle.create_macos_bundle(project, env, plugin, bundle_dir="build/MyPlugin.bundle")
 bundle.create_flat_bundle(project, env, plugin, bundle_dir="build/MyPlugin")

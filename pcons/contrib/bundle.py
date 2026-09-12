@@ -140,7 +140,8 @@ def create_macos_bundle(
         project: Pcons project.
         env: Configured environment.
         plugin: The compiled plugin/library target.
-        bundle_dir: Bundle output directory (e.g., "build/MyPlugin.bundle").
+        bundle_dir: Bundle output directory, relative to the build directory
+            (a build product, not an install-prefix destination).
         info_plist: Info.plist content (string) or path to an existing file.
             For a template with placeholders, substitute it first and pass
             the result: ``info_plist=configure_file(tmpl, out, subs)``.
@@ -174,7 +175,7 @@ def create_macos_bundle(
     binary_dir = contents_dir / (arch_subdir or "MacOS")
 
     # Install the plugin binary
-    installed = project.Install(binary_dir, [plugin])
+    installed = project.Install(binary_dir, [plugin], no_prefix=True)
     parts: list[Target] = []
 
     # Install Info.plist. Content given as a string is written here, at
@@ -187,13 +188,15 @@ def create_macos_bundle(
             info_plist = write_file(staging / "Info.plist", info_plist)
         contents_files.append(info_plist)
     if isinstance(pkginfo, Path):
-        parts.append(project.InstallAs(contents_dir / "PkgInfo", pkginfo))
+        parts.append(
+            project.InstallAs(contents_dir / "PkgInfo", pkginfo, no_prefix=True)
+        )
     elif pkginfo is not None:
         contents_files.append(write_file(staging / "PkgInfo", pkginfo))
     # One Install for the whole directory: two into the same destination
     # collide on the target name.
     if contents_files:
-        parts.append(project.Install(contents_dir, contents_files))
+        parts.append(project.Install(contents_dir, contents_files, no_prefix=True))
 
     if resources:
         parts.extend(_install_resources(project, contents_dir / "Resources", resources))
@@ -214,9 +217,10 @@ def _install_resources(
     under the names it gives. Returns the install targets made."""
     if isinstance(resources, Mapping):
         return [
-            project.InstallAs(dest / name, source) for name, source in resources.items()
+            project.InstallAs(dest / name, source, no_prefix=True)
+            for name, source in resources.items()
         ]
-    return [project.Install(dest, resources)]
+    return [project.Install(dest, resources, no_prefix=True)]
 
 
 def create_flat_bundle(
@@ -237,7 +241,8 @@ def create_flat_bundle(
         project: Pcons project.
         env: Configured environment.
         plugin: The compiled plugin/library target.
-        bundle_dir: Bundle output directory.
+        bundle_dir: Bundle output directory, relative to the build directory
+            (a build product, not an install-prefix destination).
         dlls: Optional list of DLLs/shared libraries to include.
         resources: Resource files to include: a list, copied under their own
             names, or a mapping of bundle name to source file.
@@ -256,12 +261,14 @@ def create_flat_bundle(
     bundle_path = Path(bundle_dir)
 
     # Install the plugin
-    installed = project.Install(bundle_path, [plugin])
+    installed = project.Install(bundle_path, [plugin], no_prefix=True)
     parts: list[Target] = []
 
     # Install additional DLLs
     if dlls:
-        parts.extend(project.Install(bundle_path, [dll]) for dll in dlls)
+        parts.extend(
+            project.Install(bundle_path, [dll], no_prefix=True) for dll in dlls
+        )
 
     if resources:
         parts.extend(_install_resources(project, bundle_path, resources))

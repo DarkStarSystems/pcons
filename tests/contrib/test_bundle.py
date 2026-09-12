@@ -22,6 +22,58 @@ def _outputs(project: Project) -> set[str]:
     }
 
 
+class TestBundleIsABuildProduct:
+    """bundle_dir is relative to the build directory, not the install prefix:
+    the bundle is what installers stage from, not an install itself."""
+
+    def test_macos_bundle_lands_in_the_build_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "logo.png").write_bytes(b"png")
+        (tmp_path / "PkgInfo").write_bytes(b"BNDL????")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        bundle.create_macos_bundle(
+            project,
+            env,
+            _plugin(project, env),
+            bundle_dir="MyPlugin.bundle",
+            info_plist="<plist/>",
+            pkginfo=Path(tmp_path / "PkgInfo"),
+            resources=["logo.png"],
+        )
+
+        outputs = {o for o in _outputs(project) if "MyPlugin.bundle" in o}
+        assert outputs == {
+            "MyPlugin.bundle/Contents/Info.plist",
+            "MyPlugin.bundle/Contents/MacOS/myplugin.so",
+            "MyPlugin.bundle/Contents/PkgInfo",
+            "MyPlugin.bundle/Contents/Resources/logo.png",
+        }
+
+    def test_flat_bundle_lands_in_the_build_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "logo.png").write_bytes(b"png")
+        (tmp_path / "helper.dll").write_bytes(b"dll")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        bundle.create_flat_bundle(
+            project,
+            env,
+            _plugin(project, env),
+            bundle_dir="MyPlugin",
+            dlls=["helper.dll"],
+            resources={"art/logo.png": "logo.png"},
+        )
+
+        outputs = {o for o in _outputs(project) if o.startswith("MyPlugin/")}
+        assert outputs == {
+            "MyPlugin/myplugin.so",
+            "MyPlugin/helper.dll",
+            "MyPlugin/art/logo.png",
+        }
+        assert not any("dist/" in o for o in _outputs(project))
+
+
 class TestResourcesMapping:
     def test_a_mapping_renames_on_the_way_in(self, tmp_path: Path) -> None:
         (tmp_path / "logo-white.png").write_bytes(b"png")

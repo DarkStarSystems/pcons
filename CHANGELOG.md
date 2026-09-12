@@ -294,6 +294,10 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- **`create_macos_bundle()` and `create_flat_bundle()` assemble the bundle
+  under the build directory**, where `bundle_dir` says. They went through
+  `Install()` without opting out of the install prefix, so the bundle landed
+  in `dist/` instead, and the installer helpers staged from the wrong place.
 - **clang-cl's `debug` and `relwithdebinfo` variants link with `/DEBUG`**, so
   the build produces a PDB. Only MSVC added the linker flag before; the
   compiled-in debug info went nowhere on clang-cl.
