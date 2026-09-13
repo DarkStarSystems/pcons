@@ -1719,8 +1719,8 @@ and `output_prefix` is not (that one replaces the toolchain's filename prefix).
 
 `build_prefix` sits under the build directory and above the `add_subdirectory`
 offset. With `env.build_dir = "build/rel"`, a `build_prefix` of `mcu` gives
-`build/rel/mcu`, and a sub-project keeps its shape inside the slice, at
-`build/mcu/sub`. Setting `env.build_dir` names the whole directory, so a
+`build/rel/mcu`, and a sub-project keeps its own offset inside that slice, at
+`build/rel/mcu/sub`. Setting `env.build_dir` names the whole directory, so a
 sub-project that does it drops its own offset, and its targets keep theirs.
 
 Everything the environment writes follows both settings, objects and artifacts
@@ -1822,7 +1822,7 @@ See `examples/63_command_launcher` for two stacked launchers wrapping every C co
 
 ### Running clang-tidy With Every Compile
 
-`env.use_clang_tidy()` runs clang-tidy on each C and C++ source, with that compile's own flags, and then compiles it. A clang-tidy diagnostic fails the build, the way CMake's `CXX_CLANG_TIDY` does; the object is still produced, so the diagnostic repeats on the next build rather than turning into a missing file downstream.
+`env.use_clang_tidy()` runs clang-tidy on each C and C++ source, with that compile's own flags, and then compiles it. The compile runs either way, so the object is still produced and the diagnostic repeats on the next build rather than turning into a missing file downstream. What fails the build is clang-tidy's own exit status: a warning doesn't fail it, an error does, and `--warnings-as-errors=*` turns the warnings into failures too.
 
 ```python
 env.use_clang_tidy()                              # clang-tidy from PATH

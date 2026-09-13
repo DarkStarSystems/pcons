@@ -1133,8 +1133,10 @@ class Environment(_EnvironmentStubs):
         """Run clang-tidy alongside every C and C++ compile.
 
         Each compile first runs clang-tidy on its source with the compile's
-        own flags, then compiles; a diagnostic fails the build, the way
-        CMake's ``CXX_CLANG_TIDY`` does. The driver is
+        own flags, then compiles. The compile runs either way, so the object
+        still appears; what fails the build is clang-tidy's exit status, so a
+        warning does not and an error does. ``--warnings-as-errors=*`` in
+        *args* makes warnings fail it too. The driver is
         :mod:`pcons.tools.co_compile`. Composes with ``use_compiler_cache()``
         in either order.
 

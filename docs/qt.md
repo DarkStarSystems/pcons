@@ -237,7 +237,7 @@ Worth knowing before porting a large CMake project:
   differently the generated code can reference something the target does
   not have: rcc compresses with zstd by default, and a target Qt built
   without zstd then fails to link on `qResourceFeatureZstd`. Neither
-  `qtpaths6 --query` nor pkg-config reports a Qt install's feature set
+  `qtpaths6 -query` nor pkg-config reports a Qt install's feature set
   (only paths, mkspec and version), so pcons cannot detect this. Spell
   the flag out on the environment that needs it, which is per
   environment like everything else:

@@ -49,9 +49,13 @@ scene_refs = Scanner(
 scene_refs.attach(pack_common, pack_level1, pack_level2)
 ```
 
-`attach()` is the only API for a Scanner, and it takes targets (not files). Each attached
+`attach()` is the API a build script needs, and it takes targets (not files). Each attached
 target is one **scope**. Call it before `project.resolve()`; a toolchain may
-also attach from its `after_resolve` hook.
+also attach from its `after_resolve` hook. One other name is public, for a
+toolchain's sake: `scope_id_for(target)`, in `pcons.core.scan`, gives the
+identifier a scope's files are named with, so a `manifest_extra` can name a
+per-scope path (the C++ module toolchains name their BMI directory that way)
+exactly as the wiring pass names the manifest and the dyndep file.
 
 A **governed edge** is any build edge of an attached target with at least one
 source matching `source_suffixes`. Attaching a scanner that governs nothing is
@@ -70,6 +74,13 @@ Per scope, the resolver wires:
   file in *order-only* position. The edge waits for it to exist; the loaded
   dyndep supplies the real deps. Rewriting it doesn't by itself rebuild
   anything.
+
+A scope can end up with nothing of its own to wire. One build edge takes one
+scanner, so where two targets share an edge (the same source, deduplicated to
+one object node) the first scope to claim it owns it. A scope whose governed
+edges were all claimed that way gets no collate and no dyndep. It forwards the
+owning scopes instead, so a dependent that declares only this target still
+reaches their exports.
 
 `scan_depfile` / `scan_deps_style` give the scan edge its own
 dependency tracking, so a scan that reads a header re-runs when the
