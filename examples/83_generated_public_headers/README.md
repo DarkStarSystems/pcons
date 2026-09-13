@@ -13,13 +13,12 @@ the generator. It does not have to: the include directory is a usage
 requirement of `metrics`, so the ordering that fills it is one too, and every
 target that links `metrics` waits for the generator.
 
+So `pcons` runs the generator first, ahead of both compiles. What comes next
+is up to the scheduler: `app`'s compile waits on the generated header, not on
+`libmetrics.a`, so with several jobs it and the archive can finish in either
+order. The build settles after the first run:
+
 ```
-$ pcons
-[1/5] COMMAND gen/metrics_limits.h
-[2/5] CC obj.metrics/src/metrics.c.o
-[3/5] AR libmetrics.a
-[4/5] CC obj.app/app/main.c.o
-[5/5] LINK app
 $ ninja -C build
 ninja: no work to do.
 $ ./build/app

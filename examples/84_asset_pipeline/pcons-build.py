@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from pcons.core.environment import Environment
+    from pcons.util.source_location import SourceLocation
 
 ASSETC = [sys.executable, "$SRCDIR/tools/assetc.py"]
 
@@ -126,12 +127,16 @@ class AssetBundleBuilder:
         sources: Sequence[str],
         *,
         options: str,
+        defined_at: SourceLocation | None = None,
     ) -> Target:
+        # pcons passes `defined_at` to any create_target that accepts it, so a
+        # diagnostic about this target points at the project.AssetBundle() call
+        # rather than in here.
         target = AssetBundleTarget(
             name,
             options=options,
             target_type="asset_bundle",
-            defined_at=get_caller_location(),
+            defined_at=defined_at or get_caller_location(),
             project=project,
             env=env,
         )

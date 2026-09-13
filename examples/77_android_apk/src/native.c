@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT */
 #include <jni.h>
 
 JNIEXPORT jint JNICALL

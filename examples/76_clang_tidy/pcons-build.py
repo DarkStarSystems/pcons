@@ -3,8 +3,8 @@
 
 ``env.use_clang_tidy()`` runs clang-tidy on each C and C++ source with that
 compile's own flags, then compiles it. The checks come from the ``.clang-tidy``
-file beside the sources, which clang-tidy finds on its own; ``args`` carries
-anything else.
+file at the root of this example, which clang-tidy finds by walking up from each
+source; ``args`` carries anything else.
 
 Here the checks are limited to ``readability-magic-numbers`` and the source
 trips it on purpose, so the build shows a diagnostic. It still succeeds:
