@@ -6,7 +6,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.preset import Preset, ToolContribution
-from pcons.core.subst import PathToken
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
@@ -142,8 +141,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
                 f"honored. List the names."
             )
         text = "EXPORTS\n" + "".join(f"    {s}\n" for s in symbols)
-        path = self._write_link_input(target, ".def", text)
-        return [PathToken(prefix="/DEF:", path=str(path), path_type="absolute")]
+        return [self._link_input_token(target, ".def", text, "/DEF:")]
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
         """Return handler for .def (module definition) and .manifest files."""

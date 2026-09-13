@@ -20,6 +20,11 @@ from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.presets import target_platform_for_triple
 
 
+def _written(project, token: PathToken) -> Path:
+    """The file a build-relative link-input token names."""
+    return Path(project.root_dir) / project.build_dir / token.path
+
+
 def _shared(name: str = "plug") -> Target:
     return Target(name, target_type="shared_library")
 
@@ -39,7 +44,10 @@ class TestUnixRealization:
 
         (token,) = [f for f in flags if isinstance(f, PathToken)]
         assert token.prefix == "-Wl,-exported_symbols_list,"
-        assert Path(token.path).read_text() == "_OfxGetPlugin\n_Spark*\n_already\n"
+        assert (
+            _written(test_project, token).read_text()
+            == "_OfxGetPlugin\n_Spark*\n_already\n"
+        )
 
     @patch("pcons.toolchains.unix.get_platform")
     def test_linux_writes_a_version_script(self, mock_platform, test_project):  # noqa: F811
@@ -56,7 +64,7 @@ class TestUnixRealization:
         (token,) = [f for f in flags if isinstance(f, PathToken)]
         assert token.prefix == "-Wl,--version-script="
         assert (
-            Path(token.path).read_text()
+            _written(test_project, token).read_text()
             == "{ global: OfxGetPlugin; Spark*; local: *; };\n"
         )
 
@@ -86,7 +94,7 @@ class TestUnixRealization:
 
         (token,) = [f for f in flags if isinstance(f, PathToken)]
         assert token.prefix == "-Wl,--dynamic-list="
-        assert Path(token.path).read_text() == "{ host_api; host_*; };\n"
+        assert _written(test_project, token).read_text() == "{ host_api; host_*; };\n"
 
     @patch("pcons.toolchains.unix.get_platform")
     def test_an_executable_exports_too(self, mock_platform, test_project):  # noqa: F811
@@ -129,7 +137,8 @@ class TestMsvcRealization:
         (token,) = flags
         assert isinstance(token, PathToken) and token.prefix == "/DEF:"
         assert (
-            Path(token.path).read_text() == "EXPORTS\n    OfxGetPlugin\n    PF_Main\n"
+            _written(test_project, token).read_text()
+            == "EXPORTS\n    OfxGetPlugin\n    PF_Main\n"
         )
 
     def test_a_pattern_is_refused(self, test_project):  # noqa: F811

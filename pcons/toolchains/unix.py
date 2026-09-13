@@ -422,12 +422,9 @@ class UnixToolchain(BaseToolchain):
             text = "".join(
                 f"{s}\n" if s.startswith("_") else f"_{s}\n" for s in symbols
             )
-            path = self._write_link_input(target, ".exports", text)
             return [
-                PathToken(
-                    prefix="-Wl,-exported_symbols_list,",
-                    path=str(path),
-                    path_type="absolute",
+                self._link_input_token(
+                    target, ".exports", text, "-Wl,-exported_symbols_list,"
                 )
             ]
         if not platform.is_windows:
@@ -436,19 +433,15 @@ class UnixToolchain(BaseToolchain):
                 # export, which without --export-dynamic is nothing; a
                 # dynamic list names what it exports, and only that.
                 text = "{ " + " ".join(f"{s};" for s in symbols) + " };\n"
-                path = self._write_link_input(target, ".dynlist", text)
                 return [
-                    PathToken(
-                        prefix="-Wl,--dynamic-list=",
-                        path=str(path),
-                        path_type="absolute",
+                    self._link_input_token(
+                        target, ".dynlist", text, "-Wl,--dynamic-list="
                     )
                 ]
             text = "{ global: " + " ".join(f"{s};" for s in symbols) + " local: *; };\n"
-            path = self._write_link_input(target, ".version", text)
             return [
-                PathToken(
-                    prefix="-Wl,--version-script=", path=str(path), path_type="absolute"
+                self._link_input_token(
+                    target, ".version", text, "-Wl,--version-script="
                 )
             ]
         logger.warning(
