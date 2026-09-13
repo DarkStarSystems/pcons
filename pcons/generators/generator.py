@@ -16,11 +16,14 @@ imported.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pcons.core.node import FileNode
+
+logger = logging.getLogger("pcons")
 
 if TYPE_CHECKING:
     from pcons.core.project import Project
@@ -131,6 +134,8 @@ class BaseGenerator:
             if not project._resolved:
                 project.resolve()
             output_dir = self._resolve_output_dir(project)
+            if self._is_build_generator:
+                self._log_build_tiers(project)
             self._generate_impl(project, output_dir)
 
             if compile_commands and self._supports_compile_commands:
@@ -150,6 +155,20 @@ class BaseGenerator:
 
         if self._is_build_generator:
             project._mark_generated()
+
+    @staticmethod
+    def _log_build_tiers(project: Project) -> None:
+        """Log what each invocation builds, under -v.
+
+        The same lines `pcons explain` prints, from the same decision, so
+        "why isn't X building?" is answerable from a build log too.
+        """
+        if not logger.isEnabledFor(logging.INFO):
+            return
+        from pcons.core.tiers import decide_build_tiers
+
+        for line in decide_build_tiers(project).report_lines():
+            logger.info("%s", line)
 
     @staticmethod
     def _clear_pending() -> None:
