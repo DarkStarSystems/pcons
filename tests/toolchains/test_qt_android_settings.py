@@ -1,3 +1,13 @@
+# SPDX-License-Identifier: MIT
+"""The deployment settings androiddeployqt reads.
+
+Every expected value here was read off a real file written by Qt's own CMake
+for an Android build, Qt 6.11.1, arm64-v8a. One version is one data point:
+these tests pin what that version wants, not a universal schema.
+"""
+
+from __future__ import annotations
+
 import json
 import os
 from collections.abc import Sequence
