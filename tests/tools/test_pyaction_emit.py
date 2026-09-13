@@ -133,7 +133,7 @@ def emit_both(
     three.
     """
     action = validate(fn, project=project)
-    payload = check_arguments(action, name=name, kwargs=kwargs)
+    payload = check_arguments(action, kwargs=kwargs)
     return (
         emit_module(action, project=project, env=env),
         emit_args(project=project, env=env, name=name, payload=payload),
@@ -556,7 +556,7 @@ class TestDuplicates:
         self, project: Project, env: Any
     ) -> None:
         action = validate(writes_sources, project=project)
-        payload = check_arguments(action, name="report", kwargs={})
+        payload = check_arguments(action, kwargs={})
         emit_args(project=project, env=env, name="report", payload=payload)
 
         with pytest.raises(PyActionError, match=r"report\.args\.pkl"):
@@ -605,13 +605,13 @@ class TestOneModuleManyEdges:
             project=project,
             env=env,
             name="one",
-            payload=check_arguments(action, name="one", kwargs={"n": 1}),
+            payload=check_arguments(action, kwargs={"n": 1}),
         )
         second = emit_args(
             project=project,
             env=env,
             name="two",
-            payload=check_arguments(action, name="two", kwargs={"n": 2}),
+            payload=check_arguments(action, kwargs={"n": 2}),
         )
 
         assert first != second
@@ -671,7 +671,7 @@ class TestNothingIsWrittenUntilEverythingIsChecked:
         action = validate(takes_arguments, project=project)
 
         with pytest.raises(PyActionError, match="cannot pickle"):
-            check_arguments(action, name="report", kwargs={"handle": lambda: None})
+            check_arguments(action, kwargs={"handle": lambda: None})
 
         assert not (tmp_path / "build" / "pyact").exists()
 

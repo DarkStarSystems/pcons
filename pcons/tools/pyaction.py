@@ -55,7 +55,6 @@ if TYPE_CHECKING:
 GEN_DIR = "pyact"
 MODULE_PREFIX = "pcons_pyact_"
 
-
 _SAFE_GLOBALS = frozenset({"__name__", "__doc__", "__builtins__"})
 
 
@@ -316,7 +315,7 @@ def _bind_arguments(
     try:
         signature.bind(None, None, **kwargs)
     except TypeError as exc:
-        given = ", ".join(sorted(kwargs)) or "nothing"
+        given = _and_list(sorted(kwargs)) or "nothing"
         raise PyActionError(
             f"PyAction {function.__name__}{signature} cannot be called with "
             f"{given}: {exc}. At build time it is called as "
@@ -407,9 +406,7 @@ def emit_module(action: ValidatedAction, *, project: Project, env: Environment) 
     return module_rel
 
 
-def check_arguments(
-    action: ValidatedAction, *, name: str, kwargs: Mapping[str, Any]
-) -> bytes:
+def check_arguments(action: ValidatedAction, *, kwargs: Mapping[str, Any]) -> bytes:
     """Everything about one call's arguments, settled before anything is written.
 
     Nothing reaches the build directory until this has returned, so a refused
@@ -421,7 +418,6 @@ def check_arguments(
 
     Args:
         action: What :func:`validate` returned.
-        name: The edge's name, which the pickle is named after.
         kwargs: Keyword arguments for the build-time call.
 
     Returns:
@@ -433,17 +429,17 @@ def check_arguments(
             of them cannot be pickled.
     """
     at = get_caller_location()
-    called = action.function.__name__
+    name = action.function.__name__
     _bind_arguments(action.function, kwargs, at)
-    _reject_description_objects(kwargs, called, at)
+    _reject_description_objects(kwargs, name, at)
     return _payload_bytes(
         {
             "version": runner.PROTOCOL_VERSION,
             "module": f"{MODULE_PREFIX}{action.module_stem}",
-            "function": called,
+            "function": name,
             "kwargs": dict(kwargs),
         },
-        called,
+        name,
         at,
     )
 
@@ -618,7 +614,7 @@ def _global_remedy(
     value: object,
     from_default: bool,
     imports: list[str],
-    called: str,
+    parameters: list[str],
 ) -> str | None:
     """What to type instead, for one name the body reads from the script.
 
@@ -634,7 +630,8 @@ def _global_remedy(
         value: What the build script has under it.
         from_default: Whether it was read by a parameter's default value.
         imports: Collects the import lines, which are answered together.
-        called: The function's name, so a remedy can spell out the call.
+        parameters: Collects the names that have to become parameters, which
+            are answered together too, in one call rather than one per name.
 
     Returns:
         A sentence, or None when the name joins the import advice instead.
@@ -646,11 +643,11 @@ def _global_remedy(
             f"function body, or move it to a module the build can import."
         )
     if from_default:
+        parameters.append(found)
         return (
             f"{found} is a parameter's default value, and a default is "
             f"evaluated again where the generated module defines the "
-            f"function: write the parameter without a default and pass it at "
-            f"the call, {called}(target=..., {found}={found})."
+            f"function, so write the parameter without a default."
         )
     if isinstance(value, types.ModuleType):
         imports.append(f"import {value.__name__}")
@@ -659,10 +656,8 @@ def _global_remedy(
         return (
             f"Import {found} inside the function body, the way this script imports it."
         )
-    return (
-        f"Take {found} as a parameter and pass it at the call, "
-        f"{called}(target=..., {found}={found})."
-    )
+    parameters.append(found)
+    return None
 
 
 def _reject_script_globals(
@@ -697,16 +692,27 @@ def _reject_script_globals(
         )
 
     imports: list[str] = []
+    parameters: list[str] = []
     remedies = [
         remedy
         for found in suspect
         if (
             remedy := _global_remedy(
-                found, fn.__globals__[found], found in defaults, imports, name
+                found, fn.__globals__[found], found in defaults, imports, parameters
             )
         )
         is not None
     ]
+    if parameters:
+        plural = len(parameters) > 1
+        passed = ", ".join(f"{each}={each}" for each in parameters)
+        remedies.insert(
+            0,
+            f"Take {_and_list(parameters)} as "
+            f"{'parameters' if plural else 'a parameter'} and pass "
+            f"{'them' if plural else 'it'} at the call, "
+            f"{name}(target=..., {passed}).",
+        )
     if imports:
         written = ", ".join(f'"{line}"' for line in dict.fromkeys(imports))
         remedies.insert(
@@ -940,7 +946,7 @@ def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> by
     except (pickle.PicklingError, TypeError, AttributeError) as exc:
         bad = _unpicklable(payload["kwargs"])
         label = (
-            f"{'arguments' if len(bad) > 1 else 'argument'} {', '.join(bad)}"
+            f"{'arguments' if len(bad) > 1 else 'argument'} {_and_list(bad)}"
             if bad
             else "one of its arguments"
         )
@@ -1115,7 +1121,7 @@ class PyAction:
                 action's.
         """
         edge_name = name or _derive_name(target)
-        payload = check_arguments(self._action, name=edge_name, kwargs=kwargs)
+        payload = check_arguments(self._action, kwargs=kwargs)
         module_rel = emit_module(self._action, project=self._project, env=self._env)
         args_rel = emit_args(
             project=self._project, env=self._env, name=edge_name, payload=payload

@@ -662,6 +662,20 @@ class TestEveryPyActionRemedyWorks:
 
         assert out.read_text(encoding="utf-8") == "1"
 
+    def test_a_builtin_becomes_a_def_taking_what_it_needs(self, project_env, tmp_path):
+        """ "Write a def beside the other targets and pass what it needs at the call"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, value):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(str(value), encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt", value=3)
+
+        assert out.read_text(encoding="utf-8") == "3"
+
     def test_a_lambda_becomes_a_def(self, project_env):
         """ "write it as a def"."""
         _, env = project_env
@@ -1108,10 +1122,11 @@ class TestPyActionErrors:
 
         message = str(caught.value)
         assert "PYACTION_DEFAULT is a parameter's default value" in message
+        assert "so write the parameter without a default." in message
         assert (
-            "write the parameter without a default and pass it at the call" in message
+            "Take PYACTION_DEFAULT as a parameter and pass it at the call, "
+            "render(target=..., PYACTION_DEFAULT=PYACTION_DEFAULT)." in message
         )
-        assert "render(target=..., PYACTION_DEFAULT=PYACTION_DEFAULT)." in message
 
     def test_a_target_in_kwargs_points_at_source(self, project_env):
         """The first mistake: passing a target the way it reads naturally."""
@@ -1184,6 +1199,58 @@ class TestPyActionErrors:
         message = str(caught.value)
         assert "cannot pickle argument f" in message
         assert "Pass what describes it instead, a path or a string" in message
+
+    def test_two_unpicklable_arguments_are_joined_with_and(self, project_env):
+        """A two-name list reads "f and g", never "f, g"."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, f, g):
+            return f, g
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", f=lambda: None, g=lambda: None)
+
+        assert "cannot pickle arguments f and g:" in str(caught.value)
+
+    def test_two_wrong_keywords_are_joined_with_and(self, project_env):
+        """The same list helper, at the other site that once lost it."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, title):
+            return title
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", extra=1, title="t")
+
+        assert "cannot be called with extra and title:" in str(caught.value)
+
+    def test_two_script_globals_give_one_call_to_type(self, project_env, tmp_path):
+        """One concrete thing to type, not the same thing twice."""
+        _, env = project_env
+        render = build_script_function(
+            tmp_path,
+            """
+            SRC_DIR = "src"
+            VERSION = "1.0"
+
+
+            def render(sources, targets):
+                return SRC_DIR + VERSION
+            """,
+        )
+
+        with pytest.raises(PconsError) as caught:
+            env.PyAction()(render)(target="out.txt")
+
+        message = str(caught.value)
+        assert "uses SRC_DIR and VERSION from the build script" in message
+        assert (
+            "Take SRC_DIR and VERSION as parameters and pass them at the call, "
+            "render(target=..., SRC_DIR=SRC_DIR, VERSION=VERSION)." in message
+        )
+        assert message.count("render(target=") == 1
 
     def test_two_edges_deriving_one_name_name_both_and_say_name(self, project_env):
         """The pickle is per edge, so two edges of one name collide on it."""
@@ -1423,9 +1490,11 @@ class TestPyActionErrors:
             env.PyAction()(second)(target="b.txt")
 
         message = str(caught.value)
-        assert "would overwrite build/pyact/render.py" in message
+        assert "PyAction render() would overwrite " in message
+        assert "build/pyact/render.py, already written by the PyAction at " in message
         assert "Rename one of the functions." in message
         assert "name=" not in message
+        assert "in environment" not in message
 
     def test_a_partial_says_to_pass_the_function(self, project_env):
         _, env = project_env
