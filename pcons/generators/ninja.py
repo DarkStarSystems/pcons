@@ -802,15 +802,23 @@ class NinjaGenerator(BaseGenerator):
 
         outputs_info = build_info.get("outputs")
         if outputs_info and isinstance(outputs_info, dict):
-            for i, (name, info) in enumerate(outputs_info.items()):
+            target_index = 0
+            for name, info in outputs_info.items():
                 if isinstance(info, dict):
                     info_dict = cast(dict[str, Any], info)
                     out_path = self._escape_ninja_value(
                         self._make_output_relative(info_dict["path"])
                     )
                     f.write(f"  out_{name} = {out_path}\n")
-                    # target_N supports TargetPath(index=N) in commands
-                    f.write(f"  target_{i} = {out_path}\n")
+                    # target_N supports TargetPath(index=N) in commands.
+                    # Numbered over the explicit outputs only: those are what
+                    # $out holds and what the command expansion counted when
+                    # it resolved these indices, so an implicit output in the
+                    # middle must not take a number. It stays reachable as
+                    # out_<name>.
+                    if not info_dict.get("implicit", False):
+                        f.write(f"  target_{target_index} = {out_path}\n")
+                        target_index += 1
 
         # $out_basename, for a TargetPath(basename=True) in the command. Only
         # when one is present: emitting it for every edge would add a line per

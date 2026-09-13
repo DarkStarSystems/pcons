@@ -219,6 +219,66 @@ class TestNinjaMultiOutput:
         assert command.count("-Map=") == 1
         assert "-Map=$target_0.map" in command
 
+    def test_an_implicit_output_takes_no_target_number(self, tmp_path):
+        """target_N numbers the explicit outputs, whatever order they are in.
+
+        The count the command expansion works from skips implicit outputs, so
+        an implicit one listed first must not consume target_0 -- the command
+        would then name the module file where it meant the object.
+        """
+        project = Project("test", root_dir=tmp_path, build_dir=".")
+        target = Target("mod")
+        obj_node = FileNode("build/mod.o")
+        source_node = FileNode("src/mod.cpp")
+        outputs = {
+            # Implicit first: the order a producer is free to use.
+            "module": {
+                "path": Path("build/mod.pcm"),
+                "suffix": ".pcm",
+                "implicit": True,
+                "required": True,
+            },
+            "obj": {
+                "path": Path("build/mod.o"),
+                "suffix": ".o",
+                "implicit": False,
+                "required": True,
+            },
+        }
+        obj_node._build_info = {
+            "tool": "cxx",
+            "command_var": "cmd",
+            "language": "c++",
+            "sources": [source_node],
+            "outputs": outputs,
+            "command": subst(
+                ["clang++", "-c", TargetPath(prefix="-o", index=0)],
+                {},
+            ),
+        }
+        obj_node.builder = MultiOutputBuilder(
+            "Object",
+            "cxx",
+            "cmd",
+            outputs=[
+                OutputSpec("module", ".pcm", implicit=True),
+                OutputSpec("obj", ".o"),
+            ],
+            src_suffixes=[".cpp"],
+        )
+        target.output_nodes.append(obj_node)
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = normalize_path((tmp_path / "build.ninja").read_text())
+        # The explicit output is target_0; the implicit one is out_module and
+        # takes no number at all.
+        assert "target_0 = build/mod.o" in content
+        assert "target_1 = " not in content
+        assert "out_module = build/mod.pcm" in content
+        assert "out_obj = build/mod.o" in content
+
     def test_secondary_nodes_not_written(self, tmp_path):
         """Test that secondary nodes don't get their own build statements."""
         project = Project("test", root_dir=tmp_path, build_dir=".")
