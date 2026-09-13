@@ -1454,7 +1454,8 @@ class TestPyActionErrors:
         assert message.split(": ", 1)[1].startswith(
             "PyAction needs a function written in a build script, not "
         )
-        assert "Write a def beside the other targets" in message
+        assert "Write a def beside the other targets and pass what it needs " in message
+        assert "at the call: action(target=..., value=...)." in message
 
     def test_a_method_says_to_move_it_out_of_the_class(self, project_env):
         _, env = project_env

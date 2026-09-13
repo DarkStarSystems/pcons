@@ -3,12 +3,15 @@
 
 Run from the example directory, after a first successful build.
 
-Editing the function body must re-run the edge, and editing anything else in
-the script must not. The second half is the one worth a script of its own: the
-generated module is rewritten only when its bytes change, so a comment added
-above the decoration regenerates the build files and stops there. Both halves
-need an edit to a real file and a real pcons run, which no declarative rebuild
-block can express.
+Editing the function body must re-run every edge that reads it, and editing
+anything else in the script must not re-run any. The second half is the one
+worth a script of its own: the generated module is rewritten only when its
+bytes change, so a comment added above the decoration regenerates the build
+files and stops there. Both halves need an edit to a real file and a real
+pcons run, which no declarative rebuild block can express.
+
+Three edges share one function here, across two environments, so a body edit
+has to move all three reports and both generated modules.
 
 The build script is restored whatever happens, so running this by hand in a
 checkout leaves nothing behind.
@@ -22,8 +25,12 @@ import sys
 from pathlib import Path
 
 SCRIPT = Path("pcons-build.py")
-MODULE = Path("build/pyact/report.py")
-REPORT = Path("build/report.txt")
+MODULES = (Path("build/pyact/report.py"), Path("build/strict/pyact/report.py"))
+REPORTS = (
+    Path("build/report.txt"),
+    Path("build/report2.txt"),
+    Path("build/strict/report.txt"),
+)
 ORIGINAL = SCRIPT.read_text(encoding="utf-8")
 
 
@@ -49,9 +56,12 @@ def rebuild() -> None:
             raise SystemExit(f"{command[0]} failed: {done.returncode}")
 
 
-def state() -> tuple[int, str]:
-    """What must not move: the generated module's mtime and the report."""
-    return MODULE.stat().st_mtime_ns, REPORT.read_text(encoding="utf-8")
+def state() -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """What must not move: every module's mtime and every report's text."""
+    return (
+        tuple(module.stat().st_mtime_ns for module in MODULES),
+        tuple(report.read_text(encoding="utf-8") for report in REPORTS),
+    )
 
 
 def check(condition: bool, complaint: str) -> None:
@@ -59,37 +69,41 @@ def check(condition: bool, complaint: str) -> None:
         raise SystemExit(complaint)
 
 
-before_mtime, before_report = state()
+before_mtimes, before_reports = state()
+check(len(set(before_reports)) == 3, "the three reports are not all different")
 
 try:
     SCRIPT.write_text(
         ORIGINAL.replace(
-            "@env.PyAction(", "# a comment a user might add\n@env.PyAction("
+            "def make_report(", "# a comment a user might add\ndef make_report("
         ),
         encoding="utf-8",
     )
     rebuild()
-    after_mtime, after_report = state()
-    check(after_mtime == before_mtime, "a comment rewrote the generated module")
-    check(after_report == before_report, "a comment re-ran the function")
+    after_mtimes, after_reports = state()
+    check(after_mtimes == before_mtimes, "a comment rewrote a generated module")
+    check(after_reports == before_reports, "a comment re-ran the function")
 
     SCRIPT.write_text(
         ORIGINAL.replace("lines = [title]", "lines = [title.upper()]"),
         encoding="utf-8",
     )
     rebuild()
-    edited_mtime, edited_report = state()
-    check(
-        edited_mtime != before_mtime, "a changed body left the generated module alone"
-    )
-    check(edited_report != before_report, "a changed body did not re-run the function")
-    check(
-        "WORD COUNTS" in edited_report, f"the new body did not run: {edited_report!r}"
-    )
+    edited_mtimes, edited_reports = state()
+    for index, (was, now) in enumerate(zip(before_mtimes, edited_mtimes, strict=True)):
+        check(was != now, f"a changed body left {MODULES[index]} alone")
+    for index, (was, now) in enumerate(
+        zip(before_reports, edited_reports, strict=True)
+    ):
+        check(was != now, f"a changed body did not re-run {REPORTS[index]}")
+        check(
+            now.split("\n")[0].isupper(),
+            f"the new body did not run for {REPORTS[index]}: {now!r}",
+        )
 finally:
     SCRIPT.write_text(ORIGINAL, encoding="utf-8")
 
 rebuild()
-check(state()[1] == before_report, "the report did not come back")
+check(state()[1] == before_reports, "the reports did not come back")
 
 print("rebuild ok")

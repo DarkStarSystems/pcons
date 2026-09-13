@@ -1,9 +1,15 @@
 # Test configuration for the python-action example
 
 [test]
-description = "Run a Python function as a build step: env.PyAction writes the function to a generated module and ninja runs it"
+description = "Run a Python function as a build step: env.PyAction turns it into a builder, and each call makes one edge"
 
-expected_outputs = ["build/report.txt"]
+expected_outputs = [
+    "build/report.txt",
+    "build/report2.txt",
+    "build/strict/report.txt",
+    "build/pyact/report.py",
+    "build/strict/pyact/report.py",
+]
 
 [verify]
 commands = [
@@ -15,17 +21,24 @@ description = "Nothing changed"
 expect_no_work = true
 
 [[rebuild]]
-description = "A source changed: the function runs again"
+description = "A source of the first and third edges changed: only those two re-run"
 touch = "src/a.txt"
-expect_rebuild = ["report.txt"]
+expect_rebuild = ["report.txt", "strict*report.txt"]
+expect_no_rebuild = ["report2.txt"]
 
 [[rebuild]]
-description = "The build script changed but the function did not: regenerating alone does not re-run the edge"
+description = "A source of the second edge changed: only it re-runs"
+touch = "src/c.txt"
+expect_rebuild = ["report2.txt"]
+expect_no_rebuild = ["strict*report.txt"]
+
+[[rebuild]]
+description = "The build script changed but the function did not: regenerating alone does not re-run any edge"
 touch = "pcons-build.py"
 expect_rebuild = ["build.ninja"]
-expect_no_rebuild = ["report.txt"]
+expect_no_rebuild = ["report.txt", "report2.txt", "strict*report.txt"]
 
 [[rebuild]]
-description = "A comment does not re-run the function, a changed body does"
+description = "A comment does not re-run the function, a changed body re-runs all three edges"
 run = "uv run python rebuild_check.py"
 expect_stdout = "rebuild ok"

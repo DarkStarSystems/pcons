@@ -529,7 +529,8 @@ def _plain_function(
         raise PyActionError(
             f"PyAction needs a function written in a build script, not "
             f"{_describe(fn)} of type {type(fn).__name__}. Write a def beside "
-            f"the other targets and pass what it needs to the call.",
+            f"the other targets and pass what it needs at the call: "
+            f"action(target=..., value=...).",
             at,
         )
     if fn.__name__ == "<lambda>":
