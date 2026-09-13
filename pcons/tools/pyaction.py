@@ -55,8 +55,6 @@ if TYPE_CHECKING:
 GEN_DIR = "pyact"
 MODULE_PREFIX = "pcons_pyact_"
 
-#: Parameter names the call spends on the edge, so a function may not use them.
-_RESERVED = ("target", "source", "name", "depends")
 
 _SAFE_GLOBALS = frozenset({"__name__", "__doc__", "__builtins__"})
 
@@ -180,6 +178,7 @@ def validate(fn: Callable[..., object], *, project: Project) -> ValidatedAction:
     at = get_caller_location()
     name = _decoration_name(fn)
     function = _plain_function(fn, name, at)
+    _reject_uncallable_signature(function, at)
     _reject_reserved_parameters(function, at)
     source, node = _extract(function, at)
     _reject_script_globals(function, node, name, at)
@@ -195,30 +194,97 @@ def _decoration_name(fn: Callable[..., object]) -> str:
     return getattr(fn, "__name__", None) or type(fn).__name__
 
 
+@functools.cache
+def _reserved_names() -> frozenset[str]:
+    """The parameter names :meth:`PyAction.__call__` spends on the edge.
+
+    Read from that signature rather than listed beside it, so a name added to
+    the call is reserved by the same edit and the two cannot disagree.
+    ``self`` and the ``**kwargs`` that carry the function's own arguments are
+    not keyword-only parameters, so they fall out on their own.
+    """
+    return frozenset(
+        name
+        for name, parameter in inspect.signature(PyAction.__call__).parameters.items()
+        if parameter.kind is parameter.KEYWORD_ONLY
+    )
+
+
+def _and_list(names: Sequence[str]) -> str:
+    """Names as a reader would say them, with the last joined by "and"."""
+    if len(names) < 2:
+        return names[0] if names else ""
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 def _reject_reserved_parameters(
     function: types.FunctionType, at: SourceLocation
 ) -> None:
     """Refuse a parameter whose name the call already spends on the edge.
 
-    Only the four the call actually takes. A name held back for something the
-    call might take one day costs a user a parameter for nothing.
-
     Raises:
         PyActionError: Naming the parameters to rename.
     """
-    taken = sorted(set(inspect.signature(function).parameters) & set(_RESERVED))
+    taken = sorted(set(inspect.signature(function).parameters) & _reserved_names())
     if not taken:
         return
     plural = len(taken) > 1
     raise PyActionError(
-        f"PyAction {function.__name__!r} has {', '.join(taken)} as "
-        f"{'parameter names' if plural else 'a parameter name'}, which the "
-        f"call already uses to describe the edge. Rename "
-        f"{'them' if plural else 'it'}: the function receives sources and "
-        f"targets as its first two arguments, and everything else as a "
-        f"keyword of the call.",
+        f"PyAction {function.__name__}() has {_and_list(taken)} as "
+        f"{'parameter names' if plural else 'a parameter name'}, and the call "
+        f"spends {'those names' if plural else 'that name'} on the edge "
+        f"itself. Rename {'them' if plural else 'it'} in the def and at the "
+        f"call: the function receives sources and targets as its first two "
+        f"arguments, and everything else as a keyword of the call.",
         at,
     )
+
+
+def _reject_uncallable_signature(
+    function: types.FunctionType, at: SourceLocation
+) -> None:
+    """Refuse a signature the build-time call could never satisfy.
+
+    The runner calls ``fn(sources, targets, **kwargs)``. Two shapes make that
+    impossible however the call is written, and both are properties of the
+    ``def``, so they are refused where the ``def`` is rather than at the first
+    call. Left to ``inspect``, each is reported in the words of the probe
+    rather than of the mistake: the first as "too many positional arguments",
+    the second as a missing "positional-only" argument to somebody who just
+    typed that keyword.
+
+    Raises:
+        PyActionError: Naming which half of the call shape is impossible.
+    """
+    signature = inspect.signature(function)
+    parameters = list(signature.parameters.values())
+    kinds = {p.kind for p in parameters}
+    slots = [
+        p for p in parameters if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ]
+    if len(slots) < 2 and inspect.Parameter.VAR_POSITIONAL not in kinds:
+        raise PyActionError(
+            f"PyAction {function.__name__}{signature} cannot receive sources "
+            f"and targets: it has "
+            f"{'only one parameter' if len(slots) == 1 else 'no parameters'} "
+            f"that can be filled positionally. At build time it is called as "
+            f"{function.__name__}(sources, targets, **kwargs), so write the "
+            f"first two as plain parameters: "
+            f"def {function.__name__}(sources, targets, ...).",
+            at,
+        )
+    late = [p.name for p in parameters[2:] if p.kind is p.POSITIONAL_ONLY]
+    if late:
+        plural = len(late) > 1
+        raise PyActionError(
+            f"PyAction {function.__name__}{signature} cannot be given "
+            f"{_and_list(late)}: {'they are' if plural else 'it is'} "
+            f"positional-only, and everything past sources and targets "
+            f"arrives as a keyword of the call. Move the / up so it follows "
+            f"targets: def {function.__name__}(sources, targets, /, "
+            f"{', '.join(late)}).",
+            at,
+        )
 
 
 def _bind_arguments(
@@ -242,9 +308,11 @@ def _bind_arguments(
     side by side.
 
     Raises:
-        PyActionError: Quoting what the signature says is wrong.
+        PyActionError: Naming the cause where the shape has one, and quoting
+            what the signature says otherwise.
     """
     signature = inspect.signature(function)
+    _reject_edge_supplied_keywords(function, signature, kwargs, at)
     try:
         signature.bind(None, None, **kwargs)
     except TypeError as exc:
@@ -256,6 +324,49 @@ def _bind_arguments(
             f"past the first two parameters is a keyword of the call.",
             at,
         ) from exc
+
+
+def _reject_edge_supplied_keywords(
+    function: types.FunctionType,
+    signature: inspect.Signature,
+    kwargs: Mapping[str, Any],
+    at: SourceLocation,
+) -> None:
+    """Refuse a keyword that names one of the two arguments the edge fills.
+
+    ``report(target="o.txt", sources=["a.txt"])`` is a plausible slip for
+    ``source=``, and ``bind`` answers it with "multiple values for argument
+    'sources'", which never mentions that the edge's own inputs are spelled
+    without the s. Only the function's first two parameters are refused, so a
+    body that really does take a keyword called *sources* through its own
+    ``**kwargs`` still gets it.
+
+    Raises:
+        PyActionError: Naming the clash and the singular spelling.
+    """
+    slots = [
+        p.name
+        for p in signature.parameters.values()
+        if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    ][:2]
+    clashing = sorted(set(kwargs) & set(slots))
+    if not clashing:
+        return
+    plural = len(clashing) > 1
+    edge_spelling = {"sources": "source=", "targets": "target="}
+    meant = [edge_spelling[name] for name in clashing if name in edge_spelling]
+    advice = (
+        f" The edge's own files are spelled {_and_list(meant)}, which is "
+        f"probably what you meant."
+        if meant
+        else ""
+    )
+    raise PyActionError(
+        f"PyAction {function.__name__}{signature} already receives "
+        f"{_and_list(clashing)} from the edge, so the call cannot pass "
+        f"{'them' if plural else 'it'} as well.{advice}",
+        at,
+    )
 
 
 def emit_module(action: ValidatedAction, *, project: Project, env: Environment) -> Path:
@@ -310,7 +421,7 @@ def check_arguments(
 
     Args:
         action: What :func:`validate` returned.
-        name: The edge's name, for the messages.
+        name: The edge's name, which the pickle is named after.
         kwargs: Keyword arguments for the build-time call.
 
     Returns:
@@ -322,16 +433,17 @@ def check_arguments(
             of them cannot be pickled.
     """
     at = get_caller_location()
+    called = action.function.__name__
     _bind_arguments(action.function, kwargs, at)
-    _reject_description_objects(kwargs, name, at)
+    _reject_description_objects(kwargs, called, at)
     return _payload_bytes(
         {
             "version": runner.PROTOCOL_VERSION,
             "module": f"{MODULE_PREFIX}{action.module_stem}",
-            "function": action.function.__name__,
+            "function": called,
             "kwargs": dict(kwargs),
         },
-        name,
+        called,
         at,
     )
 
@@ -408,41 +520,43 @@ def _plain_function(
     """
     if isinstance(fn, functools.partial):
         raise PyActionError(
-            f"PyAction {name!r} was given a functools.partial. Pass the "
-            f"function itself and give its bound arguments to the call.",
+            "PyAction was given a functools.partial. Pass the function itself "
+            "and give its bound arguments to the call: "
+            "action(target=..., bound=value).",
             at,
         )
     if not isinstance(fn, types.FunctionType):
         raise PyActionError(
-            f"PyAction {name!r} needs a function written in a build script, "
-            f"not {_describe(fn)} of type {type(fn).__name__}. Write a def "
-            f"beside the other targets and pass what it needs to the call.",
+            f"PyAction needs a function written in a build script, not "
+            f"{_describe(fn)} of type {type(fn).__name__}. Write a def beside "
+            f"the other targets and pass what it needs to the call.",
             at,
         )
     if fn.__name__ == "<lambda>":
         raise PyActionError(
-            f"PyAction {name!r} was given a lambda. Its source cannot be "
-            f"extracted on its own: write it as a def.",
+            "PyAction was given a lambda. Its source cannot be extracted on "
+            "its own: write it as a def.",
             at,
         )
     if fn.__closure__ is not None:
-        free = fn.__code__.co_freevars
+        free = sorted(fn.__code__.co_freevars)
+        plural = len(free) > 1
         raise PyActionError(
-            f"PyAction {name!r} reads {', '.join(free)} from the function it "
+            f"PyAction {name}() reads {_and_list(free)} from the function it "
             f"is nested in. Only the function's own source travels to build "
             f"time, so there is nothing to read "
-            f"{'them' if len(free) > 1 else 'it'} from. Pass "
-            f"{'them' if len(free) > 1 else 'it'} as "
-            f"{'keywords' if len(free) > 1 else 'a keyword'} of the call and "
-            f"take {'them' if len(free) > 1 else 'it'} as "
-            f"{'arguments' if len(free) > 1 else 'an argument'}.",
+            f"{'them' if plural else 'it'} from. Take "
+            f"{'them' if plural else 'it'} as "
+            f"{'parameters' if plural else 'a parameter'} and pass "
+            f"{'them' if plural else 'it'} at the call: "
+            f"{name}(target=..., {'=..., '.join(free)}=...).",
             at,
         )
     if _class_scoped(fn):
         raise PyActionError(
-            f"PyAction {name!r} was given {_describe(fn)}, defined in a "
-            f"class body. Only a plain function can be extracted: move the "
-            f"def out of the class.",
+            f"PyAction was given {_describe(fn)}, defined in a class body. "
+            f"Only a plain function can be extracted: move the def out of "
+            f"the class.",
             at,
         )
     return fn
@@ -499,7 +613,11 @@ def _defined_by_the_script(value: object) -> bool:
 
 
 def _global_remedy(
-    found: str, value: object, from_default: bool, imports: list[str]
+    found: str,
+    value: object,
+    from_default: bool,
+    imports: list[str],
+    called: str,
 ) -> str | None:
     """What to type instead, for one name the body reads from the script.
 
@@ -515,6 +633,7 @@ def _global_remedy(
         value: What the build script has under it.
         from_default: Whether it was read by a parameter's default value.
         imports: Collects the import lines, which are answered together.
+        called: The function's name, so a remedy can spell out the call.
 
     Returns:
         A sentence, or None when the name joins the import advice instead.
@@ -529,8 +648,8 @@ def _global_remedy(
         return (
             f"{found} is a parameter's default value, and a default is "
             f"evaluated again where the generated module defines the "
-            f"function: write the parameter without a default and pass "
-            f"{found} as a keyword of the call."
+            f"function: write the parameter without a default and pass it at "
+            f"the call, {called}(target=..., {found}={found})."
         )
     if isinstance(value, types.ModuleType):
         imports.append(f"import {value.__name__}")
@@ -539,7 +658,10 @@ def _global_remedy(
         return (
             f"Import {found} inside the function body, the way this script imports it."
         )
-    return f"Pass {found} as a keyword of the call and take it as an argument."
+    return (
+        f"Take {found} as a parameter and pass it at the call, "
+        f"{called}(target=..., {found}={found})."
+    )
 
 
 def _reject_script_globals(
@@ -566,10 +688,10 @@ def _reject_script_globals(
 
     if "__file__" in suspect:
         raise PyActionError(
-            f"PyAction {name!r} uses __file__, which at build time names the "
-            f"generated module rather than this script. Pass the path it "
-            f"means as a keyword of the call, "
-            f'project.root_dir / "...", and take it as an argument.',
+            f"PyAction {name}() uses __file__, which at build time names the "
+            f"generated module rather than this script. Take the path it "
+            f"means as a parameter and pass it at the call, "
+            f'{name}(target=..., here=project.root_dir / "...").',
             at,
         )
 
@@ -579,7 +701,7 @@ def _reject_script_globals(
         for found in suspect
         if (
             remedy := _global_remedy(
-                found, fn.__globals__[found], found in defaults, imports
+                found, fn.__globals__[found], found in defaults, imports, name
             )
         )
         is not None
@@ -591,7 +713,7 @@ def _reject_script_globals(
         )
     those = "those names" if len(suspect) > 1 else "that name"
     raise PyActionError(
-        f"PyAction {name!r} uses {', '.join(suspect)} from the build script, "
+        f"PyAction {name}() uses {_and_list(suspect)} from the build script, "
         f"and only the function's own source travels to build time, so "
         f"nothing defines {those} there. " + " ".join(remedies),
         at,
@@ -649,10 +771,12 @@ def _claim(
     if owner is not None and owner is first_owner:
         return False
     advice = _collision_advice(owner, first_owner, same_env=first_env is env)
+    subject = f"PyAction {name}()" if owner is not None else f"PyAction edge {name!r}"
+    wrote = "the PyAction" if owner is not None else "the edge"
     raise PyActionError(
-        f"PyAction {name!r}{_env_label(env)} would overwrite "
-        f"{path.as_posix()}, already written by the PyAction"
-        f"{_env_label(first_env)} at {first_at}. {advice}",
+        f"{subject}{_env_label(env)} would overwrite {path.as_posix()}, "
+        f"already written by {wrote}{_env_label(first_env)} at {first_at}. "
+        f"{advice}",
         at,
     )
 
@@ -678,7 +802,7 @@ def _collision_advice(
     if not same_env:
         fixes.append("give one environment its own build_prefix")
     if owner is None or first is None:
-        fixes.append("pass name= to one of them")
+        fixes.append('name one of the edges, name="something-else"')
     elif owner.module_text != first.module_text:
         fixes.append("rename one of the functions")
     elif same_env:
@@ -782,7 +906,7 @@ def _reject_description_objects(
         if described is not None:
             where_it_is, remedy = described
             raise PyActionError(
-                f"PyAction {name!r}: {where} is {where_it_is}, and the build "
+                f"PyAction {name}(): {where} is {where_it_is}, and the build "
                 f"description does not exist when the function runs. {remedy}",
                 at,
             )
@@ -820,7 +944,7 @@ def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> by
             else "one of its arguments"
         )
         raise PyActionError(
-            f"PyAction {name!r} cannot pickle {label}: {exc}. "
+            f"PyAction {name}() cannot pickle {label}: {exc}. "
             f"Arguments travel to build time as a file, so each one must be "
             f"picklable. Pass what describes it instead, a path or a string, "
             f"and build the object inside the function.",
@@ -855,8 +979,9 @@ def _runner_path() -> str:
     """The build-time runner's absolute path, as a command token.
 
     A path, never ``-m pcons.util.pyaction``: the ``-m`` form executes
-    ``pcons/__init__.py`` first, about 54 ms of imports on every edge, and
-    ``pcons.workers.python_server.script_argv`` hands back any argv whose
+    ``pcons/__init__.py`` first, importing the generators, toolchains and
+    packages on every edge for several times the interpreter's own start-up,
+    and ``pcons.workers.python_server.script_argv`` hands back any argv whose
     first argument starts with ``-``, which would make ``worker=`` a no-op.
     """
     return str(Path(runner.__file__)).replace("\\", "/")

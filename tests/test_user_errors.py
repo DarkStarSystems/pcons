@@ -27,6 +27,8 @@ from pcons.core.errors import (
 )
 from pcons.core.invocation import RUN_NAME
 from pcons.core.project import Project
+from pcons.core.subst import PathToken
+from pcons.util.pyaction import run
 
 
 @pytest.fixture
@@ -615,6 +617,431 @@ def build_script_function(tmp_path, source, name="render"):
     return namespace[name]
 
 
+SCRIPT_VALUE = "a value the build script computed"
+
+
+class TestEveryPyActionRemedyWorks:
+    """Every remedy above, typed out and run.
+
+    A remedy nobody has followed is a remedy nobody has checked. Each test
+    here types the sentence the matching refusal prints and asserts the
+    result is a real edge. Where the remedy moves a value across the
+    configure/build boundary, the function is then run through the build-time
+    runner, so the value is proven to arrive rather than merely to configure.
+    """
+
+    def edge_sources(self, target):
+        """The edge's own sources, as node paths."""
+        info = target.output_nodes[0]._build_info
+        return [node.path.as_posix() for node in info["sources"]]
+
+    def run_edge(self, project, action, tmp_path, **call):
+        """Make the edge, then run its function the way the runner will."""
+        made = action(**call)
+        project.resolve()
+        module, args = (
+            tmp_path / Path(token.path)
+            for token in made.output_nodes[0]._build_info["command"]
+            if isinstance(token, PathToken)
+        )
+        out = tmp_path / "written.txt"
+        run(str(module), str(args), [str(out)], [str(tmp_path / "src" / "main.c")])
+        return made, out
+
+    def test_a_partial_becomes_an_argument_of_the_call(self, project_env, tmp_path):
+        """ "give its bound arguments to the call: action(target=..., bound=value)"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, n):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(str(n), encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt", n=1)
+
+        assert out.read_text(encoding="utf-8") == "1"
+
+    def test_a_lambda_becomes_a_def(self, project_env):
+        """ "write it as a def"."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            return 1
+
+        assert render(target="out.txt").name == "out"
+
+    def test_a_method_moves_out_of_the_class(self, project_env):
+        """ "move the def out of the class"."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            return 1
+
+        assert render(target="out.txt").name == "out"
+
+    def test_a_coroutine_becomes_a_plain_def(self, project_env):
+        """ "Write it as a plain def"."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            return 1
+
+        assert render(target="out.txt").name == "out"
+
+    def test_a_closure_becomes_a_parameter(self, project_env, tmp_path):
+        """ "Take it as a parameter and pass it at the call: f(target=..., title=...)"."""
+        project, env = project_env
+        title = "from the enclosing scope"
+
+        def make():
+            @env.PyAction()
+            def render(sources, targets, title):
+                from pathlib import Path
+
+                Path(targets[0]).write_text(title, encoding="utf-8")
+
+            return render
+
+        _, out = self.run_edge(project, make(), tmp_path, target="out.txt", title=title)
+
+        assert out.read_text(encoding="utf-8") == title
+
+    def test_an_import_moves_into_the_body(self, project_env, tmp_path):
+        """ "Import Path inside the function body, the way this script imports it"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(Path(sources[0]).name, encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt")
+
+        assert out.read_text(encoding="utf-8") == "main.c"
+
+    def test_a_module_import_moves_into_the_body(self, project_env, tmp_path):
+        """'Write "import json" at the top of the function body'."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            import json
+            from pathlib import Path
+
+            Path(targets[0]).write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt")
+
+        assert out.read_text(encoding="utf-8") == '{"ok": true}'
+
+    def test_a_default_becomes_a_parameter_passed_at_the_call(
+        self, project_env, tmp_path
+    ):
+        """ "write the parameter without a default and pass it at the call"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, label):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(label, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", label=SCRIPT_VALUE
+        )
+
+        assert out.read_text(encoding="utf-8") == SCRIPT_VALUE
+
+    def test_a_script_value_becomes_a_parameter(self, project_env, tmp_path):
+        """ "Take SRC_DIR as a parameter and pass it at the call"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, SRC_DIR):  # noqa: N803
+            from pathlib import Path
+
+            Path(targets[0]).write_text(SRC_DIR, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", SRC_DIR="src"
+        )
+
+        assert out.read_text(encoding="utf-8") == "src"
+
+    def test_a_script_local_helper_is_written_out_in_the_body(
+        self, project_env, tmp_path
+    ):
+        """ "write out what it does inside the function body"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            from pathlib import Path
+
+            def helper(value):
+                return value.upper()
+
+            Path(targets[0]).write_text(helper("ok"), encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt")
+
+        assert out.read_text(encoding="utf-8") == "OK"
+
+    def test_dunder_file_becomes_a_path_passed_at_the_call(self, project_env, tmp_path):
+        """'Take the path it means as a parameter: f(target=..., here=...)'."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, here):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(Path(here).name, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project,
+            render,
+            tmp_path,
+            target="out.txt",
+            here=str(project.root_dir / "build.py"),
+        )
+
+        assert out.read_text(encoding="utf-8") == "build.py"
+
+    def test_a_reserved_parameter_is_renamed(self, project_env, tmp_path):
+        """ "Rename it in the def and at the call"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, input_file):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(input_file, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", input_file="renamed"
+        )
+
+        assert out.read_text(encoding="utf-8") == "renamed"
+
+    def test_the_signature_the_message_printed_is_callable(self, project_env):
+        """The bind message prints the signature; typing it works."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, title):
+            return title
+
+        assert render(target="out.txt", title="typed from the message").name == "out"
+
+    def test_a_target_moves_to_source(self, project_env):
+        """ "List it in source= instead, and the function receives its output paths"."""
+        project, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyAction()
+        def render(sources, targets):
+            return sources
+
+        edge = render(target="out.txt", source=[made])
+        project.resolve()
+
+        assert self.edge_sources(edge) == ["build/made.txt"]
+
+    def test_a_node_moves_to_source(self, project_env):
+        """The same remedy, for a node."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            return sources
+
+        edge = render(target="out.txt", source=[project.node("src/main.c")])
+        project.resolve()
+
+        assert self.edge_sources(edge) == ["src/main.c"]
+
+    def test_the_environment_becomes_a_value_read_here(self, project_env, tmp_path):
+        """ "Read what the function needs from it here, and pass that"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, env_name):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(env_name, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", env_name=str(env.name)
+        )
+
+        assert out.read_text(encoding="utf-8") == str(env.name)
+
+    def test_a_tool_namespace_becomes_its_values(self, project_env, tmp_path):
+        """ "env.cc.flags rather than env.cc"."""
+        project, env = project_env
+        env.cc.flags = ["-O2"]
+
+        @env.PyAction()
+        def render(sources, targets, flags):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(" ".join(flags), encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", flags=list(env.cc.flags)
+        )
+
+        assert out.read_text(encoding="utf-8") == "-O2"
+
+    def test_an_unpicklable_argument_becomes_a_path(self, project_env, tmp_path):
+        """ "Pass what describes it instead, a path or a string"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, path):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(Path(path).read_text(encoding="utf-8"))
+
+        _, out = self.run_edge(
+            project,
+            render,
+            tmp_path,
+            target="out.txt",
+            path=str(tmp_path / "src" / "main.c"),
+        )
+
+        assert out.read_text(encoding="utf-8").startswith("int main()")
+
+    def test_two_functions_of_one_name_are_renamed(self, project_env, tmp_path):
+        """ "Rename one of the functions"."""
+        _, env = project_env
+        for sub in ("one", "two"):
+            (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+        first = build_script_function(
+            tmp_path / "one",
+            """
+            def render(sources, targets):
+                return 1
+            """,
+        )
+        second = build_script_function(
+            tmp_path / "two",
+            """
+            def render_more(sources, targets):
+                return 2
+            """,
+            name="render_more",
+        )
+
+        env.PyAction()(first)(target="a.txt")
+        env.PyAction()(second)(target="b.txt")
+
+        assert (tmp_path / "build/pyact/render.py").is_file()
+        assert (tmp_path / "build/pyact/render_more.py").is_file()
+
+    def test_one_decoration_called_twice(self, project_env, tmp_path):
+        """ "Decorate the function once and call the action twice"."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            return 1
+
+        render(target="a.txt")
+        render(target="b.txt")
+
+        generated = sorted(
+            q.name
+            for q in (tmp_path / "build" / "pyact").iterdir()
+            if q.suffix in (".py", ".pkl")
+        )
+
+        assert generated == ["a.args.pkl", "b.args.pkl", "render.py"]
+
+    def test_one_of_the_edges_is_named(self, project_env, tmp_path):
+        """'Name one of the edges, name="something-else"'."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets):
+            return 1
+
+        render(target="report.txt")
+        second = render(target="sub/report.txt", name="sub-report")
+
+        assert second.name == "sub-report"
+        assert (tmp_path / "build/pyact/sub_report.args.pkl").is_file()
+
+    def test_one_environment_gets_a_build_prefix(self, project_env, tmp_path):
+        """ "Give one environment its own build_prefix"."""
+        project, _ = project_env
+        env = project.Environment(name="host")
+        other = project.Environment(name="other")
+        other.build_prefix = "other"
+
+        def decorate(environment):
+            @environment.PyAction()
+            def render(sources, targets):
+                return 1
+
+            return render
+
+        decorate(env)(target="report.txt")
+        decorate(other)(target="report.txt")
+
+        assert (tmp_path / "build/pyact/render.py").is_file()
+        assert (tmp_path / "build/other/pyact/render.py").is_file()
+
+    def test_the_first_two_parameters_become_positional(self, project_env):
+        """ "write the first two as plain parameters: def f(sources, targets, ...)"."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, title):
+            return title
+
+        assert render(target="out.txt", title="t").name == "out"
+
+    def test_the_slash_moves_up_to_follow_targets(self, project_env, tmp_path):
+        """ "Move the / up so it follows targets: def f(sources, targets, /, title)"."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, /, title):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(title, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", title="after the slash"
+        )
+
+        assert out.read_text(encoding="utf-8") == "after the slash"
+
+    def test_sources_at_the_call_becomes_source(self, project_env):
+        """ "The edge's own files are spelled source="."""
+        project, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, title):
+            return title
+
+        edge = render(target="out.txt", source=["src/main.c"], title="t")
+        project.resolve()
+
+        assert self.edge_sources(edge) == ["src/main.c"]
+
+
 class TestPyActionErrors:
     """What env.PyAction() says when a function cannot travel to build time.
 
@@ -624,11 +1051,18 @@ class TestPyActionErrors:
     """
 
     def test_a_lambda_says_to_write_a_def(self, project_env):
+        """No name is invented for it: '<lambda>' twice in one sentence."""
         _, env = project_env
-        with pytest.raises(PconsError, match="write it as a def"):
+
+        with pytest.raises(PconsError) as caught:
             env.PyAction()(lambda sources, targets: None)
 
-    def test_a_closure_names_the_variable_and_points_at_kwargs(self, project_env):
+        message = str(caught.value)
+        assert "PyAction was given a lambda." in message
+        assert "write it as a def" in message
+        assert "<lambda>" not in message
+
+    def test_a_closure_names_the_variable_and_spells_the_call(self, project_env):
         _, env = project_env
         title = "report"
 
@@ -643,8 +1077,12 @@ class TestPyActionErrors:
             make()
 
         message = str(caught.value)
-        assert "reads title from the function it is nested in" in message
-        assert "Pass it as a keyword of the call and take it as an argument." in message
+        assert message.startswith(str(caught.value.location) + ": ")
+        assert (
+            "PyAction render() reads title from the function it is nested in" in message
+        )
+        assert "Take it as a parameter and pass it at the call: " in message
+        assert "render(target=..., title=...)." in message
 
     def test_a_global_says_to_move_the_import_into_the_body(self, project_env):
         _, env = project_env
@@ -656,10 +1094,10 @@ class TestPyActionErrors:
                 return Path(targets[0])
 
         message = str(caught.value)
-        assert "uses Path from the build script" in message
+        assert "PyAction render() uses Path from the build script" in message
         assert "Import Path inside the function body, the way this script" in message
 
-    def test_a_default_says_to_drop_it_and_use_kwargs(self, project_env):
+    def test_a_default_says_to_drop_it_and_pass_it_at_the_call(self, project_env):
         _, env = project_env
 
         with pytest.raises(PconsError) as caught:
@@ -670,8 +1108,10 @@ class TestPyActionErrors:
 
         message = str(caught.value)
         assert "PYACTION_DEFAULT is a parameter's default value" in message
-        assert "write the parameter without a default and pass" in message
-        assert "as a keyword of the call" in message
+        assert (
+            "write the parameter without a default and pass it at the call" in message
+        )
+        assert "render(target=..., PYACTION_DEFAULT=PYACTION_DEFAULT)." in message
 
     def test_a_target_in_kwargs_points_at_source(self, project_env):
         """The first mistake: passing a target the way it reads naturally."""
@@ -759,9 +1199,11 @@ class TestPyActionErrors:
             render(target="sub/report.txt")
 
         message = str(caught.value)
-        assert "would overwrite build/pyact/report.args.pkl" in message
+        assert "PyAction edge 'report' would overwrite" in message
+        assert "build/pyact/report.args.pkl" in message
+        assert "already written by the edge at " in message
         assert "test_user_errors.py:" in message.split("already written by")[1]
-        assert "Pass name= to one of them." in message
+        assert 'Name one of the edges, name="something-else".' in message
 
     def test_one_function_decorated_twice_says_to_call_it_twice(self, project_env):
         """The reshape's own mistake: two decorations where one would do."""
@@ -821,9 +1263,9 @@ class TestPyActionErrors:
                 return source
 
         message = str(caught.value)
-        assert "has source as a parameter name" in message
-        assert "which the call already uses to describe the edge" in message
-        assert "Rename it" in message
+        assert "PyAction render() has source as a parameter name" in message
+        assert "the call spends that name on the edge itself" in message
+        assert "Rename it in the def and at the call" in message
 
     def test_several_reserved_names_are_named_together(self, project_env):
         _, env = project_env
@@ -835,8 +1277,114 @@ class TestPyActionErrors:
                 return depends, target
 
         message = str(caught.value)
-        assert "has depends, target as parameter names" in message
-        assert "Rename them" in message
+        assert "PyAction render() has depends and target as parameter names" in message
+        assert "the call spends those names on the edge itself" in message
+        assert "Rename them in the def and at the call" in message
+
+    def test_keyword_only_first_parameters_name_the_cause(self, project_env):
+        """bind would say "too many positional arguments", which is our probe."""
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyAction()
+            def render(*, sources, targets, title):
+                return title
+
+        message = str(caught.value)
+        assert "cannot receive sources and targets" in message
+        assert "no parameters that can be filled positionally" in message
+        assert "def render(sources, targets, ...)." in message
+        assert "positional arguments" not in message
+
+    def test_one_positional_slot_is_still_one_too_few(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyAction()
+            def render(sources, *, targets):
+                return 1
+
+        assert "only one parameter that can be filled positionally" in str(caught.value)
+
+    def test_a_positional_only_parameter_names_the_cause(self, project_env):
+        """bind calls it "a required positional-only argument", to somebody
+        who just typed that keyword."""
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyAction()
+            def render(sources, targets, title, /):
+                return title
+
+        message = str(caught.value)
+        assert "cannot be given title: it is positional-only" in message
+        assert "everything past sources and targets arrives as a keyword" in message
+        assert "def render(sources, targets, /, title)." in message
+
+    def test_two_positional_only_parameters_are_named_together(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyAction()
+            def render(sources, targets, title, count, /):
+                return title, count
+
+        message = str(caught.value)
+        assert "cannot be given title and count: they are positional-only" in message
+        assert "def render(sources, targets, /, title, count)." in message
+
+    def test_a_slash_after_targets_is_accepted(self, project_env):
+        """The good shape: only parameters past targets must take keywords."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, /, title):
+            return title
+
+        assert render(target="out.txt", title="t").name == "out"
+
+    def test_sources_as_a_call_keyword_points_at_source(self, project_env):
+        """bind would say "multiple values for argument 'sources'"."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, title):
+            return title
+
+        with pytest.raises(PconsError) as caught:
+            render(target="o.txt", sources=["a.txt"], title="t")
+
+        message = str(caught.value)
+        assert "already receives sources from the edge" in message
+        assert "the call cannot pass it as well" in message
+        assert "The edge's own files are spelled source=" in message
+        assert "multiple values" not in message
+
+    def test_targets_as_a_call_keyword_points_at_target(self, project_env):
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, title):
+            return title
+
+        with pytest.raises(PconsError) as caught:
+            render(target="o.txt", targets=["a.txt"], title="t")
+
+        assert "The edge's own files are spelled target=" in str(caught.value)
+
+    def test_a_var_keyword_body_may_still_take_a_sources_argument(self, project_env):
+        """Only the function's own first two parameters are refused."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(first, second, **rest):
+            return rest
+
+        assert render(target="o.txt", sources="a literal argument").name == "o"
 
     def test_a_parameter_named_env_is_fine(self, project_env):
         """env is not reserved: the call has no env= to collide with."""
@@ -889,8 +1437,8 @@ class TestPyActionErrors:
             env.PyAction()(functools.partial(render, n=1))
 
         message = str(caught.value)
-        assert "was given a functools.partial" in message
-        assert "give its bound arguments to the call" in message
+        assert "PyAction was given a functools.partial." in message
+        assert "action(target=..., bound=value)." in message
 
     def test_a_bound_method_says_to_write_a_def(self, project_env):
         _, env = project_env
@@ -903,7 +1451,9 @@ class TestPyActionErrors:
             env.PyAction()(Holder().render)
 
         message = str(caught.value)
-        assert "needs a function written in a build script" in message
+        assert message.split(": ", 1)[1].startswith(
+            "PyAction needs a function written in a build script, not "
+        )
         assert "Write a def beside the other targets" in message
 
     def test_a_method_says_to_move_it_out_of_the_class(self, project_env):
@@ -936,7 +1486,10 @@ class TestPyActionErrors:
 
         message = str(caught.value)
         assert "names the generated module rather than this script" in message
-        assert "Pass the path it means as a keyword of the call" in message
+        assert (
+            "Take the path it means as a parameter and pass it at the call" in message
+        )
+        assert 'render(target=..., here=project.root_dir / "...").' in message
 
     def test_every_refusal_names_the_build_script_and_line(self, project_env):
         """The location is half the message: the user has the script open."""
@@ -972,6 +1525,7 @@ class TestPyActionErrors:
             env.PyAction()(render)
 
         message = str(caught.value)
+        assert "PyAction render() uses helper from the build script" in message
         assert "helper lives only in this build script" in message
         assert "write out what it does inside the function body" in message
         assert "import" not in message.split("nothing defines that name there.")[1][:40]

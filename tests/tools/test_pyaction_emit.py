@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import functools
 import importlib.util
+import inspect
 import os
 import pickle
 import textwrap
@@ -18,9 +19,11 @@ import pytest
 from pcons.core.project import Project
 from pcons.tools.pyaction import (
     MODULE_PREFIX,
+    PyAction,
     PyActionError,
     ValidatedAction,
     _claim,
+    _reserved_names,
     check_arguments,
     emit_args,
     emit_module,
@@ -698,6 +701,30 @@ class TestValidatedActionIdentity:
         assert first.module_text == second.module_text
 
 
+class TestReservedNames:
+    """The reserved set is the call's own keyword-only parameters.
+
+    The two drifted apart once already, which is why this is derived rather
+    than listed. If deriving is ever replaced by a literal, this fails.
+    """
+
+    def test_it_is_exactly_what_the_call_spends_on_the_edge(self) -> None:
+        call = inspect.signature(PyAction.__call__).parameters
+
+        assert _reserved_names() == {
+            name
+            for name, parameter in call.items()
+            if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        }
+
+    def test_it_holds_the_four_names_the_call_names_today(self) -> None:
+        assert _reserved_names() == {"target", "source", "name", "depends"}
+
+    def test_it_excludes_self_and_the_functions_own_arguments(self) -> None:
+        assert "self" not in _reserved_names()
+        assert "kwargs" not in _reserved_names()
+
+
 class TestClaimRegistry:
     """The owner rule on its own, without a function or a file in the way."""
 
@@ -765,8 +792,12 @@ class TestClaimRegistry:
         owner = self._action(project)
         _claim(project, env, path, "x", self._at(1), owner=owner)
 
-        with pytest.raises(PyActionError, match="Pass name= to one of them"):
+        with pytest.raises(PyActionError) as caught:
             _claim(project, env, path, "x", self._at(2), owner=None)
+
+        message = str(caught.value)
+        assert "PyAction edge 'x' would overwrite" in message
+        assert 'Name one of the edges, name="something-else".' in message
 
     def test_a_second_claim_with_no_owner_at_all_is_refused(
         self, project: Project, env: Any
@@ -774,7 +805,9 @@ class TestClaimRegistry:
         path = Path("build/pyact/x.args.pkl")
         _claim(project, env, path, "x", self._at(1), owner=None)
 
-        with pytest.raises(PyActionError, match="Pass name= to one of them"):
+        with pytest.raises(
+            PyActionError, match=r'Name one of the edges, name="something-else"'
+        ):
             _claim(project, env, path, "x", self._at(2), owner=None)
 
     def test_a_shared_owner_across_environments_still_shares(

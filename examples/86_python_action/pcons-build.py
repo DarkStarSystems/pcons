@@ -13,8 +13,8 @@ Three rules follow from the function travelling alone:
 1. It imports what it needs inside its own body. The generated module holds
    the function and nothing else, so a name this script imported does not
    exist there.
-2. It reads nothing from around it. A value from the build script is passed
-   as a keyword of the call, which travels in the pickle.
+2. It reads nothing from around it. A value from the build script is taken
+   as a parameter and passed at the call, where it travels in the pickle.
 3. The decorated name is a builder, like every other pcons builder, and the
    call returns the ``Target`` that ``project.Default`` takes.
 

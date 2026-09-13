@@ -26,7 +26,7 @@ def make_project(tmp_path: Path) -> Project:
     """A project with one source file to work from."""
     (tmp_path / "a.txt").write_text("first\n", encoding="utf-8")
     (tmp_path / "b.txt").write_text("second\n", encoding="utf-8")
-    return Project("pyact", root_dir=tmp_path)
+    return Project("wordcount", root_dir=tmp_path)
 
 
 def build_info(target: Target) -> Mapping[str, Any]:
@@ -273,7 +273,7 @@ class TestGeneratedNinja:
         source_dir.mkdir()
         (source_dir / "a.txt").write_text("first\n", encoding="utf-8")
         build_dir = tmp_path / "obuild"
-        project = Project("pyact", root_dir=source_dir, build_dir=build_dir)
+        project = Project("wordcount", root_dir=source_dir, build_dir=build_dir)
         env = project.Environment()
         one_source(project, env)
 
@@ -477,6 +477,7 @@ class TestTheCallDecidesTheSlice:
         assert top.read_bytes() == under.read_bytes()
         assert outside.output_nodes[0].path.as_posix() == "build/outside.txt"
         assert inside.output_nodes[0].path.as_posix() == "build/sub/inside.txt"
+        assert outside.env is inside.env is env
 
 
 class TestMultipleEnvironments:

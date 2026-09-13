@@ -17,9 +17,10 @@ must not depend on the tree that described it still being importable.
 The edge names this file by path, never as ``-m pcons.util.pyaction``, and
 that is what keeps the claim above true of the process as well as of the file.
 The ``-m`` form executes ``pcons/__init__.py`` first, which drags in the
-generators, toolchains and packages for about 54 ms per edge, and the
-persistent Python worker hands back any argv whose first argument starts with
-``-`` to be spawned fresh, so ``worker=`` would buy nothing.
+generators, toolchains and packages on every edge and costs several times the
+interpreter's own start-up, and the persistent Python worker hands back any
+argv whose first argument starts with ``-`` to be spawned fresh, so
+``worker=`` would buy nothing.
 
 The pickle is written by the build itself and read back by the build. It is not
 a general entry point and must not be pointed at a file from anywhere else.
