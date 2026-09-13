@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pcons import Project
+from pcons import Generator, Project
 from pcons.contrib import bundle
+from pcons.generators.generator import BaseGenerator
 
 
 def _plugin(project: Project, env):
@@ -175,3 +176,71 @@ class TestTheReturnedTargetStandsForTheBundle:
             for node in dep.output_nodes
         }
         assert {"Info.plist", "PkgInfo", "logo.png"} <= covered
+
+
+def _plugin_edge(ninja: str, out: str) -> str:
+    """The one build statement in *ninja* producing *out*."""
+    lines = [line for line in ninja.splitlines() if line.startswith(f"build {out}:")]
+    assert len(lines) == 1, lines
+    return lines[0]
+
+
+class TestTheBundlePartsOnlyOrderTheCopy:
+    """The parts belong to the bundle, but none of them is an input to the
+    binary's copy: editing a resource must not recopy the binary. That is
+    order-only in ninja -- after ``||``, not ``|``."""
+
+    def _ninja(self, tmp_path: Path, make_bundle) -> str:
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        installed = make_bundle(project, env)
+        project.Default(installed)
+        Generator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    def test_macos_bundle_orders_the_parts_after_the_copy(self, tmp_path: Path) -> None:
+        (tmp_path / "logo.png").write_bytes(b"png")
+        ninja = self._ninja(
+            tmp_path,
+            lambda project, env: bundle.create_macos_bundle(
+                project,
+                env,
+                _plugin(project, env),
+                bundle_dir="MyPlugin.bundle",
+                info_plist="<plist/>",
+                pkginfo=b"BNDL????",
+                resources=["logo.png"],
+            ),
+        )
+
+        edge = _plugin_edge(ninja, "MyPlugin.bundle/Contents/MacOS/myplugin.so")
+        inputs, _, order_only = edge.partition("||")
+        assert "|" not in inputs
+        for part in ("Contents/Info.plist", "Contents/PkgInfo", "Resources/logo.png"):
+            assert part in order_only
+
+        # Order-only deps are still built, so Default(bundle) covers the
+        # whole bundle: every part is reachable from the default target.
+        assert "default MyPlugin.bundle/Contents/MacOS/myplugin.so" in ninja
+
+    def test_flat_bundle_orders_the_parts_after_the_copy(self, tmp_path: Path) -> None:
+        (tmp_path / "logo.png").write_bytes(b"png")
+        (tmp_path / "helper.dll").write_bytes(b"dll")
+        ninja = self._ninja(
+            tmp_path,
+            lambda project, env: bundle.create_flat_bundle(
+                project,
+                env,
+                _plugin(project, env),
+                bundle_dir="MyPlugin",
+                dlls=[tmp_path / "helper.dll"],
+                resources=["logo.png"],
+            ),
+        )
+
+        edge = _plugin_edge(ninja, "MyPlugin/myplugin.so")
+        inputs, _, order_only = edge.partition("||")
+        assert "|" not in inputs
+        assert "MyPlugin/helper.dll" in order_only
+        assert "MyPlugin/logo.png" in order_only

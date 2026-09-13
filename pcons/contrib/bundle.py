@@ -156,10 +156,11 @@ def create_macos_bundle(
             If None, uses standard "MacOS" directory.
 
     Returns:
-        Target for the installed plugin within the bundle. It depends on the
-        bundle's other installs (Info.plist, PkgInfo, resources), so
+        Target for the installed plugin within the bundle. The bundle's other
+        installs (Info.plist, PkgInfo, resources) are ordered before it, so
         ``project.Default(bundle)`` or ``create_pkg(depends=[bundle])``
-        covers the whole bundle.
+        covers the whole bundle without an edited resource recopying the
+        binary.
 
     Example:
         >>> plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])
@@ -202,9 +203,11 @@ def create_macos_bundle(
         parts.extend(_install_resources(project, contents_dir / "Resources", resources))
 
     # The returned target stands for the whole bundle: Default(bundle) or
-    # depends=[bundle] covers the plist, PkgInfo and resources too.
+    # depends=[bundle] covers the plist, PkgInfo and resources too. Ordering
+    # only: the parts have to be built, but none of them is an input to the
+    # binary's copy, so editing a resource must not recopy the binary.
     if parts:
-        installed.depends(*parts)
+        installed.depends(*parts, on_change=False)
     return installed
 
 
@@ -273,8 +276,10 @@ def create_flat_bundle(
     if resources:
         parts.extend(_install_resources(project, bundle_path, resources))
 
+    # Ordering only, as in create_macos_bundle: the DLLs and resources are
+    # part of the bundle, not inputs to the plugin's copy.
     if parts:
-        installed.depends(*parts)
+        installed.depends(*parts, on_change=False)
     return installed
 
 
