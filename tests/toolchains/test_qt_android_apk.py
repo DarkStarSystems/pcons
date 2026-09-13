@@ -44,6 +44,12 @@ def _staged_path(target) -> Path:
     return Path(target.output_nodes[0].path)
 
 
+def _written(path: Path | None) -> str:
+    """How build.ninja spells a path: posix separators on every host."""
+    assert path is not None
+    return path.as_posix()
+
+
 class TestWhereTheLibraryGoes:
     def test_it_lands_under_libs_slash_abi(self, app_project) -> None:
         env = android_env()
@@ -241,7 +247,7 @@ class TestTheCommand:
 
         content = _ninja(app_project, env, _app(app_project, env))
 
-        assert str(deployable.tool_path("androiddeployqt")) in content
+        assert _written(deployable.tool_path("androiddeployqt")) in content
         assert "android-deployment-settings.json" in content
         assert "--output myapp" in content
 
@@ -438,7 +444,7 @@ class TestThePasswordNeverReachesTheBuildFile:
             store_password="file:secrets/keystore-pass",
         )
 
-        assert f"file:{secret}" in content
+        assert f"file:{_written(secret)}" in content
         assert "file:secrets/keystore-pass" not in content
 
     def test_a_literal_password_is_refused(self, app_project, deployable, sdk) -> None:
@@ -564,7 +570,7 @@ class TestTheSigningEdge:
             apksigner=tool,
         )
 
-        assert str(tool) in content
+        assert _written(tool) in content
 
     def test_the_highest_build_tools_revision_wins(
         self, app_project, deployable, sdk
