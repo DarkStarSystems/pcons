@@ -528,14 +528,19 @@ class TestManifest:
 
         assert read_manifest(tmp_path, "t.pack_b")["imports"] == []
 
-    def test_manifest_is_written_with_a_digest_sidecar(self, tmp_path, monkeypatch):
-        """The sidecar is what makes a re-configure a no-op for collate."""
+    def test_one_manifest_per_scope_and_nothing_else(self, tmp_path, monkeypatch):
+        """Configure writes the manifests, and only the manifests.
+
+        Anything else beside them is an artifact no edge declares, which
+        `ninja -t clean` would leave behind.
+        """
         reference_project(tmp_path, monkeypatch)
 
         base = tmp_path / "build/scan/scene-refs"
-
-        assert (base / "t.pack_a.manifest.json").exists()
-        assert (base / "t.pack_a.manifest.json.sha256").exists()
+        assert sorted(path.name for path in base.iterdir()) == [
+            "t.pack_a.manifest.json",
+            "t.pack_b.manifest.json",
+        ]
 
 
 class TestEdgeArgs:

@@ -70,7 +70,6 @@ from __future__ import annotations
 # this runs once per affected edge on every build. The CLI is internal, typed
 # only by pcons's own generators.
 import argparse
-import hashlib
 import json
 import sys
 from dataclasses import dataclass, field
@@ -87,27 +86,23 @@ _ERROR_PREFIX = "pcons collate:"
 
 
 def write_text_if_changed(path: Path, text: str) -> None:
-    """Write *text* to *path* only when content differs.
+    """Write *text* to *path* only when its content differs.
 
-    Fast-path no-op uses a matching ``<path>.sha256`` digest file.
-    If the digest file is missing or stale, use a size check first and
-    only fall back to a byte-for-byte compare for equal-size candidates.
+    Leaving an unchanged file untouched is what makes a ``restat`` collate
+    edge cheap: ninja sees the same mtime and nothing downstream reruns. The
+    comparison reads the file itself rather than a digest recorded beside it
+    -- these files are small (a dyndep, a modmap, an exports document), and a
+    file replaced out-of-band is then rewritten like any other difference.
     """
     data = text.encode("utf-8")
-    digest = hashlib.sha256(data).digest()
-    digest_file = path.with_suffix(path.suffix + ".sha256")
-
-    if path.exists():
-        if (
-            path.stat().st_size == len(data)
-            and digest_file.exists()
-            and digest_file.read_bytes() == digest
-        ):
+    try:
+        if path.read_bytes() == data:
             return
+    except OSError:
+        pass  # missing, unreadable, or a directory: let the write speak.
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
-    digest_file.write_bytes(digest)
 
 
 def _dyndep_escape(path: str) -> str:

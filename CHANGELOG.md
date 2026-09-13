@@ -384,6 +384,11 @@ read the whole changelog!
   `depends=`, and `pcons run` builds what every level of the command path
   declared. `pcons run <group>` with only the group's own options no longer
   builds the group's targets and then fails with "Missing command". (#107)
+- **Collate no longer leaves `.sha256` files in the build directory.** The
+  dyndep, modmap and exports writers recorded a digest beside each output to
+  decide whether it had changed; they compare the file itself now, which also
+  repairs an output something else overwrote, and leaves nothing behind for
+  `ninja -t clean` to miss.
 - **An unresolved `import` of a C++ module now says what is missing.** The
   module collate dropped a logical name that nothing in the scope or its
   dependencies provided, leaving the compiler to say only "module 'X' not

@@ -116,14 +116,14 @@ def test_dyndep_paths_with_spaces_are_escaped(tmp_path):
 
 
 class TestWriteTextIfChanged:
-    """The content-addressed write helper."""
+    """The write helper that leaves an unchanged output alone."""
 
-    def test_writes_and_records_digest(self, tmp_path: Path) -> None:
+    def test_writes_the_file_and_its_directory(self, tmp_path: Path) -> None:
         target = tmp_path / "sub" / "out.txt"
         write_text_if_changed(target, "hello\n")
 
         assert target.read_text() == "hello\n"
-        assert (tmp_path / "sub" / "out.txt.sha256").exists()
+        assert list(target.parent.iterdir()) == [target]
 
     def test_identical_rewrite_is_a_noop(self, tmp_path: Path) -> None:
         target = tmp_path / "out.txt"
@@ -140,6 +140,24 @@ class TestWriteTextIfChanged:
         write_text_if_changed(target, "goodbye\n")
 
         assert target.read_text() == "goodbye\n"
+
+    def test_same_length_content_is_rewritten(self, tmp_path: Path) -> None:
+        """The comparison is byte-for-byte, not by size."""
+        target = tmp_path / "out.txt"
+        write_text_if_changed(target, "hello\n")
+        write_text_if_changed(target, "olleh\n")
+
+        assert target.read_text() == "olleh\n"
+
+    def test_an_out_of_band_edit_is_repaired(self, tmp_path: Path) -> None:
+        """Whatever touched the output, the next collate restores it."""
+        target = tmp_path / "out.txt"
+        write_text_if_changed(target, "hello\n")
+        target.write_text("tampered!\n")
+
+        write_text_if_changed(target, "hello\n")
+
+        assert target.read_text() == "hello\n"
 
 
 class TestWriteDyndepEntries:
