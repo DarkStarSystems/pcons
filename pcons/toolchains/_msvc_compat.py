@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.preset import Preset, ToolContribution
@@ -11,6 +12,7 @@ from pcons.tools.toolchain import BaseToolchain
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
     from pcons.core.flags import FlagToken
     from pcons.core.target import Target
@@ -114,6 +116,18 @@ class MsvcCompatibleToolchain(BaseToolchain):
             # MASM assembly files - compiled with ml64.exe (x64) or ml.exe (x86)
             return SourceHandler("ml", "asm", ".obj", None, None, "asmcmd")
         return None
+
+    def get_import_library_name(
+        self, shared_library_name: str, target: Platform | None = None
+    ) -> str | None:
+        """``foo.dll`` is linked against through ``foo.lib``.
+
+        The link step writes it (the ``/IMPLIB:`` in ``sharedcmd``), so the
+        name follows the DLL's, keeping any directory and any name the target
+        chose with output_prefix/output_name. These toolchains only ever build
+        for Windows, so *target* does not change the answer.
+        """
+        return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
 
     def get_link_flags_for_target(
         self,

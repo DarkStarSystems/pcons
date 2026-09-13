@@ -9,7 +9,7 @@ protocol; the core resolver dispatches to it via the builder registry.
 from __future__ import annotations
 
 import logging
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
@@ -718,13 +718,20 @@ class CompileLinkFactory:
         lib_node.add_inputs(target.intermediate_nodes)
         info = self._setup_link_node(target, env, lib_node, "sharedcmd")
 
-        import sys
-
-        if sys.platform == "win32":
+        # Whether this link writes an import library is the toolchain's answer
+        # for the platform it builds for, not the host's: an MSVC-compatible
+        # link writes one wherever it runs, and a GNU-style one writes none
+        # even when it targets Windows (ld links a DLL directly).
+        toolchain = env._toolchain
+        import_name = (
+            toolchain.get_import_library_name(lib_name, env.target)
+            if toolchain is not None
+            else None
+        )
+        if import_name is not None:
             # An import library is an archive, so archive_directory places it,
             # the way CMake does. Unset, it follows its DLL rather than falling
             # back to the build-dir root.
-            import_name = str(PurePosixPath(lib_name).with_suffix(".lib"))
             archive_directory = env.output_directory_for("static_library")
             import_lib_path = self._output_path(
                 target,
@@ -734,7 +741,10 @@ class CompileLinkFactory:
             )
             info["outputs"] = {
                 "primary": {"path": lib_path, "suffix": lib_path.suffix},
-                "import_lib": {"path": import_lib_path, "suffix": ".lib"},
+                "import_lib": {
+                    "path": import_lib_path,
+                    "suffix": import_lib_path.suffix,
+                },
             }
 
         target.output_nodes.append(lib_node)
@@ -979,19 +989,19 @@ class CompileLinkFactory:
     def _collect_dependency_outputs(self, target: Target) -> list[FileNode]:
         """Collect output nodes from all dependencies.
 
-        For SharedLibrary dependencies on Windows, returns the import library
-        (.lib) instead of the DLL (.dll) since that's what the linker needs.
+        A SharedLibrary that produced an import library contributes that
+        (foo.lib) rather than the DLL, since that is what its linker links
+        against. Whether it produced one is what the link declared, so a
+        cross build reads the same as a native one.
 
         transitive_link_dependencies() lists dependencies before dependents. Static
         linkers (GNU ld) resolve symbols left-to-right and need the reverse:
         a library must precede the libraries it depends on, so we reverse here.
         """
-        import sys
-
         result: list[FileNode] = []
         for dep in reversed(target.transitive_link_dependencies()):
             for node in dep.output_nodes:
-                if sys.platform == "win32" and dep.target_type == "shared_library":
+                if dep.target_type == "shared_library":
                     build_info = getattr(node, "_build_info", {})
                     outputs = build_info.get("outputs", {})
                     import_lib_info = outputs.get("import_lib")

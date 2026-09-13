@@ -701,6 +701,17 @@ class Toolchain(Protocol):
         """
         ...
 
+    def get_import_library_name(
+        self, shared_library_name: str, target: Platform | None = None
+    ) -> str | None:
+        """Return the import library this link writes, or None if it writes none.
+
+        Args:
+            shared_library_name: The shared library's filename.
+            target: Platform being built for. None means the build machine.
+        """
+        ...
+
     def get_install_dir(self, target_type: str, target: Platform | None = None) -> str:
         """Return the conventional install subdirectory for a target type.
 
@@ -1262,6 +1273,23 @@ class BaseToolchain(ABC):
         elif target_type == "shared_library":
             return plat.shared_lib_suffix
         return plat.exe_suffix
+
+    def get_import_library_name(
+        self, shared_library_name: str, target: Platform | None = None
+    ) -> str | None:
+        """Return the import library this link writes, or None if it writes none.
+
+        Base: None. A GNU-style link writes no import library whatever it
+        targets — ld links a DLL directly, and nothing on its command line
+        asks for one. MSVC-compatible toolchains override this.
+
+        Args:
+            shared_library_name: The shared library's filename, as
+                get_output_prefix/get_output_suffix named it.
+            target: Platform being built for, usually ``env.target``. None
+                means the build machine.
+        """
+        return None
 
     def get_install_dir(self, target_type: str, target: Platform | None = None) -> str:
         """Return the conventional install subdirectory for a target type.

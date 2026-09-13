@@ -284,6 +284,13 @@ read the whole changelog!
 
 ### Fixed
 
+- **An import library is the toolchain's business, not the host's.** A shared
+  library gets its `foo.lib` because the toolchain's link step writes one, so
+  a cross build to Windows declares and links it the same way a native build
+  does. A GNU-style link writes none — `ld` links a DLL directly — so one is
+  no longer declared for mingw, where it left a `foo.lib` nothing produced on
+  the link line. New toolchains say what they write with
+  `get_import_library_name()`.
 - **`${TARGET}` and `$TARGET` in a compile or link flag expand to the
   output**, so `link_flags += ["-Wl,-Map=${TARGET}.map"]` puts a map file
   next to the program. `${TARGET}` used to reach the command line as a

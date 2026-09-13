@@ -64,6 +64,11 @@ def windows_toolchain(gcc_toolchain, monkeypatch):
         "get_output_suffix",
         lambda target_type, target=None: _WINDOWS_SUFFIXES.get(target_type, ".exe"),
     )
+    monkeypatch.setattr(
+        gcc_toolchain,
+        "get_import_library_name",
+        lambda name, target=None: Path(name).with_suffix(".lib").as_posix(),
+    )
     return gcc_toolchain
 
 
@@ -321,14 +326,13 @@ class TestOutputDirectories:
 
 class TestWindowsImportLibrary:
     def test_it_goes_to_the_archive_directory(
-        self, tmp_path, source, windows_toolchain, monkeypatch
+        self, tmp_path, source, windows_toolchain
     ):
         """CMake sends a DLL to RUNTIME/LIBRARY and its import lib to ARCHIVE.
 
-        sys.platform is patched around resolve() only, because tool detection
-        reads it too and shutil.which cannot answer for a platform it is not on.
-        The toolchain names outputs the way MSVC does whatever the host is, so
-        the expected paths do not depend on where the test runs.
+        The toolchain names outputs the way MSVC does and writes an import
+        library whatever the host is, so the expected paths do not depend on
+        where the test runs.
         """
         project = Project("p", root_dir=tmp_path)
         env = project.Environment(toolchain=windows_toolchain, name="win")
@@ -337,55 +341,51 @@ class TestWindowsImportLibrary:
         env.archive_directory = "lib"
         shared = project.SharedLibrary("s", env, sources=["src/common.c"])
 
-        monkeypatch.setattr("sys.platform", "win32")
         project.resolve()
 
         assert _primary_path(shared) == "build/win/bin/s.dll"
         assert _import_lib_path(shared) == "build/win/lib/s.lib"
 
     def test_it_follows_the_dll_with_no_archive_directory(
-        self, tmp_path, source, windows_toolchain, monkeypatch
+        self, tmp_path, source, windows_toolchain
     ):
         project = Project("p", root_dir=tmp_path)
         env = project.Environment(toolchain=windows_toolchain)
         shared = project.SharedLibrary("foo", env, sources=["src/common.c"])
 
-        monkeypatch.setattr("sys.platform", "win32")
         project.resolve()
 
         assert _primary_path(shared) == "build/foo.dll"
         assert _import_lib_path(shared) == "build/foo.lib"
 
     def test_the_archive_directory_takes_it_from_the_dll(
-        self, tmp_path, source, windows_toolchain, monkeypatch
+        self, tmp_path, source, windows_toolchain
     ):
         project = Project("p", root_dir=tmp_path)
         env = project.Environment(toolchain=windows_toolchain)
         env.archive_directory = "lib"
         shared = project.SharedLibrary("foo", env, sources=["src/common.c"])
 
-        monkeypatch.setattr("sys.platform", "win32")
         project.resolve()
 
         assert _primary_path(shared) == "build/foo.dll"
         assert _import_lib_path(shared) == "build/lib/foo.lib"
 
     def test_the_library_directory_takes_it_too(
-        self, tmp_path, source, windows_toolchain, monkeypatch
+        self, tmp_path, source, windows_toolchain
     ):
         project = Project("p", root_dir=tmp_path)
         env = project.Environment(toolchain=windows_toolchain)
         env.library_directory = "bin"
         shared = project.SharedLibrary("foo", env, sources=["src/common.c"])
 
-        monkeypatch.setattr("sys.platform", "win32")
         project.resolve()
 
         assert _primary_path(shared) == "build/bin/foo.dll"
         assert _import_lib_path(shared) == "build/bin/foo.lib"
 
     def test_the_archive_directory_wins_over_the_library_one(
-        self, tmp_path, source, windows_toolchain, monkeypatch
+        self, tmp_path, source, windows_toolchain
     ):
         project = Project("p", root_dir=tmp_path)
         env = project.Environment(toolchain=windows_toolchain)
@@ -393,28 +393,26 @@ class TestWindowsImportLibrary:
         env.archive_directory = "lib"
         shared = project.SharedLibrary("foo", env, sources=["src/common.c"])
 
-        monkeypatch.setattr("sys.platform", "win32")
         project.resolve()
 
         assert _primary_path(shared) == "build/bin/foo.dll"
         assert _import_lib_path(shared) == "build/lib/foo.lib"
 
     def test_a_subdirectory_in_output_prefix_is_kept(
-        self, tmp_path, source, windows_toolchain, monkeypatch
+        self, tmp_path, source, windows_toolchain
     ):
         project = Project("p", root_dir=tmp_path)
         env = project.Environment(toolchain=windows_toolchain)
         shared = project.SharedLibrary("foo", env, sources=["src/common.c"])
         shared.output_prefix = "mcu/"
 
-        monkeypatch.setattr("sys.platform", "win32")
         project.resolve()
 
         assert _primary_path(shared) == "build/mcu/foo.dll"
         assert _import_lib_path(shared) == "build/mcu/foo.lib"
 
     def test_output_prefix_nests_below_the_archive_directory(
-        self, tmp_path, source, windows_toolchain, monkeypatch
+        self, tmp_path, source, windows_toolchain
     ):
         project = Project("p", root_dir=tmp_path)
         env = project.Environment(toolchain=windows_toolchain)
@@ -422,21 +420,20 @@ class TestWindowsImportLibrary:
         shared = project.SharedLibrary("foo", env, sources=["src/common.c"])
         shared.output_prefix = "mcu/"
 
-        monkeypatch.setattr("sys.platform", "win32")
         project.resolve()
 
         assert _primary_path(shared) == "build/mcu/foo.dll"
         assert _import_lib_path(shared) == "build/lib/mcu/foo.lib"
 
-    def test_other_platforms_have_no_outputs_key(
-        self, tmp_path, source, windows_toolchain, monkeypatch
+    def test_a_toolchain_that_writes_none_has_no_outputs_key(
+        self, tmp_path, source, gcc_toolchain
     ):
+        """A GNU-style link writes no import library, on any host."""
         project = Project("p", root_dir=tmp_path)
-        env = project.Environment(toolchain=windows_toolchain)
+        env = project.Environment(toolchain=gcc_toolchain)
         env.archive_directory = "lib"
         shared = project.SharedLibrary("foo", env, sources=["src/common.c"])
 
-        monkeypatch.setattr("sys.platform", "linux")
         project.resolve()
 
         assert "outputs" not in shared.output_nodes[0]._build_info
