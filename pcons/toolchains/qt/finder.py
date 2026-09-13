@@ -528,10 +528,27 @@ def _probe_pkgconfig(
         )
         return None
     descriptions["Core"] = core
+
+    def describe(name: str) -> PackageDescription | None:
+        """A module's .pc file, or the headers alone for a module Qt ships
+        without a library (and so without a .pc file of its own)."""
+        pkg = finder.find(f"Qt6{name}")
+        if pkg is not None or name not in _HEADER_ONLY_MODULES:
+            return pkg
+        includedir = finder.get_variable("Qt6Core", "includedir")
+        if not includedir:
+            return None
+        return PackageDescription(
+            name=f"Qt6{name}",
+            version=core.version,
+            include_dirs=[includedir, str(Path(includedir) / f"Qt{name}")],
+            defines=[f"QT_{name.upper()}_LIB"],
+        )
+
     for name in wanted:
         if name == "Core":
             continue
-        pkg = finder.find(f"Qt6{name}")
+        pkg = describe(name)
         if pkg is None:
             return None  # incomplete install; let qtpaths try
         descriptions[name] = pkg
@@ -548,7 +565,7 @@ def _probe_pkgconfig(
             target.link(modules["Core"])
 
     def factory(name: str) -> ImportedTarget | None:
-        pkg = finder.find(f"Qt6{name}")
+        pkg = describe(name)
         if pkg is None:
             return None
         target = ImportedTarget.from_package(pkg, env=env)

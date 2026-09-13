@@ -124,6 +124,21 @@ def _no_qtpaths():
 
 
 class TestPkgConfigRoute:
+    def test_a_header_only_module_has_no_pc_file(self, project):
+        """Qt ships QmlIntegration as headers only, so no .pc file; the
+        pkg-config route answers with the headers, as the qtpaths route
+        does, instead of calling the install incomplete."""
+        fake = _FakePkgConfig(
+            _LINUX_PCS,
+            variables={"prefix": "/usr", "includedir": "/usr/include/qt6"},
+        )
+        with _patch_pkgconfig(fake), _no_qtpaths():
+            qt = find_qt(project, modules=["QmlIntegration"])
+        assert qt is not None
+        include_dirs = [str(d) for d in qt.QmlIntegration.public.include_dirs]
+        assert any(d.endswith("QtQmlIntegration") for d in include_dirs)
+        assert qt.QmlIntegration.public.link_libs == [qt.Core]  # no library of its own
+
     def test_linux_shape(self, project):
         fake = _FakePkgConfig(
             _LINUX_PCS,
