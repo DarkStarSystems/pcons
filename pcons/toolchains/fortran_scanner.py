@@ -41,9 +41,11 @@ from pcons.core.collate import SCAN_INFO_VERSION, write_text_if_changed
 
 # Regex for MODULE <name> declarations (produces a .mod file)
 # Handles: MODULE foo, MODULE :: foo (gfortran doesn't need ::, but be flexible)
-# Excludes: MODULE PROCEDURE (which is not a module definition)
+# Excludes: MODULE PROCEDURE, and the "module subroutine" / "module function"
+# a submodule uses to implement a separate module procedure; neither defines
+# a module.
 _MODULE_RE = re.compile(
-    r"^\s*MODULE\s+(?!PROCEDURE\b)(\w+)",
+    r"^\s*MODULE\s+(?!PROCEDURE\b|SUBROUTINE\b|FUNCTION\b)(\w+)",
     re.IGNORECASE | re.MULTILINE,
 )
 

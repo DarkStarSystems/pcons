@@ -211,6 +211,24 @@ def test_scan_module_procedure_not_detected() -> None:
     assert produces == ["real_module"]
 
 
+def test_scan_submodule_procedures_are_not_modules() -> None:
+    """A submodule implements separate module procedures as "module
+    subroutine" and "module function"; neither defines a module, and reading
+    one as a module named "subroutine" made two submodules collide."""
+    src = textwrap.dedent("""\
+        submodule (parent) child
+        contains
+          module subroutine step()
+          end subroutine
+          module function value() result(v)
+            integer :: v
+          end function
+        end submodule
+    """)
+    produces, uses = scan_fortran_source(src)
+    assert produces == []
+
+
 def test_scan_module_names_lowercased() -> None:
     """Module names are normalized to lowercase."""
     src = textwrap.dedent("""\
