@@ -140,6 +140,7 @@ class TestQtInstallAcrossSubdirectories:
         assert [Path(p).name for p in spec["sources"]] == ["main.cpp"]
 
         gen = spec_path.parent
+        assert spec["exports"] == str(gen / "automoc.exports.json")
         assert (
             _automoc.main(
                 [
@@ -156,6 +157,7 @@ class TestQtInstallAcrossSubdirectories:
         assert "#include" not in (gen / "mocs_compilation.cpp").read_text()
         depfile = (gen / "mocs_compilation.cpp.d").read_text().replace("\\", "/")
         assert str(qt_prefix).replace("\\", "/") not in depfile
+        assert (gen / "automoc.exports.json").is_file()
 
     def test_child_deploy_uses_the_located_tool(self, top, tmp_path, qt_prefix):
         cxx_env_with_qt(top)

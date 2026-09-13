@@ -559,7 +559,7 @@ def _qt_make_target(
                     "moc_args": _moc_args(qt_env, predefs_path),
                     "moc_deps": [str(predefs_path)] if predefs_path else [],
                     "has_includes": bool(includes),
-                    "exports": str(project.root_dir / exports_rel),
+                    "exports": str(root / exports_rel),
                     "metatypes": (
                         None if metatypes_rel is None else str(root / metatypes_rel)
                     ),

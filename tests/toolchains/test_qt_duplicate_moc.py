@@ -22,6 +22,7 @@ from pcons.toolchains.qt._automoc import _write_exports
 from pcons.toolchains.qt._moc_report import EXPORTS_VERSION
 from pcons.toolchains.qt._moc_report import main as moc_report
 from pcons.toolchains.qt.scan import QtScanner
+from pcons.util.add_subdirectory import add_subdirectory
 
 from ._qt_test_utils import cxx_env_with_qt, generate_ninja
 
@@ -230,6 +231,52 @@ class TestTheReportEdge:
         project.QtProgram("two", env, sources=["src/two.cpp"])
 
         assert _report_edges(generate_ninja(project)) == []
+
+
+class TestTheReportAcrossSubdirectories:
+    """A closure declared by add_subdirectory still gets its report."""
+
+    def test_a_child_projects_link_closure_gets_one_edge(self, shared_dir_tree):
+        child = shared_dir_tree / "child"
+        (child / "src").mkdir(parents=True)
+        for name in ("Controller.hpp", "Controller.cpp", "main.cpp"):
+            (child / "src" / name).write_text(
+                (shared_dir_tree / "src" / name).read_text()
+            )
+        (child / "src" / "sub").mkdir()
+        (child / "src" / "sub" / "Helper.hpp").write_text(
+            (shared_dir_tree / "src" / "sub" / "Helper.hpp").read_text()
+        )
+        (child / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\n"
+            "project = Project('child')\n"
+            "env = project.default_environment\n"
+            "mod = project.QtQmlModule(\n"
+            "    'mod', env, uri='a.b', sources=['src/Controller.cpp']\n"
+            ")\n"
+            "app = project.QtProgram('app', env, sources=['src/main.cpp'])\n"
+            "app.link(mod)\n"
+        )
+        top = Project(
+            "top", root_dir=shared_dir_tree, build_dir=shared_dir_tree / "build"
+        )
+        cxx_env_with_qt(top)
+
+        add_subdirectory("child")
+        ninja = generate_ninja(top)
+
+        edges = _report_edges(ninja)
+        assert len(edges) == 1
+        assert "child/qt.app/automoc.exports.json" in edges[0]
+        assert "child/qt.mod/automoc.exports.json" in edges[0]
+        spec = json.loads(
+            (
+                shared_dir_tree / "build" / "child" / "qt.app" / "automoc.json"
+            ).read_text()
+        )
+        assert spec["exports"] == str(
+            shared_dir_tree / "build" / "child" / "qt.app" / "automoc.exports.json"
+        )
 
 
 class TestTheExportsFile:
