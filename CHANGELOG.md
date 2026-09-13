@@ -276,30 +276,23 @@ read the whole changelog!
   project, or the nearest enclosing one, rather than the most recently
   registered one. Single-environment projects are unaffected. (#118)
 
-- **Breaking:** a target created after `project.resolve()` is refused. A
-  project resolves once — generation skips one that is already resolved — so
-  a target created that late kept no nodes and reached the build files as
-  nothing at all. Create every target before an explicit `resolve()`; a
-  script that leaves resolution to generation is unaffected.
+- **Breaking:** a target created after `project.resolve()` is refused. This
+  only affects projects that explicitly call `resolve`; most projects
+  let pcons do resolution after the project files are read, during the
+  generation phase. But if you call `resolve` and then create a new
+  target, it would get silently ignored. Now pcons will notify you.
 
 ### Fixed
 
-- **A custom builder's own steps land in the subdirectory that declared the
-  target.** A factory that calls a builder during resolve (the
+- **A custom builder's steps land in the subdirectory that declared the
+  target.** Before this, a factory that calls a builder during resolve (the
   `examples/84_asset_pipeline` pattern) ran after `add_subdirectory` had
-  returned, so a relative target or source it wrote anchored at the top-level
-  root: the step's output went to `build/` instead of `build/<subdir>/`, and
-  two subdirectories declaring the same target name collided. The resolver
-  now re-enters the declaring directory before handing a target to its
-  factory. A derived output path (`env.cc.Object("x.c")` names none) no
-  longer repeats an environment's `build_prefix` below that offset.
+  returned, so a relative target or source it wrote got created at the top-level
+  root rather than into the proper subdir.
 - **An import library is the toolchain's business, not the host's.** A shared
-  library gets its `foo.lib` because the toolchain's link step writes one, so
+  library on Windows has an associated `foo.lib`, so now
   a cross build to Windows declares and links it the same way a native build
-  does. A GNU-style link writes none — `ld` links a DLL directly — so one is
-  no longer declared for mingw, where it left a `foo.lib` nothing produced on
-  the link line. New toolchains say what they write with
-  `get_import_library_name()`.
+  does. 
 - **`${TARGET}` and `$TARGET` in a compile or link flag expand to the
   output**, so `link_flags += ["-Wl,-Map=${TARGET}.map"]` puts a map file
   next to the program. `${TARGET}` used to reach the command line as a
