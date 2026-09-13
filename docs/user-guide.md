@@ -2572,7 +2572,7 @@ The function is called as `fn(sources, targets, **kwargs)`. Both path lists are 
 
 **The decoration says how the function runs, the call says what to build.** `python=`, `worker=`, `cwd=`, `launcher=`, `env_vars=`, `restat=` and `write_if_different=` go on `env.PyAction()`, because they describe the body and hold for every edge. `target=`, `source=`, `name=`, `depends=` and the function's own arguments go on the call. No option sits on both, so two edges that must run differently are two decorations.
 
-`target`, `source`, `name`, `depends` and `env` are refused as parameter names of the function: the call spends them on the edge. A keyword the signature cannot take, or a required argument left out, is refused at the call rather than failing at build time inside a generated module.
+`target`, `source`, `name` and `depends` are refused as parameter names of the function: the call spends them on the edge. A keyword the signature cannot take, or a required argument left out, is refused at the call rather than failing at build time inside a generated module.
 
 **Three rules follow from the function travelling alone.**
 

@@ -831,12 +831,24 @@ class TestPyActionErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyAction()
-            def render(sources, targets, env, target):
-                return env, target
+            def render(sources, targets, depends, target):
+                return depends, target
 
         message = str(caught.value)
-        assert "has env, target as parameter names" in message
+        assert "has depends, target as parameter names" in message
         assert "Rename them" in message
+
+    def test_a_parameter_named_env_is_fine(self, project_env):
+        """env is not reserved: the call has no env= to collide with."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, env):
+            return env
+
+        made = render(target="out.txt", env="production")
+
+        assert made.name == "out"
 
     def test_two_functions_of_one_name_say_to_rename_one(self, project_env, tmp_path):
         """The module is named after the function, so name= cannot part these."""

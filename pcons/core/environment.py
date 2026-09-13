@@ -1912,8 +1912,8 @@ class Environment(_EnvironmentStubs):
         is refused at configure time rather than at build time, and so is a
         keyword the function's signature cannot take.
 
-        ``target``, ``source``, ``name``, ``depends`` and ``env`` are refused
-        as parameter names: the call spends them on the edge.
+        ``target``, ``source``, ``name`` and ``depends`` are refused as
+        parameter names: the call spends them on the edge.
 
         ``depfile`` and ``deps_style`` are deliberately absent: a function
         that discovers its own dependencies has to write a make-style depfile

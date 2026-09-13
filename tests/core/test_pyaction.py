@@ -438,6 +438,47 @@ class TestWorker:
         assert "workers/client.py" in ninja_text(project, tmp_path)
 
 
+class TestTheCallDecidesTheSlice:
+    def test_a_call_inside_a_subdirectory_writes_under_it(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """The environment follows the decoration, the offset follows the call.
+
+        ``anchor_target_paths`` reads ``Project.current()._node_offset``, so
+        one action decorated at the top level and called in two places writes
+        a module into each slice. Both edges run the same environment, which
+        is the one that decorated the function.
+        """
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "a.txt").write_text("sub\n", encoding="utf-8")
+
+        @env.PyAction()
+        def report(sources, targets):
+            return 1
+
+        outside = report(target="outside.txt", source=["a.txt"])
+        with project._enter_subdir("sub"):
+            inside = report(target="inside.txt", source=["a.txt"])
+
+        project.resolve()
+
+        assert node_tokens(outside) == [
+            "build/pyact/report.py",
+            "build/pyact/outside.args.pkl",
+        ]
+        assert node_tokens(inside) == [
+            "build/sub/pyact/report.py",
+            "build/sub/pyact/inside.args.pkl",
+        ]
+        top = tmp_path / "build/pyact/report.py"
+        under = tmp_path / "build/sub/pyact/report.py"
+        assert top.is_file()
+        assert under.is_file()
+        assert top.read_bytes() == under.read_bytes()
+        assert outside.output_nodes[0].path.as_posix() == "build/outside.txt"
+        assert inside.output_nodes[0].path.as_posix() == "build/sub/inside.txt"
+
+
 class TestMultipleEnvironments:
     def test_a_factory_serves_two_environments(
         self, project: Project, tmp_path: Path

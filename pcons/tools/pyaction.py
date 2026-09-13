@@ -56,7 +56,7 @@ GEN_DIR = "pyact"
 MODULE_PREFIX = "pcons_pyact_"
 
 #: Parameter names the call spends on the edge, so a function may not use them.
-_RESERVED = ("target", "source", "name", "depends", "env")
+_RESERVED = ("target", "source", "name", "depends")
 
 _SAFE_GLOBALS = frozenset({"__name__", "__doc__", "__builtins__"})
 
@@ -200,8 +200,8 @@ def _reject_reserved_parameters(
 ) -> None:
     """Refuse a parameter whose name the call already spends on the edge.
 
-    All five are reserved at once, whatever a given release accepts, because
-    reserving one later would break a function that already uses it.
+    Only the four the call actually takes. A name held back for something the
+    call might take one day costs a user a parameter for nothing.
 
     Raises:
         PyActionError: Naming the parameters to rename.
