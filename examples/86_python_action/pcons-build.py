@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Run a Python function as a build step.
 
-``env.PyCommand`` turns a function written here into a build edge. The
+``env.PyAction`` turns a function written here into a build edge. The
 function does not run while the build is described: pcons writes its source
 to a generated module under the build directory, its keyword arguments to a
 pickle beside it, and emits an edge that runs the module under ninja. So the
@@ -29,7 +29,7 @@ env = project.Environment()
 src = project.root_dir / "src"
 
 
-@env.PyCommand(
+@env.PyAction(
     target=project.build_dir / "report.txt",
     source=[src / "a.txt", src / "b.txt"],
     kwargs={"title": "word counts"},

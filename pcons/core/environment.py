@@ -1866,7 +1866,7 @@ class Environment(_EnvironmentStubs):
 
         return cmd_target
 
-    def PyCommand(
+    def PyAction(
         self,
         *,
         target: str | Path | list[str | Path],
@@ -1887,8 +1887,8 @@ class Environment(_EnvironmentStubs):
         The decorated name is bound to the ``Target``, not to the function,
         the way every pcons builder returns one::
 
-            @env.PyCommand(target="report.txt", source=["a.txt"],
-                           kwargs={"title": "Report"})
+            @env.PyAction(target="report.txt", source=["a.txt"],
+                          kwargs={"title": "Report"})
             def report(sources, targets, title):
                 from pathlib import Path
                 Path(targets[0]).write_text(title + Path(sources[0]).read_text())
@@ -1924,7 +1924,7 @@ class Environment(_EnvironmentStubs):
                     sources, as ``env.Command`` takes them.
             python: The interpreter that runs the function, defaulting to the
                     one running pcons. A string, never a detected tool: the
-                    day PyCommand has to *find* an interpreter or ask its
+                    day PyAction has to *find* an interpreter or ask its
                     version, that is tool knowledge and this moves to a
                     python tool. One whose file name does not contain
                     "python" makes ``worker=`` a no-op, since that is how a
@@ -1942,9 +1942,9 @@ class Environment(_EnvironmentStubs):
         Returns:
             A decorator that returns the edge's ``Target``.
         """
-        from pcons.tools.pycommand import py_command
+        from pcons.tools.pyaction import py_action
 
-        return py_command(
+        return py_action(
             self,
             target=target,
             source=source,

@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 SCRIPT = Path("pcons-build.py")
-MODULE = Path("build/pycmd/report.py")
+MODULE = Path("build/pyact/report.py")
 REPORT = Path("build/report.txt")
 ORIGINAL = SCRIPT.read_text(encoding="utf-8")
 
@@ -64,7 +64,7 @@ before_mtime, before_report = state()
 try:
     SCRIPT.write_text(
         ORIGINAL.replace(
-            "@env.PyCommand(", "# a comment a user might add\n@env.PyCommand("
+            "@env.PyAction(", "# a comment a user might add\n@env.PyAction("
         ),
         encoding="utf-8",
     )

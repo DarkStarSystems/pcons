@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""End-to-end: a PyCommand edge built by real ninja.
+"""End-to-end: a PyAction edge built by real ninja.
 
 The only test that proves the three halves agree: what the decorator emits,
 what the generator writes, and what the runner does with the argv it gets.
@@ -44,13 +44,13 @@ def build(tmp_path: Path) -> str:
 
 
 def sources_project(tmp_path: Path, title: str) -> Project:
-    """A project whose single PyCommand concatenates two files under a title."""
+    """A project whose single PyAction concatenates two files under a title."""
     (tmp_path / "a.txt").write_text("first\n", encoding="utf-8")
     (tmp_path / "b.txt").write_text("second\n", encoding="utf-8")
     project = Project("e2e", root_dir=tmp_path)
     env: Any = project.Environment()
 
-    @env.PyCommand(
+    @env.PyAction(
         target="report.txt", source=["a.txt", "b.txt"], kwargs={"title": title}
     )
     def report(sources, targets, title):
@@ -118,7 +118,7 @@ def test_two_targets_and_no_sources(tmp_path: Path) -> None:
     project = Project("e2e", root_dir=tmp_path)
     env: Any = project.Environment()
 
-    @env.PyCommand(target=["one.txt", "two.txt"], kwargs={"n": 2})
+    @env.PyAction(target=["one.txt", "two.txt"], kwargs={"n": 2})
     def split(sources, targets, n):
         from pathlib import Path
 
@@ -146,7 +146,7 @@ def test_a_subdirectory_builds_its_own_edge(tmp_path: Path) -> None:
         child = Project("child", root_dir=tmp_path / "sub")
         env: Any = child.Environment()
 
-        @env.PyCommand(target="report.txt", source=["a.txt"])
+        @env.PyAction(target="report.txt", source=["a.txt"])
         def report(sources, targets):
             from pathlib import Path
 

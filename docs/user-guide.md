@@ -2536,12 +2536,12 @@ sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
 or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
 the link then depends on.
 
-### Python Functions as Build Steps: env.PyCommand()
+### Python Functions as Build Steps: env.PyAction()
 
-`env.Command()` runs a program. `env.PyCommand()` runs a Python function you wrote in the build script:
+`env.Command()` runs a program. `env.PyAction()` runs a Python function you wrote in the build script:
 
 ```python
-@env.PyCommand(
+@env.PyAction(
     target=project.build_dir / "report.txt",
     source=["src/a.txt", "src/b.txt"],
     kwargs={"title": "word counts"},
@@ -2557,7 +2557,7 @@ def report(sources, targets, title):
 project.Default(report)
 ```
 
-The function does not run while the build is described. pcons writes its source to a generated module under the environment's build directory, `build/pycmd/report.py`, its keyword arguments to a pickle beside it, and emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
+The function does not run while the build is described. pcons writes its source to a generated module under the environment's build directory, `build/pyact/report.py`, its keyword arguments to a pickle beside it, and emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
 
 The function is called as `fn(sources, targets, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
 
@@ -2579,7 +2579,7 @@ A lambda, a `functools.partial`, a method and a builtin are all refused: only a 
 
 ```python
 def make_report(env, title):
-    @env.PyCommand(
+    @env.PyAction(
         target="report.txt",
         source=[project.root_dir / "src" / "a.txt"],
         kwargs={"title": title},
@@ -2598,7 +2598,7 @@ reports = [make_report(env, f"{env.name} report") for env in (host, strict)]
 project.Default("report@host", "report@strict")
 ```
 
-`env` is bound at decoration, so one decoration builds for one environment, and `build_prefix` is what keeps the two apart. Each then writes into its own build directory, `build/host/report.txt` and `build/strict/report.txt`, and so does its generated module. Leave the prefixes out and both environments share one build directory, both decorations land on `build/pycmd/report.py`, and pcons refuses the second one, naming the two environments. See `examples/75_multi_env` for the multi-environment idiom itself. The closure ban and this shape fit each other: the body sits inside `make_report`, where `env` and `title` are in scope, so pass what it needs through `kwargs=`.
+`env` is bound at decoration, so one decoration builds for one environment, and `build_prefix` is what keeps the two apart. Each then writes into its own build directory, `build/host/report.txt` and `build/strict/report.txt`, and so does its generated module. Leave the prefixes out and both environments share one build directory, both decorations land on `build/pyact/report.py`, and pcons refuses the second one, naming the two environments. See `examples/75_multi_env` for the multi-environment idiom itself. The closure ban and this shape fit each other: the body sits inside `make_report`, where `env` and `title` are in scope, so pass what it needs through `kwargs=`.
 
 **A warm interpreter.** Starting Python costs more than a small function does. `worker=PythonWorker()` runs the edge in an interpreter that is already up:
 
@@ -2607,7 +2607,7 @@ from pcons.workers.python import PythonWorker
 
 worker = PythonWorker()
 
-@env.PyCommand(target="report.txt", source=["a.txt"], worker=worker)
+@env.PyAction(target="report.txt", source=["a.txt"], worker=worker)
 def report(sources, targets):
     ...
 ```

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Tests for the build-time runner in pcons.util.pycommand."""
+"""Tests for the build-time runner in pcons.util.pyaction."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from typing import Any
 
 import pytest
 
-from pcons.util import pycommand
-from pcons.util.pycommand import PROTOCOL_VERSION, USAGE, main, run
+from pcons.util import pyaction
+from pcons.util.pyaction import PROTOCOL_VERSION, USAGE, main, run
 
-RUNNER = pycommand.__file__
+RUNNER = pyaction.__file__
 
 WRITE_SOURCES = """
 def render(sources, targets):
@@ -189,7 +189,7 @@ class TestRun:
         args = tmp_path / "notadict.args.pkl"
         args.write_bytes(pickle.dumps(["not", "a", "payload"]))
 
-        with pytest.raises(ValueError, match="not a pycommand payload"):
+        with pytest.raises(ValueError, match="not a pyaction payload"):
             run(module, str(args), [], [])
 
     def test_a_payload_missing_a_key_names_the_fix(self, tmp_path: Path) -> None:
@@ -227,7 +227,7 @@ class TestMain:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """What ninja does: run from the build directory, name paths from it."""
-        gen = tmp_path / "pycmd"
+        gen = tmp_path / "pyact"
         gen.mkdir()
         write_module(gen, "rel", WRITE_SOURCES)
         write_args(gen, "rel")
@@ -235,8 +235,8 @@ class TestMain:
 
         code = main(
             [
-                "pycmd/rel.py",
-                "pycmd/rel.args.pkl",
+                "pyact/rel.py",
+                "pyact/rel.args.pkl",
                 "--n-targets",
                 "1",
                 "out.txt",
@@ -285,7 +285,7 @@ class TestMain:
         monkeypatch.setattr(
             sys,
             "argv",
-            ["pycommand.py", module, args, "--n-targets", "1", str(target), "a.txt"],
+            ["pyaction.py", module, args, "--n-targets", "1", str(target), "a.txt"],
         )
 
         assert main() == 0
@@ -295,7 +295,7 @@ class TestMain:
 class TestScriptEntryPoint:
     """The runner is spawned as a script path, never as ``-m``.
 
-    ``-m pcons.util.pycommand`` would execute ``pcons/__init__.py`` first,
+    ``-m pcons.util.pyaction`` would execute ``pcons/__init__.py`` first,
     which costs the whole import of the generators and toolchains on every
     edge, and the persistent Python worker refuses an argv starting with a
     flag. The working directory below is deliberately not the repository:

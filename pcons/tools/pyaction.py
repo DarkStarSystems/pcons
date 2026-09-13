@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""The whole of ``env.PyCommand`` except its public name.
+"""The whole of ``env.PyAction`` except its public name.
 
-``Environment.PyCommand`` is a forwarder into :func:`py_command` here, the
+``Environment.PyAction`` is a forwarder into :func:`py_action` here, the
 way ``Project.cli_command`` forwards into ``pcons.commands``. Source
 extraction and emission are the other half.
 
@@ -16,7 +16,7 @@ node-canonical paths the build edge names.
 The generated module holds the function and nothing else, so a body that uses
 a name the build script imported would fail at build time with ``NameError``.
 That is caught here instead, along with every other function shape this design
-cannot carry, each with its own :class:`PyCommandError`.
+cannot carry, each with its own :class:`PyActionError`.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pcons.core.builder import anchor_target_paths
 from pcons.core.errors import PconsError
 from pcons.core.invocation import RUN_NAME
-from pcons.util import pycommand as runner
+from pcons.util import pyaction as runner
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
@@ -49,13 +49,13 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
     from pcons.util.source_location import SourceLocation
 
-GEN_DIR = "pycmd"
-MODULE_PREFIX = "pcons_pycmd_"
+GEN_DIR = "pyact"
+MODULE_PREFIX = "pcons_pyact_"
 
 _SAFE_GLOBALS = frozenset({"__name__", "__doc__", "__builtins__"})
 
 
-class PyCommandError(PconsError):
+class PyActionError(PconsError):
     """A function cannot be turned into a build edge."""
 
 
@@ -74,7 +74,7 @@ def function_source(fn: Callable[..., object]) -> str:
         The function's source, dedented, ending in a newline.
 
     Raises:
-        PyCommandError: If the source cannot be read, or is not a plain
+        PyActionError: If the source cannot be read, or is not a plain
             ``def``.
     """
     return _extract(fn, None)[0]
@@ -97,21 +97,21 @@ def _extract(
         The source, dedented and ending in a newline, and its ``FunctionDef``.
 
     Raises:
-        PyCommandError: If the source cannot be read, or is not a plain
+        PyActionError: If the source cannot be read, or is not a plain
             ``def``.
     """
     try:
         text = textwrap.dedent(inspect.getsource(fn))
     except (OSError, TypeError) as exc:
-        raise PyCommandError(
-            f"PyCommand cannot read the source of {_describe(fn)}: {exc}. "
+        raise PyActionError(
+            f"PyAction cannot read the source of {_describe(fn)}: {exc}. "
             f"The function must be written out in a build script.",
             at,
         ) from exc
     node = ast.parse(text).body[0]
     if not isinstance(node, ast.FunctionDef):
-        raise PyCommandError(
-            f"PyCommand needs a plain function: {_not_a_def(fn, node)}", at
+        raise PyActionError(
+            f"PyAction needs a plain function: {_not_a_def(fn, node)}", at
         )
     return "".join(text.splitlines(keepends=True)[node.lineno - 1 :]), node
 
@@ -145,7 +145,7 @@ def emit(
         applied to them a second time.
 
     Raises:
-        PyCommandError: If the function cannot be carried to build time, if
+        PyActionError: If the function cannot be carried to build time, if
             another edge already wrote the same module, or if an argument
             cannot be pickled.
     """
@@ -219,31 +219,31 @@ def _plain_function(
         The same function, known to be a plain one.
 
     Raises:
-        PyCommandError: With one message per rejected shape.
+        PyActionError: With one message per rejected shape.
     """
     if isinstance(fn, functools.partial):
-        raise PyCommandError(
-            f"PyCommand {name!r} was given a functools.partial. Pass the "
+        raise PyActionError(
+            f"PyAction {name!r} was given a functools.partial. Pass the "
             f"function itself and put its bound arguments in kwargs=.",
             at,
         )
     if not isinstance(fn, types.FunctionType):
-        raise PyCommandError(
-            f"PyCommand {name!r} needs a function written in a build script, "
+        raise PyActionError(
+            f"PyAction {name!r} needs a function written in a build script, "
             f"not {_describe(fn)} of type {type(fn).__name__}. Write a def "
             f"beside the other targets and pass what it needs in kwargs=.",
             at,
         )
     if fn.__name__ == "<lambda>":
-        raise PyCommandError(
-            f"PyCommand {name!r} was given a lambda. Its source cannot be "
+        raise PyActionError(
+            f"PyAction {name!r} was given a lambda. Its source cannot be "
             f"extracted on its own: write it as a def.",
             at,
         )
     if fn.__closure__ is not None:
         free = fn.__code__.co_freevars
-        raise PyCommandError(
-            f"PyCommand {name!r} reads {', '.join(free)} from the function it "
+        raise PyActionError(
+            f"PyAction {name!r} reads {', '.join(free)} from the function it "
             f"is nested in. Only the function's own source travels to build "
             f"time, so there is nothing to read "
             f"{'them' if len(free) > 1 else 'it'} from. Pass "
@@ -253,8 +253,8 @@ def _plain_function(
             at,
         )
     if _class_scoped(fn):
-        raise PyCommandError(
-            f"PyCommand {name!r} was given {_describe(fn)}, defined in a "
+        raise PyActionError(
+            f"PyAction {name!r} was given {_describe(fn)}, defined in a "
             f"class body. Only a plain function can be extracted: move the "
             f"def out of the class.",
             at,
@@ -366,7 +366,7 @@ def _reject_script_globals(
     ``@pytest_ar`` would otherwise be reported as a global of the body.
 
     Raises:
-        PyCommandError: Naming those globals and what to type instead.
+        PyActionError: Naming those globals and what to type instead.
     """
     allowed = _SAFE_GLOBALS | {fn.__name__}
     defaults = _evaluated_names(node)
@@ -379,8 +379,8 @@ def _reject_script_globals(
         return
 
     if "__file__" in suspect:
-        raise PyCommandError(
-            f"PyCommand {name!r} uses __file__, which at build time names the "
+        raise PyActionError(
+            f"PyAction {name!r} uses __file__, which at build time names the "
             f"generated module rather than this script. Pass the path it "
             f'means in kwargs=, project.root_dir / "...", and take it as an '
             f"argument.",
@@ -404,8 +404,8 @@ def _reject_script_globals(
             0, f"Write {written} at the top of the function body, not of the script."
         )
     those = "those names" if len(suspect) > 1 else "that name"
-    raise PyCommandError(
-        f"PyCommand {name!r} uses {', '.join(suspect)} from the build script, "
+    raise PyActionError(
+        f"PyAction {name!r} uses {', '.join(suspect)} from the build script, "
         f"and only the function's own source travels to build time, so "
         f"nothing defines {those} there. " + " ".join(remedies),
         at,
@@ -436,7 +436,7 @@ def _claim(
     calls for.
 
     Raises:
-        PyCommandError: If another PyCommand already wrote that file.
+        PyActionError: If another PyAction already wrote that file.
     """
     taken = _claimed.setdefault(project.top, {})
     first = taken.get(module_rel)
@@ -447,9 +447,9 @@ def _claim(
             if first_env is not env
             else "Pass name= to one of them."
         )
-        raise PyCommandError(
-            f"PyCommand {name!r}{_env_label(env)} would overwrite "
-            f"{module_rel.as_posix()}, already written by the PyCommand"
+        raise PyActionError(
+            f"PyAction {name!r}{_env_label(env)} would overwrite "
+            f"{module_rel.as_posix()}, already written by the PyAction"
             f"{_env_label(first_env)} at {first_at}. {advice}",
             at,
         )
@@ -539,7 +539,7 @@ def _reject_description_objects(
     """Refuse a kwarg holding a piece of the build description.
 
     Raises:
-        PyCommandError: Naming where it sits and what to write instead.
+        PyActionError: Naming where it sits and what to write instead.
     """
     seen: set[int] = set()
 
@@ -550,8 +550,8 @@ def _reject_description_objects(
         described = _describe_description_object(value)
         if described is not None:
             where_it_is, remedy = described
-            raise PyCommandError(
-                f"PyCommand {name!r}: {where} is {where_it_is}, and the build "
+            raise PyActionError(
+                f"PyAction {name!r}: {where} is {where_it_is}, and the build "
                 f"description does not exist when the function runs. {remedy}",
                 at,
             )
@@ -577,14 +577,14 @@ def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> by
     sidecar and rebuild the world once for nothing.
 
     Raises:
-        PyCommandError: Naming the arguments that cannot be pickled.
+        PyActionError: Naming the arguments that cannot be pickled.
     """
     try:
         return pickle.dumps(payload, protocol=5)
     except (pickle.PicklingError, TypeError, AttributeError) as exc:
         bad = ", ".join(_unpicklable(payload["kwargs"])) or "one of its values"
-        raise PyCommandError(
-            f"PyCommand {name!r} cannot pickle kwargs {bad}: {exc}. "
+        raise PyActionError(
+            f"PyAction {name!r} cannot pickle kwargs {bad}: {exc}. "
             f"Arguments travel to build time as a file, so each one must be "
             f"picklable. Pass what describes it instead, a path or a string, "
             f"and build the object inside the function.",
@@ -618,7 +618,7 @@ def _write_if_changed(path: Path, content: bytes) -> None:
 def _runner_path() -> str:
     """The build-time runner's absolute path, as a command token.
 
-    A path, never ``-m pcons.util.pycommand``: the ``-m`` form executes
+    A path, never ``-m pcons.util.pyaction``: the ``-m`` form executes
     ``pcons/__init__.py`` first, about 54 ms of imports on every edge, and
     ``pcons.workers.python_server.script_argv`` hands back any argv whose
     first argument starts with ``-``, which would make ``worker=`` a no-op.
@@ -641,7 +641,7 @@ def _derive_name(target: object) -> str:
     return Path(str(first)).stem
 
 
-def py_command(
+def py_action(
     env: Environment,
     *,
     target: str | Path | list[str | Path],
@@ -657,7 +657,7 @@ def py_command(
     env_vars: Mapping[str, str] | None = None,
     worker: Any = None,
 ) -> Callable[[Callable[..., object]], Target]:
-    """The decorator ``Environment.PyCommand`` returns.
+    """The decorator ``Environment.PyAction`` returns.
 
     The generated module and the argument pickle are node tokens of the
     command, which is what makes the generator spell them as the execution

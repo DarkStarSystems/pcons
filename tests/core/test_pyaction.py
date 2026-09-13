@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Tests for env.PyCommand(), the decorator that makes a function a build edge."""
+"""Tests for env.PyAction(), the decorator that makes a function a build edge."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ from pcons.generators.ninja import NinjaGenerator
 from pcons.workers.python import PythonWorker
 from pcons.workers.python_server import script_argv
 
-RUNNER = Path("pcons/util/pycommand.py")
+RUNNER = Path("pcons/util/pyaction.py")
 
 
 def make_project(tmp_path: Path) -> Project:
     """A project with one source file to work from."""
     (tmp_path / "a.txt").write_text("first\n", encoding="utf-8")
     (tmp_path / "b.txt").write_text("second\n", encoding="utf-8")
-    return Project("pycmd", root_dir=tmp_path)
+    return Project("pyact", root_dir=tmp_path)
 
 
 def build_info(target: Target) -> Mapping[str, Any]:
@@ -75,7 +75,7 @@ def env(project: Project) -> Any:
 def one_source(project: Project, env: Any, **extra: Any) -> Target:
     """One edge with one target and one source, resolved."""
 
-    @env.PyCommand(target="report.txt", source=["a.txt"], **extra)
+    @env.PyAction(target="report.txt", source=["a.txt"], **extra)
     def report(sources, targets):
         from pathlib import Path
 
@@ -97,14 +97,14 @@ class TestDecoration:
     def test_the_name_comes_from_the_target_not_the_function(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyCommand(target="out.txt", source=["a.txt"])
+        @env.PyAction(target="out.txt", source=["a.txt"])
         def whatever(sources, targets):
             return 1
 
         assert whatever.name == "out"
 
     def test_an_explicit_name_wins(self, project: Project, env: Any) -> None:
-        @env.PyCommand(target="out.txt", name="render", source=["a.txt"])
+        @env.PyAction(target="out.txt", name="render", source=["a.txt"])
         def whatever(sources, targets):
             return 1
 
@@ -126,8 +126,8 @@ class TestCommandShape:
         command = tokens(report)
 
         assert node_tokens(report) == [
-            "build/pycmd/report.py",
-            "build/pycmd/report.args.pkl",
+            "build/pyact/report.py",
+            "build/pyact/report.args.pkl",
         ]
         assert command[4:6] == ["--n-targets", "1"]
         assert command[6] == TargetPath()
@@ -140,12 +140,12 @@ class TestCommandShape:
         report = one_source(project, env)
 
         assert implicit_deps(report) == [
-            "build/pycmd/report.py",
-            "build/pycmd/report.args.pkl",
+            "build/pyact/report.py",
+            "build/pyact/report.args.pkl",
         ]
 
     def test_the_sources_are_the_scripts_own(self, project: Project, env: Any) -> None:
-        @env.PyCommand(target="report.txt", source=["b.txt", "a.txt"])
+        @env.PyAction(target="report.txt", source=["b.txt", "a.txt"])
         def report(sources, targets):
             return 1
 
@@ -156,7 +156,7 @@ class TestCommandShape:
     def test_no_source_leaves_an_empty_source_list(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyCommand(target="report.txt")
+        @env.PyAction(target="report.txt")
         def report(sources, targets):
             return 1
 
@@ -166,7 +166,7 @@ class TestCommandShape:
         assert tokens(report)[-1] == SourcePath()
 
     def test_two_targets_are_counted(self, project: Project, env: Any) -> None:
-        @env.PyCommand(target=["one.txt", "two.txt"], source=["a.txt"])
+        @env.PyAction(target=["one.txt", "two.txt"], source=["a.txt"])
         def report(sources, targets):
             return 1
 
@@ -181,7 +181,7 @@ class TestCommandShape:
             target="made.txt", source=["a.txt"], command=["cp", "$SOURCE", "$TARGET"]
         )
 
-        @env.PyCommand(target="report.txt", source=[first])
+        @env.PyAction(target="report.txt", source=[first])
         def report(sources, targets):
             return 1
 
@@ -202,10 +202,10 @@ class TestGeneratedNinja:
         one_source(project, env)
         text = ninja_text(project, tmp_path)
 
-        assert "pycmd/report.py" in text
-        assert "build/pycmd/report.py" not in text
-        assert "$topdir/build/pycmd" not in text
-        assert "pycommand.py" in text
+        assert "pyact/report.py" in text
+        assert "build/pyact/report.py" not in text
+        assert "$topdir/build/pyact" not in text
+        assert "pyaction.py" in text
 
     def test_an_out_of_tree_build_directory_needs_no_absolute_path(
         self, tmp_path: Path
@@ -215,7 +215,7 @@ class TestGeneratedNinja:
         source_dir.mkdir()
         (source_dir / "a.txt").write_text("first\n", encoding="utf-8")
         build_dir = tmp_path / "obuild"
-        project = Project("pycmd", root_dir=source_dir, build_dir=build_dir)
+        project = Project("pyact", root_dir=source_dir, build_dir=build_dir)
         env = project.Environment()
         one_source(project, env)
 
@@ -223,9 +223,9 @@ class TestGeneratedNinja:
         BaseGenerator._generate_pending(project)
         text = (build_dir / "build.ninja").read_text(encoding="utf-8")
 
-        assert "pycmd/report.py" in text
+        assert "pyact/report.py" in text
         assert str(build_dir) not in text
-        assert "$topdir/pycmd" not in text
+        assert "$topdir/pyact" not in text
 
     def test_a_subdirectory_names_its_module_once(
         self, project: Project, tmp_path: Path
@@ -233,7 +233,7 @@ class TestGeneratedNinja:
         """The offset is applied to a node path once, not twice.
 
         A plain build-relative path handed to ``source=`` would come back as
-        ``sub/build/sub/pycmd/report.py``, and only in a subdirectory.
+        ``sub/build/sub/pyact/report.py``, and only in a subdirectory.
         """
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "a.txt").write_text("sub\n", encoding="utf-8")
@@ -241,7 +241,7 @@ class TestGeneratedNinja:
             child = Project("child", root_dir=tmp_path / "sub")
             env = child.Environment()
 
-            @env.PyCommand(target="report.txt", source=["a.txt"])
+            @env.PyAction(target="report.txt", source=["a.txt"])
             def report(sources, targets):
                 return 1
 
@@ -249,10 +249,10 @@ class TestGeneratedNinja:
         text = ninja_text(project, tmp_path)
 
         assert node_tokens(report) == [
-            "build/sub/pycmd/report.py",
-            "build/sub/pycmd/report.args.pkl",
+            "build/sub/pyact/report.py",
+            "build/sub/pyact/report.args.pkl",
         ]
-        assert "sub/pycmd/report.py" in text
+        assert "sub/pyact/report.py" in text
         assert "sub/build" not in text
 
     def test_restat_reaches_the_edge(
@@ -283,7 +283,7 @@ class TestGeneratedNinja:
     def test_write_if_different_wraps_the_edge(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        """The shape a PyCommand usually has: it rewrites its output every run."""
+        """The shape a PyAction usually has: it rewrites its output every run."""
         one_source(project, env, write_if_different=True)
         text = ninja_text(project, tmp_path)
 
@@ -324,7 +324,7 @@ class TestMultipleEnvironments:
         """The idiom: one factory, one decoration per environment."""
 
         def make_report(env: Any, title: str) -> Target:
-            @env.PyCommand(
+            @env.PyAction(
                 target="report.txt", source=["a.txt"], kwargs={"title": title}
             )
             def report(sources, targets, title):
@@ -344,9 +344,9 @@ class TestMultipleEnvironments:
         text = ninja_text(project, tmp_path)
 
         assert [t.name for t in made] == ["report", "report"]
-        assert node_tokens(made[0])[0] == "build/host/pycmd/report.py"
-        assert node_tokens(made[1])[0] == "build/strict/pycmd/report.py"
-        assert (tmp_path / "build/host/pycmd/report.py").is_file()
-        assert (tmp_path / "build/strict/pycmd/report.py").is_file()
+        assert node_tokens(made[0])[0] == "build/host/pyact/report.py"
+        assert node_tokens(made[1])[0] == "build/strict/pyact/report.py"
+        assert (tmp_path / "build/host/pyact/report.py").is_file()
+        assert (tmp_path / "build/strict/pyact/report.py").is_file()
         assert "host/report.txt" in text
         assert "strict/report.txt" in text

@@ -597,13 +597,13 @@ class TestBuilderEdgeCases:
         assert install is not None
 
 
-PYCOMMAND_DEFAULT = "a value the build script computed"
+PYACTION_DEFAULT = "a value the build script computed"
 
 
 def build_script_function(tmp_path, source, name="render"):
     """Define a function the way a build script does, under ``__pcons__``.
 
-    The module name is half of what PyCommand's messages reason about: a
+    The module name is half of what PyAction's messages reason about: a
     helper defined here has nowhere to be imported from, and a test module,
     which is importable, cannot stand in for that.
     """
@@ -614,8 +614,8 @@ def build_script_function(tmp_path, source, name="render"):
     return namespace[name]
 
 
-class TestPyCommandErrors:
-    """What env.PyCommand() says when a function cannot travel to build time.
+class TestPyActionErrors:
+    """What env.PyAction() says when a function cannot travel to build time.
 
     Every message is read here as the user reads it, whole, because the
     feature's failures are all configure-time refusals whose only job is to
@@ -625,14 +625,14 @@ class TestPyCommandErrors:
     def test_a_lambda_says_to_write_a_def(self, project_env):
         _, env = project_env
         with pytest.raises(PconsError, match="write it as a def"):
-            env.PyCommand(target="out.txt")(lambda sources, targets: None)
+            env.PyAction(target="out.txt")(lambda sources, targets: None)
 
     def test_a_closure_names_the_variable_and_points_at_kwargs(self, project_env):
         _, env = project_env
         title = "report"
 
         def make():
-            @env.PyCommand(target="out.txt")
+            @env.PyAction(target="out.txt")
             def render(sources, targets):
                 return title
 
@@ -650,7 +650,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt")
+            @env.PyAction(target="out.txt")
             def render(sources, targets):
                 return Path(targets[0])
 
@@ -663,12 +663,12 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt")
-            def render(sources, targets, n=PYCOMMAND_DEFAULT):
+            @env.PyAction(target="out.txt")
+            def render(sources, targets, n=PYACTION_DEFAULT):
                 return n
 
         message = str(caught.value)
-        assert "PYCOMMAND_DEFAULT is a parameter's default value" in message
+        assert "PYACTION_DEFAULT is a parameter's default value" in message
         assert "write the parameter without a default and pass" in message
         assert "in kwargs=" in message
 
@@ -683,7 +683,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt", kwargs={"t": made})
+            @env.PyAction(target="out.txt", kwargs={"t": made})
             def render(sources, targets, t):
                 return t
 
@@ -702,7 +702,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt", kwargs={"inputs": {"first": [made]}})
+            @env.PyAction(target="out.txt", kwargs={"inputs": {"first": [made]}})
             def render(sources, targets, inputs):
                 return inputs
 
@@ -713,7 +713,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt", kwargs={"e": env})
+            @env.PyAction(target="out.txt", kwargs={"e": env})
             def render(sources, targets, e):
                 return e
 
@@ -729,7 +729,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt", kwargs={"f": handle})
+            @env.PyAction(target="out.txt", kwargs={"f": handle})
             def render(sources, targets, f):
                 return f
 
@@ -741,18 +741,18 @@ class TestPyCommandErrors:
     def test_two_commands_deriving_one_name_name_both_and_say_name(self, project_env):
         _, env = project_env
 
-        @env.PyCommand(target="report.txt")
+        @env.PyAction(target="report.txt")
         def first(sources, targets):
             return 1
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="sub/report.txt")
+            @env.PyAction(target="sub/report.txt")
             def second(sources, targets):
                 return 2
 
         message = str(caught.value)
-        assert "would overwrite build/pycmd/report.py" in message
+        assert "would overwrite build/pyact/report.py" in message
         assert "test_user_errors.py:" in message.split("already written by")[1]
         assert "Pass name= to one of them" in message
 
@@ -763,7 +763,7 @@ class TestPyCommandErrors:
             return n
 
         with pytest.raises(PconsError) as caught:
-            env.PyCommand(target="out.txt")(functools.partial(render, n=1))
+            env.PyAction(target="out.txt")(functools.partial(render, n=1))
 
         message = str(caught.value)
         assert "was given a functools.partial" in message
@@ -777,7 +777,7 @@ class TestPyCommandErrors:
                 return 1
 
         with pytest.raises(PconsError) as caught:
-            env.PyCommand(target="out.txt")(Holder().render)
+            env.PyAction(target="out.txt")(Holder().render)
 
         message = str(caught.value)
         assert "needs a function written in a build script" in message
@@ -791,14 +791,14 @@ class TestPyCommandErrors:
                 return 1
 
         with pytest.raises(PconsError, match="move the def out of the class"):
-            env.PyCommand(target="out.txt")(Holder.render)
+            env.PyAction(target="out.txt")(Holder.render)
 
     def test_a_coroutine_says_to_write_a_plain_def(self, project_env):
         _, env = project_env
 
         with pytest.raises(PconsError, match="Write it as a plain def"):
 
-            @env.PyCommand(target="out.txt")
+            @env.PyAction(target="out.txt")
             async def render(sources, targets):
                 return 1
 
@@ -807,7 +807,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt")
+            @env.PyAction(target="out.txt")
             def render(sources, targets):
                 return __file__
 
@@ -820,7 +820,7 @@ class TestPyCommandErrors:
         _, env = project_env
 
         with pytest.raises(PconsError) as caught:
-            env.PyCommand(target="out.txt")(lambda sources, targets: None)
+            env.PyAction(target="out.txt")(lambda sources, targets: None)
 
         location = caught.value.location
         assert location is not None
@@ -846,7 +846,7 @@ class TestPyCommandErrors:
         )
 
         with pytest.raises(PconsError) as caught:
-            env.PyCommand(target="out.txt")(render)
+            env.PyAction(target="out.txt")(render)
 
         message = str(caught.value)
         assert "helper lives only in this build script" in message
@@ -870,7 +870,7 @@ class TestPyCommandErrors:
         )
 
         with pytest.raises(PconsError) as caught:
-            env.PyCommand(target="out.txt")(render)
+            env.PyAction(target="out.txt")(render)
 
         message = str(caught.value)
         assert "Import join inside the function body, the way this script" in message
@@ -891,7 +891,7 @@ class TestPyCommandErrors:
         )
 
         with pytest.raises(PconsError, match='Write "import json"'):
-            env.PyCommand(target="out.txt")(render)
+            env.PyAction(target="out.txt")(render)
 
     def test_a_tool_namespace_in_kwargs_points_at_its_values(self, project_env):
         """env.cc pickles, and drags the environment behind it."""
@@ -899,7 +899,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt", kwargs={"cc": env.cc})
+            @env.PyAction(target="out.txt", kwargs={"cc": env.cc})
             def render(sources, targets, cc):
                 return cc
 
@@ -917,7 +917,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt", kwargs={"m": {made: 1}})
+            @env.PyAction(target="out.txt", kwargs={"m": {made: 1}})
             def render(sources, targets, m):
                 return m
 
@@ -933,7 +933,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt", kwargs={"s": {made}})
+            @env.PyAction(target="out.txt", kwargs={"s": {made}})
             def render(sources, targets, s):
                 return s
 
@@ -945,7 +945,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyCommand(target="out.txt", kwargs={"n": project.node("src/main.c")})
+            @env.PyAction(target="out.txt", kwargs={"n": project.node("src/main.c")})
             def render(sources, targets, n):
                 return n
 
@@ -969,7 +969,7 @@ class TestPyCommandErrors:
 
         with pytest.raises(PconsError, match="is the target 'made'"):
 
-            @env.PyCommand(target="out.txt", kwargs={"loop": looping})
+            @env.PyAction(target="out.txt", kwargs={"loop": looping})
             def render(sources, targets, loop):
                 return loop
 
@@ -980,7 +980,7 @@ class TestPyCommandErrors:
         renamed.__name__ = "renamed"
 
         with pytest.raises(PconsError) as caught:
-            env.PyCommand(target="out.txt")(renamed)
+            env.PyAction(target="out.txt")(renamed)
 
         message = str(caught.value)
         assert "is not a def, it reads as Assign" in message

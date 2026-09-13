@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Tests for the generate-time half of PyCommand, pcons.tools.pycommand."""
+"""Tests for the generate-time half of PyAction, pcons.tools.pyaction."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ from typing import Any
 import pytest
 
 from pcons.core.project import Project
-from pcons.tools.pycommand import (
+from pcons.tools.pyaction import (
     MODULE_PREFIX,
-    PyCommandError,
+    PyActionError,
     emit,
     function_source,
 )
-from pcons.util.pycommand import PROTOCOL_VERSION, run
+from pcons.util.pyaction import PROTOCOL_VERSION, run
 
 SCRIPT_GLOBAL = "visible from the build script only"
 
@@ -217,46 +217,46 @@ class TestFunctionSource:
         assert 'return "from a factory"' in source
 
     def test_a_coroutine_is_refused(self) -> None:
-        with pytest.raises(PyCommandError, match="coroutine"):
+        with pytest.raises(PyActionError, match="coroutine"):
             function_source(coroutine)
 
     def test_a_function_with_no_readable_source_is_refused(self) -> None:
         namespace: dict[str, Any] = {}
         exec("def render(sources, targets):\n    return 1\n", namespace)  # noqa: S102
 
-        with pytest.raises(PyCommandError, match="written out in a build script"):
+        with pytest.raises(PyActionError, match="written out in a build script"):
             function_source(namespace["render"])
 
 
 class TestRejections:
     def test_a_lambda(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyCommandError, match="lambda"):
+        with pytest.raises(PyActionError, match="lambda"):
             run_emit(project, env, lambda sources, targets: None)
 
     def test_a_closure_names_its_free_variables(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyCommandError, match="reads env from"):
+        with pytest.raises(PyActionError, match="reads env from"):
             run_emit(project, env, closing_over(env))
 
     def test_a_builtin(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyCommandError, match="written in a build script"):
+        with pytest.raises(PyActionError, match="written in a build script"):
             run_emit(project, env, len)
 
     def test_a_partial(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyCommandError, match="functools.partial"):
+        with pytest.raises(PyActionError, match="functools.partial"):
             run_emit(project, env, functools.partial(writes_sources, []))
 
     def test_a_method(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyCommandError, match="class body"):
+        with pytest.raises(PyActionError, match="class body"):
             run_emit(project, env, Holder.method)
 
     def test_a_bound_method(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyCommandError, match="written in a build script"):
+        with pytest.raises(PyActionError, match="written in a build script"):
             run_emit(project, env, Holder().method)
 
     def test_a_body_reading_a_script_global(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyCommandError, match="SCRIPT_GLOBAL"):
+        with pytest.raises(PyActionError, match="SCRIPT_GLOBAL"):
             run_emit(project, env, uses_a_script_global)
 
     def test_an_attribute_name_is_not_mistaken_for_a_global(
@@ -281,23 +281,23 @@ class TestRejections:
     def test_a_coroutine_reaches_the_error_through_emit(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyCommandError, match="coroutine"):
+        with pytest.raises(PyActionError, match="coroutine"):
             run_emit(project, env, coroutine)
 
     def test_a_refused_function_does_not_claim_its_module(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyCommandError, match="coroutine"):
+        with pytest.raises(PyActionError, match="coroutine"):
             run_emit(project, env, coroutine)
 
         module_rel, _ = run_emit(project, env, writes_sources)
 
-        assert module_rel == Path("build/pycmd/report.py")
+        assert module_rel == Path("build/pyact/report.py")
 
     def test_a_default_reading_a_script_global(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyCommandError, match="SCRIPT_GLOBAL"):
+        with pytest.raises(PyActionError, match="SCRIPT_GLOBAL"):
             run_emit(project, env, defaults_from_the_script)
 
     def test_an_annotation_reading_a_script_global_is_fine(
@@ -312,13 +312,13 @@ class TestRejections:
         assert hasattr(load(tmp_path / module_rel, "gen_annotated"), "annotated")
 
     def test_a_body_reading_dunder_file(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyCommandError, match="names the generated module"):
+        with pytest.raises(PyActionError, match="names the generated module"):
             run_emit(project, env, uses_dunder_file)
 
     def test_an_unpicklable_kwarg_names_the_key(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyCommandError, match="cannot pickle kwargs handle"):
+        with pytest.raises(PyActionError, match="cannot pickle kwargs handle"):
             run_emit(
                 project,
                 env,
@@ -333,8 +333,8 @@ class TestEmit:
     ) -> None:
         module_rel, args_rel = run_emit(project, env, writes_sources)
 
-        assert module_rel == Path("build/pycmd/report.py")
-        assert args_rel == Path("build/pycmd/report.args.pkl")
+        assert module_rel == Path("build/pyact/report.py")
+        assert args_rel == Path("build/pyact/report.args.pkl")
         assert (tmp_path / module_rel).is_file()
         assert (tmp_path / args_rel).is_file()
 
@@ -345,9 +345,7 @@ class TestEmit:
         text = (tmp_path / module_rel).read_text(encoding="utf-8")
 
         assert text.startswith("# SPDX-License-Identifier: MIT\n")
-        assert text.splitlines()[1].endswith(
-            "from test_pycommand_emit.py. Do not edit."
-        )
+        assert text.splitlines()[1].endswith("from test_pyaction_emit.py. Do not edit.")
         assert "from __future__ import annotations" in text
         assert "def writes_sources(sources, targets):" in text
         assert "@" not in text
@@ -384,7 +382,7 @@ class TestEmit:
             tmp_path,
             "caller",
             """
-            from pcons.tools.pycommand import emit
+            from pcons.tools.pyaction import emit
 
 
             def render(sources, targets):
@@ -430,8 +428,8 @@ class TestEmit:
     ) -> None:
         module_rel, args_rel = run_emit(project, env, writes_sources, name="a/b.txt")
 
-        assert module_rel == Path("build/pycmd/a_b_txt.py")
-        assert args_rel.parent == Path("build/pycmd")
+        assert module_rel == Path("build/pyact/a_b_txt.py")
+        assert args_rel.parent == Path("build/pyact")
         assert (tmp_path / module_rel).is_file()
 
     def test_a_sub_project_writes_under_its_own_slice(
@@ -443,7 +441,7 @@ class TestEmit:
             child_env = child.Environment()
             module_rel, _ = run_emit(child, child_env, writes_sources)
 
-        assert module_rel == Path("build/sub/pycmd/report.py")
+        assert module_rel == Path("build/sub/pyact/report.py")
         assert (tmp_path / module_rel).is_file()
 
     def test_two_subdirectories_may_share_one_environment(
@@ -458,8 +456,8 @@ class TestEmit:
         with project._enter_subdir("b"):
             second, _ = run_emit(project, env, writes_sources)
 
-        assert first == Path("build/a/pycmd/report.py")
-        assert second == Path("build/b/pycmd/report.py")
+        assert first == Path("build/a/pyact/report.py")
+        assert second == Path("build/b/pyact/report.py")
 
     def test_a_build_prefix_moves_both_files(
         self, project: Project, tmp_path: Path
@@ -469,8 +467,8 @@ class TestEmit:
 
         module_rel, args_rel = run_emit(project, env, writes_sources)
 
-        assert module_rel == Path("build/host/pycmd/report.py")
-        assert args_rel == Path("build/host/pycmd/report.args.pkl")
+        assert module_rel == Path("build/host/pyact/report.py")
+        assert args_rel == Path("build/host/pyact/report.args.pkl")
 
 
 class TestDuplicates:
@@ -479,7 +477,7 @@ class TestDuplicates:
     ) -> None:
         run_emit(project, env, writes_sources)
 
-        with pytest.raises(PyCommandError, match="would overwrite"):
+        with pytest.raises(PyActionError, match="would overwrite"):
             run_emit(project, env, writes_sources)
 
     def test_the_same_name_in_two_environments_is_fine(
@@ -500,7 +498,7 @@ class TestDuplicates:
 
         run_emit(project, env, writes_sources)
 
-        with pytest.raises(PyCommandError, match="would overwrite"):
+        with pytest.raises(PyActionError, match="would overwrite"):
             run_emit(project, other, writes_sources)
 
     def test_each_project_starts_with_a_clean_registry(self, tmp_path: Path) -> None:

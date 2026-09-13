@@ -1,7 +1,7 @@
 # Test configuration for the python-action example
 
 [test]
-description = "Run a Python function as a build step: env.PyCommand writes the function to a generated module and ninja runs it"
+description = "Run a Python function as a build step: env.PyAction writes the function to a generated module and ninja runs it"
 
 expected_outputs = ["build/report.txt"]
 
