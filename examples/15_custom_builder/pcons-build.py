@@ -14,7 +14,7 @@ from pcons import Project
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode
 from pcons.core.target import Target
-from pcons.util.source_location import get_caller_location
+from pcons.util.source_location import SourceLocation, get_caller_location
 
 # =============================================================================
 # Custom Builder Definition
@@ -65,6 +65,7 @@ class GenerateVersionBuilder:
         version: str = "1.0.0",
         app_name: str = "App",
         name: str | None = None,
+        defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a GenerateVersion target.
 
@@ -81,10 +82,13 @@ class GenerateVersionBuilder:
         output_path = project.path_resolver.normalize_target_path(output)
         target_name = name or f"version_{output_path.stem}"
 
+        # pcons passes `defined_at` to any create_target that accepts it, so a
+        # diagnostic about this target points at the project.GenerateVersion()
+        # call rather than in here.
         target = Target(
             target_name,
             target_type="command",
-            defined_at=get_caller_location(),
+            defined_at=defined_at or get_caller_location(),
         )
         target._builder_name = "GenerateVersion"
 
