@@ -56,6 +56,7 @@ class BuilderRegistration:
     name: str
     create_target: Callable[..., Target]
     target_type: str
+    build_tier: str = "default"
     factory_class: type | None = None
     requires_env: bool = False
     description: str = ""
@@ -76,6 +77,7 @@ class BuilderRegistry:
         *,
         create_target: Callable[..., Target],
         target_type: str,
+        build_tier: str = "default",
         factory_class: type | None = None,
         requires_env: bool = False,
         description: str = "",
@@ -89,6 +91,11 @@ class BuilderRegistry:
             create_target: Function to create a Target for this builder.
                 Should have signature: (project, *args, **kwargs) -> Target
             target_type: The str for targets created by this builder.
+            build_tier: Which invocation reaches this builder's targets:
+                ``"default"`` for a product (a plain ``ninja`` builds it),
+                ``"all"`` for a step that operates on products (an install,
+                an archive, a test run), ``"manual"`` for one that must be
+                asked for by name. See `pcons.core.tiers`.
             factory_class: Optional NodeFactory class for resolution.
             requires_env: Whether the builder requires an Environment argument.
             description: Human-readable description of the builder.
@@ -96,10 +103,13 @@ class BuilderRegistry:
                        (e.g., ["linux", "darwin", "win32"]). None/empty means all.
             **options: Additional builder-specific options.
         """
+        from pcons.core.tiers import validate_tier
+
         cls._builders[name] = BuilderRegistration(
             name=name,
             create_target=create_target,
             target_type=target_type,
+            build_tier=validate_tier(build_tier),
             factory_class=factory_class,
             requires_env=requires_env,
             description=description,
@@ -137,6 +147,7 @@ def builder(
     name: str,
     *,
     target_type: str,
+    build_tier: str = "default",
     factory_class: type | None = None,
     requires_env: bool = False,
     description: str = "",
@@ -174,6 +185,7 @@ def builder(
             name,
             create_target=create_target,
             target_type=target_type,
+            build_tier=build_tier,
             factory_class=factory_class,
             requires_env=requires_env,
             description=desc,

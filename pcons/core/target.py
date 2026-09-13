@@ -488,10 +488,13 @@ class Target:
         # on targets with thousands of sources.
         "_source_set",
         "_subdir",
-        # Utility targets (lupdate, doc generation, ...) set this False:
-        # excluded from 'all' and implicit defaults, built only when
-        # requested by name/alias or listed in Default().
-        "build_by_default",
+        # Which invocation reaches this target: see pcons/core/tiers.py.
+        # The value the builder placed it in, or the script's own choice.
+        "_build_tier",
+        # Where a script set build_tier; None while the placement stands.
+        "_build_tier_at",
+        # The builder that placed it, for the "build tiers" report.
+        "_build_tier_by",
     )
 
     def __init__(
@@ -545,7 +548,11 @@ class Target:
         self.output_suffix: str | None = None
         # Sources resolved after the main resolve phase (for Install, etc.)
         self._pending_sources: list[Target | Node | Path | str] | None = None
-        self.build_by_default: bool = True  # see __slots__ comment
+        # Products build by default; a builder placing a step or a utility
+        # target says so (place_in_tier), and a script may move any target.
+        self._build_tier: str = "default"
+        self._build_tier_at: SourceLocation | None = None
+        self._build_tier_by: str | None = None
         # Build info for archive and command targets
         self._build_info: BuildInfo | dict[str, Any] | None = None
         self._builder_name: str | None = None
@@ -594,6 +601,60 @@ class Target:
     def env(self) -> Environment | None:
         """The environment this target builds in."""
         return self._env
+
+    @property
+    def build_tier(self) -> str:
+        """Which invocation builds this target (see `pcons.core.tiers`).
+
+        ``"default"`` for a product (plain ``ninja``), ``"all"`` for a step
+        that operates on products (``ninja all``, or naming it), ``"manual"``
+        for one that must not run unasked (naming it only). The builder places
+        the target; assigning here overrides that placement::
+
+            bench.build_tier = "all"       # not on every build
+            lupdate.build_tier = "manual"  # it rewrites sources
+
+        The tier every invocation actually gets is decided at generate, from
+        this, the builder's placement and ``Default()`` together.
+        """
+        return self._build_tier
+
+    @build_tier.setter
+    def build_tier(self, tier: str) -> None:
+        from pcons.core.tiers import validate_tier
+
+        location = get_caller_location()
+        self._build_tier = validate_tier(tier, location)
+        self._build_tier_at = location
+
+    @property
+    def build_by_default(self) -> bool:
+        """Deprecated alias for :attr:`build_tier`: True is ``"default"``,
+        False is ``"all"``. A manual target reads as False."""
+        return self._build_tier == "default"
+
+    @build_by_default.setter
+    def build_by_default(self, value: bool) -> None:
+        self.build_tier = "default" if value else "all"
+
+    def place_in_tier(self, tier: str, *, by: str | None = None) -> None:
+        """Declare the tier this target's builder places it in.
+
+        For builders, not build scripts: a script assigns
+        :attr:`build_tier`, and that choice stands whatever the builder
+        declares. ``by`` names the builder, for the "build tiers" report.
+
+        Registered builders declare their placement once, in the
+        ``@builder(..., build_tier=...)`` decorator; this is for a builder
+        that creates a target another builder made, or one on the side (Qt's
+        lupdate target).
+        """
+        from pcons.core.tiers import validate_tier
+
+        if self._build_tier_at is not None:
+            return  # the script has spoken
+        self._build_tier = validate_tier(tier)
+        self._build_tier_by = by
 
     @property
     def dependencies(self) -> tuple[Target, ...]:
