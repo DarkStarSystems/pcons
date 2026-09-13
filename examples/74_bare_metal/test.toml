@@ -27,13 +27,21 @@ commands = [
     { run = "${PCONS} run qemu", expect_stdout = "checksum ok" },
     { run = "${PCONS} run qemu", expect_stdout = "Hello from bare metal (pcons)!" },
     { run = "${PCONS} run qemu", expect_stdout = "version 1.4.0" },
-    # One target of one environment, named by the environment it builds in.
-    { run = "${PCONS} build common@host", expect_stdout = "" },
+    # One target of one environment, named by the environment it builds in:
+    # the name has to resolve, or pcons exits non-zero.
+    { run = "${PCONS} build common@host" },
 ]
 
 [skip]
 # Needs the ARM bare-metal toolchain to build and QEMU to run.
-require_commands = ["arm-none-eabi-gcc", "arm-none-eabi-objcopy", "qemu-system-arm"]
+require_commands = [
+    "arm-none-eabi-gcc",
+    "arm-none-eabi-ar",
+    "arm-none-eabi-objcopy",
+    "arm-none-eabi-readelf",
+    "arm-none-eabi-size",
+    "qemu-system-arm",
+]
 # Windows: the host generator is built as genver.exe and the shell differs.
-platforms = ["win32"]
+platforms = ["windows"]
 generators = ["xcode"]
