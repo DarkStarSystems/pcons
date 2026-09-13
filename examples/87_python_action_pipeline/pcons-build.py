@@ -32,8 +32,17 @@ two bytes and the comparison would fail there and nowhere else.
 
 Why the request sets a User-Agent: lipsum.com answers an empty ``text/html``
 body, with status 200, to the default ``Python-urllib`` agent, and the real
-JSON to anything else. Without it the build fails at ``json.loads`` on an
-empty string, which is why the parse is wrapped to name the URL.
+JSON to anything else.
+
+Why the whole fetch sits in one ``try``: a build log is all a CI failure
+leaves behind, and none of ``HTTPError``, ``URLError``, ``TimeoutError`` or a
+``KeyError`` from a document of the wrong shape names the URL on its own.
+Wrapping the parse alone would leave the four likeliest failures as a
+traceback with nothing in it to act on.
+
+Why ``write_bytes``: ``write_text`` translates a newline on Windows, so the
+stored document would not be the bytes the endpoint sent, in an example whose
+whole argument is that bytes survive.
 
 This example reaches the network, the way ``07_conan_example`` does. There is
 no offline fallback on purpose: a fallback would make the example build two
@@ -56,17 +65,19 @@ def fetch(sources, targets, url, field):
     from urllib.request import Request, urlopen
 
     request = Request(url, headers={"User-Agent": "pcons-example"})
-    with urlopen(request, timeout=30) as response:  # noqa: S310
-        raw = response.read().decode("utf-8")
+    raw = ""
     try:
+        with urlopen(request, timeout=30) as response:  # noqa: S310
+            raw = response.read().decode("utf-8")
         payload = json.loads(raw)
-    except ValueError as exc:
+        for key in field.split("."):
+            payload = payload[key]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         raise SystemExit(
-            f"{url} did not answer JSON: {exc}. Got {raw[:200]!r}"
+            f"{url} could not be fetched: {type(exc).__name__}: {exc}. "
+            f"It answered {raw[:200]!r}"
         ) from exc
-    for key in field.split("."):
-        payload = payload[key]
-    Path(targets[0]).write_text(payload, encoding="utf-8")
+    Path(targets[0]).write_bytes(payload.encode("utf-8"))
 
 
 @env.PyAction()
