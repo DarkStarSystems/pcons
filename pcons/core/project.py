@@ -2059,6 +2059,7 @@ class Project(_ProjectBuilders):
                 " skipping it",
                 type(finder).__name__,
             )
+            return
         self._extra_finders.append((env.name if env is not None else None, finder))
         self._package_finder_chains.clear()
 
