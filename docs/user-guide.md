@@ -598,6 +598,10 @@ For finer control over the phases, you can resolve explicitly:
 project.resolve()
 ```
 
+Every target has to exist by then. A target created after `resolve()` is
+refused: nothing would resolve it, so it would be missing from the build
+files.
+
 ### Project
 
 A `Project` is the top-level container for your build. It holds all environments, targets, and nodes.

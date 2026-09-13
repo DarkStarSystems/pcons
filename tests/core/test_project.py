@@ -156,6 +156,62 @@ class TestProjectTargets:
             project.get_target("missing", raise_if_missing=True)
 
 
+class TestTargetsAfterResolve:
+    """A target created after resolve() is refused, not silently dropped.
+
+    A project is resolved once — generation skips an already-resolved one —
+    so a target created afterwards keeps its nodes forever unresolved and
+    reaches the build files as nothing at all.
+    """
+
+    def _project(self, tmp_path):
+        (tmp_path / "in.txt").write_text("source\n")
+        (tmp_path / "late.txt").write_text("late\n")
+        project = Project("late", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(target="out.txt", source="in.txt", command="cp $SOURCE $TARGET")
+        return project, env
+
+    def test_a_late_target_is_refused(self, tmp_path):
+        project, env = self._project(tmp_path)
+        project.resolve()
+
+        with pytest.raises(PconsError, match="after resolve"):
+            env.Command(
+                target="after.txt", source="late.txt", command="cp $SOURCE $TARGET"
+            )
+
+    def test_the_message_says_what_to_do(self, tmp_path):
+        project, env = self._project(tmp_path)
+        project.resolve()
+
+        with pytest.raises(PconsError) as excinfo:
+            env.Command(
+                target="after.txt", source="late.txt", command="cp $SOURCE $TARGET"
+            )
+
+        assert "before project.resolve()" in str(excinfo.value)
+
+    def test_a_late_target_in_a_subproject_is_refused(self, tmp_path):
+        project, _ = self._project(tmp_path)
+        project.resolve()
+
+        with project._enter_subdir("child"):
+            child = Project("child", root_dir=tmp_path / "child")
+            child.Environment()
+            # The subproject was never resolved itself; its tree was.
+            assert not child._resolved
+            with pytest.raises(PconsError, match="after resolve"):
+                Target("late_lib")
+
+    def test_resolving_twice_is_still_allowed(self, tmp_path):
+        project, _ = self._project(tmp_path)
+        project.resolve()
+        project.resolve()
+
+        assert project._resolved
+
+
 class TestSubproject:
     def test_target_lookup(self):
         root = Project("root")

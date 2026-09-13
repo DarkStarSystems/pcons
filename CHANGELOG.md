@@ -276,6 +276,12 @@ read the whole changelog!
   project, or the nearest enclosing one, rather than the most recently
   registered one. Single-environment projects are unaffected. (#118)
 
+- **Breaking:** a target created after `project.resolve()` is refused. A
+  project resolves once — generation skips one that is already resolved — so
+  a target created that late kept no nodes and reached the build files as
+  nothing at all. Create every target before an explicit `resolve()`; a
+  script that leaves resolution to generation is unaffected.
+
 ### Fixed
 
 - **`${TARGET}` and `$TARGET` in a compile or link flag expand to the

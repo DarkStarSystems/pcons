@@ -796,9 +796,18 @@ class Project(_ProjectBuilders):
         """Register a target; called only by Target.__init__.
 
         Raises:
+            PconsError: If the project tree has already been resolved.
             ValueError: If a target of that name is already registered and the
                 two cannot be told apart by their environments.
         """
+        if self._resolved or self.top._resolved:
+            raise PconsError(
+                f"Cannot create target '{target.name}' after resolve(). "
+                f"Nothing resolves a target created this late, so it would "
+                f"be missing from the generated build files. Create every "
+                f"target before project.resolve(); a script that leaves "
+                f"resolution to generation needs no call at all."
+            )
         for existing in self._targets:
             if existing.name == target.name:
                 _refuse_duplicate(existing, target)
@@ -1564,9 +1573,10 @@ class Project(_ProjectBuilders):
         """Output dependency graphs if requested via PCONS_GRAPH/PCONS_MERMAID env vars.
 
         Called once the deferred-generation pass has drained, so the graph
-        describes the same project the build files do. A script may call
-        resolve() itself and go on adding targets, so writing from resolve()
-        would snapshot a project still under construction.
+        describes the same project the build files do. A script may resolve()
+        explicitly and go on queueing work — another project, another
+        generator — so writing from resolve() would snapshot a build still
+        under construction.
         """
         if not (os.environ.get("PCONS_GRAPH") or os.environ.get("PCONS_MERMAID")):
             return

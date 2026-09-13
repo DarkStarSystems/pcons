@@ -765,6 +765,22 @@ class TestScannerErrors:
         with pytest.raises(PconsError, match="already has a producer"):
             project.resolve()
 
+    def test_a_scanned_target_created_after_resolve_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        """Edge ownership is decided once, during one resolve.
+
+        A scope wired by a later resolve would start from an empty ownership
+        registry, so an edge the first pass already governs could take a
+        second dyndep file ("one edge takes one dyndep file"). Creating the
+        target that late is refused instead.
+        """
+        project, scanner, a, _b = reference_project(tmp_path, monkeypatch)
+        env = a._env
+
+        with pytest.raises(PconsError, match="after resolve"):
+            scanner.attach(pack(env, "c"))
+
     def test_target_objects_as_sources_are_scanned(self, tmp_path, monkeypatch):
         """A source given as a Target resolves before the wiring pass, so the
         scan edge reads that target's output like any other source."""

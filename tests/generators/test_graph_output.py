@@ -8,9 +8,9 @@ directory and read back a file nothing had written, crashing, and the
 named-file spelling wrote nothing and said nothing.
 
 They are now read once the whole generation pass has drained, which is also
-what makes the graph agree with the build files: a script may resolve() and go
-on adding targets, and a graph written from the first resolve() would show
-neither those targets nor anything queued after it.
+what makes the graph agree with the build files: a script may resolve()
+explicitly, and a graph written from that resolve() would show nothing queued
+after it.
 """
 
 from __future__ import annotations
@@ -141,25 +141,23 @@ class TestGraphToFile:
 class TestGraphDescribesTheWholeProject:
     """What the graph shows and what the build files build are the same thing."""
 
-    def test_targets_added_after_an_explicit_resolve_are_in_the_graph(
+    def test_an_explicitly_resolved_project_is_still_graphed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A script may resolve() and keep building. examples/18 does.
+        """The graph is written from the generation drain, not from resolve().
 
-        Writing from the first resolve() would snapshot a project still under
-        construction, and the graph would then disagree with the build.ninja
-        written beside it, silently and with a zero exit.
+        A script that resolves explicitly (examples/18 does, to inspect the
+        resolved state) leaves nothing for resolve() to write a graph from,
+        and the graph would disagree with the build.ninja written beside it,
+        silently and with a zero exit.
         """
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("PCONS_GRAPH", "g.dot")
         project = _make_project(tmp_path)
         project.resolve()
-        env = project.Environment()
-        (tmp_path / "late.txt").write_text("late\n")
-        env.Command(target="after.txt", source="late.txt", command="cp $SOURCE $TARGET")
         _generate(project)
 
-        assert "after_txt" in (tmp_path / "g.dot").read_text()
+        assert "in_txt -> out_txt" in (tmp_path / "g.dot").read_text()
 
     def test_resolving_twice_writes_one_graph(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
