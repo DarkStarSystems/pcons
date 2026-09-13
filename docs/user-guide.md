@@ -770,19 +770,70 @@ A dependency you declare yourself with `target.depends()` joins this graph
 before every step of the target; how each step holds it is described under
 [Custom Commands](#custom-commands-with-envcommand).
 
-### Default and Alias Targets
+### What a Build Builds: Tiers, Defaults and Aliases
 
-**Default targets** are built when you run `ninja` with no arguments:
+Run `ninja` with no arguments and it builds **the products**: every program,
+library, command, document, pack or bundle the build makes. That is usually
+what you want, and it needs no calls at all.
+
+`ninja all` (or `make all`) builds those *and* the **steps** that operate on
+them: installs, overlays, archives, installers, test runs. A step doesn't
+belong in an ordinary build — an install writes outside the build directory —
+but it is one word away, and it also builds as any product's dependency.
+
+Every target sits in one of three nested tiers, named by the invocation that
+reaches it:
+
+| `build_tier` | reached by | holds |
+|---|---|---|
+| `"default"` | plain `ninja`, and everything below | the products |
+| `"all"` | `ninja all`, naming it, being a dependency | installs, archives, installers, test runs |
+| `"manual"` | naming it only | targets that must not run unasked |
+
+The builder that creates a target places it: `Program`, `SharedLibrary`,
+`Command`, a LaTeX document, your own custom builder are products;
+`Install`, `InstallDir`, `OverlayDir`, `Tarfile`, `Test` are steps. Where a
+target's location is — top level or deep in a subdirectory — never matters.
+
+**Move one target** by assigning its tier:
 
 ```python
-# Set default targets - these build when you run just "ninja"
-project.Default(app)
-project.Default(lib, app)  # Can specify multiple
+bench.build_tier = "all"       # built by `ninja all` or `ninja bench`, not by default
+lupdate.build_tier = "manual"  # it rewrites sources: only `ninja lupdate`
+installed.build_tier = "default"  # this install is part of the ordinary build
 ```
 
-If you don't call `project.Default()`, all programs and libraries (static and shared) in the project are built by default. This is usually what you want for simple projects. Use `Default()` when you want to build only a subset by default — for example, to exclude test programs or optional tools from the default build. Calling `Default()` multiple times adds to the default targets list.
+**Name the default set outright** with `Default()`, when the default build
+should be a subset — the app but not the test programs:
 
-`ninja all` (or `make all`) builds every target in the project, including custom commands, installers, and archives.
+```python
+project.Default(app)
+project.Default(lib, tools)  # several at once; calls append
+```
+
+Naming any target replaces the products pcons would have chosen, so the
+unnamed products move to `all`. Naming a step promotes it:
+`project.Default(installed_assets)` is how an install becomes part of the
+ordinary build.
+
+Nothing about this depends on the order your script is written in. The tiers
+are decided once, at generate, from every `build_tier`, every `Default()`
+call and every builder's placement together. To see the outcome, and the line
+responsible for each target, ask:
+
+```bash
+pcons explain            # a "build tiers" section, one line per target
+pcons -v                 # the same lines, logged at generate
+```
+
+Naming a target in `Default()` *and* setting its `build_tier` to `"all"` or
+`"manual"` is a contradiction, and pcons says so, naming both lines.
+
+!!! note "`build_by_default`"
+    The older boolean is a deprecated alias, kept one release: `True` reads
+    and writes `"default"`, `False` reads and writes `"all"`. Write
+    `build_tier` instead — and for a target that must not run unasked,
+    `"manual"` is what `False` was usually reaching for.
 
 **Aliases** create named phony targets for convenient building:
 

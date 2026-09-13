@@ -88,8 +88,10 @@ from. Each target section lists its concrete commands, its effective usage
 requirements with the target that contributed each one (`include_dirs`,
 `defines`, `link_libs`, ...), and the environment it builds with; each
 environment section attributes every flag and define to the preset, variant
-or toolchain that set it (the CLI face of `env.explain()`). Runs the build
-script but writes no build files and persists nothing.
+or toolchain that set it (the CLI face of `env.explain()`). A "build tiers"
+section then says which invocation builds each target — its `build_tier`,
+why, and the line responsible — so "why isn't X building?" is one command.
+Runs the build script but writes no build files and persists nothing.
 
 Commands are shown exactly as the build runs them — from the build
 directory — so with `--width 0` they can be pasted into a shell there and
@@ -120,6 +122,10 @@ Commands are shown as the build runs them, from the build directory (build).
       physics  <- simulator (private)
       m        <- math (public)
       math     <- physics (public)
+
+build tiers:
+  simulator  default  product (Program)
+  bench      all      build_tier = "all"  pcons-build.py:31
 
 Environment #1  (toolchain: llvm)  pcons-build.py:8
   cc.flags:

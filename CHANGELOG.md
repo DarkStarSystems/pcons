@@ -174,6 +174,28 @@ read the whole changelog!
 
 ### Changed
 
+- **A plain `ninja` now builds every product, not just programs and
+  libraries.** Every target sits in one of three tiers, and the builder that
+  creates it says which: `build_tier = "default"` for a product (a program, a
+  library, a `Command`, a document, a custom builder's output), `"all"` for a
+  step that operates on products (`Install`, `InstallDir`, `OverlayDir`,
+  `Tarfile`, `Zipfile`, `Test`, the installer helpers), `"manual"` for a
+  target that must not run unasked (Qt's `lupdate` and `QtDeploy`). `ninja
+  all` builds everything but the manual ones, as before.
+  - **Migration:** a `Command` whose output nothing consumes used to build
+    only when named or listed in `Default()`, and now builds by default. To
+    keep one out of the ordinary build, write `cmd.build_tier = "all"`.
+  - `Default()` still names the default tier outright, demoting the products
+    it doesn't name, but decides nothing at the call: the tiers are decided
+    once at generate, from every `build_tier`, every `Default()` call and
+    every builder's placement together. So an attribute's effect no longer
+    depends on what else was called, or in what order, and a target's place
+    in the tree never matters. Naming a target in `Default()` and also
+    setting it to `"all"` or `"manual"` is refused, naming both lines.
+  - `pcons explain` gains a "build tiers" section — each target's tier, why,
+    and the line responsible — and `pcons -v` logs the same lines at generate.
+  - `target.build_by_default` is a deprecated alias, kept one release: `True`
+    is `"default"`, `False` is `"all"`. (#121)
 - **The `debug` and `relwithdebinfo` variants compile with `/Z7` on MSVC and
   clang-cl**, not `/Zi`. This is the modern standard.
 - **MSVC's C++ compiler gets `/Zc:__cplusplus` by default.** Without it
