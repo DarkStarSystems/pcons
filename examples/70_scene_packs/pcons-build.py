@@ -8,9 +8,9 @@ A `Scanner` settles it at build time. No compiler is involved anywhere here.
 
 1. **Only the scanner reads a `ref` line.** `tools/scan_scene.py` reports what
    each pack provides and requires; pcons collates those reports into a ninja
-   dyndep file, and the ordering shows up in the build graph. Nothing below
-   encodes "level2 after level1" -- move a `ref` line to another scene and the
-   build order follows it, with no edit to this script.
+   dyndep file, where the discovered inputs land. Nothing below says that
+   `level2` references `level1`: the `depends()` calls say which packs a scene
+   may refer to, and the scene text picks the one whose digest gets embedded.
 
 2. **Discovered facts reach the command line, too.** `edge_args` has collate
    write each pack edge a `.refs` file listing the packs that edge must read,

@@ -23,18 +23,30 @@ scene_refs.attach(pack_common, pack_level1, pack_level2)
 
 **Only the scanner reads a `ref` line.** `tools/scan_scene.py` reports each
 pack's provides and requires as JSON; pcons collates those into a ninja dyndep
-file. The build statement for `packs/level2.pack` has no ordering in it at all:
+file. The build statement for `packs/level2.pack` names the scene it packs and,
+as implicit deps, the packer script and `packs/level1.pack` — that last from the
+`depends()` in the build script, which is what orders the two packs. The scan
+adds a `dyndep =` binding and an order-only edge to the dyndep file it writes:
 
 ```
-build packs/level2.pack: command_cmdline_32e8d26d gen/generated2.scene | ...
+# build.ninja, one statement, rule name and bindings elided
+build packs/level2.pack: <cmdline rule> gen/generated2.scene | $
+    $topdir/tools/pack_scene.py packs/level1.pack || $
+    scan/scene-refs/scene_packs.pack_level2.dyndep
 ```
 
-and the ordering arrives at build time, from what the scenes said:
+What the scene text decides is *which* pack, and that arrives at build time, in
+the dyndep:
 
 ```
 # scan/scene-refs/scene_packs.pack_level2.dyndep
 build packs/level2.pack: dyndep | packs/level1.pack
 ```
+
+Give `pack_level2` a second dependency and the build statement grows a second
+implicit dep, while the dyndep still names `packs/level1.pack` alone: the
+declared dependencies say where a name may be found, the scene says which one
+is used.
 
 **The discovered facts reach the command line too.** `edge_args` has collate
 write each pack edge a `.refs` file — `common packs/common.pack` — and appends
