@@ -40,8 +40,7 @@ expect_stdout = "edited in place"
 
 [skip]
 # Runs on Linux, macOS and Windows -- nothing here is platform-specific.
-# The Xcode generator has no OverlayDir branch: it emits the aggregate target
-# with no script phase, so nothing is staged and the outputs never appear.
-# Same reason 14_install_dir skips it, and it is the generator's gap rather
-# than the example's.
+# The Xcode generator cannot express an overlay -- which tree wins a path is
+# settled while the command runs -- and refuses this project outright rather
+# than emitting an aggregate target that stages nothing.
 generators = ["xcode"]

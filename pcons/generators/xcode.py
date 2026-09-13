@@ -17,6 +17,9 @@ Limitations:
       so commands that generate source files won't trigger proper rebuilds.
     - ObjectLibrary is not directly representable in Xcode's target model.
     - Aliases don't have a direct Xcode equivalent.
+    - OverlayDir, and Install of a directory, are refused rather than
+      generated: both stage a tree whose contents are settled while the
+      command runs, which no script phase expresses.
 
 Path handling:
     - Xcode puts built products in Release/ or Debug/ subdirectories
@@ -105,9 +108,55 @@ class XcodeGenerator(BaseGenerator):
         ] = {}  # target name -> frameworks phase id
         self._product_ref_ids: dict[str, str] = {}  # target name -> product file ref id
 
+    # Install-tool commands that stage a whole directory tree, and the
+    # builder each one comes from. InstallDir's copytreecmd is deliberately
+    # absent: _create_install_dir_script_phases writes a cp -R for it.
+    _UNEXPRESSIBLE_STAGING = {
+        "overlaycmd": "OverlayDir",
+        "copytreecmd": "Install of a directory",
+    }
+
+    def find_staged_tree(self, project: Project) -> tuple[str, str] | None:
+        """Name of the first target that stages a directory tree this
+        generator has no script phase for, and the builder that asked for it,
+        or None if the project has none.
+
+        An OverlayDir decides while it runs which source tree wins each path,
+        and an Install of a directory records what it copied in a stamp;
+        neither is a shell script this generator knows how to write.
+        """
+        for target in project.targets:
+            if getattr(target, "_builder_name", None) == "InstallDir":
+                continue
+            for node in self._get_target_build_nodes(target):
+                command = (getattr(node, "_build_info", None) or {}).get("command_var")
+                builder = self._UNEXPRESSIBLE_STAGING.get(cast("str", command))
+                if builder is not None:
+                    return target.name, builder
+        return None
+
+    def _reject_staged_trees(self, project: Project) -> None:
+        """Raise if this project stages a directory tree this generator cannot
+        express.
+
+        Call before writing anything. Left alone, such a target reaches Xcode
+        as an aggregate target with no script phase at all, which stages
+        nothing and reports success.
+        """
+        found = self.find_staged_tree(project)
+        if found is not None:
+            target_name, builder = found
+            raise PconsError(
+                f"target '{target_name}' uses {builder}, which the "
+                f"{self.name} generator cannot express: it would build a "
+                f"target that stages nothing. Generate with the ninja or "
+                f"make generator instead."
+            )
+
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate the .xcodeproj bundle in output_dir."""
         self._reject_dyndep(project)
+        self._reject_staged_trees(project)
 
         output_dir.mkdir(parents=True, exist_ok=True)
 

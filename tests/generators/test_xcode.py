@@ -553,6 +553,54 @@ class TestXcodeGeneratorInstallDir:
         assert "cp -R" in content
 
 
+class TestXcodeGeneratorStagedTrees:
+    """A staged directory tree this generator cannot express is refused."""
+
+    def test_overlay_dir_is_refused(self, tmp_path):
+        """OverlayDir has no script phase, so the project is refused."""
+        (tmp_path / "shared").mkdir()
+        (tmp_path / "app").mkdir()
+
+        project = Project("overlay_test", root_dir=tmp_path, build_dir=tmp_path)
+        env = project.Environment()
+        project.OverlayDir(env, "stage", sources=["shared", "app"], name="stage_it")
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        with pytest.raises(PconsError) as exc:
+            BaseGenerator._generate_pending(project)
+
+        message = str(exc.value)
+        assert "stage_it" in message
+        assert "OverlayDir" in message
+        assert "ninja" in message
+        # Refused before anything was written.
+        assert not (tmp_path / "overlay_test.xcodeproj").exists()
+
+    def test_install_of_a_directory_is_refused(self, tmp_path):
+        """An Install whose source is a directory stages a tree by stamp."""
+        project = Project("install_tree_test", root_dir=tmp_path, build_dir=tmp_path)
+
+        target = Target("install_assets", target_type="interface")
+        target._builder_name = "Install"
+        target._builder_data = {"dest_dir": "dist"}
+        source = FileNode(Path("assets"))
+        stamp = FileNode(tmp_path / ".stamps" / "assets.stamp")
+        stamp.depends([source])
+        stamp._build_info = {
+            "tool": "install",
+            "command_var": "copytreecmd",
+            "sources": [source],
+        }
+        target.output_nodes.append(stamp)
+        target._install_nodes = [stamp]
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        with pytest.raises(PconsError, match="install_assets"):
+            BaseGenerator._generate_pending(project)
+
+
 class TestXcodeGeneratorArchive:
     """Tests for Archive (Tarfile/Zipfile) target support."""
 
