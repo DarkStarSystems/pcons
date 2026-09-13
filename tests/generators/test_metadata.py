@@ -35,7 +35,7 @@ class TestMetadataGenerator:
         BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "pcons_metadata.json").read_text())
-        assert content["schema_version"] == 2
+        assert content["schema_version"] == 3
         assert content["projects"][0]["name"] == "test"
 
     def test_includes_targets_dependencies_and_aliases(self, tmp_path):

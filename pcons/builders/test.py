@@ -141,7 +141,12 @@ class TestNodeFactory:
             return str(path).replace("\\", "/")
 
 
-@builder("Test", target_type="test", factory_class=TestNodeFactory)
+@builder(
+    "Test",
+    target_type="test",
+    build_tier="all",
+    factory_class=TestNodeFactory,
+)
 class TestBuilder:
     """Declare a test to be run by ``pcons test`` (or ``ninja test``).
 

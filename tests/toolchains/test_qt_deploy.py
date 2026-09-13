@@ -45,7 +45,7 @@ class TestQtDeploy:
         assert "macdeployqt" in content
         assert "App.app" in content
         assert "build deploy: phony" in content
-        # Utility target: excluded from 'all' and the default line.
+        # Manual tier: excluded from 'all' and the default line.
         for line in content.splitlines():
             if line.startswith("build all: phony") or line.startswith("default "):
                 assert "deploy" not in line

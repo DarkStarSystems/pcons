@@ -594,62 +594,40 @@ class MakefileGenerator(BaseGenerator):
         f.write("\n")
 
     def _write_default_target(self, f: TextIO, project: Project) -> None:
-        """Write the default and 'all' targets."""
-        user_defaults: list[str] = []
+        """Write the default and 'all' targets.
 
-        for target in project.default_targets:
-            if target.output_nodes:
-                for out_node in target.output_nodes:
-                    if isinstance(out_node, FileNode):
-                        user_defaults.append(self._node_path(out_node))
-            else:
-                for target_node in target.nodes:
-                    if isinstance(target_node, FileNode):
-                        user_defaults.append(self._node_path(target_node))
+        Which targets each one builds comes from `decide_build_tiers`, the
+        same decision the ninja generator writes, so `make` and `ninja`
+        build the same things.
+        """
+        from pcons.core.tiers import decide_build_tiers
 
-        # Collect all target outputs for 'all' (utility targets with
-        # build_by_default=False are only built when requested).
-        all_outputs: list[str] = []
-        for target in project.targets:
-            if not getattr(target, "build_by_default", True):
-                continue
-            if getattr(target, "_resolved", False):
-                for node in target.output_nodes:
-                    if isinstance(node, FileNode):
-                        all_outputs.append(self._node_path(node))
+        tiers = decide_build_tiers(project)
 
-        # If no resolved targets, find final nodes from env-created nodes
+        def outputs(targets: list[Target]) -> list[str]:
+            return [
+                self._node_path(node)
+                for target in targets
+                if target._resolved
+                for node in target.output_nodes
+                if isinstance(node, FileNode)
+            ]
+
+        all_outputs = outputs(tiers.all_targets)
+        # Builds that create nodes directly, registering no target, still
+        # have final outputs worth making.
         if not all_outputs:
             all_outputs = self._find_final_nodes(project)
+        default_outputs = outputs(tiers.default_targets)
 
-        # Collect programs and libraries for implicit default
-        prog_lib_outputs: list[str] = []
-        if not user_defaults:
-            for target in project.targets:
-                if not getattr(target, "build_by_default", True):
-                    continue
-                if getattr(target, "_resolved", False):
-                    if target.target_type in (
-                        "program",
-                        "shared_library",
-                        "static_library",
-                    ):
-                        for node in target.output_nodes:
-                            if isinstance(node, FileNode):
-                                prog_lib_outputs.append(
-                                    self._make_build_relative_path(node.path)
-                                )
-
-        # Write targets
         f.write("# Default target\n")
 
-        # Determine what 'make' with no args builds
-        defaults = user_defaults or prog_lib_outputs or all_outputs
+        defaults = default_outputs or all_outputs
         if defaults:
             f.write(f"default: {' '.join(defaults)}\n")
             f.write(".DEFAULT_GOAL := default\n")
 
-        # 'make all' builds every target in the project
+        # 'make all' builds every target but the manual ones
         if all_outputs:
             f.write(f"all: {' '.join(all_outputs)}\n")
 

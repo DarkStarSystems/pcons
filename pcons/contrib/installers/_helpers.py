@@ -103,6 +103,18 @@ def stage_files(
     return project.Install(dest_dir, sources)
 
 
+def as_installer_step(target: Target, *, by: str) -> Target:
+    """Place an installer's command target in the "all" build tier.
+
+    Packaging operates on products, so it belongs where installs and archives
+    are: reached by `ninja all` or by name, not by a plain `ninja` (see
+    `pcons.core.tiers`). *by* names the helper, for the tier report. Returns
+    *target*, so a helper can wrap the target it is about to return.
+    """
+    target.place_in_tier("all", by=by)
+    return target
+
+
 def generate_component_plist(
     output: Path,
     *,

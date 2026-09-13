@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 @builder(
     "QtDeploy",
     target_type="command",
+    build_tier="manual",
     requires_env=True,
     description="Bundle Qt runtime with an app (macdeployqt/windeployqt)",
 )
@@ -75,7 +76,7 @@ class QtDeployBuilder:
             flags: Extra flags for macdeployqt/windeployqt.
 
         Returns:
-            The command target (build_by_default=False).
+            The command target (build_tier "manual": `ninja deploy`).
         """
         _require_qt_tool(env, "QtDeploy()")
         defined_at = defined_at or get_caller_location()
@@ -122,7 +123,6 @@ class QtDeployBuilder:
             command=command,
             name=f"{name}-cmd",
         )
-        target.build_by_default = False
         project.Alias(name, target)
         if name != "deploy":
             project.Alias("deploy", target)
