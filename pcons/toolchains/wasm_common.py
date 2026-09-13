@@ -16,8 +16,11 @@ from pcons.core.subst import TargetPath
 from pcons.toolchains.unix import UnixToolchain
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
+    from pcons.core.subst import FlagToken, PathToken
     from pcons.tools.toolchain import SourceHandler
 
 
@@ -70,6 +73,13 @@ class WasmToolchain(UnixToolchain):
                 "Use StaticLibrary instead, or target a native platform."
             )
         return ".a"  # static library
+
+    def link_group_tokens(
+        self, archives: Sequence[PathToken], env: Environment | None = None
+    ) -> list[FlagToken] | None:
+        """None: wasm-ld resolves archives in any order and takes the GNU
+        group flags only for compatibility, so a cycle needs nothing."""
+        return None
 
     def get_compile_flags_for_target_type(
         self, target_type: str, env: Environment | None = None

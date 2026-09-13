@@ -385,3 +385,14 @@ class TestWasiSdkSetupPreset:
         tc._sdk_path = None
         tc._sysroot = None
         assert tc.setup_presets(Environment()) == []
+
+
+class TestLinkGroups:
+    def test_archives_in_a_cycle_need_no_group(self):
+        """wasm-ld resolves archives in any order; the GNU group flags a
+        Unix toolchain emits are not wanted on its link line."""
+        from pcons.core.subst import PathToken
+        from pcons.toolchains.wasi import WasiToolchain
+
+        archive = PathToken(path="liba.a", path_type="build")
+        assert WasiToolchain().link_group_tokens([archive]) is None
