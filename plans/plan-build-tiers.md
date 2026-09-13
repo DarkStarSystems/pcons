@@ -1,8 +1,9 @@
 # Build tiers: what an invocation builds
 
-**Status: decided 2026-09-13, not implemented.** Replaces the implicit
-"programs and libraries" default set and the boolean `build_by_default`.
-Settles issue #121.
+**Status: implemented 2026-09-13.** Core in `pcons/core/tiers.py`
+(`decide_build_tiers`), `Target.build_tier` / `place_in_tier`, the
+`build_tier=` declaration on `@builder`. Replaces the implicit "programs and
+libraries" default set and the boolean `build_by_default`. Settles issue #121.
 
 ## The problem
 
