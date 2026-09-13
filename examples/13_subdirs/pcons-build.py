@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: MIT
 """Build script demonstrating subdirectory builds.
 
-This example shows how to organize a project with subdirectories,
-where each subdir can be built standalone OR as part of the main build.
+This example shows how to organize a project with subdirectories. A subdir
+whose dependencies all sit below it builds standalone as well as here; one
+that reaches sideways, as app does, builds as part of this project.
 
 Structure:
   13_subdirs/
     pcons-build.py      <- This file (main build)
     libfoo/
-      pcons-build.py    <- Standalone: builds just libfoo
+      pcons-build.py    <- Standalone: builds libfoo, and libbar below it
       src/foo.c
       include/foo.h
     app/
-      pcons-build.py    <- Standalone: builds app + libfoo
+      pcons-build.py    <- Links libfoo, which sits beside it, not below
       src/main.c
 
 Usage:
@@ -21,9 +22,6 @@ Usage:
 
   # Or build just libfoo standalone
   cd libfoo && pcons
-
-  # Or build app (which pulls in libfoo)
-  cd app && pcons
 """
 
 from pathlib import Path

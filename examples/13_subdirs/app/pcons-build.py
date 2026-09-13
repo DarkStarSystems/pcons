@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Build script for app - can be built standalone or as part of parent project.
+"""Build script for app - built as part of the parent project.
 
-This demonstrates a subdir that depends on another subdir (libfoo).
-Works both standalone and as part of the parent build.
+This demonstrates a subdir that depends on a sibling subdir (libfoo). It has
+no standalone path of its own, unlike libfoo: a project is rooted at the
+directory its build script sits in, and libfoo is outside app's.
 """
 
 from pcons import context
