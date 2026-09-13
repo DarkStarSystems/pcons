@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from pcons.core.node import FileNode, Node
     from pcons.core.preset import Preset, ToolContribution
     from pcons.core.target import Target
+    from pcons.tools.pyaction import PyAction as PyActionBuilder
     from pcons.tools.toolchain import Toolchain
 else:
     # At runtime, Environment inherits from `object`; tool namespaces and
@@ -1869,11 +1870,6 @@ class Environment(_EnvironmentStubs):
     def PyAction(
         self,
         *,
-        target: str | Path | list[str | Path],
-        source: Target | str | Path | Sequence[Target | str | Path] | None = None,
-        kwargs: Mapping[str, Any] | None = None,
-        name: str | None = None,
-        depends: str | Path | Sequence[str | Path] | None = None,
         python: str | None = None,
         restat: bool = False,
         write_if_different: bool = False,
@@ -1881,49 +1877,49 @@ class Environment(_EnvironmentStubs):
         launcher: Sequence[str] | None = None,
         env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
-    ) -> Callable[[Callable[..., object]], Target]:
-        """Run a Python function of this build script as a build edge.
+    ) -> Callable[[Callable[..., object]], PyActionBuilder]:
+        """Turn a Python function of this build script into a builder.
 
-        The decorated name is bound to the ``Target``, not to the function,
-        the way every pcons builder returns one::
+        The decorated name is a builder, the way ``env.Program`` is, and
+        calling it makes an edge::
 
-            @env.PyAction(target="report.txt", source=["a.txt"],
-                          kwargs={"title": "Report"})
+            @env.PyAction()
             def report(sources, targets, title):
                 from pathlib import Path
+
                 Path(targets[0]).write_text(title + Path(sources[0]).read_text())
 
-        The function does not run now. Its source is written to a generated
-        module under the environment's build directory, its keyword arguments
-        to a pickle beside it, and the edge runs the module at build time with
-        *sources* and *targets* as the build tool spells them.
+            counts = report(target="counts.txt", source=["a.txt"], title="Counts")
+            more = report(target="more.txt", source=["b.txt"], title="More")
+
+            project.Default(counts, more)
+
+        The function does not run now. Its source is written once to a
+        generated module under the environment's build directory, each call
+        writes its own argument pickle beside it, and each edge runs the
+        module at build time with *sources* and *targets* as the build tool
+        spells them.
+
+        The arguments here say how the function runs, which is a property of
+        the body and the same for every edge. The call says what to build.
+        No option appears at both, so two edges that must run differently are
+        two decorations, which is honest about being two ways of running.
 
         Only the function's own source travels, so the body may use nothing
         from around it: no name the build script imported or defined, no
         variable of an enclosing function. Import what it needs inside the
-        body and take everything else through ``kwargs``. Anything else is
-        refused here, at configure time, rather than at build time.
+        body and take everything else as a keyword of the call. Anything else
+        is refused at configure time rather than at build time, and so is a
+        keyword the function's signature cannot take.
+
+        ``target``, ``source``, ``name``, ``depends`` and ``env`` are refused
+        as parameter names: the call spends them on the edge.
 
         ``depfile`` and ``deps_style`` are deliberately absent: a function
         that discovers its own dependencies has to write a make-style depfile
         by hand, which deserves its own example.
 
-        Sources and targets travel on the command line, so a very long source
-        list meets the same command-line limit ``env.Command`` already has,
-        about 32000 characters on Windows.
-
         Args:
-            target: Output file(s), exactly as ``env.Command`` takes them.
-            source: Input file(s), or None. They arrive as the function's
-                    *sources*, in the order written.
-            kwargs: Keyword arguments for the build-time call. Each value
-                    must be picklable.
-            name: Target name for ``ninja <name>``, and the argument
-                  pickle's file name. Defaults to the first target's stem.
-                  The generated module is named after the function instead,
-                  so one function is one module however many edges read it.
-            depends: Extra files that trigger a rebuild without being
-                    sources, as ``env.Command`` takes them.
             python: The interpreter that runs the function, defaulting to the
                     one running pcons. A string, never a detected tool: the
                     day PyAction has to *find* an interpreter or ask its
@@ -1942,17 +1938,12 @@ class Environment(_EnvironmentStubs):
                     small function.
 
         Returns:
-            A decorator that returns the edge's ``Target``.
+            A decorator that returns the builder the script calls.
         """
         from pcons.tools.pyaction import py_action
 
         return py_action(
             self,
-            target=target,
-            source=source,
-            kwargs=kwargs,
-            name=name,
-            depends=depends,
             python=python,
             restat=restat,
             write_if_different=write_if_different,

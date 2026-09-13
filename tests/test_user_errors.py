@@ -11,6 +11,7 @@ roadmap for future error handling improvements.
 """
 
 import functools
+import inspect
 import textwrap
 import warnings
 from pathlib import Path
@@ -625,14 +626,14 @@ class TestPyActionErrors:
     def test_a_lambda_says_to_write_a_def(self, project_env):
         _, env = project_env
         with pytest.raises(PconsError, match="write it as a def"):
-            env.PyAction(target="out.txt")(lambda sources, targets: None)
+            env.PyAction()(lambda sources, targets: None)
 
     def test_a_closure_names_the_variable_and_points_at_kwargs(self, project_env):
         _, env = project_env
         title = "report"
 
         def make():
-            @env.PyAction(target="out.txt")
+            @env.PyAction()
             def render(sources, targets):
                 return title
 
@@ -643,14 +644,14 @@ class TestPyActionErrors:
 
         message = str(caught.value)
         assert "reads title from the function it is nested in" in message
-        assert "Pass it in kwargs= and take it as an argument." in message
+        assert "Pass it as a keyword of the call and take it as an argument." in message
 
     def test_a_global_says_to_move_the_import_into_the_body(self, project_env):
         _, env = project_env
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction(target="out.txt")
+            @env.PyAction()
             def render(sources, targets):
                 return Path(targets[0])
 
@@ -663,14 +664,14 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction(target="out.txt")
+            @env.PyAction()
             def render(sources, targets, n=PYACTION_DEFAULT):
                 return n
 
         message = str(caught.value)
         assert "PYACTION_DEFAULT is a parameter's default value" in message
         assert "write the parameter without a default and pass" in message
-        assert "in kwargs=" in message
+        assert "as a keyword of the call" in message
 
     def test_a_target_in_kwargs_points_at_source(self, project_env):
         """The first mistake: passing a target the way it reads naturally."""
@@ -681,16 +682,19 @@ class TestPyActionErrors:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
-        with pytest.raises(PconsError) as caught:
+        @env.PyAction()
+        def render(sources, targets, t):
+            return t
 
-            @env.PyAction(target="out.txt", kwargs={"t": made})
-            def render(sources, targets, t):
-                return t
+        with pytest.raises(PconsError) as caught:
+            call_line = inspect.currentframe().f_lineno + 1
+            render(target="out.txt", t=made)
 
         message = str(caught.value)
-        assert "kwargs['t'] is the target 'made'" in message
+        assert "argument t is the target 'made'" in message
         assert "the build description does not exist when the function runs" in message
         assert "List it in source= instead" in message
+        assert caught.value.location.lineno == call_line
 
     def test_a_target_nested_in_kwargs_is_found_and_located(self, project_env):
         _, env = project_env
@@ -700,25 +704,27 @@ class TestPyActionErrors:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
+        @env.PyAction()
+        def render(sources, targets, inputs):
+            return inputs
+
         with pytest.raises(PconsError) as caught:
+            render(target="out.txt", inputs={"first": [made]})
 
-            @env.PyAction(target="out.txt", kwargs={"inputs": {"first": [made]}})
-            def render(sources, targets, inputs):
-                return inputs
-
-        assert "kwargs['inputs']['first'][0] is the target 'made'" in str(caught.value)
+        assert "argument inputs['first'][0] is the target 'made'" in str(caught.value)
 
     def test_the_environment_in_kwargs_says_to_read_it_here(self, project_env):
         _, env = project_env
 
-        with pytest.raises(PconsError) as caught:
+        @env.PyAction()
+        def render(sources, targets, e):
+            return e
 
-            @env.PyAction(target="out.txt", kwargs={"e": env})
-            def render(sources, targets, e):
-                return e
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", e=env)
 
         message = str(caught.value)
-        assert "kwargs['e'] is the environment itself" in message
+        assert "argument e is the environment itself" in message
         assert "Read what the function needs from it here" in message
 
     def test_an_unpicklable_kwarg_names_the_key_and_the_way_out(
@@ -727,35 +733,110 @@ class TestPyActionErrors:
         _, env = project_env
         handle = (tmp_path / "src" / "main.c").open()
 
-        with pytest.raises(PconsError) as caught:
+        @env.PyAction()
+        def render(sources, targets, f):
+            return f
 
-            @env.PyAction(target="out.txt", kwargs={"f": handle})
-            def render(sources, targets, f):
-                return f
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", f=handle)
 
         handle.close()
         message = str(caught.value)
-        assert "cannot pickle kwargs f" in message
+        assert "cannot pickle argument f" in message
         assert "Pass what describes it instead, a path or a string" in message
 
     def test_two_edges_deriving_one_name_name_both_and_say_name(self, project_env):
         """The pickle is per edge, so two edges of one name collide on it."""
         _, env = project_env
 
-        @env.PyAction(target="report.txt")
-        def first(sources, targets):
+        @env.PyAction()
+        def render(sources, targets):
             return 1
 
-        with pytest.raises(PconsError) as caught:
+        render(target="report.txt")
 
-            @env.PyAction(target="sub/report.txt")
-            def second(sources, targets):
-                return 2
+        with pytest.raises(PconsError) as caught:
+            render(target="sub/report.txt")
 
         message = str(caught.value)
         assert "would overwrite build/pyact/report.args.pkl" in message
         assert "test_user_errors.py:" in message.split("already written by")[1]
-        assert "Pass name= to one of them" in message
+        assert "Pass name= to one of them." in message
+
+    def test_one_function_decorated_twice_says_to_call_it_twice(self, project_env):
+        """The reshape's own mistake: two decorations where one would do."""
+        _, env = project_env
+
+        def decorate():
+            @env.PyAction()
+            def render(sources, targets):
+                return 1
+
+            return render
+
+        decorate()(target="a.txt")
+
+        with pytest.raises(PconsError) as caught:
+            decorate()(target="b.txt")
+
+        message = str(caught.value)
+        assert "would overwrite build/pyact/render.py" in message
+        assert "Decorate the function once and call the action twice." in message
+        assert "Rename" not in message
+
+    def test_a_wrong_keyword_is_refused_at_the_call(self, project_env):
+        """A build-time TypeError inside a generated module, moved forward."""
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, title):
+            return title
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", titel="typo")
+
+        message = str(caught.value)
+        assert "render(sources, targets, title) cannot be called with" in message
+        assert "titel: missing a required argument: 'title'" in message
+        assert "render(sources, targets, **kwargs)" in message
+        assert caught.value.location.lineno > 0
+
+    def test_a_missing_argument_is_refused_at_the_call(self, project_env):
+        _, env = project_env
+
+        @env.PyAction()
+        def render(sources, targets, title):
+            return title
+
+        with pytest.raises(PconsError, match="missing a required argument: 'title'"):
+            render(target="out.txt")
+
+    def test_a_reserved_parameter_name_is_refused_at_the_def(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyAction()
+            def render(sources, targets, source):
+                return source
+
+        message = str(caught.value)
+        assert "has source as a parameter name" in message
+        assert "which the call already uses to describe the edge" in message
+        assert "Rename it" in message
+
+    def test_several_reserved_names_are_named_together(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyAction()
+            def render(sources, targets, env, target):
+                return env, target
+
+        message = str(caught.value)
+        assert "has env, target as parameter names" in message
+        assert "Rename them" in message
 
     def test_two_functions_of_one_name_say_to_rename_one(self, project_env, tmp_path):
         """The module is named after the function, so name= cannot part these."""
@@ -776,10 +857,10 @@ class TestPyActionErrors:
                 return 2
             """,
         )
-        env.PyAction(target="a.txt")(first)
+        env.PyAction()(first)(target="a.txt")
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction(target="b.txt")(second)
+            env.PyAction()(second)(target="b.txt")
 
         message = str(caught.value)
         assert "would overwrite build/pyact/render.py" in message
@@ -793,11 +874,11 @@ class TestPyActionErrors:
             return n
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction(target="out.txt")(functools.partial(render, n=1))
+            env.PyAction()(functools.partial(render, n=1))
 
         message = str(caught.value)
         assert "was given a functools.partial" in message
-        assert "put its bound arguments in kwargs=" in message
+        assert "give its bound arguments to the call" in message
 
     def test_a_bound_method_says_to_write_a_def(self, project_env):
         _, env = project_env
@@ -807,7 +888,7 @@ class TestPyActionErrors:
                 return 1
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction(target="out.txt")(Holder().render)
+            env.PyAction()(Holder().render)
 
         message = str(caught.value)
         assert "needs a function written in a build script" in message
@@ -821,14 +902,14 @@ class TestPyActionErrors:
                 return 1
 
         with pytest.raises(PconsError, match="move the def out of the class"):
-            env.PyAction(target="out.txt")(Holder.render)
+            env.PyAction()(Holder.render)
 
     def test_a_coroutine_says_to_write_a_plain_def(self, project_env):
         _, env = project_env
 
         with pytest.raises(PconsError, match="Write it as a plain def"):
 
-            @env.PyAction(target="out.txt")
+            @env.PyAction()
             async def render(sources, targets):
                 return 1
 
@@ -837,20 +918,20 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction(target="out.txt")
+            @env.PyAction()
             def render(sources, targets):
                 return __file__
 
         message = str(caught.value)
         assert "names the generated module rather than this script" in message
-        assert "Pass the path it means in kwargs=" in message
+        assert "Pass the path it means as a keyword of the call" in message
 
     def test_every_refusal_names_the_build_script_and_line(self, project_env):
         """The location is half the message: the user has the script open."""
         _, env = project_env
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction(target="out.txt")(lambda sources, targets: None)
+            env.PyAction()(lambda sources, targets: None)
 
         location = caught.value.location
         assert location is not None
@@ -876,7 +957,7 @@ class TestPyActionErrors:
         )
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction(target="out.txt")(render)
+            env.PyAction()(render)
 
         message = str(caught.value)
         assert "helper lives only in this build script" in message
@@ -900,7 +981,7 @@ class TestPyActionErrors:
         )
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction(target="out.txt")(render)
+            env.PyAction()(render)
 
         message = str(caught.value)
         assert "Import join inside the function body, the way this script" in message
@@ -921,20 +1002,21 @@ class TestPyActionErrors:
         )
 
         with pytest.raises(PconsError, match='Write "import json"'):
-            env.PyAction(target="out.txt")(render)
+            env.PyAction()(render)
 
     def test_a_tool_namespace_in_kwargs_points_at_its_values(self, project_env):
         """env.cc pickles, and drags the environment behind it."""
         _, env = project_env
 
-        with pytest.raises(PconsError) as caught:
+        @env.PyAction()
+        def render(sources, targets, cc):
+            return cc
 
-            @env.PyAction(target="out.txt", kwargs={"cc": env.cc})
-            def render(sources, targets, cc):
-                return cc
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", cc=env.cc)
 
         message = str(caught.value)
-        assert "kwargs['cc'] is the 'cc' tool namespace" in message
+        assert "argument cc is the 'cc' tool namespace" in message
         assert "env.cc.flags rather than env.cc" in message
 
     def test_a_target_used_as_a_dict_key_is_found(self, project_env):
@@ -945,13 +1027,14 @@ class TestPyActionErrors:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
+        @env.PyAction()
+        def render(sources, targets, m):
+            return m
+
         with pytest.raises(PconsError) as caught:
+            render(target="out.txt", m={made: 1})
 
-            @env.PyAction(target="out.txt", kwargs={"m": {made: 1}})
-            def render(sources, targets, m):
-                return m
-
-        assert "a key of kwargs['m'] is the target 'made'" in str(caught.value)
+        assert "a key of argument m is the target 'made'" in str(caught.value)
 
     def test_a_target_in_a_set_is_found_without_an_index(self, project_env):
         _, env = project_env
@@ -961,26 +1044,28 @@ class TestPyActionErrors:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
+        @env.PyAction()
+        def render(sources, targets, s):
+            return s
+
         with pytest.raises(PconsError) as caught:
+            render(target="out.txt", s={made})
 
-            @env.PyAction(target="out.txt", kwargs={"s": {made}})
-            def render(sources, targets, s):
-                return s
-
-        assert "an element of kwargs['s'] is the target 'made'" in str(caught.value)
+        assert "an element of argument s is the target 'made'" in str(caught.value)
 
     def test_a_node_in_kwargs_points_at_source(self, project_env):
         """A node is the fifth build-description type, and reads as a path."""
         project, env = project_env
 
-        with pytest.raises(PconsError) as caught:
+        @env.PyAction()
+        def render(sources, targets, n):
+            return n
 
-            @env.PyAction(target="out.txt", kwargs={"n": project.node("src/main.c")})
-            def render(sources, targets, n):
-                return n
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", n=project.node("src/main.c"))
 
         message = str(caught.value)
-        assert "kwargs['n'] is the build graph's file 'src/main.c'" in message
+        assert "argument n is the build graph's file 'src/main.c'" in message
         assert "List it in source= instead" in message
 
     def test_a_structure_that_contains_itself_is_refused_not_walked_forever(
@@ -997,11 +1082,12 @@ class TestPyActionErrors:
         looping["self"] = looping
         looping["t"] = made
 
-        with pytest.raises(PconsError, match="is the target 'made'"):
+        @env.PyAction()
+        def render(sources, targets, loop):
+            return loop
 
-            @env.PyAction(target="out.txt", kwargs={"loop": looping})
-            def render(sources, targets, loop):
-                return loop
+        with pytest.raises(PconsError, match="is the target 'made'"):
+            render(target="out.txt", loop=looping)
 
     def test_a_renamed_lambda_says_its_source_is_not_a_def(self, project_env):
         """Reaches the ast fallback: __name__ says def, the source says lambda."""
@@ -1010,7 +1096,7 @@ class TestPyActionErrors:
         renamed.__name__ = "renamed"
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction(target="out.txt")(renamed)
+            env.PyAction()(renamed)
 
         message = str(caught.value)
         assert "is not a def, it reads as Assign" in message

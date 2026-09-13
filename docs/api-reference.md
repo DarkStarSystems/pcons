@@ -80,7 +80,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.add_toolchain(toolchain)` | Add additional toolchain (e.g., CUDA) |
 | `env.toolchain` | The primary toolchain this environment was created with |
 | `env.Command(target, source, cmd)` | Run arbitrary shell command |
-| `env.PyAction(target, source, kwargs)` | Decorator: run a Python function of the build script as a build step |
+| `env.PyAction(**how)` | Decorator: turn a Python function of the build script into a builder; calling it makes a build edge |
 | `env.Framework(*names)` | Link macOS frameworks (macOS only) |
 | `env.Glob(pattern)` | Find files matching a glob pattern |
 | `env.cc` | C compiler settings |

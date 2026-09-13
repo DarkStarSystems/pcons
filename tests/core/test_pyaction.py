@@ -15,6 +15,7 @@ from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
+from pcons.tools.pyaction import PyAction
 from pcons.workers.python import PythonWorker
 from pcons.workers.python_server import script_argv
 
@@ -72,43 +73,96 @@ def env(project: Project) -> Any:
     return project.Environment()
 
 
-def one_source(project: Project, env: Any, **extra: Any) -> Target:
+def one_source(project: Project, env: Any, **how: Any) -> Target:
     """One edge with one target and one source, resolved."""
 
-    @env.PyAction(target="report.txt", source=["a.txt"], **extra)
+    @env.PyAction(**how)
     def report(sources, targets):
         from pathlib import Path
 
         Path(targets[0]).write_text(Path(sources[0]).read_text())
 
+    made = report(target="report.txt", source=["a.txt"])
     project.resolve()
-    return report
+    return made
 
 
 class TestDecoration:
-    def test_the_decorated_name_becomes_a_target(
+    def test_the_decorated_name_becomes_a_builder(
         self, project: Project, env: Any
     ) -> None:
-        report = one_source(project, env)
+        @env.PyAction()
+        def report(sources, targets):
+            return 1
 
-        assert isinstance(report, Target)
-        assert report.name == "report"
+        assert isinstance(report, PyAction)
+        assert report.function.__name__ == "report"
 
-    def test_the_name_comes_from_the_target_not_the_function(
+    def test_the_builder_names_its_function(self, project: Project, env: Any) -> None:
+        @env.PyAction()
+        def report(sources, targets):
+            return 1
+
+        assert repr(report) == "<PyAction report>"
+
+    def test_the_call_returns_the_target(self, project: Project, env: Any) -> None:
+        made = one_source(project, env)
+
+        assert isinstance(made, Target)
+        assert made.name == "report"
+
+    def test_one_decoration_makes_as_many_edges_as_it_is_called(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyAction()
+        def report(sources, targets, n):
+            return n
+
+        made = [report(target=f"r{n}.txt", source=["a.txt"], n=n) for n in (1, 2, 3)]
+        project.resolve()
+
+        assert [t.name for t in made] == ["r1", "r2", "r3"]
+        assert sorted(q.name for q in (tmp_path / "build" / "pyact").iterdir()) == [
+            "r1.args.pkl",
+            "r2.args.pkl",
+            "r3.args.pkl",
+            "report.py",
+        ]
+
+    def test_the_module_is_named_after_the_function_and_the_pickle_after_the_edge(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyAction(target="out.txt", source=["a.txt"])
+        @env.PyAction()
         def whatever(sources, targets):
             return 1
 
-        assert whatever.name == "out"
+        made = whatever(target="out.txt", source=["a.txt"])
+        project.resolve()
+
+        assert made.name == "out"
+        assert node_tokens(made) == [
+            "build/pyact/whatever.py",
+            "build/pyact/out.args.pkl",
+        ]
 
     def test_an_explicit_name_wins(self, project: Project, env: Any) -> None:
-        @env.PyAction(target="out.txt", name="render", source=["a.txt"])
+        @env.PyAction()
         def whatever(sources, targets):
             return 1
 
-        assert whatever.name == "render"
+        made = whatever(target="out.txt", name="render", source=["a.txt"])
+
+        assert made.name == "render"
+
+    def test_the_call_takes_no_positional_arguments(
+        self, project: Project, env: Any
+    ) -> None:
+        @env.PyAction()
+        def report(sources, targets):
+            return 1
+
+        with pytest.raises(TypeError):
+            report("out.txt")  # ty: ignore[too-many-positional-arguments]
 
 
 class TestCommandShape:
@@ -145,34 +199,37 @@ class TestCommandShape:
         ]
 
     def test_the_sources_are_the_scripts_own(self, project: Project, env: Any) -> None:
-        @env.PyAction(target="report.txt", source=["b.txt", "a.txt"])
+        @env.PyAction()
         def report(sources, targets):
             return 1
 
+        made = report(target="report.txt", source=["b.txt", "a.txt"])
         project.resolve()
 
-        assert source_paths(report) == ["b.txt", "a.txt"]
+        assert source_paths(made) == ["b.txt", "a.txt"]
 
     def test_no_source_leaves_an_empty_source_list(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyAction(target="report.txt")
+        @env.PyAction()
         def report(sources, targets):
             return 1
 
+        made = report(target="report.txt")
         project.resolve()
 
-        assert source_paths(report) == []
-        assert tokens(report)[-1] == SourcePath()
+        assert source_paths(made) == []
+        assert tokens(made)[-1] == SourcePath()
 
     def test_two_targets_are_counted(self, project: Project, env: Any) -> None:
-        @env.PyAction(target=["one.txt", "two.txt"], source=["a.txt"])
+        @env.PyAction()
         def report(sources, targets):
             return 1
 
+        made = report(target=["one.txt", "two.txt"], source=["a.txt"])
         project.resolve()
 
-        assert tokens(report)[4:6] == ["--n-targets", "2"]
+        assert tokens(made)[4:6] == ["--n-targets", "2"]
 
     def test_a_target_as_a_source_resolves_to_its_outputs(
         self, project: Project, env: Any
@@ -181,13 +238,14 @@ class TestCommandShape:
             target="made.txt", source=["a.txt"], command=["cp", "$SOURCE", "$TARGET"]
         )
 
-        @env.PyAction(target="report.txt", source=[first])
+        @env.PyAction()
         def report(sources, targets):
             return 1
 
+        made = report(target="report.txt", source=[first])
         project.resolve()
 
-        assert source_paths(report) == ["build/made.txt"]
+        assert source_paths(made) == ["build/made.txt"]
 
     def test_the_interpreter_can_be_chosen(self, project: Project, env: Any) -> None:
         report = one_source(project, env, python="/usr/bin/python3")
@@ -241,14 +299,16 @@ class TestGeneratedNinja:
             child = Project("child", root_dir=tmp_path / "sub")
             env = child.Environment()
 
-            @env.PyAction(target="report.txt", source=["a.txt"])
+            @env.PyAction()
             def report(sources, targets):
                 return 1
+
+            made = report(target="report.txt", source=["a.txt"])
 
         project.resolve()
         text = ninja_text(project, tmp_path)
 
-        assert node_tokens(report) == [
+        assert node_tokens(made) == [
             "build/sub/pyact/report.py",
             "build/sub/pyact/report.args.pkl",
         ]
@@ -294,9 +354,70 @@ class TestGeneratedNinja:
     def test_depends_reaches_the_edge(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        report = one_source(project, env, depends=["b.txt"])
+        """``depends`` is a call option: it says what this edge waits on."""
 
-        assert "b.txt" in implicit_deps(report)
+        @env.PyAction()
+        def report(sources, targets):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"], depends=["b.txt"])
+        project.resolve()
+
+        assert "b.txt" in implicit_deps(made)
+
+
+class TestDecorationOptionsReachEveryEdge:
+    """How the function runs is decided once and holds for every call."""
+
+    def test_restat_and_the_worker_reach_both_edges(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyAction(restat=True, worker=PythonWorker())
+        def report(sources, targets, n):
+            return n
+
+        report(target="one.txt", source=["a.txt"], n=1)
+        report(target="two.txt", source=["b.txt"], n=2)
+        project.resolve()
+        text = ninja_text(project, tmp_path)
+
+        assert text.count("restat = 1") == 2
+        assert text.count("workers/client.py") == 2
+
+    def test_the_interpreter_reaches_both_edges(
+        self, project: Project, env: Any
+    ) -> None:
+        @env.PyAction(python="/usr/bin/python3")
+        def report(sources, targets):
+            return 1
+
+        made = [report(target=f"r{n}.txt", source=["a.txt"]) for n in (1, 2)]
+        project.resolve()
+
+        assert [tokens(t)[0] for t in made] == ["/usr/bin/python3"] * 2
+
+
+class TestArgumentsFitTheSignature:
+    def test_a_function_with_no_arguments_takes_none(
+        self, project: Project, env: Any
+    ) -> None:
+        made = one_source(project, env)
+
+        assert made.name == "report"
+
+    def test_a_var_keyword_signature_accepts_anything(
+        self, project: Project, env: Any
+    ) -> None:
+        """A function that declares **kwargs really does take every keyword."""
+
+        @env.PyAction()
+        def report(sources, targets, **rest):
+            return rest
+
+        made = report(target="out.txt", source=["a.txt"], whatever=1, anything=2)
+        project.resolve()
+
+        assert made.name == "out"
 
 
 class TestWorker:
@@ -324,15 +445,13 @@ class TestMultipleEnvironments:
         """The idiom: one factory, one decoration per environment."""
 
         def make_report(env: Any, title: str) -> Target:
-            @env.PyAction(
-                target="report.txt", source=["a.txt"], kwargs={"title": title}
-            )
+            @env.PyAction()
             def report(sources, targets, title):
                 from pathlib import Path
 
                 Path(targets[0]).write_text(title, encoding="utf-8")
 
-            return report
+            return report(target="report.txt", source=["a.txt"], title=title)
 
         host = project.Environment(name="host")
         host.build_prefix = "host"

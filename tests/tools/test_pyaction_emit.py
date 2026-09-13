@@ -21,6 +21,7 @@ from pcons.tools.pyaction import (
     PyActionError,
     ValidatedAction,
     _claim,
+    check_arguments,
     emit_args,
     emit_module,
     function_source,
@@ -97,6 +98,11 @@ def writes_sources(sources, targets):
         out.write("|".join(sources))
 
 
+def takes_arguments(sources, targets, n=0, handle=None):
+    """A body with arguments, for the tests that pass some."""
+    return n, handle
+
+
 def defaults_from_the_script(sources, targets, label=SCRIPT_GLOBAL):
     return label
 
@@ -123,10 +129,11 @@ def emit_both(
     tests below that only ask what landed in the build directory want all
     three.
     """
-    action = validate(fn, project=project, name=name)
+    action = validate(fn, project=project)
+    payload = check_arguments(action, name=name, kwargs=kwargs)
     return (
         emit_module(action, project=project, env=env),
-        emit_args(action, project=project, env=env, name=name, kwargs=kwargs),
+        emit_args(project=project, env=env, name=name, payload=payload),
     )
 
 
@@ -345,11 +352,11 @@ class TestRejections:
     def test_an_unpicklable_kwarg_names_the_key(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyActionError, match="cannot pickle kwargs handle"):
+        with pytest.raises(PyActionError, match="cannot pickle argument handle"):
             run_emit(
                 project,
                 env,
-                writes_sources,
+                takes_arguments,
                 kwargs={"n": 1, "handle": lambda: None},
             )
 
@@ -417,7 +424,7 @@ class TestEmit:
 
 
             def emit_it(project, env):
-                action = validate(render, project=project, name="report")
+                action = validate(render, project=project)
                 return emit_module(action, project=project, env=env)
             """,
         )
@@ -430,13 +437,13 @@ class TestEmit:
     def test_the_payload_carries_the_protocol_and_the_kwargs(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        _, args_rel = run_emit(project, env, writes_sources, kwargs={"n": 3})
+        _, args_rel = run_emit(project, env, takes_arguments, kwargs={"n": 3})
         payload = pickle.loads((tmp_path / args_rel).read_bytes())
 
         assert payload == {
             "version": PROTOCOL_VERSION,
-            "module": f"{MODULE_PREFIX}writes_sources",
-            "function": "writes_sources",
+            "module": f"{MODULE_PREFIX}takes_arguments",
+            "function": "takes_arguments",
             "kwargs": {"n": 3},
         }
 
@@ -505,8 +512,12 @@ class TestDuplicates:
         """Two decorations are two actions, and a module has one owner."""
         run_emit(project, env, writes_sources)
 
-        with pytest.raises(PyActionError, match="would overwrite"):
+        with pytest.raises(PyActionError) as caught:
             run_emit(project, env, writes_sources)
+
+        message = str(caught.value)
+        assert "would overwrite build/pyact/writes_sources.py" in message
+        assert "Decorate the function once and call the action twice." in message
 
     def test_two_functions_of_one_name_are_refused_naming_both(
         self, project: Project, env: Any, tmp_path: Path
@@ -541,11 +552,12 @@ class TestDuplicates:
     def test_a_second_edge_of_one_name_collides_on_the_pickle(
         self, project: Project, env: Any
     ) -> None:
-        action = validate(writes_sources, project=project, name="report")
-        emit_args(action, project=project, env=env, name="report", kwargs={})
+        action = validate(writes_sources, project=project)
+        payload = check_arguments(action, name="report", kwargs={})
+        emit_args(project=project, env=env, name="report", payload=payload)
 
         with pytest.raises(PyActionError, match=r"report\.args\.pkl"):
-            emit_args(action, project=project, env=env, name="report", kwargs={})
+            emit_args(project=project, env=env, name="report", payload=payload)
 
     def test_the_same_name_in_two_environments_is_fine(
         self, project: Project, env: Any
@@ -583,25 +595,33 @@ class TestOneModuleManyEdges:
     def test_two_edges_of_one_function_share_one_module(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        action = validate(writes_sources, project=project, name="report")
+        action = validate(takes_arguments, project=project)
 
         module_rel = emit_module(action, project=project, env=env)
-        first = emit_args(action, project=project, env=env, name="one", kwargs={"n": 1})
+        first = emit_args(
+            project=project,
+            env=env,
+            name="one",
+            payload=check_arguments(action, name="one", kwargs={"n": 1}),
+        )
         second = emit_args(
-            action, project=project, env=env, name="two", kwargs={"n": 2}
+            project=project,
+            env=env,
+            name="two",
+            payload=check_arguments(action, name="two", kwargs={"n": 2}),
         )
 
         assert first != second
         assert sorted(q.name for q in (tmp_path / module_rel).parent.iterdir()) == [
             "one.args.pkl",
+            "takes_arguments.py",
             "two.args.pkl",
-            "writes_sources.py",
         ]
 
     def test_the_module_holds_the_action_text(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        action = validate(writes_sources, project=project, name="report")
+        action = validate(writes_sources, project=project)
         module_rel = emit_module(action, project=project, env=env)
 
         assert (tmp_path / module_rel).read_text(encoding="utf-8") == action.module_text
@@ -614,7 +634,7 @@ class TestOneModuleManyEdges:
         Corrupting the file is the only way to tell the two apart: identical
         bytes would be skipped either way.
         """
-        action = validate(writes_sources, project=project, name="report")
+        action = validate(writes_sources, project=project)
         module_rel = emit_module(action, project=project, env=env)
         (tmp_path / module_rel).write_text("not what emit wrote", encoding="utf-8")
 
@@ -630,7 +650,7 @@ class TestOneModuleManyEdges:
     ) -> None:
         """What the owner is for: one file, two edges, no refusal."""
         twin = project.Environment(name="twin")
-        action = validate(writes_sources, project=project, name="report")
+        action = validate(writes_sources, project=project)
 
         first = emit_module(action, project=project, env=env)
         (tmp_path / first).write_text("not what emit wrote", encoding="utf-8")
@@ -640,6 +660,44 @@ class TestOneModuleManyEdges:
         assert (tmp_path / first).read_text(encoding="utf-8") == "not what emit wrote"
 
 
+class TestNothingIsWrittenUntilEverythingIsChecked:
+    def test_a_refused_argument_leaves_no_module_and_no_claim(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """The arguments are settled before the module reaches the disk."""
+        action = validate(takes_arguments, project=project)
+
+        with pytest.raises(PyActionError, match="cannot pickle"):
+            check_arguments(action, name="report", kwargs={"handle": lambda: None})
+
+        assert not (tmp_path / "build" / "pyact").exists()
+
+        module_rel = emit_module(action, project=project, env=env)
+
+        assert (tmp_path / module_rel).is_file()
+
+
+class TestValidatedActionIdentity:
+    def test_two_validations_of_one_def_are_two_actions(
+        self, project: Project, tmp_path: Path
+    ) -> None:
+        """The factory idiom, which a generated __eq__ would call one action."""
+
+        def decorate() -> ValidatedAction:
+            def render(sources, targets):
+                return 1
+
+            return validate(render, project=project)
+
+        first = decorate()
+        second = decorate()
+
+        assert first is not second
+        assert first != second
+        assert len({first, second}) == 2
+        assert first.module_text == second.module_text
+
+
 class TestClaimRegistry:
     """The owner rule on its own, without a function or a file in the way."""
 
@@ -647,11 +705,20 @@ class TestClaimRegistry:
         return SourceLocation("pcons-build.py", lineno, "build")
 
     def _action(self, project: Project) -> ValidatedAction:
-        return validate(writes_sources, project=project, name="report")
+        return validate(writes_sources, project=project)
+
+    def _other_action(self, project: Project) -> ValidatedAction:
+        """A second action whose module text differs from ``_action``'s."""
+        return validate(annotated, project=project)
 
     def test_a_first_claim_says_to_write(self, project: Project, env: Any) -> None:
         claimed = _claim(
-            project, env, Path("build/pyact/x.py"), "x", self._at(1), owner=object()
+            project,
+            env,
+            Path("build/pyact/x.py"),
+            "x",
+            self._at(1),
+            owner=self._action(project),
         )
 
         assert claimed is True
@@ -665,14 +732,30 @@ class TestClaimRegistry:
 
         assert _claim(project, env, path, "x", self._at(2), owner=owner) is False
 
-    def test_another_owner_on_one_path_is_refused(
+    def test_another_function_on_one_path_says_to_rename(
         self, project: Project, env: Any
     ) -> None:
         path = Path("build/pyact/x.py")
         _claim(project, env, path, "x", self._at(1), owner=self._action(project))
 
         with pytest.raises(PyActionError, match="Rename one of the functions"):
+            _claim(
+                project, env, path, "x", self._at(2), owner=self._other_action(project)
+            )
+
+    def test_the_same_function_twice_says_to_call_the_action_twice(
+        self, project: Project, env: Any
+    ) -> None:
+        """Two decorations of one function, which the module text tells apart."""
+        path = Path("build/pyact/x.py")
+        _claim(project, env, path, "x", self._at(1), owner=self._action(project))
+
+        with pytest.raises(PyActionError) as caught:
             _claim(project, env, path, "x", self._at(2), owner=self._action(project))
+
+        message = str(caught.value)
+        assert "Decorate the function once and call the action twice." in message
+        assert "Rename" not in message
 
     def test_no_owner_on_a_taken_path_is_refused(
         self, project: Project, env: Any
@@ -704,6 +787,22 @@ class TestClaimRegistry:
 
         assert _claim(project, twin, path, "x", self._at(2), owner=owner) is False
 
+    def test_one_function_across_environments_names_build_prefix_alone(
+        self, project: Project, env: Any
+    ) -> None:
+        """One def in a factory: there is no second function to rename."""
+        twin = project.Environment(name="twin")
+        path = Path("build/pyact/x.py")
+        _claim(project, env, path, "x", self._at(1), owner=self._action(project))
+
+        with pytest.raises(PyActionError) as caught:
+            _claim(project, twin, path, "x", self._at(2), owner=self._action(project))
+
+        message = str(caught.value)
+        assert "Give one environment its own build_prefix." in message
+        assert "rename" not in message
+        assert "name=" not in message
+
     def test_another_owner_across_environments_names_build_prefix(
         self, project: Project, env: Any
     ) -> None:
@@ -712,7 +811,9 @@ class TestClaimRegistry:
         _claim(project, env, path, "x", self._at(1), owner=self._action(project))
 
         with pytest.raises(PyActionError) as caught:
-            _claim(project, twin, path, "x", self._at(2), owner=self._action(project))
+            _claim(
+                project, twin, path, "x", self._at(2), owner=self._other_action(project)
+            )
 
         message = str(caught.value)
         assert "Give one environment its own build_prefix" in message
@@ -739,10 +840,10 @@ class TestWriteIfChanged:
     def test_an_unchanged_description_touches_neither_file(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        module_rel, args_rel = run_emit(project, env, writes_sources, kwargs={"n": 1})
+        module_rel, args_rel = run_emit(project, env, takes_arguments, kwargs={"n": 1})
         self._aged(tmp_path, module_rel, args_rel)
 
-        self._emit_again(tmp_path, writes_sources, {"n": 1})
+        self._emit_again(tmp_path, takes_arguments, {"n": 1})
 
         assert (tmp_path / module_rel).stat().st_mtime == 0
         assert (tmp_path / args_rel).stat().st_mtime == 0
@@ -754,7 +855,7 @@ class TestWriteIfChanged:
             tmp_path,
             "body_one",
             """
-            def render(sources, targets):
+            def render(sources, targets, n):
                 return 1
             """,
         )
@@ -762,7 +863,7 @@ class TestWriteIfChanged:
             tmp_path,
             "body_two",
             """
-            def render(sources, targets):
+            def render(sources, targets, n):
                 return 2
             """,
         )
@@ -777,10 +878,10 @@ class TestWriteIfChanged:
     def test_changed_kwargs_rewrite_only_the_pickle(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        module_rel, args_rel = run_emit(project, env, writes_sources, kwargs={"n": 1})
+        module_rel, args_rel = run_emit(project, env, takes_arguments, kwargs={"n": 1})
         self._aged(tmp_path, module_rel, args_rel)
 
-        self._emit_again(tmp_path, writes_sources, {"n": 2})
+        self._emit_again(tmp_path, takes_arguments, {"n": 2})
 
         assert (tmp_path / module_rel).stat().st_mtime == 0
         assert (tmp_path / args_rel).stat().st_mtime != 0

@@ -50,15 +50,14 @@ def sources_project(tmp_path: Path, title: str) -> Project:
     project = Project("e2e", root_dir=tmp_path)
     env: Any = project.Environment()
 
-    @env.PyAction(
-        target="report.txt", source=["a.txt", "b.txt"], kwargs={"title": title}
-    )
+    @env.PyAction()
     def report(sources, targets, title):
         from pathlib import Path
 
         body = "".join(Path(name).read_text(encoding="utf-8") for name in sources)
         Path(targets[0]).write_text(f"{title}\n{body}", encoding="utf-8")
 
+    report(target="report.txt", source=["a.txt", "b.txt"], title=title)
     generate(project)
     return project
 
@@ -118,13 +117,14 @@ def test_two_targets_and_no_sources(tmp_path: Path) -> None:
     project = Project("e2e", root_dir=tmp_path)
     env: Any = project.Environment()
 
-    @env.PyAction(target=["one.txt", "two.txt"], kwargs={"n": 2})
+    @env.PyAction()
     def split(sources, targets, n):
         from pathlib import Path
 
         for index, name in enumerate(targets):
             Path(name).write_text(f"{index} of {n}, {len(sources)} sources\n")
 
+    split(target=["one.txt", "two.txt"], n=2)
     generate(project)
     build(tmp_path)
 
@@ -137,6 +137,44 @@ def test_two_targets_and_no_sources(tmp_path: Path) -> None:
 
 
 @needs_ninja
+def test_one_function_makes_two_edges_from_one_module(tmp_path: Path) -> None:
+    """The whole point of the builder shape, end to end.
+
+    One decoration, two calls: one generated module, two pickles, two edges,
+    and ninja builds both.
+    """
+    (tmp_path / "a.txt").write_text("first\n", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("second\n", encoding="utf-8")
+    project = Project("e2e", root_dir=tmp_path)
+    env: Any = project.Environment()
+
+    @env.PyAction()
+    def report(sources, targets, title):
+        from pathlib import Path
+
+        body = "".join(Path(name).read_text(encoding="utf-8") for name in sources)
+        Path(targets[0]).write_text(f"{title}\n{body}", encoding="utf-8")
+
+    report(target="both.txt", source=["a.txt", "b.txt"], title="Both")
+    report(target="just_a.txt", source=["a.txt"], title="Just a")
+    generate(project)
+    build(tmp_path)
+
+    generated = sorted(q.name for q in (tmp_path / "build" / "pyact").iterdir())
+    assert [q for q in generated if q.endswith((".py", ".pkl"))] == [
+        "both.args.pkl",
+        "just_a.args.pkl",
+        "report.py",
+    ]
+    assert (tmp_path / "build" / "both.txt").read_text(
+        encoding="utf-8"
+    ) == "Both\nfirst\nsecond\n"
+    assert (tmp_path / "build" / "just_a.txt").read_text(
+        encoding="utf-8"
+    ) == "Just a\nfirst\n"
+
+
+@needs_ninja
 def test_a_subdirectory_builds_its_own_edge(tmp_path: Path) -> None:
     """The path a plain build-relative source would get wrong."""
     (tmp_path / "sub").mkdir()
@@ -146,13 +184,15 @@ def test_a_subdirectory_builds_its_own_edge(tmp_path: Path) -> None:
         child = Project("child", root_dir=tmp_path / "sub")
         env: Any = child.Environment()
 
-        @env.PyAction(target="report.txt", source=["a.txt"])
+        @env.PyAction()
         def report(sources, targets):
             from pathlib import Path
 
             Path(targets[0]).write_text(
                 Path(sources[0]).read_text(encoding="utf-8"), encoding="utf-8"
             )
+
+        report(target="report.txt", source=["a.txt"])
 
     generate(project)
     build(tmp_path)

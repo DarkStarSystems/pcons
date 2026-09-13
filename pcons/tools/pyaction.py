@@ -8,10 +8,12 @@ extraction and emission are the other half.
 A function typed in a build script cannot be pickled. The script runs under
 ``__name__ == "__pcons__"`` and that module is never importable, so pickle,
 which stores a function by module and qualname, has nothing to store. The body
-reaches build time as a real file instead: :func:`emit` writes the function's
-own source to a generated module and its keyword arguments to a sidecar
-pickle, both beside the environment's build directory, and hands back the two
-node-canonical paths the build edge names.
+reaches build time as a real file instead. :func:`validate` reads the
+function once, at decoration. :func:`check_arguments` reads one call's
+arguments. :func:`emit_module` writes the function's own source to a
+generated module, once per path it lands on, and :func:`emit_args` writes one
+edge's arguments to a sidecar pickle beside it. Both hand back the
+node-canonical path the build edge names.
 
 The generated module holds the function and nothing else, so a body that uses
 a name the build script imported would fail at build time with ``NameError``.
@@ -53,6 +55,9 @@ if TYPE_CHECKING:
 GEN_DIR = "pyact"
 MODULE_PREFIX = "pcons_pyact_"
 
+#: Parameter names the call spends on the edge, so a function may not use them.
+_RESERVED = ("target", "source", "name", "depends", "env")
+
 _SAFE_GLOBALS = frozenset({"__name__", "__doc__", "__builtins__"})
 
 
@@ -61,11 +66,11 @@ class PyActionError(PconsError):
 
 
 _claimed: weakref.WeakKeyDictionary[
-    Project, dict[Path, tuple[SourceLocation, Environment, object | None]]
+    Project, dict[Path, tuple[SourceLocation, Environment, ValidatedAction | None]]
 ] = weakref.WeakKeyDictionary()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ValidatedAction:
     """A function that can be carried to build time, and the module for it.
 
@@ -73,6 +78,12 @@ class ValidatedAction:
     settled once even when many edges run the same function. What
     :func:`emit_module` and :func:`emit_args` write depends on the
     environment and on the edge, so they run per call.
+
+    ``eq=False`` on purpose: the claim registry tells one action's module from
+    another's by identity, and two validations of one ``def`` inside a factory
+    are two actions that a generated ``__eq__`` would call equal. Identity is
+    the only equality this class has, so ``is`` is the only thing anyone can
+    write.
 
     Attributes:
         function: The function a build script wrote.
@@ -147,9 +158,7 @@ def _extract(
     return "".join(text.splitlines(keepends=True)[node.lineno - 1 :]), node
 
 
-def validate(
-    fn: Callable[..., object], *, project: Project, name: str
-) -> ValidatedAction:
+def validate(fn: Callable[..., object], *, project: Project) -> ValidatedAction:
     """Everything about *fn* that one look at the function settles.
 
     Nothing is written here. A function this refuses never reaches a build
@@ -161,7 +170,6 @@ def validate(
         project: The project whose root the module's origin line is relative
             to. The origin names the script that wrote the function, which
             does not change when another environment emits it.
-        name: The edge's name, for the messages.
 
     Returns:
         The function, the module text, and where the build script asked.
@@ -170,10 +178,84 @@ def validate(
         PyActionError: If the function cannot be carried to build time.
     """
     at = get_caller_location()
+    name = _decoration_name(fn)
     function = _plain_function(fn, name, at)
+    _reject_reserved_parameters(function, at)
     source, node = _extract(function, at)
     _reject_script_globals(function, node, name, at)
     return ValidatedAction(function, _module_text(source, project, at), at)
+
+
+def _decoration_name(fn: Callable[..., object]) -> str:
+    """How a message names what the decorator was handed.
+
+    The edge has no name yet at decoration, and the function is what the
+    reader is looking at.
+    """
+    return getattr(fn, "__name__", None) or type(fn).__name__
+
+
+def _reject_reserved_parameters(
+    function: types.FunctionType, at: SourceLocation
+) -> None:
+    """Refuse a parameter whose name the call already spends on the edge.
+
+    All five are reserved at once, whatever a given release accepts, because
+    reserving one later would break a function that already uses it.
+
+    Raises:
+        PyActionError: Naming the parameters to rename.
+    """
+    taken = sorted(set(inspect.signature(function).parameters) & set(_RESERVED))
+    if not taken:
+        return
+    plural = len(taken) > 1
+    raise PyActionError(
+        f"PyAction {function.__name__!r} has {', '.join(taken)} as "
+        f"{'parameter names' if plural else 'a parameter name'}, which the "
+        f"call already uses to describe the edge. Rename "
+        f"{'them' if plural else 'it'}: the function receives sources and "
+        f"targets as its first two arguments, and everything else as a "
+        f"keyword of the call.",
+        at,
+    )
+
+
+def _bind_arguments(
+    function: types.FunctionType, kwargs: Mapping[str, Any], at: SourceLocation
+) -> None:
+    """Refuse a call the build-time call would refuse.
+
+    The runner calls ``fn(sources, targets, **kwargs)``, so binding two
+    placeholders and the keywords models that exactly: what binds here runs
+    there, and what does not would have raised ``TypeError`` inside a
+    generated module, with a traceback pointing at a file nobody wrote.
+
+    A function whose own signature ends in ``**kwargs`` accepts every
+    keyword, so nothing is refused for it. That is the function's contract,
+    not a hole here.
+
+    ``bind`` stops at the first thing it cannot place, and a missing
+    parameter is the first thing it looks at, so a misspelled keyword is
+    reported as the parameter it failed to fill. The message names what was
+    passed as well as what the signature wants, which puts the two spellings
+    side by side.
+
+    Raises:
+        PyActionError: Quoting what the signature says is wrong.
+    """
+    signature = inspect.signature(function)
+    try:
+        signature.bind(None, None, **kwargs)
+    except TypeError as exc:
+        given = ", ".join(sorted(kwargs)) or "nothing"
+        raise PyActionError(
+            f"PyAction {function.__name__}{signature} cannot be called with "
+            f"{given}: {exc}. At build time it is called as "
+            f"{function.__name__}(sources, targets, **kwargs), so everything "
+            f"past the first two parameters is a keyword of the call.",
+            at,
+        ) from exc
 
 
 def emit_module(action: ValidatedAction, *, project: Project, env: Environment) -> Path:
@@ -214,55 +296,67 @@ def emit_module(action: ValidatedAction, *, project: Project, env: Environment) 
     return module_rel
 
 
-def emit_args(
-    action: ValidatedAction,
-    *,
-    project: Project,
-    env: Environment,
-    name: str,
-    kwargs: Mapping[str, Any],
-) -> Path:
+def check_arguments(
+    action: ValidatedAction, *, name: str, kwargs: Mapping[str, Any]
+) -> bytes:
+    """Everything about one call's arguments, settled before anything is written.
+
+    Nothing reaches the build directory until this has returned, so a refused
+    argument leaves no generated file behind and claims no path.
+
+    The arguments belong to the call rather than to the function, so the
+    location is taken here rather than at decoration, and every message names
+    the line that passed the value.
+
+    Args:
+        action: What :func:`validate` returned.
+        name: The edge's name, for the messages.
+        kwargs: Keyword arguments for the build-time call.
+
+    Returns:
+        The sidecar pickle's bytes, ready for :func:`emit_args`.
+
+    Raises:
+        PyActionError: If the arguments do not fit the function's signature,
+            if one of them holds a piece of the build description, or if one
+            of them cannot be pickled.
+    """
+    at = get_caller_location()
+    _bind_arguments(action.function, kwargs, at)
+    _reject_description_objects(kwargs, name, at)
+    return _payload_bytes(
+        {
+            "version": runner.PROTOCOL_VERSION,
+            "module": f"{MODULE_PREFIX}{action.module_stem}",
+            "function": action.function.__name__,
+            "kwargs": dict(kwargs),
+        },
+        name,
+        at,
+    )
+
+
+def emit_args(*, project: Project, env: Environment, name: str, payload: bytes) -> Path:
     """Write one edge's argument pickle.
 
     One edge is one pickle, so this path is exclusive: nothing may share it,
     not even the action that claimed the module beside it.
 
-    The arguments belong to the call rather than to the function, so they are
-    checked here, and the location is taken here too. Both messages then name
-    the line that passed the value, not the line that wrote the ``def``.
-
     Args:
-        action: What :func:`validate` returned.
         project: Any project of the tree; the claim registry hangs off its top.
         env: The environment whose build directory holds the pickle.
         name: The edge's name, which the pickle is named after.
-        kwargs: Keyword arguments for the build-time call.
+        payload: What :func:`check_arguments` returned.
 
     Returns:
         The pickle's path, anchored the way :func:`emit_module` returns one.
 
     Raises:
-        PyActionError: If another edge already claimed that file, or if an
-            argument holds a piece of the build description, or cannot be
-            pickled.
+        PyActionError: If another edge already claimed that file.
     """
-    at = get_caller_location()
-    _reject_description_objects(kwargs, name, at)
     args_rel = _gen_dir(env) / f"{_sanitized(name)}.args.pkl"
-    _claim(project, env, args_rel, name, at, owner=None)
-    _write_if_changed(
-        project._path_resolver.project_root / args_rel,
-        _payload_bytes(
-            {
-                "version": runner.PROTOCOL_VERSION,
-                "module": f"{MODULE_PREFIX}{action.module_stem}",
-                "function": action.function.__name__,
-                "kwargs": dict(kwargs),
-            },
-            name,
-            at,
-        ),
-    )
+    _claim(project, env, args_rel, name, get_caller_location(), owner=None)
+    _write_if_changed(project._path_resolver.project_root / args_rel, payload)
     return args_rel
 
 
@@ -315,14 +409,14 @@ def _plain_function(
     if isinstance(fn, functools.partial):
         raise PyActionError(
             f"PyAction {name!r} was given a functools.partial. Pass the "
-            f"function itself and put its bound arguments in kwargs=.",
+            f"function itself and give its bound arguments to the call.",
             at,
         )
     if not isinstance(fn, types.FunctionType):
         raise PyActionError(
             f"PyAction {name!r} needs a function written in a build script, "
             f"not {_describe(fn)} of type {type(fn).__name__}. Write a def "
-            f"beside the other targets and pass what it needs in kwargs=.",
+            f"beside the other targets and pass what it needs to the call.",
             at,
         )
     if fn.__name__ == "<lambda>":
@@ -338,8 +432,9 @@ def _plain_function(
             f"is nested in. Only the function's own source travels to build "
             f"time, so there is nothing to read "
             f"{'them' if len(free) > 1 else 'it'} from. Pass "
-            f"{'them' if len(free) > 1 else 'it'} in kwargs= and take "
             f"{'them' if len(free) > 1 else 'it'} as "
+            f"{'keywords' if len(free) > 1 else 'a keyword'} of the call and "
+            f"take {'them' if len(free) > 1 else 'it'} as "
             f"{'arguments' if len(free) > 1 else 'an argument'}.",
             at,
         )
@@ -435,7 +530,7 @@ def _global_remedy(
             f"{found} is a parameter's default value, and a default is "
             f"evaluated again where the generated module defines the "
             f"function: write the parameter without a default and pass "
-            f"{found} in kwargs=."
+            f"{found} as a keyword of the call."
         )
     if isinstance(value, types.ModuleType):
         imports.append(f"import {value.__name__}")
@@ -444,7 +539,7 @@ def _global_remedy(
         return (
             f"Import {found} inside the function body, the way this script imports it."
         )
-    return f"Pass {found} in kwargs= and take it as an argument."
+    return f"Pass {found} as a keyword of the call and take it as an argument."
 
 
 def _reject_script_globals(
@@ -473,8 +568,8 @@ def _reject_script_globals(
         raise PyActionError(
             f"PyAction {name!r} uses __file__, which at build time names the "
             f"generated module rather than this script. Pass the path it "
-            f'means in kwargs=, project.root_dir / "...", and take it as an '
-            f"argument.",
+            f"means as a keyword of the call, "
+            f'project.root_dir / "...", and take it as an argument.',
             at,
         )
 
@@ -520,7 +615,7 @@ def _claim(
     name: str,
     at: SourceLocation,
     *,
-    owner: object | None,
+    owner: ValidatedAction | None,
 ) -> bool:
     """Record that *path* is taken, and say whether the caller should write.
 
@@ -553,22 +648,43 @@ def _claim(
     first_at, first_env, first_owner = first
     if owner is not None and owner is first_owner:
         return False
-    remedy = (
-        "rename one of the functions"
-        if owner is not None
-        else "pass name= to one of them"
-    )
-    advice = (
-        f"Give one environment its own build_prefix, or {remedy}."
-        if first_env is not env
-        else f"{remedy[:1].upper()}{remedy[1:]}."
-    )
+    advice = _collision_advice(owner, first_owner, same_env=first_env is env)
     raise PyActionError(
         f"PyAction {name!r}{_env_label(env)} would overwrite "
         f"{path.as_posix()}, already written by the PyAction"
         f"{_env_label(first_env)} at {first_at}. {advice}",
         at,
     )
+
+
+def _collision_advice(
+    owner: ValidatedAction | None,
+    first: ValidatedAction | None,
+    *,
+    same_env: bool,
+) -> str:
+    """What to do about two claims on one path, in the words that apply.
+
+    A pickle belongs to one edge, so naming one of the edges parts them. A
+    module belongs to one function, so naming an edge does nothing for it:
+    when two environments share a build directory, only a build_prefix parts
+    them, and when one environment claims twice, the answer turns on whether
+    it is one function or two. The module text is what tells those apart. A
+    factory that writes the ``def`` inside itself makes a fresh function
+    object every call, so comparing the objects would report a name clash
+    where there is one function and no clash at all.
+    """
+    fixes: list[str] = []
+    if not same_env:
+        fixes.append("give one environment its own build_prefix")
+    if owner is None or first is None:
+        fixes.append("pass name= to one of them")
+    elif owner.module_text != first.module_text:
+        fixes.append("rename one of the functions")
+    elif same_env:
+        fixes.append("decorate the function once and call the action twice")
+    sentence = ", or ".join(fixes)
+    return f"{sentence[:1].upper()}{sentence[1:]}."
 
 
 def _origin(project: Project, at: SourceLocation) -> str:
@@ -682,7 +798,7 @@ def _reject_description_objects(
                 walk(item, f"an element of {where}")
 
     for key, value in kwargs.items():
-        walk(value, f"kwargs[{key!r}]")
+        walk(value, f"argument {key}")
 
 
 def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> bytes:
@@ -697,9 +813,14 @@ def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> by
     try:
         return pickle.dumps(payload, protocol=5)
     except (pickle.PicklingError, TypeError, AttributeError) as exc:
-        bad = ", ".join(_unpicklable(payload["kwargs"])) or "one of its values"
+        bad = _unpicklable(payload["kwargs"])
+        label = (
+            f"{'arguments' if len(bad) > 1 else 'argument'} {', '.join(bad)}"
+            if bad
+            else "one of its arguments"
+        )
         raise PyActionError(
-            f"PyAction {name!r} cannot pickle kwargs {bad}: {exc}. "
+            f"PyAction {name!r} cannot pickle {label}: {exc}. "
             f"Arguments travel to build time as a file, so each one must be "
             f"picklable. Pass what describes it instead, a path or a string, "
             f"and build the object inside the function.",
@@ -756,14 +877,146 @@ def _derive_name(target: object) -> str:
     return Path(str(first)).stem
 
 
+@dataclass(frozen=True)
+class _HowToRun:
+    """How the function runs, which every edge of one action shares.
+
+    These describe the body rather than any one edge, so they sit on the
+    decoration. What to build sits on the call, and no option sits on both.
+    """
+
+    python: str | None = None
+    restat: bool = False
+    write_if_different: bool = False
+    cwd: str | Path | None = None
+    launcher: Sequence[str] | None = None
+    env_vars: Mapping[str, str] | None = None
+    worker: Any = None
+
+    def command_kwargs(self) -> dict[str, Any]:
+        """The part of this that ``env.Command`` takes verbatim."""
+        return {
+            "restat": self.restat,
+            "write_if_different": self.write_if_different,
+            "cwd": self.cwd,
+            "launcher": self.launcher,
+            "env_vars": self.env_vars,
+            "worker": self.worker,
+        }
+
+
+class PyAction:
+    """A build-script function, ready to be turned into build edges.
+
+    ``env.PyAction(...)`` returns the decorator that makes one of these, and
+    calling it makes an edge, the way calling ``env.Program`` does::
+
+        @env.PyAction()
+        def report(sources, targets, title):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(title)
+
+        counts = report(target="counts.txt", source=[a, b], title="counts")
+        more = report(target="more.txt", source=[c], title="more")
+
+    One decoration is one generated module however many edges read it, and
+    each call writes its own argument pickle. The module belongs to the
+    :class:`ValidatedAction` inside, which is what claims its path, so this
+    object is never itself in the claim registry.
+    """
+
+    __slots__ = ("_action", "_env", "_how", "_project")
+
+    def __init__(
+        self, action: ValidatedAction, env: Environment, how: _HowToRun
+    ) -> None:
+        self._action = action
+        self._env = env
+        self._how = how
+        self._project = env._project
+
+    def __repr__(self) -> str:
+        return f"<PyAction {self._action.function.__name__}>"
+
+    @property
+    def function(self) -> types.FunctionType:
+        """The function the build script wrote."""
+        return self._action.function
+
+    def __call__(
+        self,
+        *,
+        target: str | Path | list[str | Path],
+        source: Target | str | Path | Sequence[Target | str | Path] | None = None,
+        name: str | None = None,
+        depends: str | Path | Sequence[str | Path] | None = None,
+        **kwargs: Any,
+    ) -> Target:
+        """Make one build edge that runs the function.
+
+        Everything is keyword-only. A positional argument would have to be
+        told apart from the function's own, and there is no obvious first one:
+        ``target`` and ``source`` are equally plausible.
+
+        The generated module and the argument pickle are node tokens of the
+        command, which is what makes the generator spell them as the
+        execution directory sees them and makes the edge rebuild when either
+        changes. A node token does not join ``$SOURCES``, so the script's own
+        sources keep index 0 and are all the runner passes on.
+
+        Sources and targets travel on the command line, so a very long source
+        list meets the same limit ``env.Command`` already has, about 32000
+        characters on Windows.
+
+        Args:
+            target: Output file or files, as ``env.Command`` takes them.
+            source: Input files, or None. They arrive as the function's
+                *sources*, in the order written.
+            name: Edge name for ``ninja <name>``, and the argument pickle's
+                file name. Defaults to the first target's stem.
+            depends: Extra rebuild triggers that are not sources.
+            **kwargs: The function's own arguments. Each must be picklable,
+                and together they must fit its signature.
+
+        Returns:
+            The edge's ``Target``.
+
+        Raises:
+            PyActionError: If the arguments do not fit the function, if one
+                of them holds a piece of the build description or cannot be
+                pickled, or if the generated module collides with another
+                action's.
+        """
+        edge_name = name or _derive_name(target)
+        payload = check_arguments(self._action, name=edge_name, kwargs=kwargs)
+        module_rel = emit_module(self._action, project=self._project, env=self._env)
+        args_rel = emit_args(
+            project=self._project, env=self._env, name=edge_name, payload=payload
+        )
+        interpreter = (self._how.python or sys.executable).replace("\\", "/")
+        return self._env.Command(
+            target=target,
+            source=source,
+            name=edge_name,
+            command=[
+                interpreter,
+                _runner_path(),
+                self._project.node(module_rel),
+                self._project.node(args_rel),
+                "--n-targets",
+                str(len(_as_list(target))),
+                "$TARGETS",
+                "$SOURCES",
+            ],
+            depends=depends,
+            **self._how.command_kwargs(),
+        )
+
+
 def py_action(
     env: Environment,
     *,
-    target: str | Path | list[str | Path],
-    source: Target | str | Path | Sequence[Target | str | Path] | None = None,
-    kwargs: Mapping[str, Any] | None = None,
-    name: str | None = None,
-    depends: str | Path | Sequence[str | Path] | None = None,
     python: str | None = None,
     restat: bool = False,
     write_if_different: bool = False,
@@ -771,22 +1024,15 @@ def py_action(
     launcher: Sequence[str] | None = None,
     env_vars: Mapping[str, str] | None = None,
     worker: Any = None,
-) -> Callable[[Callable[..., object]], Target]:
+) -> Callable[[Callable[..., object]], PyAction]:
     """The decorator ``Environment.PyAction`` returns.
 
-    The generated module and the argument pickle are node tokens of the
-    command, which is what makes the generator spell them as the execution
-    directory sees them and makes the edge rebuild when either changes. A
-    node token does not join ``$SOURCES``, so the user's own sources keep
-    index 0 and are all the runner passes on to the function.
+    Nothing is checked here: the function has not arrived yet, and every
+    refusal about it has to point at the ``def`` rather than at the line
+    above it.
 
     Args:
-        env: The environment the edge builds in.
-        target: Output file or files, as ``env.Command`` takes them.
-        source: Input files, or None.
-        kwargs: Keyword arguments for the build-time call.
-        name: Edge name, defaulting to the first target's stem.
-        depends: Extra rebuild triggers that are not sources.
+        env: The environment the edges build in.
         python: Interpreter to run, defaulting to the one running pcons.
         restat: See ``env.Command``.
         write_if_different: See ``env.Command``.
@@ -796,39 +1042,19 @@ def py_action(
         worker: See ``env.Command``.
 
     Returns:
-        A decorator that emits the function and returns the edge's Target.
+        A decorator that returns the ``PyAction`` the build script calls.
     """
-    project = env._project
+    how = _HowToRun(
+        python=python,
+        restat=restat,
+        write_if_different=write_if_different,
+        cwd=cwd,
+        launcher=launcher,
+        env_vars=env_vars,
+        worker=worker,
+    )
 
-    def decorate(fn: Callable[..., object]) -> Target:
-        derived = name or _derive_name(target)
-        action = validate(fn, project=project, name=derived)
-        module_rel = emit_module(action, project=project, env=env)
-        args_rel = emit_args(
-            action, project=project, env=env, name=derived, kwargs=kwargs or {}
-        )
-        interpreter = (python or sys.executable).replace("\\", "/")
-        return env.Command(
-            target=target,
-            source=source,
-            name=derived,
-            command=[
-                interpreter,
-                _runner_path(),
-                project.node(module_rel),
-                project.node(args_rel),
-                "--n-targets",
-                str(len(_as_list(target))),
-                "$TARGETS",
-                "$SOURCES",
-            ],
-            depends=depends,
-            restat=restat,
-            write_if_different=write_if_different,
-            cwd=cwd,
-            launcher=launcher,
-            env_vars=env_vars,
-            worker=worker,
-        )
+    def decorate(fn: Callable[..., object]) -> PyAction:
+        return PyAction(validate(fn, project=env._project), env, how)
 
     return decorate
