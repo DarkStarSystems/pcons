@@ -738,7 +738,8 @@ class TestPyActionErrors:
         assert "cannot pickle kwargs f" in message
         assert "Pass what describes it instead, a path or a string" in message
 
-    def test_two_commands_deriving_one_name_name_both_and_say_name(self, project_env):
+    def test_two_edges_deriving_one_name_name_both_and_say_name(self, project_env):
+        """The pickle is per edge, so two edges of one name collide on it."""
         _, env = project_env
 
         @env.PyAction(target="report.txt")
@@ -752,9 +753,38 @@ class TestPyActionErrors:
                 return 2
 
         message = str(caught.value)
-        assert "would overwrite build/pyact/report.py" in message
+        assert "would overwrite build/pyact/report.args.pkl" in message
         assert "test_user_errors.py:" in message.split("already written by")[1]
         assert "Pass name= to one of them" in message
+
+    def test_two_functions_of_one_name_say_to_rename_one(self, project_env, tmp_path):
+        """The module is named after the function, so name= cannot part these."""
+        _, env = project_env
+        for sub in ("one", "two"):
+            (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+        first = build_script_function(
+            tmp_path / "one",
+            """
+            def render(sources, targets):
+                return 1
+            """,
+        )
+        second = build_script_function(
+            tmp_path / "two",
+            """
+            def render(sources, targets):
+                return 2
+            """,
+        )
+        env.PyAction(target="a.txt")(first)
+
+        with pytest.raises(PconsError) as caught:
+            env.PyAction(target="b.txt")(second)
+
+        message = str(caught.value)
+        assert "would overwrite build/pyact/render.py" in message
+        assert "Rename one of the functions." in message
+        assert "name=" not in message
 
     def test_a_partial_says_to_pass_the_function(self, project_env):
         _, env = project_env

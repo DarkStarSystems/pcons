@@ -1918,8 +1918,10 @@ class Environment(_EnvironmentStubs):
                     *sources*, in the order written.
             kwargs: Keyword arguments for the build-time call. Each value
                     must be picklable.
-            name: Target name for ``ninja <name>``, and the generated
-                  module's file name. Defaults to the first target's stem.
+            name: Target name for ``ninja <name>``, and the argument
+                  pickle's file name. Defaults to the first target's stem.
+                  The generated module is named after the function instead,
+                  so one function is one module however many edges read it.
             depends: Extra files that trigger a rebuild without being
                     sources, as ``env.Command`` takes them.
             python: The interpreter that runs the function, defaulting to the

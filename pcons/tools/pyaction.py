@@ -32,6 +32,7 @@ import textwrap
 import types
 import weakref
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -60,8 +61,38 @@ class PyActionError(PconsError):
 
 
 _claimed: weakref.WeakKeyDictionary[
-    Project, dict[Path, tuple[SourceLocation, Environment]]
+    Project, dict[Path, tuple[SourceLocation, Environment, object | None]]
 ] = weakref.WeakKeyDictionary()
+
+
+@dataclass(frozen=True)
+class ValidatedAction:
+    """A function that can be carried to build time, and the module for it.
+
+    What :func:`validate` settles depends on the function alone, so it is
+    settled once even when many edges run the same function. What
+    :func:`emit_module` and :func:`emit_args` write depends on the
+    environment and on the edge, so they run per call.
+
+    Attributes:
+        function: The function a build script wrote.
+        module_text: The whole content of the generated module.
+        at: Where the build script handed the function over.
+    """
+
+    function: types.FunctionType
+    module_text: str
+    at: SourceLocation
+
+    @property
+    def module_stem(self) -> str:
+        """The generated module's file name, without its suffix.
+
+        From the function, never from the edge: one function is one module
+        however many edges read it, and two edges of one function would
+        otherwise write byte-identical twins.
+        """
+        return _sanitized(self.function.__name__)
 
 
 def function_source(fn: Callable[..., object]) -> str:
@@ -116,68 +147,128 @@ def _extract(
     return "".join(text.splitlines(keepends=True)[node.lineno - 1 :]), node
 
 
-def emit(
-    fn: Callable[..., object],
-    *,
-    project: Project,
-    env: Environment,
-    name: str,
-    kwargs: Mapping[str, Any],
-) -> tuple[Path, Path]:
-    """Write the generated module and its argument pickle.
+def validate(
+    fn: Callable[..., object], *, project: Project, name: str
+) -> ValidatedAction:
+    """Everything about *fn* that one look at the function settles.
 
-    Both files are written only when their bytes change, so an unchanged build
-    description leaves their modification times alone and the edges that read
-    them do not re-run.
+    Nothing is written here. A function this refuses never reaches a build
+    directory, and a function it accepts can be emitted as often as there
+    are edges for it.
 
     Args:
         fn: The function to run at build time.
-        project: The project the edge belongs to, any project of the tree.
-        env: The environment whose build directory holds the two files.
-        name: The edge's name, used for both file names.
-        kwargs: Keyword arguments to pickle for the build-time call.
+        project: The project whose root the module's origin line is relative
+            to. The origin names the script that wrote the function, which
+            does not change when another environment emits it.
+        name: The edge's name, for the messages.
 
     Returns:
-        The module path and the pickle path, relative to the build directory
-        and anchored the way a node path is. Neither a disk path nor what
-        ``env.Command`` takes as a source: write to ``root / path``, and hand
-        the builder ``project.node(path)``, or a subdirectory's offset is
-        applied to them a second time.
+        The function, the module text, and where the build script asked.
 
     Raises:
-        PyActionError: If the function cannot be carried to build time, if
-            another edge already wrote the same module, or if an argument
-            cannot be pickled.
+        PyActionError: If the function cannot be carried to build time.
     """
     at = get_caller_location()
     function = _plain_function(fn, name, at)
     source, node = _extract(function, at)
     _reject_script_globals(function, node, name, at)
+    return ValidatedAction(function, _module_text(source, project, at), at)
+
+
+def emit_module(action: ValidatedAction, *, project: Project, env: Environment) -> Path:
+    """Write the generated module for *env*, once per path it lands on.
+
+    The same action reaching one path again is one file two edges read, so
+    the second claim succeeds and skips the write. A different action on that
+    path is two functions of one name, which is an error.
+
+    Args:
+        action: What :func:`validate` returned.
+        project: Any project of the tree; the claim registry hangs off its top.
+        env: The environment whose build directory holds the module.
+
+    Returns:
+        The module's path, relative to the build directory and anchored the
+        way a node path is. Neither a disk path nor what ``env.Command``
+        takes as a source: write to ``root / path``, and hand the builder
+        ``project.node(path)``, or a subdirectory's offset is applied twice.
+
+    Raises:
+        PyActionError: If another action already wrote that file.
+    """
+    module_rel = _gen_dir(env) / f"{action.module_stem}.py"
+    claimed = _claim(
+        project,
+        env,
+        module_rel,
+        action.function.__name__,
+        action.at,
+        owner=action,
+    )
+    if claimed:
+        _write_if_changed(
+            project._path_resolver.project_root / module_rel,
+            action.module_text.encode("utf-8"),
+        )
+    return module_rel
+
+
+def emit_args(
+    action: ValidatedAction,
+    *,
+    project: Project,
+    env: Environment,
+    name: str,
+    kwargs: Mapping[str, Any],
+) -> Path:
+    """Write one edge's argument pickle.
+
+    One edge is one pickle, so this path is exclusive: nothing may share it,
+    not even the action that claimed the module beside it.
+
+    The arguments belong to the call rather than to the function, so they are
+    checked here, and the location is taken here too. Both messages then name
+    the line that passed the value, not the line that wrote the ``def``.
+
+    Args:
+        action: What :func:`validate` returned.
+        project: Any project of the tree; the claim registry hangs off its top.
+        env: The environment whose build directory holds the pickle.
+        name: The edge's name, which the pickle is named after.
+        kwargs: Keyword arguments for the build-time call.
+
+    Returns:
+        The pickle's path, anchored the way :func:`emit_module` returns one.
+
+    Raises:
+        PyActionError: If another edge already claimed that file, or if an
+            argument holds a piece of the build description, or cannot be
+            pickled.
+    """
+    at = get_caller_location()
     _reject_description_objects(kwargs, name, at)
-    text = _module_text(source, project, at)
-
-    stem = _sanitized(name)
-    root = project._path_resolver.project_root
-    gen_dir = anchor_target_paths(env, [Path(GEN_DIR)])[0]
-    module_rel = gen_dir / f"{stem}.py"
-    args_rel = gen_dir / f"{stem}.args.pkl"
-
-    _claim(project, env, module_rel, name, at)
-    _write_if_changed(root / module_rel, text.encode("utf-8"))
+    args_rel = _gen_dir(env) / f"{_sanitized(name)}.args.pkl"
+    _claim(project, env, args_rel, name, at, owner=None)
     _write_if_changed(
-        root / args_rel,
+        project._path_resolver.project_root / args_rel,
         _payload_bytes(
             {
                 "version": runner.PROTOCOL_VERSION,
-                "module": f"{MODULE_PREFIX}{stem}",
-                "function": function.__name__,
+                "module": f"{MODULE_PREFIX}{action.module_stem}",
+                "function": action.function.__name__,
                 "kwargs": dict(kwargs),
             },
             name,
             at,
         ),
     )
-    return module_rel, args_rel
+    return args_rel
+
+
+def _gen_dir(env: Environment) -> Path:
+    """Where both generated files go, anchored the way a node path is."""
+    return anchor_target_paths(env, [Path(GEN_DIR)])[0]
 
 
 def _describe(fn: Callable[..., object]) -> str:
@@ -423,37 +514,61 @@ def _env_label(env: Environment) -> str:
 
 
 def _claim(
-    project: Project, env: Environment, module_rel: Path, name: str, at: SourceLocation
-) -> None:
-    """Record that *module_rel* is taken, refusing a second claim on it.
+    project: Project,
+    env: Environment,
+    path: Path,
+    name: str,
+    at: SourceLocation,
+    *,
+    owner: object | None,
+) -> bool:
+    """Record that *path* is taken, and say whether the caller should write.
 
     The registry hangs off the top-level project rather than off this module,
     so a second project in the same process starts clean.
+
+    *owner* is what may legally reach one path twice. A module's owner is the
+    :class:`ValidatedAction` behind it, so one action emitting into two
+    environments that share a build directory writes one file and two edges
+    read it. A pickle passes ``None``, which makes its path exclusive,
+    because one edge's arguments are nobody else's.
 
     Two environments decorating one function through a factory land on the
     same source line, so the environment is what tells the two claims apart,
     and giving one of them a ``build_prefix`` is the fix the factory shape
     calls for.
 
+    Returns:
+        True when the claim is new and the file has to be written, False when
+        *owner* already holds that path and the bytes are there.
+
     Raises:
-        PyActionError: If another PyAction already wrote that file.
+        PyActionError: If somebody else already claimed that file.
     """
     taken = _claimed.setdefault(project.top, {})
-    first = taken.get(module_rel)
-    if first is not None:
-        first_at, first_env = first
-        advice = (
-            "Give one environment its own build_prefix, or pass name= to one of them."
-            if first_env is not env
-            else "Pass name= to one of them."
-        )
-        raise PyActionError(
-            f"PyAction {name!r}{_env_label(env)} would overwrite "
-            f"{module_rel.as_posix()}, already written by the PyAction"
-            f"{_env_label(first_env)} at {first_at}. {advice}",
-            at,
-        )
-    taken[module_rel] = (at, env)
+    first = taken.get(path)
+    if first is None:
+        taken[path] = (at, env, owner)
+        return True
+    first_at, first_env, first_owner = first
+    if owner is not None and owner is first_owner:
+        return False
+    remedy = (
+        "rename one of the functions"
+        if owner is not None
+        else "pass name= to one of them"
+    )
+    advice = (
+        f"Give one environment its own build_prefix, or {remedy}."
+        if first_env is not env
+        else f"{remedy[:1].upper()}{remedy[1:]}."
+    )
+    raise PyActionError(
+        f"PyAction {name!r}{_env_label(env)} would overwrite "
+        f"{path.as_posix()}, already written by the PyAction"
+        f"{_env_label(first_env)} at {first_at}. {advice}",
+        at,
+    )
 
 
 def _origin(project: Project, at: SourceLocation) -> str:
@@ -687,8 +802,10 @@ def py_action(
 
     def decorate(fn: Callable[..., object]) -> Target:
         derived = name or _derive_name(target)
-        module_rel, args_rel = emit(
-            fn, project=project, env=env, name=derived, kwargs=kwargs or {}
+        action = validate(fn, project=project, name=derived)
+        module_rel = emit_module(action, project=project, env=env)
+        args_rel = emit_args(
+            action, project=project, env=env, name=derived, kwargs=kwargs or {}
         )
         interpreter = (python or sys.executable).replace("\\", "/")
         return env.Command(
