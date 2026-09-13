@@ -43,7 +43,7 @@ per environment when they differ; a script that sets none prints nothing.
 |---|---|
 | `--graph [FILE]` | Write the dependency graph as DOT (default: stdout) |
 | `--mermaid [FILE]` | Write the dependency graph as Mermaid (default: stdout) |
-| `--graph-detail ITEMS` | Extra detail in those graphs: `headers`, `scan`, `discovered` (comma-separated). Each reads files a build writes, so build first. See [Scanners](scanners.md#seeing-it-in-the-graph) |
+| `--graph-detail ITEMS` | Extra detail in those graphs: `headers`, `scan`, `discovered` (comma-separated). `headers` and `discovered` read files a build writes, so build first; `scan` needs no build. See [Scanners](scanners.md#seeing-it-in-the-graph) |
 
 ### `pcons build`
 

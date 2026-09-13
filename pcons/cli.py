@@ -1188,27 +1188,31 @@ def _generate(
         return exit_code, []
 
     tops = [p for p in _projects if p.is_top_level]
-    variants = _variants_in_use(tops)
+    variants = _variants_in_use(tops, requested=variant)
     if variants:
         click.echo(variants)
     return 0, tops
 
 
-def _variants_in_use(projects: Sequence[Any]) -> str:
+def _variants_in_use(projects: Sequence[Any], requested: str | None = None) -> str:
     """One line saying what a generate configured, for the terminal.
 
     Coming back to a build directory, nothing else says what it builds.
     Empty when no environment set a variant, so a script that never calls
     ``set_variant`` prints nothing. Several environments with different
-    variants are listed with the environment that holds each.
+    variants are listed with the environment that holds each, the one
+    ``--variant`` asked for first, so the line reads as an answer to it.
     """
     seen: dict[str, list[str]] = {}
+    if requested:
+        seen[requested] = []
     for project in projects:
         for env in getattr(project, "environments", []):
             variant = getattr(env, "variant", None)
             if not variant or variant == "default":
                 continue
             seen.setdefault(variant, []).append(env.name or "")
+    seen = {v: envs for v, envs in seen.items() if envs or v != requested}
     if not seen:
         return ""
     if len(seen) == 1:
@@ -2438,7 +2442,7 @@ def cli_init(
     metavar="ITEMS",
     help=(
         "Extra detail for --graph/--mermaid (comma-separated): "
-        "headers, scan, discovered. Each needs a prior build."
+        "headers, scan, discovered. headers and discovered need a prior build."
     ),
 )
 @jobs_option
@@ -2461,6 +2465,12 @@ def cli_generate(
     **declared_but_unused: object,
 ) -> None:
     """Generate build files from pcons-build.py."""
+    if graph_detail:
+        from pcons.core.project import _graph_detail
+
+        _graph_detail(graph_detail)  # a typo fails here, not silently later
+        if graph is None and mermaid is None:
+            raise click.UsageError("--graph-detail needs --graph or --mermaid.")
     variables, _ = parse_variables(list(extra))
     code, projects = _generate(
         build_dir,
