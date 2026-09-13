@@ -11,6 +11,7 @@ import pytest
 
 from pcons.util.commands import (
     _escape_depfile_path,
+    _prune_empty,
     concat,
     copy,
     copytree,
@@ -434,6 +435,84 @@ class TestOverlay:
         overlay(str(dest), [str(shared), str(app)])
 
         assert (dest / "both.txt").stat().st_mtime_ns == before
+
+
+class TestStampContainment:
+    """A stamp is a file on disk, so what it lists is not trusted blindly.
+
+    Every path a stamp names is deleted on the next run, and the directories
+    it leaves empty are pruned upwards; a line escaping the destination would
+    take someone else's file with it and send the prune walk past its
+    sentinel toward the filesystem root.
+    """
+
+    def _escaping_lines(self, outside: Path) -> list[str]:
+        return [
+            f"{posix(outside)}\n",  # absolute
+            "../outside.txt\n",  # climbs out
+            "res/../../outside.txt\n",  # climbs out from inside
+            f"../outside.txt\t{posix(outside)}\n",  # with a source recorded
+            "C:/outside.txt\n",  # absolute on the other platform
+        ]
+
+    def test_overlay_leaves_a_path_outside_the_destination_alone(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        shared, app, dest = overlay_trees(tmp_path)
+        outside = tmp_path / "outside.txt"
+        outside.write_text("theirs\n")
+        stamp = tmp_path / "stage.stamp"
+        stamp.write_text("".join(self._escaping_lines(outside)), encoding="utf-8")
+
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert outside.read_text() == "theirs\n"
+        assert tmp_path.is_dir()
+        warnings = capsys.readouterr().err
+        assert warnings.count("outside the destination") == 5
+        # The run rewrote the stamp, so the bad lines are gone.
+        assert "outside.txt" not in stamp.read_text()
+
+    def test_copytree_leaves_a_path_outside_the_destination_alone(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "kept.txt").write_text("kept\n")
+        outside = tmp_path / "outside.txt"
+        outside.write_text("theirs\n")
+        stamp = tmp_path / "assets.stamp"
+        stamp.write_text("".join(self._escaping_lines(outside)), encoding="utf-8")
+
+        copytree(str(src), str(tmp_path / "dest"), stamp=str(stamp))
+
+        assert outside.read_text() == "theirs\n"
+        assert (tmp_path / "dest" / "kept.txt").read_text() == "kept\n"
+
+    def test_a_staged_path_inside_the_destination_is_still_removed(
+        self, tmp_path: Path
+    ) -> None:
+        """The check rejects only what escapes: nested paths keep working."""
+        shared, app, dest = overlay_trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+        assert "res/a.txt" in stamp.read_text()
+
+        (shared / "res" / "a.txt").unlink()
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert not (dest / "res" / "a.txt").exists()
+
+    def test_prune_stops_at_a_path_it_does_not_hold(self, tmp_path: Path) -> None:
+        """Directly: the prune walk refuses a path outside its sentinel."""
+        stop = tmp_path / "dest"
+        stop.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "deep").mkdir(parents=True)
+
+        _prune_empty(elsewhere / "deep" / "gone.txt", stop)
+
+        assert (elsewhere / "deep").is_dir()
 
 
 class TestOverlayCommandLine:

@@ -21,7 +21,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Iterator, Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 def copy(src: str, dest: str, mode: int | None = None) -> None:
@@ -238,9 +238,31 @@ def _overlay_walk(
         )
 
 
+def _is_dest_relative(rel: str) -> bool:
+    """Whether *rel* names a path inside the destination it was staged under.
+
+    Both path flavours are asked, because a stamp is a file on disk: one
+    written on another platform can name ``C:/x`` or ``\\\\server\\share``
+    where this one sees no anchor at all.
+    """
+    return bool(rel) and not any(
+        pure.anchor or ".." in pure.parts
+        for pure in (PurePosixPath(rel), PureWindowsPath(rel))
+    )
+
+
 def _staged_before(stamp: str | None) -> dict[str, str | None]:
     """What the previous overlay run wrote: each destination-relative path
-    and the source file that won it, when the stamp recorded one."""
+    and the source file that won it, when the stamp recorded one.
+
+    A line naming anything but a path under the destination -- absolute, or
+    climbing out with ``..`` -- is dropped with a warning. What the caller
+    does with these paths is delete them and prune the directories they
+    leave empty, and a stamp is only as trustworthy as the file it was read
+    from: one carried over from another tree, half written by an interrupted
+    run, or edited by hand. Dropping the line rather than failing keeps a
+    bad stamp from wedging the build, and this run rewrites it.
+    """
     if not stamp:
         return {}
     stamp_path = Path(stamp)
@@ -248,9 +270,16 @@ def _staged_before(stamp: str | None) -> dict[str, str | None]:
         return {}
     staged: dict[str, str | None] = {}
     for line in stamp_path.read_text(encoding="utf-8").splitlines():
-        if line:
-            rel, sep, source = line.partition("\t")
-            staged[rel] = source if sep else None
+        if not line:
+            continue
+        rel, sep, source = line.partition("\t")
+        if not _is_dest_relative(rel):
+            print(
+                f"pcons: {stamp}: ignoring staged path outside the destination: {rel}",
+                file=sys.stderr,
+            )
+            continue
+        staged[rel] = source if sep else None
     return staged
 
 
@@ -270,9 +299,13 @@ def _write_stamp(stamp: str, staged: Mapping[str, Path | None]) -> None:
 
 
 def _prune_empty(path: Path, stop: Path) -> None:
-    """Remove the directories above *path* that it left empty, below *stop*."""
+    """Remove the directories above *path* that it left empty, below *stop*.
+
+    A path that is not under *stop* prunes nothing: the walk would never meet
+    its sentinel and would climb toward the filesystem root.
+    """
     for parent in path.parents:
-        if parent == stop:
+        if parent == stop or not parent.is_relative_to(stop):
             return
         try:
             parent.rmdir()
