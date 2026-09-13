@@ -43,5 +43,3 @@ bundle = env.Command(
         f"{run}${{SOURCES[0]}} --out=$TARGET --stamp=$$Revision$$ -i${{SOURCES[1:]}}"
     ),
 )
-
-project.Default(bundle)

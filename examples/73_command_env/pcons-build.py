@@ -41,7 +41,3 @@ without_var = env.Command(
     target=project.build_dir / "without_var.txt",
     command=[python, "-c", show, "$TARGET"],
 )
-
-# Naming any default target replaces the automatic set, so both go here: a
-# command target is not built unless something asks for it.
-project.Default(with_var, without_var)

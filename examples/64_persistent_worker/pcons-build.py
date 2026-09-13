@@ -30,5 +30,3 @@ report = env.Command(
     # Short, so an example run leaves nothing lingering for long.
     worker=PythonWorker(preload=["xml.dom.minidom"], idle_timeout=30),
 )
-
-project.Default(report)

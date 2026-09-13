@@ -147,5 +147,3 @@ apk = host.Command(
         "${SOURCES[0]}",
     ],
 )
-
-project.Default(native, apk)
