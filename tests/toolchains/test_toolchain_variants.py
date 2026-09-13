@@ -318,7 +318,8 @@ class TestClangClVariants:
         ClangClToolchain().apply_variant(env, "release-fastest")
 
         assert "/O2" in env.cc.flags
-        assert "/Ob3" in env.cc.flags
+        # clang reads /Ob3 as /Ob2, and a clang-cl before 19 warns about it.
+        assert "/Ob3" not in env.cc.flags
         assert "/MD" in env.cc.flags
         assert "NDEBUG" in env.cxx.defines
 

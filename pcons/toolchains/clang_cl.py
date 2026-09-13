@@ -245,6 +245,15 @@ class ClangClToolchain(MsvcCompatibleToolchain):
     # clang-cl spells it the clang way: -flto bitcode objects, which
     # lld-link recognizes and link-time-optimizes on its own; /LTCG is
     # accepted there but unneeded.
+    # clang treats /Ob3 as /Ob2, and a clang-cl before 19 (LLVM 19, September
+    # 2024; still the LLVM of Ubuntu 24.04 and of Visual Studio 17.10 and
+    # 17.11) warns about it as an unknown argument, so release-fastest is
+    # /O2 alone here.
+    MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
+        **MsvcCompatibleToolchain.MSVC_VARIANTS,
+        "release-fastest": (["/O2", "/MD"], ["NDEBUG"]),
+    }
+
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         **MsvcCompatibleToolchain.FEATURE_PRESETS,
         "lto": {
