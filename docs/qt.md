@@ -433,7 +433,7 @@ tree and a per-application one. `permissions` takes bare names; the
 build-tools revision of its own, so without it gradle.properties gets an
 empty `androidBuildToolsVersion` and Gradle stops with `Invalid revision`.
 Naming the highest revision installed under the SDK is what
-`examples/78_qt_android_apk` does.
+`examples/79_qt_android_apk` does.
 
 The tools androiddeployqt runs itself -- `rcc`, `qmlimportscanner`,
 `qmldom` -- are named in the file, and they are **host** programs. A Qt for
@@ -587,7 +587,7 @@ the name Qt's own `--sign` gives it.
 
 #### The worked example
 
-`examples/78_qt_android_apk` is the whole path end to end: a Qt Quick
+`examples/79_qt_android_apk` is the whole path end to end: a Qt Quick
 application, a `QtQmlModule` cross-compiled with the host Qt's moc and rcc,
 one Java class in the package source directory, a manifest naming
 `QtActivity`, the settings file, the staging and androiddeployqt.

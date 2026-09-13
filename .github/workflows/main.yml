@@ -486,8 +486,8 @@ jobs:
         run: |
           set -o pipefail
           uv run pytest tests/test_examples.py --cov=pcons --cov-append \
-            --cov-report=xml -v -k "78_qt_android_apk" | tee qtapk.txt
-          if grep -q '78_qt_android_apk-ninja] SKIPPED' qtapk.txt; then
+            --cov-report=xml -v -k "79_qt_android_apk" | tee qtapk.txt
+          if grep -q '79_qt_android_apk-ninja] SKIPPED' qtapk.txt; then
             echo "::error::the Qt APK example skipped instead of running"
             exit 1
           fi
