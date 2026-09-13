@@ -1207,7 +1207,12 @@ class Project(_ProjectBuilders):
 
     @property
     def default_targets(self) -> list[Target]:
-        """Get the default build targets."""
+        """The targets this project's ``Default()`` calls named, in order.
+
+        What a build actually builds is decided at generate, from these and
+        every target's ``build_tier``: ask
+        `pcons.core.tiers.decide_build_tiers`.
+        """
         return list(self._default_targets)
 
     @property
