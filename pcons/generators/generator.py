@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pcons.core.node import FileNode
 
-logger = logging.getLogger("pcons")
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.project import Project

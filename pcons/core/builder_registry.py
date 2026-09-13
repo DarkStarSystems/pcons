@@ -21,6 +21,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
+from pcons.core.tiers import validate_tier
+
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
@@ -103,8 +105,6 @@ class BuilderRegistry:
                        (e.g., ["linux", "darwin", "win32"]). None/empty means all.
             **options: Additional builder-specific options.
         """
-        from pcons.core.tiers import validate_tier
-
         cls._builders[name] = BuilderRegistration(
             name=name,
             create_target=create_target,

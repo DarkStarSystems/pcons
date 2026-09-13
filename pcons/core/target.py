@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 from pcons.core.flags import merge_flags
 from pcons.core.names import validate_name
+from pcons.core.tiers import validate_tier
 from pcons.core.types import SourceSpec
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -621,8 +622,6 @@ class Target:
 
     @build_tier.setter
     def build_tier(self, tier: str) -> None:
-        from pcons.core.tiers import validate_tier
-
         location = get_caller_location()
         self._build_tier = validate_tier(tier, location)
         self._build_tier_at = location
@@ -649,8 +648,6 @@ class Target:
         that creates a target another builder made, or one on the side (Qt's
         lupdate target).
         """
-        from pcons.core.tiers import validate_tier
-
         if self._build_tier_at is not None:
             return  # the script has spoken
         self._build_tier = validate_tier(tier)
