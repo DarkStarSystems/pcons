@@ -22,8 +22,9 @@ produce. A launcher that runs inside this one (a compiler cache, say) stays in
 front of the compile and out of the analysis. The compile runs even when the
 analysis complained, so the object still appears and the diagnostics repeat
 on the next build rather than turning into a missing-file error somewhere
-downstream. Exits nonzero if either half failed, so a diagnostic fails the
-build the way CMake's does.
+downstream. Exits nonzero if either half failed: clang-tidy exits zero on a
+warning, so only an error, or a warning under ``--warnings-as-errors``,
+fails the build, the way CMake's does.
 
 ``compile_commands.json`` is unaffected: pcons reports the compiler itself,
 without launchers, so clangd sees the real compile.
