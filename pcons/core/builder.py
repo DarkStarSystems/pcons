@@ -300,11 +300,18 @@ class BaseBuilder(ABC):
         env: Environment,
     ) -> list[Path]:
         """Default target paths: source names in build_dir with the first
-        target suffix. Subclasses can override."""
+        target suffix. Subclasses can override.
+
+        The build directory is the declaring script's own, the one
+        ``anchor_target_paths`` reads these paths against — the environment's
+        own carries its ``build_prefix`` but not the subdirectory offset, so
+        anchoring a path written with it would repeat the prefix below the
+        offset.
+        """
         if not self._target_suffixes:
             raise ValueError(f"Builder {self.name} has no target suffixes")
 
-        build_dir = Path(env.get("build_dir", "build"))
+        build_dir = env.build_dir_for(Project.current()._node_offset)
         suffix = self._target_suffixes[0]
 
         result: list[Path] = []

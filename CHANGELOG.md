@@ -284,6 +284,15 @@ read the whole changelog!
 
 ### Fixed
 
+- **A custom builder's own steps land in the subdirectory that declared the
+  target.** A factory that calls a builder during resolve (the
+  `examples/84_asset_pipeline` pattern) ran after `add_subdirectory` had
+  returned, so a relative target or source it wrote anchored at the top-level
+  root: the step's output went to `build/` instead of `build/<subdir>/`, and
+  two subdirectories declaring the same target name collided. The resolver
+  now re-enters the declaring directory before handing a target to its
+  factory. A derived output path (`env.cc.Object("x.c")` names none) no
+  longer repeats an environment's `build_prefix` below that offset.
 - **An import library is the toolchain's business, not the host's.** A shared
   library gets its `foo.lib` because the toolchain's link step writes one, so
   a cross build to Windows declares and links it the same way a native build

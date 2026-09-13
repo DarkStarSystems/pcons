@@ -924,3 +924,135 @@ class TestSubdirectoryInstallPaths:
         text = self._ninja(test_project, tmp_path)
 
         assert "$topdir/data.txt" in text
+
+
+class TestSubdirectoryFactoryPaths:
+    """A factory's own builder calls anchor at the target's subdirectory.
+
+    A custom builder may create its steps in its factory, during resolve,
+    the way ``examples/84_asset_pipeline`` does. By then the subdirectory
+    script has long since returned, so the paths it writes there must be
+    read against the directory that declared the target rather than the
+    top-level root.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    CHILD = (
+        "from pcons.core.builder import GenericCommandBuilder\n"
+        "from pcons.core.builder_registry import builder\n"
+        "from pcons.core.project import Project\n"
+        "from pcons.core.target import Target\n"
+        "from pcons.util.source_location import get_caller_location\n"
+        "\n"
+        "\n"
+        "class GadgetFactory:\n"
+        "    def __init__(self, project):\n"
+        "        self.project = project\n"
+        "\n"
+        "    def resolve(self, target, env):\n"
+        "        step = GenericCommandBuilder(['python3', '$SOURCE', '$TARGET'])\n"
+        "        (out,) = step(env, 'gen/gadget.h', ['mk.py'])\n"
+        "        target.output_nodes.append(out)\n"
+        "\n"
+        "    def resolve_pending(self, target):\n"
+        "        pass\n"
+        "\n"
+        "\n"
+        "@builder(\n"
+        "    'Gadget',\n"
+        "    target_type='gadget',\n"
+        "    requires_env=True,\n"
+        "    factory_class=GadgetFactory,\n"
+        "    description='A gadget',\n"
+        ")\n"
+        "class GadgetBuilder:\n"
+        "    @staticmethod\n"
+        "    def create_target(project, name, env, **kwargs):\n"
+        "        target = Target(\n"
+        "            name,\n"
+        "            target_type='gadget',\n"
+        "            defined_at=get_caller_location(),\n"
+        "            project=project,\n"
+        "            env=env,\n"
+        "        )\n"
+        "        target._builder_name = 'Gadget'\n"
+        "        return target\n"
+        "\n"
+        "\n"
+        "project = Project.current()\n"
+        "gadget = project.Gadget('gadget', project.default_environment)\n"
+    )
+
+    def test_the_factorys_target_lands_in_the_subdir_build_dir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(test_project, "child", self.CHILD)
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build child/gen/gadget.h: " in text
+
+    def test_the_factorys_source_anchors_at_the_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(test_project, "child", self.CHILD)
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/mk.py" in text
+        assert "$topdir/mk.py" not in text
+
+    def test_a_top_level_factory_is_unchanged(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        """The same builder, declared at the top, stays at the top."""
+        env = test_project.Environment(toolchain="c")
+        # Running the subdirectory script is what registers the builder.
+        _make_subdir(test_project, "child", self.CHILD)
+        add_subdirectory("child")
+
+        top = test_project.Gadget("top_gadget", env)  # ty: ignore[unresolved-attribute]
+        text = self._ninja(test_project, tmp_path)
+
+        assert top.output_nodes[0].path == Path("build/gen/gadget.h")
+        assert "build gen/gadget.h: " in text
+
+
+class TestSubdirectoryDefaultTargetPaths:
+    """A derived target path places itself where the anchor will read it.
+
+    ``env.cc.Object("x.c")`` names no output, so the builder derives one. It
+    used to derive it in the environment's own build directory, which carries
+    ``build_prefix`` but not the subdirectory offset, so anchoring the result
+    repeated the prefix below the offset.
+    """
+
+    def test_a_prefixed_environment_does_not_repeat_its_prefix(
+        self, test_project: Project, tmp_path: Path, gcc_toolchain
+    ) -> None:
+        env = test_project.Environment(toolchain=gcc_toolchain, name="mcu")
+        env.build_prefix = "mcu"
+        subdir = _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "objs = project.default_environment.cc.Object('x.c')\n",
+        )
+        (subdir / "x.c").write_text("int x;\n")
+
+        ns = add_subdirectory("child", env=env)
+
+        assert ns.objs[0].path.parent == Path("build/mcu/child")

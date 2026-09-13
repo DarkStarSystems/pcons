@@ -606,6 +606,32 @@ class Project(_ProjectBuilders):
             Project.__current = old_current
             Project.__default_env = old_default_env
 
+    @contextmanager
+    def _declaring_at(self, offset: Path) -> Generator[None, None, None]:
+        """Anchor paths created in this block at *offset* from the top root.
+
+        ``_enter_subdir`` does this while a subdirectory's script runs, and
+        every path written there is read against its own directory. A target's
+        factory runs later, during resolve, when that context has unwound, so
+        the resolver re-enters the directory the target was declared in
+        (``Target._subdir``) before handing it over.
+
+        Args:
+            offset: Offset from the top-level root, as a target carries it.
+                It must be inside this project, which is where its targets
+                were declared.
+        """
+        relative = offset.relative_to(self._offset)
+        old_subdir = self._subdir
+        old_current = Project.__current
+        self._subdir = str(relative) if relative.parts else None
+        Project.__current = self
+        try:
+            yield
+        finally:
+            self._subdir = old_subdir
+            Project.__current = old_current
+
     def write_build_files(self, *, regen_command: Sequence[str] | None = None) -> None:
         """Write this project's build files, here and now.
 

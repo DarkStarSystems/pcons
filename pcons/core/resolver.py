@@ -309,7 +309,11 @@ class Resolver:
         builder_name = target._builder_name
         if builder_name is not None and builder_name in self._builder_factories:
             factory = self._builder_factories[builder_name]
-            factory.resolve(target, env)
+            # In the directory the target was declared in: a factory that
+            # calls a builder writes relative paths the way the script that
+            # declared the target would have.
+            with target.project._declaring_at(target._subdir):
+                factory.resolve(target, env)
         elif env is None:
             trace("resolve", "  Skipping target without env")
         else:
@@ -346,7 +350,8 @@ class Resolver:
             else None
         )
         if factory is not None:
-            factory.resolve_pending(target)
+            with target.project._declaring_at(target._subdir):
+                factory.resolve_pending(target)
         elif target._pending_sources:
             logger.warning(
                 "Target '%s' has pending sources but no factory registered for "
