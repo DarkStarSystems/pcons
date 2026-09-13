@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 import pcons.toolchains.qt.finder as qt_finder
+from pcons.core.errors import ConfigureError
 from pcons.core.project import Project
 from pcons.packages.description import PackageDescription
 from pcons.toolchains.qt import QtNotFoundError, QtProbe, find_qt
@@ -680,6 +681,31 @@ def _qt_env(project, name=None):
     return project.Environment(toolchain=fake_qt_toolchain(), name=name)
 
 
+def _android_env(project, name=None):
+    """An unnamed-by-default environment retargeted for Android.
+
+    A cross preset overrides the cc/cxx/link/ar commands, so the environment
+    needs those tools; the fake qt toolchain is added afterwards, as find_qt
+    would, and takes no part in the retargeting.
+    """
+    from pcons.toolchains.llvm import LlvmToolchain
+    from pcons.toolchains.presets import android
+    from tests.toolchains._qt_test_utils import fake_qt_toolchain
+
+    env = project.Environment(name=name)
+    for tool, cmd in (
+        ("cc", "clang"),
+        ("cxx", "clang++"),
+        ("link", "clang"),
+        ("ar", "ar"),
+    ):
+        env.add_tool(tool).set("cmd", cmd)
+    env._toolchain = LlvmToolchain()
+    env.apply_cross_preset(android(ndk="/fake/ndk", api=35))
+    env.add_toolchain(fake_qt_toolchain())
+    return env
+
+
 def _prefixed_pcs(prefix):
     return {
         name: PackageDescription(
@@ -752,7 +778,8 @@ class TestPerEnvironmentInstalls:
         assert first is second
         assert sorted(second.modules) == ["Core", "Widgets"]
 
-    def test_unnamed_environments_share_one_install(self, project):
+    def test_unnamed_environments_for_one_target_share_one_install(self, project):
+        """Their module targets would be one target anyway."""
         one = _qt_env(project)
         two = _qt_env(project)
         fake = _PerPrefixPkgConfig(["/usr", "/opt/cross"])
@@ -761,6 +788,50 @@ class TestPerEnvironmentInstalls:
             fake.calls = 1
             second = find_qt(project, two, modules=["Core"])
         assert first is second
+
+    def test_an_unnamed_cross_environment_does_not_get_the_host_qt(self, project):
+        """`name` is optional, so it cannot be the whole cache key.
+
+        The host-plus-Android case probe="qtpaths" exists for: two unnamed
+        environments built for different targets need different installs, and
+        keying on the name alone silently handed the second one the first
+        one's Qt (and `qt_install` the host prefix, which androiddeployqt
+        would then have written into its settings).
+        """
+        host = _qt_env(project)
+        cross = _android_env(project)
+        fake = _PerPrefixPkgConfig(["/usr", "/opt/qt-android"])
+        with _patch_pkgconfig(fake), _no_qtpaths():
+            on_host = find_qt(project, host, modules=["Core"])
+            fake.calls = 1
+            assert qt_finder.qt_install(project, cross) is None
+            # Both installs would hold a target named Qt6Core, and only an
+            # environment name can tell those apart.
+            with pytest.raises(ConfigureError, match="name them"):
+                find_qt(project, cross, modules=["Core"])
+        assert qt_finder.qt_install(project, host) is on_host
+
+    def test_naming_the_two_environments_gives_two_installs(self, project):
+        """The fix the refusal above asks for."""
+        host = _qt_env(project, "host")
+        cross = _android_env(project, "android")
+        fake = _PerPrefixPkgConfig(["/usr", "/opt/qt-android"])
+        with _patch_pkgconfig(fake), _no_qtpaths():
+            on_host = find_qt(project, host, modules=["Core"])
+            fake.calls = 1
+            on_cross = find_qt(project, cross, modules=["Core"])
+        assert on_host is not on_cross
+        assert on_cross.prefix == Path("/opt/qt-android")
+
+    def test_a_cross_environment_asked_twice_hits_the_cache(self, project):
+        cross = _android_env(project)
+        fake = _PerPrefixPkgConfig(["/opt/qt-android", "/usr"])
+        with _patch_pkgconfig(fake), _no_qtpaths():
+            first = find_qt(project, cross, modules=["Core"])
+            fake.calls = 1
+            second = find_qt(project, cross, modules=["Widgets"])
+        assert first is second
+        assert sorted(second.modules) == ["Core", "Widgets"]
 
     def test_no_environment_uses_the_inherited_one(self, project):
         host = _qt_env(project, "host")

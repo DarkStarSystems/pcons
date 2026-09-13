@@ -82,10 +82,13 @@ _MODULE_DEPS: dict[str, tuple[str, ...]] = {
 _HEADER_ONLY_MODULES: frozenset[str] = frozenset({"QmlIntegration"})
 """Modules Qt ships with headers and no library, so nothing is linked."""
 
-# One QtPackage per project and environment name: a cross build and a host
-# build need different installs, and their module targets are told apart by
-# their environments. Weak keys let projects be collected.
-_qt_installs: weakref.WeakKeyDictionary[Project, dict[str | None, QtPackage]] = (
+_InstallKey = tuple[str | None, str | None, str | None]
+"""Environment name plus the cross target that decides which Qt it needs."""
+
+# One QtPackage per project and environment: a cross build and a host build
+# need different installs, and their module targets are told apart by their
+# environments. Weak keys let projects be collected.
+_qt_installs: weakref.WeakKeyDictionary[Project, dict[_InstallKey, QtPackage]] = (
     weakref.WeakKeyDictionary()
 )
 
@@ -101,8 +104,16 @@ def _probe_used(qt: QtPackage) -> QtProbe:
     return "pkg-config" if qt.found_via == "pkg-config" else "qtpaths"
 
 
-def _install_key(project: Project, env: Environment | None) -> str | None:
+def _install_key(project: Project, env: Environment | None) -> _InstallKey:
     """The cache slot an install lands in.
+
+    The environment's name, plus the cross target it was retargeted with:
+    ``name`` is optional, so an unnamed host environment and an unnamed
+    Android one land in the same slot if it is all the key holds, and the
+    second one silently gets the first one's Qt. The cross preset is what
+    decides which Qt an environment needs, so it belongs in the key. The
+    ``probe=`` argument does not: it says how to look, not what to find, and
+    a later call disagreeing with the cache is warned about, not re-probed.
 
     A caller passing no environment still gets module targets in one: the
     project's inherited environment, which is what ``Target`` falls back to.
@@ -112,7 +123,39 @@ def _install_key(project: Project, env: Environment | None) -> str | None:
     """
     if env is None:
         env = project._inherited_environment()
-    return env.name if env is not None else None
+    cross = env.cross if env is not None else None
+    return (
+        env.name if env is not None else None,
+        getattr(cross, "name", None),
+        getattr(cross, "triple", None),
+    )
+
+
+def _refuse_indistinguishable_environment(project: Project, key: _InstallKey) -> None:
+    """Refuse a second Qt for an environment nothing can tell apart.
+
+    A module target is identified by its name and its environment's name, so
+    two environments that both hold ``Qt6Core`` have to be named, and named
+    differently. Saying so here — before probing, naming both environments —
+    beats letting target creation refuse with a message pointing into pcons.
+    """
+    for other, qt in _qt_installs.get(project, {}).items():
+        if other == key or (other[0] is not None and key[0] is not None):
+            continue
+        raise ConfigureError(
+            f"find_qt: Qt {qt.version} at {qt.prefix} is already located for "
+            f"{_describe_key(other)}, and {_describe_key(key)} needs its own "
+            f"install. Both environments would hold a target named 'Qt6Core', "
+            f"which only their names can tell apart: name them, e.g. "
+            f"project.Environment(..., name='host')."
+        )
+
+
+def _describe_key(key: _InstallKey) -> str:
+    """An install key as prose, for the error above."""
+    name, cross, _triple = key
+    which = f"environment '{name}'" if name else "an unnamed environment"
+    return f"{which} (cross target '{cross}')" if cross else which
 
 
 def qt_install(project: Project, env: Environment | None = None) -> QtPackage | None:
@@ -276,8 +319,8 @@ def find_qt(
         project: The project; module targets register with it, and
             discovery is cached on it (repeat calls may add modules).
         env: The environment Qt is located for. Discovery is cached per
-            environment name, so a cross build and a host build each get
-            their own install and their own module targets. The ``qt``
+            environment, so a cross build and a host build each get their
+            own install and their own module targets. The ``qt``
             toolchain is added to the environment with moc/uic/rcc paths
             configured, enabling ``env.qt.*`` builders and
             ``project.QtProgram(...)``. MSVC-style toolchains also get
@@ -321,7 +364,8 @@ def find_qt(
             f"{'$PCONS_QT_ROOT' if 'PCONS_QT_ROOT' in os.environ else 'qt_root='})."
         )
 
-    qt = qt_install(project, env)
+    key = _install_key(project, env)
+    qt = _qt_installs.get(project, {}).get(key)
     if qt is not None:
         ignored: list[str] = []
         if qt_root is not None and not qt.prefix.is_relative_to(qt_root):
@@ -339,6 +383,7 @@ def find_qt(
                 qt.found_via,
             )
     if qt is None:
+        _refuse_indistinguishable_environment(project, key)
         if probe in ("auto", "pkg-config"):
             qt = _probe_pkgconfig(wanted, version, qt_root, env)
         if qt is None and probe in ("auto", "qtpaths"):
@@ -347,7 +392,7 @@ def find_qt(
             if not required:
                 return None
             raise QtNotFoundError(_not_found_message(wanted, version, qt_root, probe))
-        _qt_installs.setdefault(project, {})[_install_key(project, env)] = qt
+        _qt_installs.setdefault(project, {})[key] = qt
     elif version is not None and not _version_satisfies(qt.version, version):
         if not required:
             return None

@@ -108,8 +108,8 @@ tries both probes and takes no `probe` argument.
 
 Passing `env` adds the `qt` toolchain to the environment (tool paths for
 moc/uic/rcc), enabling the builders below. Discovery is cached per project
-and per environment name; call `find_qt` again with the same environment to
-add modules, and once per environment to build for two of them:
+and per environment; call `find_qt` again with the same environment to add
+modules, and once per environment to build for two of them:
 
 ```python
 host_qt = find_qt(project, host, modules=["Widgets"])
@@ -117,8 +117,11 @@ mcu_qt = find_qt(project, mcu, modules=["Core"])
 ```
 
 Each environment gets its own install and its own module targets, told
-apart by `Qt6Core@host` and `Qt6Core@mcu`. Two environments without names
-share one install, because nothing tells them apart.
+apart by `Qt6Core@host` and `Qt6Core@mcu`. Two unnamed environments built
+for the same target share one install, because their module targets would be
+one target anyway. Two that need *different* installs, say a host build and
+an Android cross build, are refused with a message asking you to name them:
+the name is what tells `Qt6Core` in one from `Qt6Core` in the other.
 
 A Qt target belongs to the environment it was declared in, like any other
 target, so one name can be built for both:
