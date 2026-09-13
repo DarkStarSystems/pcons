@@ -422,11 +422,14 @@ class Environment(_EnvironmentStubs):
         would leave ``common@mcu`` meaning two things. Scoped to one project: a
         sub-project may have its own ``host`` environment, since its targets are
         spelled ``child::app@host``. Called wherever an environment gets its
-        name: the constructor, and assignment afterwards.
+        name: ``Project.Environment()``, and assignment afterwards. An
+        environment with no project yet has nothing to clash with.
         """
         from pcons.core.errors import PconsError
 
         project = self._project
+        if project is None:
+            return
         for other in project.environments:
             if other is not self and other.name == name:
                 raise PconsError(
@@ -671,7 +674,7 @@ class Environment(_EnvironmentStubs):
         new_vars = new_env._get_vars()
         for key, value in vars_dict.items():
             if isinstance(value, list):
-                new_vars[key] = list(value)
+                new_vars[key] = value.copy()  # a FlagList keeps its grouping
             elif isinstance(value, dict):
                 new_vars[key] = dict(value)
             else:
