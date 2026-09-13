@@ -10,6 +10,7 @@ expected_outputs = [
     "build/bin/genscene2.py",
     "build/gen/generated2.scene",
     "build/packs/common.pack",
+    "build/packs/extras.pack",
     "build/packs/level1.pack",
     "build/packs/level2.pack",
 ]
@@ -40,6 +41,12 @@ description = "Touching a scene re-scans and repacks, without disturbing the gen
 touch = "assets/common.scene"
 expect_rebuild = ["packs*common.pack", "packs*level1.pack", "packs*level2.pack"]
 expect_no_rebuild = ["bin*", "gen*"]
+
+[[rebuild]]
+description = "A candidate pack nothing references repacks alone: the scan, not the depends(), decides the inputs"
+touch = "assets/extras.scene"
+expect_rebuild = ["packs*extras.pack"]
+expect_no_rebuild = ["packs*common.pack", "packs*level1.pack", "packs*level2.pack", "bin*", "gen*"]
 
 [[rebuild]]
 description = "Touching a generator fragment reassembles it, and stops there"

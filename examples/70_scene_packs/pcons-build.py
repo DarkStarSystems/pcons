@@ -10,7 +10,8 @@ A `Scanner` settles it at build time. No compiler is involved anywhere here.
    each pack provides and requires; pcons collates those reports into a ninja
    dyndep file, where the discovered inputs land. Nothing below says that
    `level2` references `level1`: the `depends()` calls say which packs a scene
-   may refer to, and the scene text picks the one whose digest gets embedded.
+   *may* refer to, and the scene text picks the ones whose digests get
+   embedded.
 
 2. **Discovered facts reach the command line, too.** `edge_args` has collate
    write each pack edge a `.refs` file listing the packs that edge must read,
@@ -18,11 +19,15 @@ A `Scanner` settles it at build time. No compiler is involved anywhere here.
    time; only the content is decided at build time. So `tools/pack_scene.py`
    never parses a scene for refs -- it is told.
 
-3. **Target dependencies carry the *exports*.** A scope resolves a required
-   name against the scopes it depends on, so `pack_level2` needs
-   `depends(pack_level1)` to see the name "level1" at all. That
-   dependency says where to look (and builds level1 first, as any dependency
-   does); the scene's content decides what is used and in which order.
+3. **Target dependencies carry the *exports*; the scan decides the inputs.**
+   A scope resolves a required name against the scopes it depends on, so
+   `pack_level2` needs a `depends()` on whichever pack provides "level1" to
+   see that name at all. Those dependencies are declared `on_change=False`:
+   they order the build and carry the exports, but do not by themselves
+   make a pack rebuild. What does is the dyndep the scan writes, which names
+   the packs a scene actually references. So `level2` lists `common`,
+   `level1` and `extras` as candidates, references only `level1`, and a
+   change to `extras` leaves it alone.
 
 4. **Generated sources need no phases.** Two generations of them here: the
    build assembles `genscene1.py` from checked-in fragments, runs it to get a
@@ -106,12 +111,14 @@ def pack(name: str, *scenes: str | Path) -> Target:
 
 
 pack_common = pack("common", "assets/common.scene")
+pack_extras = pack("extras", "assets/extras.scene")
 pack_level1 = pack("level1", "assets/level1.scene", gen_dir / "generated1.scene")
 pack_level2 = pack("level2", gen_dir / "generated2.scene")
 
-# Carry the exports: see point 3 above.
-pack_level1.depends(pack_common)
-pack_level2.depends(pack_level1)
+# The packs a scene may reference: see point 3 above. Order-only, so a
+# candidate that is not referenced does not repack anything.
+pack_level1.depends(pack_common, on_change=False)
+pack_level2.depends(pack_common, pack_level1, pack_extras, on_change=False)
 
 
 def pack_of_edge(env: Any, scenes: Any, governed: Any) -> dict[str, str]:
@@ -149,6 +156,6 @@ scene_refs = Scanner(
         include="requires",
     ),
 )
-scene_refs.attach(pack_common, pack_level1, pack_level2)
+scene_refs.attach(pack_common, pack_extras, pack_level1, pack_level2)
 
-project.Default(pack_common, pack_level1, pack_level2)
+project.Default(pack_common, pack_extras, pack_level1, pack_level2)

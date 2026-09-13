@@ -1,6 +1,6 @@
 # Content-discovered build order, over sources the build generates
 
-Three scene packs, no compiler. A `.scene` file names what it provides and
+Four scene packs, no compiler. A `.scene` file names what it provides and
 what it references; compiling one into a `.pack` embeds a digest of every pack
 it references, so a referenced pack has to be built first. Which pack that is
 lives in the scene text, and nothing in `pcons-build.py` says it.
@@ -18,35 +18,40 @@ scene_refs = Scanner(
                            format=ArgsFormat(line="{name} {path}"),
                            include="requires"),
 )
-scene_refs.attach(pack_common, pack_level1, pack_level2)
+scene_refs.attach(pack_common, pack_extras, pack_level1, pack_level2)
 ```
 
 **Only the scanner reads a `ref` line.** `tools/scan_scene.py` reports each
 pack's provides and requires as JSON; pcons collates those into a ninja dyndep
-file. The build statement for `packs/level2.pack` names the scene it packs and,
-as implicit deps, the packer script and `packs/level1.pack` — that last from the
-`depends()` in the build script, which is what orders the two packs. The scan
-adds a `dyndep =` binding and an order-only edge to the dyndep file it writes:
+file. The build script declares which packs `level2` *may* reference, with
+`depends(pack_common, pack_level1, pack_extras, on_change=False)`: those land
+on the build statement as order-only deps, so every candidate is built first
+but none of them makes `level2` repack by itself. The only implicit dep the
+script contributes is the packer:
 
 ```
 # build.ninja, one statement, rule name and bindings elided
 build packs/level2.pack: <cmdline rule> gen/generated2.scene | $
-    $topdir/tools/pack_scene.py packs/level1.pack || $
+    $topdir/tools/pack_scene.py || $
+    packs/common.pack packs/level1.pack packs/extras.pack $
     scan/scene-refs/scene_packs.pack_level2.dyndep
 ```
 
-What the scene text decides is *which* pack, and that arrives at build time, in
-the dyndep:
+What the scene text decides is *which* of those packs is an input, and that
+arrives at build time, in the dyndep:
 
 ```
 # scan/scene-refs/scene_packs.pack_level2.dyndep
 build packs/level2.pack: dyndep | packs/level1.pack
 ```
 
-Give `pack_level2` a second dependency and the build statement grows a second
-implicit dep, while the dyndep still names `packs/level1.pack` alone: the
-declared dependencies say where a name may be found, the scene says which one
-is used.
+So editing `assets/extras.scene` repacks `extras` and stops there: `level2`
+lists it as a candidate but does not reference it, and the dyndep is what
+ninja consults. (The scan of `level2` re-runs, since a candidate it may read
+changed, and its unchanged dyndep ends the cascade.) Add `ref extras` to
+`level2`'s scene and the dyndep gains `packs/extras.pack` on the next build,
+with no change to the build script: the declared dependencies say where a name
+may be found, the scene says which ones are used.
 
 **The discovered facts reach the command line too.** `edge_args` has collate
 write each pack edge a `.refs` file — `common packs/common.pack` — and appends
@@ -55,10 +60,10 @@ content decided at build time, so `tools/pack_scene.py` is *told* which packs
 to read rather than parsing a scene for refs.
 
 **Target dependencies carry the exports.** A scope resolves a required name
-only against the scopes it depends on, so `pack_level2` needs
-`depends(pack_level1)` to see the name `level1` at all. The dependency
-says where to look (and builds `level1` first, as any dependency does); the
-scene content decides what gets used, and when.
+only against the scopes it depends on, so `pack_level2` needs a `depends()`
+on the pack that provides `level1` to see that name at all. The dependency
+says where to look (and builds the candidates first, as any dependency does);
+the scene content decides what gets used, and when.
 
 ## Generated sources, twice over
 
@@ -79,14 +84,14 @@ the build script — pcons runs once and ninja builds it all:
 
 ```
 $ pcons
-[1/13] SCAN[scene-refs] packs/common.pack.scaninfo.json
-[2/13] COLLATE[scene-refs] scan/scene-refs/scene_packs.pack_common.dyndep
-[3/13] COMMAND packs/common.pack
-[4/13] COMMAND bin/genscene1.py
-[5/13] COMMAND gen/generated1.scene gen/gen2_payload.pyfrag
-[6/13] SCAN[scene-refs] packs/level1.pack.scaninfo.json
+[1/16] SCAN[scene-refs] packs/common.pack.scaninfo.json
+[2/16] COLLATE[scene-refs] scan/scene-refs/scene_packs.pack_common.dyndep
+[3/16] COMMAND packs/common.pack
+[4/16] COMMAND bin/genscene1.py
+[5/16] COMMAND gen/generated1.scene gen/gen2_payload.pyfrag
+[6/16] SCAN[scene-refs] packs/level1.pack.scaninfo.json
 ...
-[13/13] COMMAND packs/level2.pack
+[16/16] COMMAND packs/level2.pack
 ```
 
 A scanner that scanned the whole project in one pass could not: the scan of
