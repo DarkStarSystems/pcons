@@ -378,6 +378,13 @@ read the whole changelog!
   `depends=`, and `pcons run` builds what every level of the command path
   declared. `pcons run <group>` with only the group's own options no longer
   builds the group's targets and then fails with "Missing command". (#107)
+- **An unresolved `import` of a C++ module now says what is missing.** The
+  module collate dropped a logical name that nothing in the scope or its
+  dependencies provided, leaving the compiler to say only "module 'X' not
+  found". It now warns, naming the compile, the module, and the `link()` or
+  `depends()` edge that would carry the providing target's module exports.
+  A warning, not an error: a header unit or a module from outside the build
+  is legitimate.
 
 ### Removed
 

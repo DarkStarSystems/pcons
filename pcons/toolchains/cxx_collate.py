@@ -154,6 +154,7 @@ class _Plan:
     files: list[tuple[str, str]] = field(default_factory=list)
     bmi_dirs: list[str] = field(default_factory=list)
     std_objs: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def _norm(path: str) -> str:
@@ -401,13 +402,17 @@ class _Resolver:
         self,
         own: dict[tuple[str, str], _Module],
         imported: dict[tuple[str, str], _Module],
+        scope: str,
         std_error: str | None = None,
     ) -> None:
         # Own provides shadow imported ones: a scope that compiles its own
         # interface must read that BMI, not an upstream copy.
         self._own = own
         self._imported = imported
+        self._scope = scope
         self._std_error = std_error
+        #: Unresolved-import notices, for the caller to report.
+        self.warnings: list[str] = []
 
     def find(self, logical: str, key: str) -> _Module | None:
         """The module providing *logical* for compatibility class *key*."""
@@ -430,8 +435,11 @@ class _Resolver:
         clear. ``std`` and ``std.compat`` are an error when nothing provides
         them at all: the toolchain owes the project a standard-library module,
         and the compiler alone would fail much further downstream. Any other
-        name nothing provides passes through silently -- it may be satisfied
-        externally (a prebuilt BMI the user points the compiler at).
+        name nothing provides only warns and passes through -- it may be
+        satisfied externally (a header unit, or a prebuilt BMI the user points
+        the compiler at) -- but far more often the providing target is simply
+        not a dependency of this one, and the compiler's "module not found"
+        says nothing about that.
         """
         resolved: list[_Module] = []
         for logical in edge.requires:
@@ -440,8 +448,6 @@ class _Resolver:
                 resolved.append(module)
                 continue
             elsewhere = self._other_keys(logical)
-            if not elsewhere and logical in _STD_MODULES:
-                raise CollateError(self._std_error or _STD_UNAVAILABLE)
             if elsewhere:
                 others = ", ".join(sorted({m.obj or m.origin for m in elsewhere}))
                 raise CollateError(
@@ -453,6 +459,16 @@ class _Resolver:
                     f"this TU's flags too (e.g. add its source to the "
                     f"importing target), or align the targets' flags."
                 )
+            if logical in _STD_MODULES:
+                raise CollateError(self._std_error or _STD_UNAVAILABLE)
+            self.warnings.append(
+                f"{_ERROR_PREFIX} {edge.out} imports module '{logical}', which "
+                f"nothing in scope '{self._scope}' or its dependencies "
+                f"provides. If another target provides it, this target needs "
+                f"link() or depends() on that target, which is what carries "
+                f"its module exports here; a header unit or a module from "
+                f"outside the build is fine."
+            )
         return resolved
 
     def closure(self, direct: list[_Module], key: str) -> list[_Module]:
@@ -460,8 +476,9 @@ class _Resolver:
 
         A compile needs ``-fmodule-file=`` for every module reachable from its
         imports, not just the ones it names. Unresolvable transitive names are
-        skipped for the same reason direct ones are (see
-        :meth:`resolve_direct`), and revisits are cheap cycle protection.
+        skipped without a word: they are some other TU's direct imports, and
+        the scope that compiles that TU is the one that warns about them (see
+        :meth:`resolve_direct`). Revisits are cheap cycle protection.
         """
         seen: dict[str, _Module] = {}
         queue = list(direct)
@@ -580,7 +597,7 @@ def _plan(manifest: dict[str, Any], build_dir: Path) -> _Plan:
         list(extra.get("std_exports") or []),
     )
     edges, own = _load_edges(manifest, build_dir, moddir, bmi_ext)
-    resolver = _Resolver(own, imported, str(std_error) if std_error else None)
+    resolver = _Resolver(own, imported, scope, str(std_error) if std_error else None)
     wants_args = bool(manifest.get("edge_args"))
 
     plan = _Plan()
@@ -607,6 +624,7 @@ def _plan(manifest: dict[str, Any], build_dir: Path) -> _Plan:
                 )
             plan.files.append((edge.args_file, modmap_for(edge, closure)))
 
+    plan.warnings = resolver.warnings
     plan.std_objs = sorted(link_objs)
     link_args_file = manifest.get("link_args_file")
     if link_args_file:
@@ -641,6 +659,9 @@ def collate(manifest: dict[str, Any], build_dir: Path) -> int:
     except CollateError as exc:
         print(f"{_ERROR_PREFIX} {exc}", file=sys.stderr)
         return 1
+
+    for warning in plan.warnings:
+        print(warning, file=sys.stderr)
 
     # Ninja creates the directories of an edge's declared outputs, but a BMI
     # is a dyndep-discovered implicit output; nobody else would make its

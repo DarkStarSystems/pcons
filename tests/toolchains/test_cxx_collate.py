@@ -506,9 +506,14 @@ class TestTransitiveClosure:
 
 
 class TestExternalModules:
-    """A name nothing provides may still be satisfied by the compiler."""
+    """A name nothing provides may still be satisfied by the compiler.
 
-    def test_passes_through_silently(
+    So it is a warning, not an error — but a warning that names the missing
+    edge, since the usual cause is a missing dependency on the target that
+    does provide the module.
+    """
+
+    def test_warns_but_still_builds(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         m = manifest(
@@ -516,11 +521,39 @@ class TestExternalModules:
         )
 
         assert collate(m, tmp_path) == 0
-        assert capsys.readouterr().err == ""
+        err = capsys.readouterr().err
+        assert "obj.app/main.cpp.o imports module 'vendor.prebuilt'" in err
+        assert "scope 'app'" in err
+        assert "link() or depends()" in err
         assert dyndep_text(tmp_path, m) == (
             "ninja_dyndep_version = 1\n\nbuild obj.app/main.cpp.o: dyndep\n"
         )
         assert modmap(tmp_path, "obj.app/main.cpp.o") == ""
+
+    def test_resolved_imports_are_silent(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert collate(two_tu_scope(tmp_path), tmp_path) == 0
+        assert capsys.readouterr().err == ""
+
+    def test_transitive_unresolvable_does_not_warn(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The scope that compiles that TU is the one that warns about it."""
+        imports = [
+            exports_file(
+                tmp_path,
+                "scan/cxx-modules/lib.exports.json",
+                {"B": upstream_module("B", requires=["vendor.prebuilt"])},
+            )
+        ]
+        m = manifest(
+            edges=[edge(tmp_path, "obj.app/a.cpp.o", requires=["B"])],
+            imports=imports,
+        )
+
+        assert collate(m, tmp_path) == 0
+        assert capsys.readouterr().err == ""
 
 
 class TestModmapWriting:
