@@ -2,11 +2,11 @@
 """A Qt Widgets application, the high-level way.
 
 QtProgram() accepts .ui and .qrc files directly in sources and finds
-Q_OBJECT classes itself (automoc, scanned when pcons generates — never
-at build time). Every generated file is an ordinary, visible ninja edge
-with a depfile, so incremental builds are exact and `ninja -t commands`
-shows precisely what runs. There is no equivalent of CMake's opaque
-<target>_autogen step or its mocs_compilation.cpp aggregate TU.
+Q_OBJECT classes itself. Which files need moc is a fact about their
+contents, so one visible automoc edge per target runs the scan and moc
+while the build runs, behind a single mocs_compilation.cpp; uic and rcc
+stay one plain ninja edge per file. Everything carries a depfile, so
+incremental builds are exact and `ninja -t commands` shows what runs.
 """
 
 from pcons import Project, find_c_toolchain

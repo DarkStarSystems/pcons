@@ -3,8 +3,8 @@
 QtStaticLibrary, and QtResources.
 
 The Qt wrappers accept ``.ui`` and ``.qrc`` files directly in sources and
-run automoc — a generate-time scan of the target's sources and their
-project-local headers for Q_OBJECT/Q_GADGET/Q_NAMESPACE:
+run automoc — a scan of the target's sources and their project-local
+headers for Q_OBJECT/Q_GADGET/Q_NAMESPACE:
 
     qt = find_qt(project, env, modules=["Widgets"])
     app = project.QtProgram("myapp", env,
@@ -13,16 +13,19 @@ project-local headers for Q_OBJECT/Q_GADGET/Q_NAMESPACE:
 
 What this automates, per file kind:
 
-- header with Q_OBJECT  -> moc edge -> moc_*.cpp compiled as its own TU
-- .cpp with Q_OBJECT    -> moc edge -> *.moc; the .cpp must #include it
-  (hard error at generate time if it doesn't)
+- header with Q_OBJECT  -> moc -> moc_*.cpp, #included by mocs_compilation.cpp
+- .cpp with Q_OBJECT    -> moc -> *.moc; the .cpp must #include it
+  (hard error at build time if it doesn't)
 - .ui                   -> uic edge -> ui_*.h; its dir joins the include
   path of every TU
 - .qrc                  -> rcc edge -> qrc_*.cpp compiled and linked
 
-Everything lands under ``build/qt.<target>/``. A scan manifest plus a
-cheap build-time check edge make a stale scan (e.g. Q_OBJECT added
-without re-running pcons) a loud error instead of a vtable link mystery.
+Everything lands under ``build/qt.<target>/``. Which files need moc is a
+fact about their content, so one build-time edge per target does the scan
+and runs moc, and its single static output — ``mocs_compilation.cpp``,
+the CMake AUTOMOC shape — is what the target compiles. A generated
+Q_OBJECT header is then an ordinary input of that edge: order it with
+``app.depends(generator)`` and it joins the moc set on the first build.
 
 QtResources synthesizes the .qrc from a Python file list (no XML):
 
@@ -33,7 +36,7 @@ QtResources synthesizes the .qrc from a Python file list (no XML):
 from __future__ import annotations
 
 import json
-import logging
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -42,15 +45,13 @@ from xml.sax.saxutils import escape
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import PathToken
-from pcons.toolchains.qt.scan import _HEADER_SUFFIXES, QtScanner
+from pcons.toolchains.qt.scan import _HEADER_SUFFIXES, output_rel_dir
 from pcons.toolchains.qt.toolchain import (
     MOC_SOURCE_SUFFIXES,
     _source_path,
     _source_rel_dir,
 )
 from pcons.util.source_location import get_caller_location
-
-logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -75,7 +76,7 @@ def _write_if_changed(path: Path, content: str) -> None:
     """Write a generate-time file only when its content changed.
 
     Keeps the file's mtime stable across regenerations so downstream
-    build edges (rcc, scan check) don't re-run needlessly.
+    build edges (rcc, automoc) don't re-run needlessly.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists() or path.read_text(encoding="utf-8") != content:
@@ -221,15 +222,115 @@ def _scan_include_dirs(
     return list(dict.fromkeys(dirs))
 
 
+_automoc_edges: weakref.WeakKeyDictionary[Project, list[tuple[FileNode, Target]]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def inherit_automoc_deps(project: Project) -> None:
+    """Order each automoc edge behind whatever its target's compiles wait on.
+
+    Called from the Qt toolchain's ``after_resolve`` hook, once the compiles
+    exist and ``target.depends()`` has been applied to them. The automoc edge
+    reads what those compiles read, so a generated Q_OBJECT header reaches it
+    through the node graph rather than through an existence check. The pending
+    edges are consumed here, so a second toolchain instance's hook is a no-op.
+
+    The registry is keyed by the top-level project, because that is the one
+    the hook is handed: a Qt target declared by an ``add_subdirectory``
+    child registers against the child project, and keying by it would leave
+    that edge unordered.
+
+    The automoc edge itself is never inherited: it is a source of the target
+    and so an input of its own compile, which would read back here as a
+    self-cycle.
+    """
+    for node, target in _automoc_edges.pop(project.top, []):
+        sources = target.intermediate_nodes or target.output_nodes
+        inherited = [
+            dep
+            for source in sources
+            for dep in (*source.implicit_deps, *source.order_only_deps)
+            if isinstance(dep, FileNode) and dep is not node
+        ]
+        if inherited:
+            node.wait_for(inherited)
+
+
+def _set_node_vars(node: Node, node_vars: dict[str, object]) -> None:
+    """Attach per-edge command variables (the swift.py precedent)."""
+    info = getattr(node, "_build_info", None)
+    if info is not None:
+        info["vars"] = node_vars
+
+
+def _declare_implicit_output(primary: FileNode, extra: FileNode) -> None:
+    """Make *extra* a second, implicit output of *primary*'s edge.
+
+    Ninja's ``$out`` covers the explicit outputs only, so the edge keeps its
+    ``$out.d`` depfile while still telling the build about the file it writes
+    on the side.
+    """
+    info = getattr(primary, "_build_info", None)
+    if info is None:
+        return
+    info["outputs"] = {
+        "primary": {
+            "path": primary.path,
+            "suffix": primary.path.suffix,
+            "implicit": False,
+            "required": True,
+        },
+        "extra": {
+            "path": extra.path,
+            "suffix": extra.path.suffix,
+            "implicit": True,
+            "required": True,
+        },
+    }
+    extra._build_info = {"primary_node": primary, "output_name": "extra"}
+
+
+def _moc_args(qt_env: Environment, predefs: Path | None) -> list[str]:
+    """The moc command line the automoc tool runs with, minus in and out.
+
+    The same includes, defines and flags ``$qt.moccmd`` would expand to;
+    ``$qt.mocpredefs`` becomes a plain path because the tool, unlike a ninja
+    rule, has no build-relative reference to resolve it against.
+    """
+    dprefix = str(qt_env.qt.get("dprefix", "-D"))
+    iprefix = str(qt_env.qt.get("iprefix", "-I"))
+    args = [str(flag) for flag in qt_env.qt.mocflags]
+    args += [f"{dprefix}{define}" for define in qt_env.qt.mocdefines]
+    args += [f"{iprefix}{include}" for include in qt_env.qt.mocincludes]
+    if predefs is not None:
+        args += ["--include", str(predefs)]
+    return args
+
+
+def _dot_moc_dirs(cpp_paths: Sequence[Path], qt_dir: Path, root: Path) -> list[Path]:
+    """Directories a self-mocing source's ``<stem>.moc`` may land in.
+
+    Which sources need one is content, decided while the build runs, but
+    *where* the file goes follows from the static source list — so the
+    include path a ``#include "x.moc"`` needs stays a generate-time fact.
+    """
+    return [
+        qt_dir.joinpath(*output_rel_dir(path.resolve(), root))
+        for path in cpp_paths
+        if path.suffix in MOC_SOURCE_SUFFIXES
+    ]
+
+
 @dataclass
 class _QtGenInfo:
     """Internal: what _qt_make_target generated (consumed by QtQmlModule)."""
 
     qt_env: Environment
     qt_dir: Path  # build-relative, e.g. build/qt.<name>
-    moc_header_nodes: list[Node] = field(default_factory=list)
+    automoc_node: Node | None = None
+    metatypes_node: Node | None = None
     moc_header_dirs: list[Path] = field(default_factory=list)
-    dot_moc_nodes: list[Node] = field(default_factory=list)
 
 
 def _qt_make_target(
@@ -307,11 +408,13 @@ def _qt_make_target(
 
     # Compiler predefines for moc (GCC/Clang; MSVC uses --compiler-flavor).
     predefs_node: Node | None = None
+    predefs_path: Path | None = None
     toolchain_name = env.toolchain.name if env.toolchain is not None else ""
     if toolchain_name in ("msvc", "clang-cl"):
         qt_env.qt.mocflags = list(qt_env.qt.mocflags) + ["--compiler-flavor", "msvc"]
     elif env.has_tool("cxx"):
         predefs_node = qt_env.qt.Predefs(qt_dir / "moc_predefs.h")[0]
+        predefs_path = project.root_dir / qt_dir / "moc_predefs.h"
         qt_env.qt.mocpredefs = [
             "--include",
             PathToken(path=f"qt.{name}/moc_predefs.h", path_type="build"),
@@ -333,97 +436,86 @@ def _qt_make_target(
         qrc_nodes.append(qt_env.qt.Rcc(target_path, str(qrc))[0])
 
     # ---- automoc ---------------------------------------------------------
-    moc_nodes: list[Node] = []
+    automoc_node: Node | None = None
+    metatypes_node: Node | None = None
     moc_header_dirs: list[Path] = []
-    dot_moc_nodes: list[Node] = []
-    scan_stamp: Node | None = None
     if automoc and cpp_paths:
-        scan_dirs = _scan_include_dirs(project, env, link)
-        scanner = QtScanner(project.root_dir, cache_dir=project.root_dir / build_dir)
-        scan = scanner.scan_target_sources(
-            cpp_paths,
-            include_dirs=scan_dirs,
-            no_moc=[project.root_dir / p for p in no_moc],
-        )
-        for source in scan.moc_sources:
-            scanner.check_moc_include(source)
-        scanner.save_cache()
-
-        if (scan.moc_headers or scan.moc_sources) and not includes:
-            logger.warning(
-                "Qt target '%s': moc runs with no include paths — pass the "
-                "Qt modules via link=[qt.Widgets, ...] at construction so "
-                "moc can resolve Qt headers (app.link() afterward is too "
-                "late for moc).",
-                name,
-            )
-
-        for header in scan.moc_headers:
-            rel = _source_rel_dir(qt_env, project.node(header))
-            target_path = qt_dir.joinpath(*rel) / f"moc_{header.stem}.cpp"
-            moc_nodes.append(qt_env.qt.Moc(target_path, str(header))[0])
-            moc_header_dirs.append(header.parent)
-        for source in scan.moc_sources:
-            rel = _source_rel_dir(qt_env, project.node(source))
-            target_path = qt_dir.joinpath(*rel) / f"{source.stem}.moc"
-            moc_node = qt_env.qt.Moc(target_path, str(source))[0]
-            dot_moc_nodes.append(moc_node)
-            gen_header_dirs.append(target_path.parent)
-            # The .cpp's compile must wait for its .moc.
-            project.node(source).depends([moc_node])
-
-        # Manifest + build-time check: a scan whose outcome would change
-        # fails the build with "re-run pcons" instead of a link mystery.
-        manifest_path = project.root_dir / qt_dir / "scan-manifest.json"
+        root = project._path_resolver.project_root
+        metatypes_rel = qt_dir / f"{name}_metatypes.json" if moc_json else None
+        spec_rel = qt_dir / "automoc.json"
         _write_if_changed(
-            manifest_path,
+            project.root_dir / spec_rel,
             json.dumps(
                 {
                     "version": 1,
                     "target": name,
-                    "project_root": str(project.root_dir),
+                    "project_root": str(root),
+                    "gen_dir": str(project.root_dir / qt_dir),
                     "sources": sorted(str(p) for p in cpp_paths),
-                    "include_dirs": [str(p) for p in scan_dirs],
+                    "include_dirs": [
+                        str(p) for p in _scan_include_dirs(project, env, link)
+                    ],
                     "no_moc": sorted(str(project.root_dir / p) for p in no_moc),
-                    "moc_headers": sorted(str(p) for p in scan.moc_headers),
-                    "moc_sources": sorted(str(p) for p in scan.moc_sources),
+                    "moc": [str(qt_env.qt.moc)],
+                    "moc_args": _moc_args(qt_env, predefs_path),
+                    "moc_deps": [str(predefs_path)] if predefs_path else [],
+                    "has_includes": bool(includes),
+                    "metatypes": (
+                        None
+                        if metatypes_rel is None
+                        else str(project.root_dir / metatypes_rel)
+                    ),
                 },
                 indent=1,
                 sort_keys=True,
             ),
         )
-        scan_stamp = qt_env.qt.ScanCheck(
-            qt_dir / "scan.ok", qt_dir / "scan-manifest.json"
+        edge = qt_env.qt.Automoc(
+            qt_dir / "mocs_compilation.cpp", [spec_rel, *cpp_paths]
         )[0]
+        _set_node_vars(
+            edge,
+            {
+                "AUTOMOCSPEC": PathToken(
+                    path=project._path_resolver.make_execution_relative(spec_rel),
+                    path_type="build",
+                )
+            },
+        )
+        if predefs_node is not None:
+            edge.implicit_deps.append(predefs_node)
+        if metatypes_rel is not None:
+            metatypes_node = project.node(metatypes_rel)
+            _declare_implicit_output(edge, metatypes_node)
+        automoc_node = edge
 
-    # moc edges wait for predefs and the scan check.
-    moc_deps = [n for n in (predefs_node, scan_stamp) if n is not None]
-    for moc_node in (*moc_nodes, *dot_moc_nodes):
-        moc_node.implicit_deps.extend(moc_deps)
+        gen_header_dirs.extend(_dot_moc_dirs(cpp_paths, qt_dir, root))
+        moc_header_dirs = [p.parent for p in cpp_paths]
 
     # ---- the real target -------------------------------------------------
     factory = getattr(project, kind)
     target: Target = factory(
         name,
         env,
-        sources=[*plain, *moc_nodes, *qrc_nodes],
+        sources=[*plain, *([automoc_node] if automoc_node else []), *qrc_nodes],
         defined_at=defined_at,
     )
     if link:
         target.link(*link)
     for directory in dict.fromkeys(gen_header_dirs):
         target.private.include_dirs.append(directory)
-    # Generated headers (ui_*.h, *.moc) and the scan stamp must exist
-    # before any of the target's TUs compile.
-    for node in (*ui_nodes, *dot_moc_nodes, *moc_deps):
-        target.depends(node)
+    for node in (predefs_node, automoc_node, *ui_nodes):
+        if node is not None:
+            target.depends(node)
+    if isinstance(automoc_node, FileNode):
+        _automoc_edges.setdefault(project.top, []).append((automoc_node, target))
 
     info = _QtGenInfo(
         qt_env=qt_env,
         qt_dir=qt_dir,
-        moc_header_nodes=list(moc_nodes),
+        automoc_node=automoc_node,
+        metatypes_node=metatypes_node,
         moc_header_dirs=list(dict.fromkeys(moc_header_dirs)),
-        dot_moc_nodes=list(dot_moc_nodes),
     )
     return target, info
 

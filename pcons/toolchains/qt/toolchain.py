@@ -21,8 +21,12 @@ The tool namespace is ``env.qt``: tool paths (``env.qt.moc``), flag lists
 Every generated edge is incrementally correct via depfiles: moc runs with
 ``--output-dep-file`` (re-runs when transitively-included headers change)
 and rcc with ``--depfile`` (re-runs when files listed in the .qrc change).
-There is no build-time scanning and no aggregate ``mocs_compilation.cpp``:
-each moc output is its own small, visible ninja edge.
+
+QtProgram's automoc is the one exception to "one file, one edge": which
+files need moc is a fact about their *content*, so it is decided by a single
+build-time edge per target (``Automoc``, see
+:mod:`pcons.toolchains.qt._automoc`) that runs the scan and moc itself and
+writes one ``mocs_compilation.cpp`` aggregate TU.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.node import FileNode
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.toolchains.qt.scan import output_rel_dir
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain, toolchain_registry
 
@@ -43,6 +48,7 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder, OutputGroup
     from pcons.core.environment import Environment
     from pcons.core.node import Node
+    from pcons.core.project import Project
     from pcons.core.toolconfig import ToolConfig
     from pcons.toolchains.qt.finder import QtPackage
 
@@ -106,17 +112,10 @@ def _source_path(source: Node) -> Path:
 
 
 def _source_rel_dir(env: Environment, source: Node) -> tuple[str, ...]:
-    """Project-relative dir parts of a source, for collision-free layout.
-
-    Out-of-project sources (scanned sibling repos) mirror their absolute
-    path; drive/root markers are dropped so the parts always join into a
-    plain relative subpath.
-    """
+    """Project-relative dir parts of a source, for collision-free layout."""
     project = getattr(env, "_project", None)
-    parent = _source_path(source).parent
-    if project is not None:
-        parent = project._path_resolver.normalize_source_path(parent)
-    return tuple(p.replace(":", "") for p in parent.parts if p not in ("..", "/", "."))
+    root = None if project is None else project._path_resolver.project_root
+    return output_rel_dir(_source_path(source), root)
 
 
 class _QtGenBuilder(CommandBuilder):
@@ -303,16 +302,12 @@ class QtTool(BaseTool):
                 TargetPath(),
                 SourcePath(),
             ],
-            # Staleness guard for the generate-time moc scan ($in is the
-            # scan manifest); its depfile lists every scanned file and
-            # directory, so it re-checks exactly when the scan could
-            # change — and fails with a "re-run pcons" message if it did.
-            "scancheckcmd": [
+            "automoccmd": [
                 "$qt.python",
                 "-m",
-                "pcons.toolchains.qt._scan_check",
-                "--manifest",
-                SourcePath(),
+                "pcons.toolchains.qt._automoc",
+                "--spec",
+                "$AUTOMOCSPEC",
                 "-o",
                 TargetPath(),
                 "--depfile",
@@ -330,16 +325,6 @@ class QtTool(BaseTool):
                 "-o",
                 TargetPath(),
                 "$cxx.flags",
-            ],
-            # QML: merge per-TU moc JSON into one metatypes file ($in is
-            # the moc_*.cpp nodes for ordering; the .json siblings are
-            # named via $JSONFILES).
-            "collectjsoncmd": [
-                "$qt.moc",
-                "--collect-json",
-                "-o",
-                TargetPath(),
-                "$JSONFILES",
             ],
             # Translations: compile a .ts source catalog to binary .qm.
             "lreleasecmd": [
@@ -399,12 +384,11 @@ class QtTool(BaseTool):
             ),
             # Internal builders used by QtProgram (not part of the
             # public per-file API, but harmless to call directly).
-            "ScanCheck": CommandBuilder(
-                "ScanCheck",
+            "Automoc": CommandBuilder(
+                "Automoc",
                 "qt",
-                "scancheckcmd",
-                src_suffixes=[".json"],
-                target_suffixes=[".ok"],
+                "automoccmd",
+                target_suffixes=[".cpp"],
                 depfile=TargetPath(suffix=".d"),
                 deps_style="gcc",
                 restat=True,
@@ -415,12 +399,6 @@ class QtTool(BaseTool):
                 "predefscmd",
                 target_suffixes=[".h"],
                 restat=True,
-            ),
-            "CollectJson": CommandBuilder(
-                "CollectJson",
-                "qt",
-                "collectjsoncmd",
-                target_suffixes=[".json"],
             ),
             "Lrelease": LreleaseBuilder(
                 "Lrelease",
@@ -489,6 +467,20 @@ class QtToolchain(BaseToolchain):
             return False
         self._tools = {"qt": qt}
         return True
+
+    def after_resolve(
+        self,
+        project: Project,
+        source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
+    ) -> None:
+        """Order each automoc edge behind what the target's compiles wait on.
+
+        The edge exists before the compiles do, so the ordering can only be
+        wired once every ``target.depends()`` has reached them.
+        """
+        from pcons.toolchains.qt.builders import inherit_automoc_deps
+
+        inherit_automoc_deps(project)
 
     @classmethod
     def from_package(cls, qt: QtPackage) -> QtToolchain:

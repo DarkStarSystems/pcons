@@ -689,6 +689,12 @@ class ScannerResolver:
         governed: FileNode,
         scanned: list[FileNode],
     ) -> FileNode:
+        """Build the scan edge that stands in front of one governed edge.
+
+        The scan reads what the governed command reads, since a module
+        scanner runs a real compiler front end, so it inherits the governed
+        edge's dependencies as well as its own scanned sources.
+        """
         from pcons.core.builder import _tokenize_one
 
         project = self.project
