@@ -1033,8 +1033,15 @@ class NinjaGenerator(BaseGenerator):
 
         if default_outputs:
             f.write(f"default {' '.join(default_outputs)}\n")
-        elif all_outputs:
-            f.write("default all\n")
+        elif project.targets:
+            # Nothing is in the default tier, so a plain ninja builds
+            # nothing: not the steps in `all`, and not ninja's own choice of
+            # every final output, which could include a manual target.
+            f.write("build pcons-nothing: phony\n")
+            f.write("default pcons-nothing\n")
+        # A build that creates nodes directly, registering no target at all,
+        # writes no default line: ninja then builds every final output,
+        # which is what such a build means.
 
     def _escape_path(self, path: Path | str) -> str:
         """Escape a path for use in Ninja files.

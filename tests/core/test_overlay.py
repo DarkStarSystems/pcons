@@ -49,6 +49,7 @@ def overlay_project(
     project = Project("test", root_dir=root, build_dir=root / "build")
     env = project.Environment(name="host")
     stage = project.OverlayDir(env, "stage", sources=sources, exclude=exclude or [])
+    project.Default(stage)  # a step: plain ninja builds it only when named
     project.resolve()
     return project, stage
 

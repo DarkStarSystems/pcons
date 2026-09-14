@@ -47,6 +47,7 @@ def _register_contrib_builders() -> None:
 
     BuilderRegistry.register(
         "Pkg",
+        build_tier="all",  # packaging is a step on products
         create_target=create_pkg,
         target_type="installer",
         requires_env=True,
@@ -55,6 +56,7 @@ def _register_contrib_builders() -> None:
     )
     BuilderRegistry.register(
         "ComponentPkg",
+        build_tier="all",  # packaging is a step on products
         create_target=create_component_pkg,
         target_type="installer",
         requires_env=True,
@@ -63,6 +65,7 @@ def _register_contrib_builders() -> None:
     )
     BuilderRegistry.register(
         "Dmg",
+        build_tier="all",  # packaging is a step on products
         create_target=create_dmg,
         target_type="installer",
         requires_env=True,
@@ -71,6 +74,7 @@ def _register_contrib_builders() -> None:
     )
     BuilderRegistry.register(
         "Msix",
+        build_tier="all",  # packaging is a step on products
         create_target=create_msix,
         target_type="installer",
         requires_env=True,
@@ -79,6 +83,7 @@ def _register_contrib_builders() -> None:
     )
     BuilderRegistry.register(
         "Appx",
+        build_tier="all",  # packaging is a step on products
         create_target=create_appx,
         target_type="installer",
         requires_env=True,
@@ -87,6 +92,7 @@ def _register_contrib_builders() -> None:
     )
     BuilderRegistry.register(
         "MacosBundle",
+        build_tier="default",  # the bundle is the plugin's deliverable form
         create_target=create_macos_bundle,
         target_type="installer",
         requires_env=True,
@@ -95,6 +101,7 @@ def _register_contrib_builders() -> None:
     )
     BuilderRegistry.register(
         "FlatBundle",
+        build_tier="default",  # the bundle is the plugin's deliverable form
         create_target=create_flat_bundle,
         target_type="installer",
         requires_env=True,

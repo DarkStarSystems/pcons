@@ -614,19 +614,20 @@ class MakefileGenerator(BaseGenerator):
             ]
 
         all_outputs = outputs(tiers.all_targets)
-        # A build that creates nodes directly, registering no target at all,
-        # still has final outputs worth making. Only then: a project whose
-        # every target is manual has decided that nothing builds unasked.
-        if not all_outputs and not project.targets:
-            all_outputs = self._find_final_nodes(project)
         default_outputs = outputs(tiers.default_targets)
+        # A build that creates nodes directly, registering no target at all,
+        # still has final outputs worth making, and they are its default.
+        # Only then: a project whose every target is manual has decided that
+        # nothing builds unasked.
+        if not project.targets and not all_outputs:
+            all_outputs = default_outputs = self._find_final_nodes(project)
 
+        # Only the decided defaults: when the default tier is empty, `make`
+        # builds nothing, rather than the steps in `all` or make's own choice
+        # of the first rule.
         f.write("# Default target\n")
-
-        defaults = default_outputs or all_outputs
-        if defaults:
-            f.write(f"default: {' '.join(defaults)}\n")
-            f.write(".DEFAULT_GOAL := default\n")
+        f.write(f"default: {' '.join(default_outputs)}\n".rstrip() + "\n")
+        f.write(".DEFAULT_GOAL := default\n")
 
         # 'make all' builds every target but the manual ones
         if all_outputs:
