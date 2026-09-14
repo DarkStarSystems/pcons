@@ -183,6 +183,12 @@ ssh tower1 '$env:PATH = "C:\Users\garyo\.local\bin;$env:PATH"; cd E:/src/pcons; 
 
 To create a new release (e.g., `v0.3.0`):
 
+0. **Run the compatibility sweep**: `~/src/pcons-tests/sweep.sh` cleans,
+   builds, rebuilds (must be a no-op) and runs `pcons explain` on every
+   real-world project in `~/src/pcons-tests` against the local checkout.
+   Only known environmental failures are acceptable; anything else blocks
+   the release. (v0.29.0 shipped an `explain` crash the sweep would have caught.)
+
 1. **Update version** in `pcons/__init__.py` (line ~25):
    ```python
    __version__ = "0.3.0"
@@ -207,7 +213,7 @@ To create a new release (e.g., `v0.3.0`):
 
 4. Use gh to wait for the CI build to complete successfully. If it does:
 
-4. **Tag and push**:
+5. **Tag and push**:
    ```bash
    git tag v0.3.0
    git push && git push --tags
