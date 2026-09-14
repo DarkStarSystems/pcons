@@ -711,7 +711,6 @@ name = "pcons"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
-    { name = "pbxproj" },
     { name = "tomli-w" },
     { name = "watchfiles", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
@@ -734,12 +733,16 @@ docs = [
 watch = [
     { name = "watchfiles" },
 ]
+xcode = [
+    { name = "pbxproj" },
+]
 
 [package.dev-dependencies]
 dev = [
     { name = "coverage" },
     { name = "hypothesis" },
     { name = "mypy" },
+    { name = "pcons", extra = ["xcode"] },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
@@ -756,7 +759,7 @@ requires-dist = [
     { name = "mkdocs-macros-plugin", marker = "extra == 'docs'", specifier = ">=1.0" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0" },
-    { name = "pbxproj", specifier = ">=3.0.0" },
+    { name = "pbxproj", marker = "extra == 'xcode'", specifier = ">=3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
@@ -766,13 +769,14 @@ requires-dist = [
     { name = "watchfiles", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=1.0" },
     { name = "watchfiles", marker = "extra == 'watch'", specifier = ">=1.0" },
 ]
-provides-extras = ["dev", "docs", "watch"]
+provides-extras = ["dev", "docs", "watch", "xcode"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "coverage", specifier = ">=7.10" },
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "mypy", specifier = ">=1.0" },
+    { name = "pcons", extras = ["xcode"] },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-cov", specifier = ">=4.0" },
     { name = "pytest-xdist", specifier = ">=3.8" },

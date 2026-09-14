@@ -29,6 +29,7 @@ Path handling:
 
 from __future__ import annotations
 
+import importlib.util
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -42,6 +43,12 @@ if TYPE_CHECKING:
 
     from pcons.core.project import Project
     from pcons.core.target import Target
+
+INSTALL_HINT = (
+    "The Xcode generator needs the 'pbxproj' package, which is not installed.\n"
+    "Ask for it explicitly:\n"
+    "    pip install 'pcons[xcode]'"
+)
 
 # Map pcons target types to Xcode product types
 PRODUCT_TYPE_MAP = {
@@ -59,6 +66,16 @@ EXPLICIT_FILE_TYPE_MAP = {
     "com.apple.product-type.library.static": "archive.ar",
     "com.apple.product-type.library.dynamic": "compiled.mach-o.dylib",
 }
+
+
+def ensure_available() -> None:
+    """Raise :class:`PconsError` with an install hint if pbxproj is missing.
+
+    Called before generation starts so the user learns about the missing
+    package immediately rather than partway through writing the project.
+    """
+    if importlib.util.find_spec("pbxproj") is None:
+        raise PconsError(INSTALL_HINT)
 
 
 def _generate_id() -> str:
@@ -152,6 +169,19 @@ class XcodeGenerator(BaseGenerator):
                 f"target that stages nothing. Generate with the ninja or "
                 f"make generator instead."
             )
+
+    def generate(
+        self,
+        project: Project,
+        *,
+        compile_commands: bool = True,
+        root_symlink: bool = True,
+    ) -> None:
+        """Refuse up front if pbxproj is missing, then defer as usual."""
+        ensure_available()
+        super().generate(
+            project, compile_commands=compile_commands, root_symlink=root_symlink
+        )
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate the .xcodeproj bundle in output_dir."""
