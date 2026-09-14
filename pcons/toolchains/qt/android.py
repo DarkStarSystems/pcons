@@ -382,9 +382,10 @@ def android_deployment_settings(
         The path written.
 
     Raises:
-        ValueError: If the environment is not an Android cross environment,
-            or if *build_tools* is left out and the SDK holds no build-tools
-            revision to default to.
+        ValueError: If the environment is not an Android cross environment.
+            What the content is refused for -- no Qt found, no build-tools
+            revision under the SDK to default to -- is raised where the
+            content is decided, in the generate pass.
     """
     _android_preset(env)
 
