@@ -191,7 +191,7 @@ def android_apk(
         "--input",
         "${SOURCES[0]}",
         "--output",
-        _execution_relative(project, directory),
+        project._path_resolver.make_execution_relative(directory),
     ]
     if release:
         arguments.append("--release")
@@ -216,11 +216,6 @@ def android_apk(
     if no_build:
         result.build_by_default = False
     return result
-
-
-def _execution_relative(project: Project, directory: Path) -> str:
-    """*directory* as the command will see it: ninja runs in the build dir."""
-    return project._path_resolver.normalize_target_path(directory).as_posix()
 
 
 #: apksigner password sources that keep the value out of the build file. Its
