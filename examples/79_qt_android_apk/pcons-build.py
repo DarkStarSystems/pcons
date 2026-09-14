@@ -16,10 +16,10 @@ What it shows:
    so the host Qt beside it supplies the tools.
 2. A ``QtQmlModule`` cross-compiled: moc, qmltyperegistrar and rcc run on
    the build machine, the objects are aarch64.
-3. ``android_deployment_settings()``, the JSON androiddeployqt reads.
-   ``build_tools=`` is not optional in practice: without
-   ``sdkBuildToolsRevision`` androiddeployqt writes an empty
-   ``androidBuildToolsVersion`` and Gradle stops with "Invalid revision".
+3. ``android_deployment_settings()``, the JSON androiddeployqt reads. It
+   writes ``sdkBuildToolsRevision`` from the newest revision installed
+   under the SDK, which nothing else supplies: androiddeployqt detects
+   none and Gradle stops with "Invalid revision" without one.
 4. Staging the application where androiddeployqt looks for it, which
    ``android_apk()`` does on its own.
 5. A package source directory with one Java class, so Gradle really
@@ -65,18 +65,6 @@ def _from_env(*names: str) -> Path:
     raise SystemExit(f"Set one of {', '.join(names)} to build this example.")
 
 
-def _newest(directory: Path) -> str:
-    revisions = sorted(
-        (p for p in directory.iterdir() if p.is_dir()),
-        key=lambda p: tuple(
-            int(part) if part.isdigit() else 0 for part in p.name.split(".")
-        ),
-    )
-    if not revisions:
-        raise SystemExit(f"Nothing installed under {directory}.")
-    return revisions[-1].name
-
-
 ndk = _from_env("ANDROID_NDK_HOME", "ANDROID_NDK_ROOT")
 sdk = _from_env("ANDROID_HOME", "ANDROID_SDK_ROOT")
 qt_root = _from_env("PCONS_QT_ANDROID_ROOT")
@@ -106,7 +94,6 @@ settings = android_deployment_settings(
     app=app,
     package_name=PACKAGE,
     package_source_dir="android",
-    build_tools=_newest(sdk / "build-tools"),
 )
 
 apk = android_apk(

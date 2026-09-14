@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.generators.generator import BaseGenerator
+from pcons.toolchains.android import newest_build_tools
 from pcons.toolchains.presets import CrossPreset
 
 if TYPE_CHECKING:
@@ -298,6 +299,18 @@ def _absolute(project: Project, directory: Path) -> Path:
     return Path(project.top.root_dir) / directory
 
 
+def _build_tools_revision(env: Environment, given: str | None) -> str:
+    """The SDK build-tools revision to write, given one or not."""
+    if given is not None:
+        return given
+    sdk = _android_preset(env).sdk
+    assert sdk is not None
+    try:
+        return newest_build_tools(sdk).name
+    except ValueError as exc:
+        raise ValueError(f"{exc} Or name one with build_tools=<revision>.") from exc
+
+
 class _SettingsFile(BaseGenerator):
     """The settings file, written when the pending generation runs.
 
@@ -357,14 +370,21 @@ def android_deployment_settings(
         permissions: Android permissions ("android.permission.INTERNET"),
                       as bare names. The ``[{"name": ...}]`` shape the file
                       wants is this function's business, not the caller's.
-        build_tools: SDK build-tools revision ("37.0.0"). Needed for a real
-                     package: androiddeployqt does not detect one, and left
-                     out it writes an empty ``androidBuildToolsVersion`` into
-                     gradle.properties, on which Gradle stops with "Invalid
-                     revision". Measured against Qt 6.11.1.
+        build_tools: SDK build-tools revision ("37.0.0"). Default: the
+                     highest one installed under the SDK the preset names.
+                     One is always written: androiddeployqt detects none of
+                     its own and left out writes an empty
+                     ``androidBuildToolsVersion`` into gradle.properties, on
+                     which Gradle stops with "Invalid revision". Measured
+                     against Qt 6.11.1.
 
     Returns:
         The path written.
+
+    Raises:
+        ValueError: If the environment is not an Android cross environment,
+            or if *build_tools* is left out and the SDK holds no build-tools
+            revision to default to.
     """
     _android_preset(env)
 
@@ -387,8 +407,7 @@ def android_deployment_settings(
             settings["android-package-source-directory"] = str(directory)
         if permissions:
             settings["permissions"] = [{"name": name} for name in permissions]
-        if build_tools is not None:
-            settings["sdkBuildToolsRevision"] = build_tools
+        settings["sdkBuildToolsRevision"] = _build_tools_revision(env, build_tools)
         return json.dumps(settings, indent=3) + "\n"
 
     project.node(output)

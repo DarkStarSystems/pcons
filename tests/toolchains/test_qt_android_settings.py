@@ -20,6 +20,7 @@ from pcons.toolchains.qt.android import android_deployment_settings, deployment_
 from pcons.toolchains.qt.finder import QtPackage
 
 from ._qt_test_utils import (
+    ANDROID_BUILD_TOOLS,
     ANDROID_NDK,
     ANDROID_SDK,
     QT_HOST_TOOLS,
@@ -500,7 +501,6 @@ class TestTheOptionalKeys:
         assert "android-package-name" not in settings
         assert "android-package-source-directory" not in settings
         assert "permissions" not in settings
-        assert "sdkBuildToolsRevision" not in settings
 
     def test_they_are_written_when_asked_for(
         self, found_qt, test_project, tmp_path
@@ -517,6 +517,39 @@ class TestTheOptionalKeys:
 
         assert settings["android-package-name"] == "org.example.myapp"
         assert settings["sdkBuildToolsRevision"] == "37.0.0"
+
+
+class TestTheBuildToolsRevision:
+    """androiddeployqt detects none of its own: left out of the file, Gradle
+    stops with "Invalid revision". So one is always written, and the build
+    script only names it to override the SDK's newest."""
+
+    def test_the_newest_installed_revision_is_the_default(
+        self, found_qt, test_project
+    ) -> None:
+        path = android_deployment_settings(test_project, android_env(), app="myapp")
+
+        settings = _written_settings(test_project, path)
+
+        assert settings["sdkBuildToolsRevision"] == ANDROID_BUILD_TOOLS
+
+    def test_a_named_revision_is_the_one_written(self, found_qt, test_project) -> None:
+        path = android_deployment_settings(
+            test_project, android_env(), app="myapp", build_tools="30.0.3"
+        )
+
+        settings = _written_settings(test_project, path)
+
+        assert settings["sdkBuildToolsRevision"] == "30.0.3"
+
+    def test_an_sdk_with_no_build_tools_says_what_to_pass(
+        self, found_qt, test_project, tmp_path
+    ) -> None:
+        env = android_env(sdk=str(tmp_path / "empty-sdk"))
+        path = android_deployment_settings(test_project, env, app="myapp")
+
+        with pytest.raises(ValueError, match="build_tools="):
+            _written_settings(test_project, path)
 
 
 class TestThePackageSourceDirectory:

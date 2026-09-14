@@ -4,10 +4,17 @@
 All Qt unit tests run without a Qt installation: the qt toolchain is
 constructed with fake tool paths and the generated build.ninja is
 inspected as text.
+
+The fake Android SDK is the exception that has to exist on disk: the
+deployment settings default ``sdkBuildToolsRevision`` to the highest
+revision installed, which is a directory listing. It is one fixed tree of
+empty directories, shared by every worker and every run.
 """
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,7 +27,6 @@ from pcons.toolchains.qt.toolchain import QtTool, QtToolchain
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
 
     from pcons.core.environment import Environment
     from pcons.core.project import Project
@@ -65,7 +71,19 @@ def cxx_env_with_qt(project: Project, name: str | None = None) -> Environment:
 
 
 ANDROID_NDK = "/fake/ndk"
-ANDROID_SDK = "/fake/sdk"
+
+#: The one build-tools revision the fake SDK has installed.
+ANDROID_BUILD_TOOLS = "37.0.0"
+
+
+def _fake_android_sdk() -> str:
+    """An SDK root that exists, holding one build-tools revision."""
+    root = Path(tempfile.gettempdir()) / "pcons-fake-android-sdk"
+    (root / "build-tools" / ANDROID_BUILD_TOOLS).mkdir(parents=True, exist_ok=True)
+    return str(root)
+
+
+ANDROID_SDK = _fake_android_sdk()
 
 QT_HOST_TOOLS = ("rcc", "qmlimportscanner", "qmldom")
 

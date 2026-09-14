@@ -252,6 +252,9 @@ toolchain_registry.register_finder(
 # module on first attribute access (PEP 562), so `from pcons.toolchains
 # import GccToolchain` still works without loading every toolchain.
 _LAZY_ATTRS = {
+    # Android SDK
+    "build_tools_program": "pcons.toolchains.android",
+    "newest_build_tools": "pcons.toolchains.android",
     # Build context classes
     "CompileLinkContext": "pcons.toolchains.build_context",
     "MsvcCompileLinkContext": "pcons.toolchains.build_context",
@@ -336,6 +339,9 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    # Android SDK
+    "build_tools_program",
+    "newest_build_tools",
     # Toolchain finder and registry
     "find_c_toolchain",
     "find_fortran_toolchain",

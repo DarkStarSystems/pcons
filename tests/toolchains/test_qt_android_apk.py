@@ -556,9 +556,10 @@ class TestTheSigningEdge:
     def test_an_explicit_apksigner_is_the_one_that_runs(
         self, app_project, deployable, tmp_path
     ) -> None:
-        """Named outright, apksigner is taken as given: no build-tools
-        revision is looked for, so an SDK holding none still signs."""
-        env = android_env(sdk=str(tmp_path / "empty-sdk"))
+        """Named outright, apksigner is taken as given, so an SDK whose
+        build tools do not include one still signs."""
+        (tmp_path / "toolless-sdk" / "build-tools" / "37.0.0").mkdir(parents=True)
+        env = android_env(sdk=str(tmp_path / "toolless-sdk"))
         tool = tmp_path / "tools" / "apksigner"
 
         content = _signed_ninja(

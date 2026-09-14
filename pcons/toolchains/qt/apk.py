@@ -41,7 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.configure.platform import get_platform
+from pcons.toolchains.android import build_tools_program
 from pcons.toolchains.qt.android import (
     _android_preset,
     android_output_dir,
@@ -405,20 +405,7 @@ def _apksigner(cross: CrossPreset, override: str | Path | None) -> str | Path:
     if override is not None:
         return override
     assert cross.sdk is not None
-    suffix = ".bat" if get_platform().is_windows else ""
-    revisions = Path(cross.sdk) / "build-tools"
-    installed = sorted(
-        (p for p in revisions.glob("*") if (p / f"apksigner{suffix}").is_file()),
-        key=lambda p: _revision(p.name),
-    )
-    if not installed:
-        raise ValueError(
-            f"No apksigner under {revisions}. Install the SDK build tools, "
-            f"or name the program with apksigner=<path>."
-        )
-    return installed[-1] / f"apksigner{suffix}"
-
-
-def _revision(name: str) -> tuple[int, ...]:
-    """A build-tools directory name, ordered as the version it is."""
-    return tuple(int(part) if part.isdigit() else 0 for part in name.split("."))
+    try:
+        return build_tools_program(cross.sdk, "apksigner")
+    except ValueError as exc:
+        raise ValueError(f"{exc} Or name the program with apksigner=<path>.") from exc

@@ -433,11 +433,25 @@ is the caller's: `project.Install()` is one way to build it out of a shared
 tree and a per-application one. `permissions` takes bare names; the
 `[{"name": ...}]` shape the file wants is not the caller's business.
 
-`build_tools` reads as optional and is not: androiddeployqt detects no
-build-tools revision of its own, so without it gradle.properties gets an
-empty `androidBuildToolsVersion` and Gradle stops with `Invalid revision`.
-Naming the highest revision installed under the SDK is what
-`examples/79_qt_android_apk` does.
+`sdkBuildToolsRevision` is always written, because androiddeployqt detects
+no revision of its own: without it gradle.properties gets an empty
+`androidBuildToolsVersion` and Gradle stops with `Invalid revision`. The
+default is the highest revision installed under the SDK the preset names,
+so a build script says nothing. `build_tools="37.0.0"` pins another one.
+The same lookup is a public helper, for a script driving the SDK tools
+itself:
+
+```python
+from pcons.toolchains.android import build_tools_program, newest_build_tools
+
+revision = newest_build_tools(sdk).name       # "37.0.0"
+zipalign = build_tools_program(sdk, "zipalign")
+```
+
+`newest_build_tools` orders the revisions as versions rather than as text,
+where `9.0.0` sorts above `37.0.0` and is four years older.
+`build_tools_program` skips a newer revision that does not hold the program
+and spells it the way the host does, `apksigner.bat` on Windows.
 
 The tools androiddeployqt runs itself -- `rcc`, `qmlimportscanner`,
 `qmldom` -- are named in the file, and they are **host** programs. A Qt for
