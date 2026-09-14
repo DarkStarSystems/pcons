@@ -238,6 +238,33 @@ class TestWhereItLooksForLibraries:
         assert set(settings_for(env)["extraLibraryDirs"]) == landed
         assert len(landed) == 2
 
+    def test_a_sub_project_names_the_directory_the_library_lands_in(
+        self, settings_for, test_project
+    ) -> None:
+        """A sub-project's own root already carries its offset from the top,
+        and so does the build directory a target reports. Anchoring one on
+        the other applies the offset twice and names a directory that holds
+        no library, which androiddeployqt copies nothing out of."""
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        root = Path(test_project.root_dir)
+        (root / "child").mkdir()
+        (root / "child" / "a.c").write_text("int f(void){return 0;}\n")
+        (root / "child" / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\n"
+            "project = Project('child')\n"
+            "env = project.parent.default_environment\n"
+            "lib = project.SharedLibrary('dep', env, sources=['a.c'])\n"
+        )
+        env = android_env()
+        child = add_subdirectory("child", project=test_project, env=env)
+        test_project.resolve()
+
+        settings = deployment_settings(child.project, env, app="myapp")
+
+        landed = root / child.lib.output_nodes[0].path
+        assert settings["extraLibraryDirs"] == [str(landed.parent)]
+
     def test_the_paths_are_absolute(self, settings_for) -> None:
         """androiddeployqt runs from wherever it is invoked and reads them
         directly, not through a build directory."""
@@ -418,6 +445,28 @@ class TestTheQmlKeys:
         assert isinstance(settings["qml-root-path"], list)
         assert isinstance(settings["qml-import-paths"], str)
 
+    def test_a_sub_project_import_path_is_the_top_level_build_directory(
+        self, settings_for, test_project
+    ) -> None:
+        """The import path is a build directory, which is anchored at the top
+        of the tree. Read from a sub-project's own root it gains that
+        sub-project's offset a second time."""
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        root = Path(test_project.root_dir)
+        (root / "child").mkdir()
+        (root / "child" / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\n"
+            "project = Project('child')\n"
+        )
+        env = android_env()
+        child = add_subdirectory("child", project=test_project, env=env)
+        _qml_module(child.project, env, "ui", "qml")
+
+        settings = deployment_settings(child.project, env, app="myapp")
+
+        assert settings["qml-import-paths"] == str(root / test_project.build_dir)
+
     def test_the_paths_are_absolute(self, settings_for, test_project) -> None:
         env = android_env()
         _qml_module(test_project, env, "ui", "qml")
@@ -567,6 +616,26 @@ class TestWhereTheFileGoes:
         path = android_deployment_settings(test_project, env, app="myapp")
 
         assert path.parent == Path(test_project.root_dir) / test_project.build_dir
+
+    def test_a_sub_projects_default_is_the_top_level_build_directory(
+        self, found_qt, test_project
+    ) -> None:
+        """``project.build_dir`` already carries the sub-project offset."""
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        root = Path(test_project.root_dir)
+        (root / "child").mkdir()
+        (root / "child" / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\nproject = Project('child')\n"
+        )
+        env = android_env()
+        child = add_subdirectory("child", project=test_project, env=env)
+
+        path = android_deployment_settings(child.project, env, app="myapp")
+
+        assert path == root / child.project.build_dir / (
+            "android-deployment-settings.json"
+        )
 
     def test_a_relative_path_is_from_the_project_root(
         self, found_qt, test_project

@@ -283,9 +283,16 @@ def _qml_keys(project: Project, env: Environment) -> dict[str, Any]:
 
 
 def _absolute(project: Project, directory: Path) -> Path:
+    """A build-derived directory as androiddeployqt will read it.
+
+    Anchored at the top-level root, which is where ``target.build_dir`` and
+    ``env.build_dir_for()`` are anchored: a sub-project's own root already
+    carries the offset those paths carry, and anchoring there applies it
+    twice.
+    """
     if directory.is_absolute():
         return directory
-    return Path(project.root_dir) / directory
+    return Path(project.top.root_dir) / directory
 
 
 def android_deployment_settings(
@@ -348,7 +355,9 @@ def android_deployment_settings(
         settings["sdkBuildToolsRevision"] = build_tools
 
     if output is None:
-        output = project.build_dir / "android-deployment-settings.json"
+        output = _absolute(
+            project, project.build_dir / "android-deployment-settings.json"
+        )
     output = Path(output)
     if not output.is_absolute():
         output = Path(project.root_dir) / output
