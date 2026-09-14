@@ -213,8 +213,9 @@ def android_apk(
         source=[Path(settings), staged],
         command=command,
     )
-    if no_build:
-        result.build_by_default = False
+    result.place_in_tier(
+        "all", by="android_apk(no_build=True)" if no_build else "android_apk()"
+    )
     return result
 
 
@@ -353,7 +354,7 @@ def sign_apk(
         command += ["--key-pass", key]
     command += ["--out", "$TARGET", "${SOURCES[0]}"]
 
-    return env.Command(
+    signed = env.Command(
         name=name or f"{application_binary(app)}-apk-signed",
         target=signed_apk_path(env, app, output=output),
         tool=tool,
@@ -361,6 +362,8 @@ def sign_apk(
         command=command,
         depends=[keystore_path],
     )
+    signed.place_in_tier("manual", by="sign_apk()")
+    return signed
 
 
 def _password_source(spec: str | None, argument: str, root: Path) -> str:
