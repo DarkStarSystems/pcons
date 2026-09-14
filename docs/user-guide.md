@@ -770,71 +770,68 @@ A dependency you declare yourself with `target.depends()` joins this graph
 before every step of the target; how each step holds it is described under
 [Custom Commands](#custom-commands-with-envcommand).
 
-### What a Build Builds: Tiers, Defaults and Aliases
+### What Gets Built: Build Tiers, `Default()` and Aliases
 
-Run `ninja` with no arguments and it builds **the products**: every program,
-library, command, document, pack or bundle the build makes. That is usually
-what you want, and it needs no calls at all.
+Every target is in one of three *build tiers*, which decide when it gets
+built:
 
-`ninja all` (or `make all`) builds those *and* the **steps** that operate on
-them: installs, overlays, archives, installers. A step doesn't
-belong in an ordinary build — an install writes outside the build directory —
-but it is one word away, and it also builds as any product's dependency.
+| `build_tier` | built by |
+|---|---|
+| `"default"` | plain `pcons`, `ninja` or `make`, with nothing named |
+| `"all"` | `pcons all` / `ninja all` / `make all`, or naming the target |
+| `"manual"` | naming the target only |
 
-Every target sits in one of three nested tiers, named by the invocation that
-reaches it:
+Whatever a target's tier, anything it depends on gets built along with it,
+as usual.
 
-| `build_tier` | reached by | holds |
-|---|---|---|
-| `"default"` | plain `ninja`, and everything below | the products |
-| `"all"` | `ninja all`, naming it, being a dependency | installs, archives, installers |
-| `"manual"` | naming it only | test runs (`ninja test`), targets that must not run unasked |
+Each builder puts its targets in a sensible tier. Programs, libraries,
+`Command`s, LaTeX documents, bundles, and custom builders' outputs are
+`default`, so a plain `pcons` builds everything the project makes. Installs,
+overlays, archives and installers are `all`: they operate on the things you
+built, and you don't usually want them running on every build. Test targets,
+Qt's `lupdate` and `QtDeploy` are `manual`: run them by name (`pcons test`,
+`ninja lupdate`). Where a target sits in the source tree makes no difference
+to any of this.
 
-The builder that creates a target places it: `Program`, `SharedLibrary`,
-`Command`, a LaTeX document, your own custom builder are products;
-`Install`, `InstallDir`, `OverlayDir`, `Tarfile` are steps; `Test` is manual,
-run by `ninja test`. Where a target's location is — top level or deep in a
-subdirectory — never matters.
-
-**Move one target** by assigning its tier:
+To change a target's tier, just set it:
 
 ```python
-bench.build_tier = "all"       # built by `ninja all` or `ninja bench`, not by default
-lupdate.build_tier = "manual"  # it rewrites sources: only `ninja lupdate`
-installed.build_tier = "default"  # this install is part of the ordinary build
+zipfile.build_tier = "default"   # add the zip to the default build
+bench.build_tier = "all"         # `ninja all` or `ninja bench`, not every build
+lupdate.build_tier = "manual"    # it rewrites sources: only when asked for
 ```
 
-**Name the default set outright** with `Default()`, when the default build
-should be a subset — the app but not the test programs:
+`Default()` is rarely needed now. When you do call it, it resets the
+`default` tier to exactly the targets you name (several calls add to that
+set), so the script has complete control of the default build:
 
 ```python
-project.Default(app)
-project.Default(lib, tools)  # several at once; calls append
+project.Default(app)          # only app, whatever else the project makes
+project.Default(lib, tools)   # these too
 ```
 
-Naming any target replaces the products pcons would have chosen, so the
-unnamed products move to `all`. Naming a step promotes it:
-`project.Default(installed_assets)` is how an install becomes part of the
-ordinary build.
+Naming a step this way (`project.Default(installed)`) puts it in the default
+build. Most of the time it's simpler to set `build_tier` on the one or two
+targets you want to move, and leave the rest alone.
 
-Nothing about this depends on the order your script is written in. The tiers
-are decided once, at generate, from every `build_tier`, every `Default()`
-call and every builder's placement together. To see the outcome, and the line
-responsible for each target, ask:
+None of this depends on the order your script does things in: the tiers are
+worked out once, at generate time, from every `build_tier`, every `Default()`
+call and every builder's placement. Naming a target in `Default()` and also
+setting its `build_tier` to `"all"` or `"manual"` is an error, and pcons
+tells you which two lines disagree.
+
+To see every target's tier and why it's there:
 
 ```bash
-pcons explain            # a "build tiers" section, one line per target
-pcons -v                 # the same lines, logged at generate
+pcons explain    # includes a "build tiers" section, one line per target
+pcons -v         # logs the same lines while generating
 ```
 
-Naming a target in `Default()` *and* setting its `build_tier` to `"all"` or
-`"manual"` is a contradiction, and pcons says so, naming both lines.
-
 !!! note "`build_by_default`"
-    The older boolean is a deprecated alias, kept one release: `True` reads
-    and writes `"default"`, `False` writes `"manual"`, which is what `False`
-    did: out of the default build and out of `all`. Write `build_tier`
-    instead, and say `"all"` for a step that `ninja all` may run.
+    The older boolean attribute still works for one release: `True` means
+    `"default"`, `False` means `"manual"` (which is what `False` did: out of
+    the default build and out of `all`). Use `build_tier` instead; it can
+    also say `"all"`.
 
 **Aliases** create named phony targets for convenient building:
 

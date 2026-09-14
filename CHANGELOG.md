@@ -16,20 +16,75 @@ source files, with proper dependency management throughout. Most of
 this now requires the Ninja back-end because Makefiles don't have the
 machinery to support this kind of dynamic dependency.
 
-This release also includes many other new features and lots of fixes,
+This release also changes which targets are built by default,
+introducing the concept of build tiers: what gets built by default
+(plain `pcons` or `ninja`), and what goes into `pcons all` or `ninja
+all`.
+
+It also includes many other new features and lots of fixes,
 including a few unavoidable breaking changes, hopefully minor. Please
 read the whole changelog!
 
 ### Added
 
-- **Static libraries may link each other.** Two static libraries that call
-  into each other can each `link()` the other; that cycle is no longer an
-  error, since neither has to be built before the other and every linker
-  can resolve it. On Linux the archives reach GNU ld wrapped in
-  `-Wl,--start-group ... -Wl,--end-group`; Apple's ld and MSVC's link
-  rescan archives on their own and get them as they are. Object libraries
-  and header-only libraries may be in such a cycle too.
-  See `examples/85_static_lib_cycle`. (#120)
+- **Scanners: runtime-discovered dependencies.** A `Scanner` declares
+  that some edges' real dependencies, their extra outputs, and even
+  parts of their command lines, come from their inputs' *content*. Users can now give
+  a command that scans one edge's sources and reports what it found; pcons
+  wires a scan edge per governed edge, one collate edge per target, and the
+  ninja `dyndep` file that reorders the build. Discovered flags reach a
+  command line through a per-edge args file collate writes at a path fixed at
+  configure time. Not C++-specific: there's an example at  `examples/70_scene_packs` 
+  that packs "scene" files that reference each other by  name. New doc at `docs/scanners.md`.
+
+- **The dependency graphs know about scanners.** `--graph` and `--mermaid`
+    no longer draw a scanner's dyndep file as if it were a source: the
+    machinery is elided and the edges it governs carry a `scanned: <scanner>`
+    line under their name. A new `--graph-detail` asks for more — `scan` draws the
+    machinery itself, `discovered` draws what the last build's dyndep files
+    actually found, and `headers` draws the compiler's `.d` edges.
+
+- **Static libraries may link each other without causing a dependency
+  loop.** Two static libraries that call into each other can each
+  `link()` the other; that cycle is no longer an error, since neither
+  has to be built before the other and every linker can resolve it. On
+  Linux the archives reach GNU ld wrapped in `-Wl,--start-group ...
+  -Wl,--end-group`; Apple's ld and MSVC's link rescan archives on
+  their own and get them as they are. Object libraries and header-only
+  libraries may be in such a cycle too. See
+  `examples/85_static_lib_cycle`. (#120)
+
+- **Multiple environments in one project: each can decide where its targets
+  are built.** A firmware image and the host tools that build it, or a cross
+  build and a host build, can now share one script and even one target name
+  without their outputs colliding. 
+  - `env.build_prefix` puts everything an environment writes (objects, link
+    outputs, `env.Command()` targets) under `build/<prefix>/`. Below that,
+    `env.runtime_directory`, `env.library_directory` and
+    `env.archive_directory` can be used to place programs, shared libraries and static
+    libraries by kind, like the CMake variables. All four dirs are relative to the
+    build directory and empty by default.
+  - Two targets may share a name when both environments are named and their
+    `build_prefix` differs. Where a target is looked up by its string name
+    rather than held as a `Target`, the name can carry the environment to
+    say which one: `<target>@<env>`, as in `pcons build common@mcu`,
+    `project.get_target("common@mcu")`, or the full form `sub::common@mcu`.
+  - `add_subdirectory(dir, env=...)` builds an included directory in that
+    environment. Include the same directory twice with two environments to
+    build it for both; the included script needs no change, since its
+    `default_environment` is the one the caller passed.
+  - `add_subdirectory(dir, vars={...})` sets the build variables for that subdir's invocation. They shadow the
+    command line.
+  - `find_package(env=...)` and `add_package_finder(env=...)` search and cache
+    per environment, so a cross build and a host build can exist simultaneously.
+    See the Changed entry below for what a cross environment now searches.
+  - `project.has_target(name)` lists all targets of the given name
+  - `env.cross` is the cross preset an environment was retargeted with, or
+    None.
+
+  `examples/74_bare_metal` (a firmware image plus host tools) and
+  `examples/75_multi_env` show all of this. (#96, #118)
+
 - **Pcons now prints the variant it's using**: `Generated build files
   for variant debug` on the terminal, or one entry per environment when
   they differ. (#125)
@@ -72,23 +127,6 @@ read the whole changelog!
   with `use_compiler_cache()`. The driver, `pcons.tools.co_compile`, is a
   launcher; see `examples/76_clang_tidy`.
 
-- **Scanners: runtime-discovered dependencies.** A `Scanner` declares
-  that some edges' real dependencies, their extra outputs, and even
-  parts of their command lines, come from their inputs' *content*. Users can now give
-  a command that scans one edge's sources and reports what it found; pcons
-  wires a scan edge per governed edge, one collate edge per target, and the
-  ninja `dyndep` file that reorders the build. Discovered flags reach a
-  command line through a per-edge args file collate writes at a path fixed at
-  configure time. Not C++-specific: there's an example at  `examples/70_scene_packs` 
-  that packs "scene" files that reference each other by  name. New doc at `docs/scanners.md`.
-
-- **The dependency graphs know about scanners.** `--graph` and `--mermaid`
-  no longer draw a scanner's dyndep file as if it were a source: the
-  machinery is elided and the edges it governs carry a `scanned: <scanner>`
-  line under their name. A new `--graph-detail` asks for more — `scan` draws the
-  machinery itself, `discovered` draws what the last build's dyndep files
-  actually found, and `headers` draws the compiler's `.d` edges.
-
 - **`env.Command` takes `tool=`: the program that runs the command.** The
   program is not one of the command's inputs, so it has its own argument:
   `tool=collate` with `command="$TOOL $TARGET $SOURCES"`. pcons writes it the
@@ -115,41 +153,6 @@ read the whole changelog!
   in the build script, which reaches everything. `examples/73_command_env`.
   (#109)
 
-- **Multiple environments in one project: each can decide where its targets
-  are built.** A firmware image and the host tools that build it, or a cross
-  build and a host build, can now share one script and even one target name
-  without their outputs colliding. Nothing changes for a project that sets
-  none of the new attributes.
-  - `env.build_prefix` puts everything an environment writes (objects, link
-    outputs, `env.Command()` targets) under `build/<prefix>/`. Below that,
-    `env.runtime_directory`, `env.library_directory` and
-    `env.archive_directory` can be used to place programs, shared libraries and static
-    libraries by kind, like the CMake variables. All four dirs are relative to the
-    build directory and empty by default.
-  - Two targets may share a name when both environments are named and their
-    `build_prefix` differs. Where a target is looked up by its string name
-    rather than held as a `Target`, the name can carry the environment to
-    say which one: `<target>@<env>`, as in `pcons build common@mcu`,
-    `project.get_target("common@mcu")`, or the full form `sub::common@mcu`.
-  - `add_subdirectory(dir, env=...)` builds an included directory in that
-    environment. Include the same directory twice with two environments to
-    build it for both; the included script needs no change, since its
-    `default_environment` is the one the caller passed.
-  - `add_subdirectory(dir, vars={...})` sets the build variables the included
-    tree reads with `get_var()`, for the duration of the call. They shadow the
-    command line. This replaces setting `os.environ` before the call.
-  - `find_package(env=...)` and `add_package_finder(env=...)` search and cache
-    per environment, so a cross build and a host build can hold different
-    answers for one package name. See the Changed entry below for what a
-    cross environment now searches.
-  - `project.has_target(name)` answers whether a name is taken, including
-    when several targets answer to it.
-  - `env.cross` is the cross preset an environment was retargeted with, or
-    None.
-
-  `examples/74_bare_metal` (a firmware image plus host tools) and
-  `examples/75_multi_env` show all of this. (#96, #118)
-
 - **A cross build's outputs are named and installed for the platform it
   targets.** New attribute `env.target` is a `Platform` derived from the cross preset's
   triple, or the host when there is no preset. Toolchains consult it, so
@@ -174,35 +177,16 @@ read the whole changelog!
 
 ### Changed
 
-- **A plain `ninja` now builds every product, not just programs and
-  libraries.** Every target sits in one of three tiers, and the builder that
-  creates it says which: `build_tier = "default"` for a product (a program, a
-  library, a `Command`, a document, a custom builder's output), `"all"` for a
-  step that operates on products (`Install`, `InstallDir`, `OverlayDir`,
-  `Tarfile`, `Zipfile`, the installer helpers), `"manual"` for a target that
-  runs only by name (`Test`, run by `ninja test`; Qt's `lupdate` and
-  `QtDeploy`). `ninja all` builds everything but the manual ones, as before.
-  A macOS or flat bundle is a product: plain `ninja` assembles it, where it
-  used to build only the plugin inside.
-  - **Migration:** a `Command` whose output nothing consumes used to build
-    only when named or listed in `Default()`, and now builds by default. To
-    keep one out of the ordinary build, write `cmd.build_tier = "all"`. The
-    other way round: a project whose only targets are steps (an install-only
-    script) used to have its steps run by a plain `ninja`, and now builds
-    nothing until it names one: `project.Default(staged)`, or
-    `staged.build_tier = "default"`.
-  - `Default()` still names the default tier outright, demoting the products
-    it doesn't name, but decides nothing at the call: the tiers are decided
-    once at generate, from every `build_tier`, every `Default()` call and
-    every builder's placement together. So an attribute's effect no longer
-    depends on what else was called, or in what order, and a target's place
-    in the tree never matters. Naming a target in `Default()` and also
-    setting it to `"all"` or `"manual"` is refused, naming both lines.
-  - `pcons explain` gains a "build tiers" section — each target's tier, why,
-    and the line responsible — and `pcons -v` logs the same lines at generate.
+- **Restructured which targets build by default, or with `all`.** This release introduces a new concept of "build tiers": `default`, `all` and `manual`. All targets with `build_tier = default` build by default with plain `pcons` or `ninja` or `make` (building all their dependencies as usual); targets with `build_tier = all` build only when individually named or with `all` (e.g. `pcons all`, `ninja all` etc.), and other targets must be named on the cmd line to get built (unless something already getting built depends on them of course).
+
+  - Each builder has a standard setting for whether the type of thing it builds gets into the `default` set: programs, libraries, Commands, documents and bundles go into `default`. Other builders such as installers and archives default to `all`, except test targets (which go into the `test` alias), Qt's `lupdate` and `QtDeploy`, and others with no output files that get set to `manual`. They typically should be invoked explicitly on the cmd line. 
+  - To change which tier a given target is in, just set its `target.build_tier`. I.e. to add a zip file to the default build, `zipfile.build_tier = "default"`.
+  - To see all targets and what tier they're in, use `pcons explain`, or `pcons -v` to see all the tiers and why each one's in that tier.
+  - `Default()` is now rarely needed; when used, it resets the `default` tier to only include the specified targets (as before, multiple calls to `Default()` add default targets). This overrides the standard default tier completely, so the script has complete control of what is built by default. But most of the time, instead of using `Default()`, it'll be easier to include or exclude the desired targets individually by setting their `build_tier`. 
   - `target.build_by_default` is a deprecated alias, kept one release: `True`
     is `"default"`, `False` is `"manual"`, which is what `False` did: out of
     the default build and out of `all`. (#121)
+
 - **The `debug` and `relwithdebinfo` variants compile with `/Z7` on MSVC and
   clang-cl**, not `/Zi`. This is the modern standard.
 - **MSVC's C++ compiler gets `/Zc:__cplusplus` by default.** Without it
@@ -341,7 +325,7 @@ read the whole changelog!
   `examples/84_asset_pipeline` pattern) ran after `add_subdirectory` had
   returned, so a relative target or source it wrote got created at the top-level
   root rather than into the proper subdir.
-- **An import library is the toolchain's business, not the host's.** A shared
+- **Import libraries on Windows are handled automatically in cross builds.** A shared
   library on Windows has an associated `foo.lib`, so now
   a cross build to Windows declares and links it the same way a native build
   does. 
@@ -352,9 +336,7 @@ read the whole changelog!
   `$SOURCE`/`$TARGET` in a command with several inputs or outputs repeats
   per path; one such substitution per argument. (#122, thanks @rootsec1)
 - **`create_macos_bundle()` and `create_flat_bundle()` assemble the bundle
-  under the build directory**, where `bundle_dir` says. They went through
-  `Install()` without opting out of the install prefix, so the bundle landed
-  in `dist/` instead, and the installer helpers staged from the wrong place.
+  under the proper build directory**, where `bundle_dir` says.
 - **clang-cl's `debug` and `relwithdebinfo` variants link with `/DEBUG`**, so
   the build produces a PDB. Only MSVC added the linker flag before; the
   compiled-in debug info went nowhere on clang-cl.
@@ -365,33 +347,18 @@ read the whole changelog!
 - **The Conan profile for clang-cl** now carries the MSVC runtime settings
   (`compiler.runtime`, `runtime_type`, `runtime_version`), no `libcxx`, and
   the conf that makes Conan build with clang-cl and Ninja. 
-- `link("/opt/vendor/lib/libfoo.a")` is refused by `link()` itself, where the
-  build script can see it, with a message saying what to do; the string
-  became `-l/opt/vendor/lib/libfoo.a` and failed inside the linker. A string
-  with a directory separator, or ending in `.a`, `.so`, `.dylib`, `.dll`,
-  `.o` or `.obj`, is a path; a bare `ws2_32.lib` is still a name, which is
-  how MSVC's linker takes an import library. (#123)
-- `project.Command()` takes `tool=` too. The new argument reached
-  `env.Command()` alone, so the project-level form raised "unexpected keyword
-  argument". (#141)
+- **Incorrect calls** like `link("/opt/vendor/lib/libfoo.a")` (passing a lib's path to `link`) are now refused by `link()` itself, where the build script can see it, with a message saying what to do. A bare `ws2_32.lib` is still accepted, since that's how MSVC's linker takes an import library. (#123)
+- `project.Command()` takes `tool=` too, avoiding the previous "unexpected keyword argument" error. (#141)
 - `create_macos_bundle()` and `create_flat_bundle()` return a target that
   depends on the bundle's other installs (Info.plist, PkgInfo, resources,
   DLLs), so `Default(bundle)` or `create_pkg(depends=[bundle])` covers the
   whole bundle instead of the plugin binary alone.
 - An `ObjectLibrary` used as another target's source no longer makes each
-  of its objects an order-only dependency of itself and of every sibling,
-  which ninja refused as a cycle. A node a dependency produces is not one of
-  the consumer's own steps, so it doesn't wait for that dependency, and a
-  node never depends on itself.
-- Conan packages link in dependents-first order. The finder folded a
-  package's `Requires` in the order the `.pc` file listed them, which put
-  `opencv_core` before `opencv_imgproc` and broke static links with GNU ld;
-  a library now follows every library that uses it, as `pkg-config --libs`
-  orders them. (#157)
+  of its objects an order-only dependency of itself and of every sibling. That was causing erroneous build cycle errors.
+- Conan packages link in dependents-first order. A listed library now follows every library that uses it, as `pkg-config --libs` orders them. (#157)
 - The installer helpers (`create_pkg`, `create_component_pkg`, `create_dmg`,
   `create_msix`) work in an environment with a `build_prefix`: staging and
-  outputs now sit under the prefix and the command lines say so, where
-  before pkgbuild wrote to one place and ninja looked in another. Staging
+  outputs now sit under the prefix and the command lines say so. Staging
   is also per environment, so two variants can package the same name. (#143)
 - A `FlagPair` survives assignment and cloning. Assigning a plain list to a
   flag variable (`env.cc.flags = ["-Wall"]`) keeps it a `FlagList`, and so
