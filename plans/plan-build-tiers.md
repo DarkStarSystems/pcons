@@ -27,8 +27,8 @@ it:
 | tier | reached by | holds |
 |---|---|---|
 | `default` | plain `ninja`, and everything below | the products: programs, libraries, commands, documents, packs, bundles of the build's own making |
-| `all` | `ninja all`, naming, and as a dependency | steps that operate on products: installs, overlays, archives, installers, test runs |
-| `manual` | naming only | targets that must not run unasked: one that rewrites sources (Qt lupdate), one too slow or too destructive for routine builds |
+| `all` | `ninja all`, naming, and as a dependency | steps that operate on products: installs, overlays, archives, installers |
+| `manual` | naming only | test runs (`ninja test`: a Test target has no output for `all` to name), and targets that must not run unasked: one that rewrites sources (Qt lupdate), one too slow or too destructive for routine builds |
 
 `default` ⊂ `all` ⊂ everything. Location never matters: a subdirectory's
 target and a top-level one are placed the same way. (SCons built only
@@ -40,8 +40,8 @@ what lived under the current directory; pcons has no such rule.)
   it: `Program`, `StaticLibrary`, `SharedLibrary`, `Command`, `Object` and
   every product-making builder (LaTeX, Qt program, custom builders by
   default) say `"default"`; `Install`, `InstallAs`, `InstallDir`,
-  `OverlayDir`, `Tarfile`/`Zipfile`, the installer helpers, `Test` say
-  `"all"`; Qt's lupdate and deploy say `"manual"`.
+  `OverlayDir`, `Tarfile`/`Zipfile`, the installer helpers say `"all"`;
+  `Test`, Qt's lupdate and deploy say `"manual"`.
 - The script may set it: `bench.build_tier = "all"`,
   `firmware.build_tier = "default"`, `lupdate.build_tier = "manual"`.
 - `build_by_default` is kept one release as a deprecated alias:

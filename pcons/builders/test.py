@@ -144,7 +144,9 @@ class TestNodeFactory:
 @builder(
     "Test",
     target_type="test",
-    build_tier="all",
+    # A test runs through its own `test` phony and has no output for `all`
+    # or `default` to name; running tests is asked for by name.
+    build_tier="manual",
     factory_class=TestNodeFactory,
 )
 class TestBuilder:

@@ -777,7 +777,7 @@ library, command, document, pack or bundle the build makes. That is usually
 what you want, and it needs no calls at all.
 
 `ninja all` (or `make all`) builds those *and* the **steps** that operate on
-them: installs, overlays, archives, installers, test runs. A step doesn't
+them: installs, overlays, archives, installers. A step doesn't
 belong in an ordinary build — an install writes outside the build directory —
 but it is one word away, and it also builds as any product's dependency.
 
@@ -787,13 +787,14 @@ reaches it:
 | `build_tier` | reached by | holds |
 |---|---|---|
 | `"default"` | plain `ninja`, and everything below | the products |
-| `"all"` | `ninja all`, naming it, being a dependency | installs, archives, installers, test runs |
-| `"manual"` | naming it only | targets that must not run unasked |
+| `"all"` | `ninja all`, naming it, being a dependency | installs, archives, installers |
+| `"manual"` | naming it only | test runs (`ninja test`), targets that must not run unasked |
 
 The builder that creates a target places it: `Program`, `SharedLibrary`,
 `Command`, a LaTeX document, your own custom builder are products;
-`Install`, `InstallDir`, `OverlayDir`, `Tarfile`, `Test` are steps. Where a
-target's location is — top level or deep in a subdirectory — never matters.
+`Install`, `InstallDir`, `OverlayDir`, `Tarfile` are steps; `Test` is manual,
+run by `ninja test`. Where a target's location is — top level or deep in a
+subdirectory — never matters.
 
 **Move one target** by assigning its tier:
 

@@ -7,10 +7,10 @@ reaches it:
 - ``"default"``: plain ``ninja``, and everything below it. The products —
   programs, libraries, commands, documents, packs, whatever this build makes.
 - ``"all"``: ``ninja all``, naming the target, and being a dependency. The
-  steps that operate on products: installs, overlays, archives, installers,
-  test runs.
-- ``"manual"``: naming only. Targets that must not run unasked: one that
-  rewrites sources (Qt's lupdate), one too slow or too destructive for a
+  steps that operate on products: installs, overlays, archives, installers.
+- ``"manual"``: naming only. Test runs (``ninja test``), and targets that
+  must not run unasked: one that rewrites sources (Qt's lupdate), one too
+  slow or too destructive for a
   routine build.
 
 The builder that creates a target places it (:meth:`Target.place_in_tier`);

@@ -518,3 +518,37 @@ class TestGenerators:
         ninja_sets = _ninja_sets(_generate(project, NinjaGenerator()))
         make_sets = _make_sets(_generate(project, MakefileGenerator()))
         assert ninja_sets == make_sets
+
+
+class TestPlacementsWithNoOutputs:
+    def test_a_test_target_is_manual(self, tmp_path, monkeypatch, gcc_toolchain):
+        """A Test runs through its own phony and has no output `all` could
+        name, so its honest tier is manual: `ninja test` runs it."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "t.c").write_text("int main(void) { return 0; }\n")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        prog = project.Program("prog", env, sources=["t.c"])
+        test = project.Test("smoke", prog)
+        project.resolve()
+
+        assert decide_build_tiers(project)[test].tier == "manual"
+
+
+class TestMakefileManualOnlyProject:
+    def test_a_manual_only_project_builds_nothing_unasked(self, project, env):
+        """The orphan-node fallback is for builds that register no target;
+        a project whose every target is manual has said what it wants."""
+        stamp = env.Command(
+            target="stamp.txt",
+            source=["in.txt"],
+            command="cp $SOURCE $TARGET",
+            name="stamp",
+        )
+        stamp.build_tier = "manual"
+        project.resolve()
+
+        content = _generate(project, MakefileGenerator())
+
+        assert "default:" not in content
+        assert "\nall:" not in content

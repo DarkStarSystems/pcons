@@ -547,8 +547,8 @@ project.CompileShaders(env, output="shaders.pak", sources=["*.glsl"])
 
 A builder declares which invocation reaches its targets with
 `build_tier=`: `"default"` (the default) for a builder that makes a product,
-`"all"` for one whose targets operate on products — an install, an archive, a
-test run — and `"manual"` for one that must be asked for by name. See
+`"all"` for one whose targets operate on products — an install, an archive —
+and `"manual"` for one that must be asked for by name, such as a test run. See
 [build tiers](user-guide.md#what-a-build-builds-tiers-defaults-and-aliases).
 
 **Expansion packs** - packages that add multiple builders:

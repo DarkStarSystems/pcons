@@ -614,9 +614,10 @@ class MakefileGenerator(BaseGenerator):
             ]
 
         all_outputs = outputs(tiers.all_targets)
-        # Builds that create nodes directly, registering no target, still
-        # have final outputs worth making.
-        if not all_outputs:
+        # A build that creates nodes directly, registering no target at all,
+        # still has final outputs worth making. Only then: a project whose
+        # every target is manual has decided that nothing builds unasked.
+        if not all_outputs and not project.targets:
             all_outputs = self._find_final_nodes(project)
         default_outputs = outputs(tiers.default_targets)
 

@@ -179,9 +179,9 @@ read the whole changelog!
   creates it says which: `build_tier = "default"` for a product (a program, a
   library, a `Command`, a document, a custom builder's output), `"all"` for a
   step that operates on products (`Install`, `InstallDir`, `OverlayDir`,
-  `Tarfile`, `Zipfile`, `Test`, the installer helpers), `"manual"` for a
-  target that must not run unasked (Qt's `lupdate` and `QtDeploy`). `ninja
-  all` builds everything but the manual ones, as before.
+  `Tarfile`, `Zipfile`, the installer helpers), `"manual"` for a target that
+  runs only by name (`Test`, run by `ninja test`; Qt's `lupdate` and
+  `QtDeploy`). `ninja all` builds everything but the manual ones, as before.
   - **Migration:** a `Command` whose output nothing consumes used to build
     only when named or listed in `Default()`, and now builds by default. To
     keep one out of the ordinary build, write `cmd.build_tier = "all"`.
