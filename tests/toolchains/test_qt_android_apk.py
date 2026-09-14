@@ -447,6 +447,28 @@ class TestThePasswordNeverReachesTheBuildFile:
         assert f"file:{_written(secret)}" in content
         assert "file:secrets/keystore-pass" not in content
 
+    def test_a_relative_password_file_is_taken_from_the_project_root(
+        self, app_project, deployable, sdk, tmp_path, monkeypatch
+    ) -> None:
+        """The keystore beside it is anchored there, and the two paths are
+        written on the same two lines of the same script."""
+        secret = Path(app_project.root_dir) / "secrets" / "keystore-pass"
+        secret.parent.mkdir()
+        secret.write_text(f"{PASSWORD}\n")
+        (tmp_path / "elsewhere").mkdir()
+        monkeypatch.chdir(tmp_path / "elsewhere")
+        env = android_env(sdk=str(sdk))
+
+        content = _signed_ninja(
+            app_project,
+            env,
+            _app(app_project, env),
+            keystore="release.jks",
+            store_password="file:secrets/keystore-pass",
+        )
+
+        assert f"file:{_written(secret)}" in content
+
     def test_a_literal_password_is_refused(self, app_project, deployable, sdk) -> None:
         env = android_env(sdk=str(sdk))
         app = _app(app_project, env)

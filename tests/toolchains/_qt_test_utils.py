@@ -143,7 +143,14 @@ def fake_qt_for_android(root: Path, tools: Sequence[str] = QT_HOST_TOOLS) -> QtP
 
 
 def generate_ninja(project: Project) -> str:
-    """Generate build.ninja and return its content (slashes normalized)."""
+    """Generate build.ninja and return its content (slashes normalized).
+
+    Read where the generator wrote it rather than through the working
+    directory, which a test is free to move.
+    """
     NinjaGenerator().generate(project)
     BaseGenerator._generate_pending(project)
-    return (project.build_dir / "build.ninja").read_text().replace("\\", "/")
+    build_dir = project.build_dir
+    if not build_dir.is_absolute():
+        build_dir = Path(project.root_dir) / build_dir
+    return (build_dir / "build.ninja").read_text().replace("\\", "/")

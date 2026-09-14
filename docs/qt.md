@@ -576,6 +576,10 @@ itself when the edge runs. `pass:<password>` is refused, because pcons
 would write it into `build.ninja`, and so is `stdin`, because a build edge
 has no console to answer a prompt.
 
+A relative `file:` path is made absolute against the project root, the same
+anchor as `keystore`: apksigner runs from the build directory and would
+find neither where it was written.
+
 `alias` is needed only when the keystore holds more than one key.
 `key_password` names where the private key password comes from, in the same
 two forms; left out, apksigner opens the key with the keystore password.

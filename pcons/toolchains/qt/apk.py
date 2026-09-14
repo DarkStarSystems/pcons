@@ -295,7 +295,9 @@ def sign_apk(
                   root, and a dependency of the edge, so a new keystore
                   re-signs.
         store_password: Where apksigner reads the keystore password:
-                        ``"env:NAME"`` or ``"file:PATH"``.
+                        ``"env:NAME"`` or ``"file:PATH"``. A relative
+                        ``file:`` path is made absolute against the project
+                        root, like the keystore.
         alias: The key alias in the keystore. Needed only when the keystore
                holds more than one key.
         key_password: Where apksigner reads the private key password, in the
@@ -325,9 +327,12 @@ def sign_apk(
             "A release package is never signed with a debug key, and pcons "
             "never makes a release keystore."
         )
-    store = _password_source(store_password, "store_password")
+    root = Path(project.root_dir)
+    store = _password_source(store_password, "store_password", root)
     key = (
-        None if key_password is None else _password_source(key_password, "key_password")
+        None
+        if key_password is None
+        else _password_source(key_password, "key_password", root)
     )
     if key is not None and key == store and key.startswith("file:"):
         raise ValueError(
@@ -340,7 +345,7 @@ def sign_apk(
     tool = _apksigner(cross, apksigner)
     keystore_path = Path(keystore)
     if not keystore_path.is_absolute():
-        keystore_path = Path(project.root_dir) / keystore_path
+        keystore_path = root / keystore_path
 
     command: list[str] = ["$TOOL", "sign", "--ks", str(keystore_path)]
     if alias is not None:
@@ -360,8 +365,13 @@ def sign_apk(
     )
 
 
-def _password_source(spec: str | None, argument: str) -> str:
-    """An apksigner password source that holds no password."""
+def _password_source(spec: str | None, argument: str, root: Path) -> str:
+    """An apksigner password source that holds no password.
+
+    A relative ``file:`` path is made absolute against *root*, the project
+    root, exactly as the keystore is. apksigner runs from the build
+    directory and would find neither where it was written.
+    """
     if spec is None:
         raise ValueError(
             f"sign_apk() needs to know where apksigner reads the password: "
@@ -390,7 +400,7 @@ def _password_source(spec: str | None, argument: str) -> str:
     if scheme == "file":
         path = Path(value)
         if not path.is_absolute():
-            path = path.resolve()
+            path = root / path
         return f"file:{path}"
     return spec
 
