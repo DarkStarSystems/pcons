@@ -538,6 +538,24 @@ class TestTheSigningEdge:
 
         assert "release.jks" in edge
 
+    def test_an_absolute_keystore_is_named_as_it_was_given(
+        self, app_project, deployable, sdk, tmp_path
+    ) -> None:
+        """Only a relative one is anchored; a keystore outside the project is
+        the normal case for a release key."""
+        keystore = tmp_path / "keys" / "release.jks"
+        env = android_env(sdk=str(sdk))
+
+        content = _signed_ninja(
+            app_project,
+            env,
+            _app(app_project, env),
+            keystore=keystore,
+            store_password="env:KS",
+        )
+
+        assert f"--ks {_written(keystore)}" in content
+
     def test_the_alias_is_passed_when_it_is_given(
         self, app_project, deployable, sdk
     ) -> None:

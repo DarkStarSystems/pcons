@@ -247,9 +247,7 @@ def signed_apk_path(
         build directory is absolute.
     """
     unsigned = apk_path(env, app, output=output, release=True)
-    stem = unsigned.name[: -len(".apk")]
-    if stem.endswith("-unsigned"):
-        stem = stem[: -len("-unsigned")]
+    stem = unsigned.name.removesuffix(".apk").removesuffix("-unsigned")
     return unsigned.with_name(f"{stem}-signed.apk")
 
 
