@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-09-14
+
 This release adds a significant new feature: Scanners. These operate
 at runtime, largely replacing the configure-time scans we were using
 for C++ and Fortran modules. Those scans were good up to a point, but
@@ -2319,7 +2321,8 @@ see **Changed** below for each one and what to write instead.
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/DarkStarSystems/pcons/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/DarkStarSystems/pcons/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/DarkStarSystems/pcons/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/DarkStarSystems/pcons/compare/v0.25.0...v0.26.0
