@@ -777,12 +777,14 @@ built:
 
 | `build_tier` | built by |
 |---|---|
-| `"default"` | plain `pcons`, `ninja` or `make`, with nothing named |
-| `"all"` | `pcons all` / `ninja all` / `make all`, or naming the target |
-| `"manual"` | naming the target only |
+| `"default"` | plain `pcons`, `ninja` or `make`, with no targets named |
+| `"all"` | `pcons all` / `ninja all` / `make all` |
+| `"manual"` | naming the target(s) only |
 
-Whatever a target's tier, anything it depends on gets built along with it,
-as usual.
+Whatever a target's tier, anything it depends on gets built along with
+it, as usual. (So just to be clear, marking a target as `manual` but
+having a program depend on it will still build that target whenever
+the program is built.) And naming any target always builds it, no matter its tier.
 
 Each builder puts its targets in a sensible tier. Programs, libraries,
 `Command`s, LaTeX documents, bundles, and custom builders' outputs are
@@ -806,7 +808,7 @@ lupdate.build_tier = "manual"    # it rewrites sources: only when asked for
 set), so the script has complete control of the default build:
 
 ```python
-project.Default(app)          # only app, whatever else the project makes
+project.Default(app)          # only app, whatever else the project can make
 project.Default(lib, tools)   # these too
 ```
 
@@ -828,7 +830,7 @@ pcons -v         # logs the same lines while generating
 ```
 
 !!! note "`build_by_default`"
-    The older boolean attribute still works for one release: `True` means
+    The older boolean attribute introduced in 0.23.0 will still work for one release: `True` means
     `"default"`, `False` means `"manual"` (which is what `False` did: out of
     the default build and out of `all`). Use `build_tier` instead; it can
     also say `"all"`.
@@ -839,15 +841,15 @@ pcons -v         # logs the same lines while generating
 # Create an alias - builds with "ninja install"
 project.Alias("install", installed_lib, installed_headers)
 
-# Create an alias for tests
-project.Alias("test", test_runner)
+# Create an alias for tests (note: for standard tests, pcons already creates a `test` alias)
+project.Alias("run-test", test_runner)
 
 # Now you can run:
 #   ninja install    # Build and install
 #   ninja test       # Build and run tests
 ```
 
-Aliases are Ninja phony targets - they don't produce files but depend on other targets. Target names (like `"myapp"` in `project.Program("myapp", env)`) are also usable with Ninja:
+Aliases are Ninja or Makefile phony targets - they don't produce files but depend on other targets. Target names (like `"myapp"` in `project.Program("myapp", env)`) are also usable with ninja or make:
 
 ```bash
 ninja myapp      # Build just the myapp target
@@ -856,6 +858,8 @@ ninja install    # Build the install alias
 ```
 
 Calling `Alias()` multiple times with the same alias name adds targets to that alias, and you can have Aliases that contain (depend on) other Aliases.
+
+Pcons defines a few aliases automatically: `all` (every target except the manual tier), and when the project has `Test()` targets, `test` (build and run them) and `test-build` (just build them). With the Makefile generator there's also `clean`; ninja has `ninja -t clean` built in. Some helpers add their own, like `lupdate` and `deploy` from the Qt tools. There's no built-in `install` alias; make one with `Alias("install", ...)` as above.
 
 ### Multi-Platform Builds
 
@@ -894,7 +898,7 @@ libfoo = add_subdirectory("libfoo")
 app.link(libfoo.libfoo)
 ```
 
-The point of this is that a library builds either way — on its own during
+The point of this is that a library can be built either way — on its own during
 development, and pulled into a larger tree when something depends on it. Write
 the script the natural way and it works in both:
 
@@ -911,11 +915,11 @@ lib = project.StaticLibrary("foo", env, sources=["src/foo.c"])
 lib.public.include_dirs.append(project.build_dir)
 ```
 
-`project.root_dir` and `project.build_dir` always mean *this* project's source
-directory and *this* project's build output, wherever it sits. Built directly,
-`build_dir` is `build/`; embedded one level down, it is `build/libfoo/`. Nothing
-in the script has to know which. The same holds several levels deep, and sibling
-subdirectories stay in separate build directories.
+`project.root_dir` and `project.build_dir` always mean *this*
+project's source directory and *this* project's build output, wherever
+it sits. Built directly, `build_dir` is `build/`; embedded one level
+down, it is `build/libfoo/`. The same holds several levels deep, and
+sibling subdirectories stay in separate build directories.
 
 Notes:
 
@@ -938,23 +942,17 @@ import sources          # libfoo/sources.py
 
 Its own directory comes first, so a module there shadows a same-named one beside
 the root script while the inclusion runs. Editing an imported module re-runs
-pcons, like editing the build script itself.
-
-Those modules belong to the inclusion, packages as much as single files. Two
-subdirectories may each carry a `sources.py`, or a `shapes/` package, without
-seeing each other's, and a directory included twice imports
-its own again rather than reusing what the first pass computed, so a helper that
-reads the environment is right both times. Modules from anywhere else stay
-cached as usual: the standard library, installed packages, and a module beside
-the root script, which is the place to put one several subdirectories share.
+pcons, like editing the build script itself. Modules imported by an included
+script are private to that inclusion; a directory included twice imports its
+own copy each time.
 
 See `examples/13_subdirs` for a worked example, including a library nested two
 levels down that declares its own generator with relative paths.
 
 #### One subdirectory, once per environment
 
-`add_subdirectory(..., env=...)` names the environment the included tree builds
-in. It is the default environment for the duration of the call, so the script
+`add_subdirectory(..., env=...)` sets the environment the included tree builds
+with. That becomes the default environment for the duration of the call, so the script
 above needs no change: its `default_environment` answers with the environment
 the caller passed. Include the same directory twice to build it twice:
 
@@ -983,48 +981,42 @@ add_subdirectory("libfoo", env=vendor_env, vars={
 })
 ```
 
-Values are spelled as Python, not as command-line strings: `False`, `2`,
-`Path("/opt")`. They shadow the command line, because a project vendoring a
-dependency is deciding how it builds, not offering a default. To let the user
-override one, say so:
+Values are python, not command-line strings: `False`, `2`,
+`Path("/opt")`. They shadow the command line. To let the user
+override one, say so explicitly:
 
 ```python
 vars={"LIBFOO_PYTHON": get_var("LIBFOO_PYTHON", False)}
 ```
 
-Names you do not mention keep whatever the command line gave them, and a nested
-`add_subdirectory()` keeps yours while overriding only the names it passes.
+Names not overridden keep whatever the command line or parent gave them.
 
-This replaces setting `os.environ` before the call, which leaked into every
-later inclusion and lost to the command line rather than beating it.
+This replaces setting `os.environ` before the call, which is not recommended.
 
-The rules:
+Some rules and notes for setting variables like this:
 
 - **Both environments must be named and must differ in `build_prefix`.**
   The names are what tell the two `foo` targets apart, and the prefixes are
-  what keep their output files apart. Without them the second inclusion is a
-  duplicate, and pcons says so, naming both definition sites.
-- **A nested `add_subdirectory()` inherits it.** Everything under the call
+  what keep their output files apart.
+- **A nested `add_subdirectory()` inherits the parent's variables.** Everything under the call
   builds in that environment, however deep, unless an inner call passes its
   own `env=`, which wins for its own subtree only.
 - **It overrides every other source**, including the environments the enclosing
-  project registered. The included script asks its parent, and the parent has
-  environments of its own, so filling in only for a project without any would
-  never fire.
-- **A script that makes its own environment is not overridden.** It said which
-  environment it builds in, and including it twice collides.
+  project registered.
+- **A script that makes its own environment is not overridden.** That environment is local to the script.
 
 See `examples/75_multi_env` for a worked example: `parity/` is described once
 and built for both environments, with each environment's flags.
 
 ### Multiple projects in one script
 
-Some builds contain more than one project: firmware plus the host
-tools that flash it, an application plus its installer, two
+Some builds contain more than one separate project: firmware plus the
+host tools that flash it, an application plus its installer, two
 configurations of one source tree, or a monorepo with several
 independent sub-projects. Each `Project()` created outside
 `add_subdirectory()` is an independent top-level project, with its own
-build directory, environments, node namespace, defaults and build files:
+build directory, environments, node namespace, defaults and build
+files:
 
 ```python
 device = Project("device")                      # the default build dir
@@ -1072,7 +1064,9 @@ One `pcons` run generates and builds both, in script order. The rules:
 `build.ninja` or `Makefile`, so to build manually, you'd need individual `ninja -C`
 calls.
 
-See `examples/66_multi_project` for a worked example.
+Sometimes multiple projects are the best way to separate concerns, and sometimes when there's a bit more coupling, multiple environments are best. Use whichever makes most sense for your build (and you can use both!)
+
+See `examples/66_multi_project` for a worked multi-project example.
 
 ---
 
