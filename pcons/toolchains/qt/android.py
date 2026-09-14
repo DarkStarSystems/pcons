@@ -158,7 +158,7 @@ def _library_dirs(project: Project, env: Environment) -> list[Path]:
     found = {
         placed(target.build_dir): None
         for target in project.targets
-        if target._env is env and target.target_type == "shared_library"
+        if target.env is env and target.target_type == "shared_library"
     }
     if not found:
         return [placed(env.build_dir_for(Path()))]
