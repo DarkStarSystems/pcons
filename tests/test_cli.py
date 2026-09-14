@@ -3764,6 +3764,7 @@ env = project.Environment(toolchain="c")
 mylib = project.StaticLibrary("mylib", env, sources=["lib.c"])
 mylib.public.include_dirs.append("include")
 mylib.public.defines.append("USE_MYLIB")
+mylib.public.defines.append(("MYLIB_VERSION", "2"))
 app = project.Program("app", env, sources=["main.c"])
 app.link(mylib)
 """
@@ -3775,6 +3776,13 @@ app.link(mylib)
         assert "requirements:" in result.stdout
         assert "<- mylib (public)" in result.stdout
         assert "USE_MYLIB" in result.stdout
+        # A (name, value) define shows as -D would and keeps its contributor.
+        version_row = next(
+            line
+            for line in result.stdout.splitlines()
+            if line.lstrip().startswith("MYLIB_VERSION=2")
+        )
+        assert "<- mylib (public)" in version_row
 
     def test_sibling_sources_collapse_to_braces(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

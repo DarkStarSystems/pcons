@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `pcons explain` crashed with an `AttributeError` when a tool or usage
+  requirement carried a `(name, value)` define. Those now render as
+  `NAME=VALUE`, the way `-D` shows them, and attribute to their preset or
+  contributing target like plain defines.
+
 ## [0.29.0] - 2026-09-14
 
 This release adds a significant new feature: Scanners. These operate

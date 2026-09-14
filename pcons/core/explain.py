@@ -78,6 +78,18 @@ class Explanation:
         return "\n".join(lines) if lines else "(no flags)"
 
 
+def define_text(define: Any) -> str:
+    """The ``NAME`` or ``NAME=VALUE`` form of a define, as ``-D`` would show it.
+
+    Defines may be given as plain strings or ``(name, value)`` pairs; a
+    ``None`` value means the bare name.
+    """
+    if isinstance(define, tuple):
+        name, value = define
+        return str(name) if value is None else f"{name}={value}"
+    return str(define)
+
+
 def _quote(token: str) -> str:
     """Quote a rendered token for display when it contains whitespace."""
     if token and not any(c.isspace() for c in token):
@@ -399,7 +411,10 @@ def explain(
             # Flags attribute as units, grouped the same way on both sides;
             # a contribution's flags are self-contained, so pairs never
             # straddle preset boundaries.
-            actual_units = units(actual) if var == "flags" else actual
+            if var == "flags":
+                actual_units = units(actual)
+            else:
+                actual_units = [define_text(d) for d in actual]
             expected: list[tuple[str, str, str]] = [
                 (token, preset.name, preset.category)
                 for preset in applied_presets
@@ -408,7 +423,7 @@ def explain(
                 for token in (
                     units(contribution.flags)
                     if var == "flags"
-                    else contribution.defines
+                    else [define_text(d) for d in contribution.defines]
                 )
             ]
             for token, source, category in _attribute(actual_units, expected):

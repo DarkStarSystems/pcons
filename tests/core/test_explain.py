@@ -90,6 +90,23 @@ class TestAttribution:
         exp = env.explain("cc")
         assert not [r for r in exp.rows if r.var == "cmd"]
 
+    def test_pair_defines_render_as_name_equals_value(self, test_project):
+        """A ``(name, value)`` define is shown the way ``-D`` would, and
+        attributes to its preset like a plain one."""
+        env = _make_env()
+        env.apply(
+            Preset(
+                name="ppoll",
+                category="feature",
+                contributions=(ToolContribution("cxx", defines=(("USE_PPOLL", "1"),)),),
+            )
+        )
+        env.cxx.defines.append(("NO_VALUE", None))
+        exp = env.explain("cxx")
+        assert _src(exp, "cxx", "USE_PPOLL=1") == "ppoll"
+        assert _src(exp, "cxx", "NO_VALUE") is None
+        assert "USE_PPOLL=1  <- ppoll (feature)" in str(exp)
+
     def test_single_tool_scope(self, test_project):
         env = _make_env()
         env.apply(_release())

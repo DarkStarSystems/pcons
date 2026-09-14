@@ -148,7 +148,7 @@ def _format_requirements(target: Target, root: Path, style: _Style) -> Iterator[
     fields from the compile-phase requirements, link fields from the
     link-phase ones (they differ in which implicit deps apply).
     """
-    from pcons.core.explain import node_paths
+    from pcons.core.explain import define_text, node_paths
     from pcons.core.target import Target
     from pcons.tools.requirements import compute_effective_requirements, flag_units
 
@@ -184,9 +184,11 @@ def _format_requirements(target: Target, root: Path, style: _Style) -> Iterator[
                 key = display = value.name or "?"
             else:
                 key = str(value)
-                display = (
-                    node_paths([value], root)[0] if isinstance(value, Path) else key
-                )
+                if isinstance(value, Path):
+                    display = node_paths([value], root)[0]
+                else:
+                    # A (name, value) define is shown the way -D would.
+                    display = define_text(value)
             rows.append((field, display, reqs.origins.get((field, key))))
 
     # A value can legitimately appear twice with one meaning (a target in
