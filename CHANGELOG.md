@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.1] - 2026-09-14
+
 ### Changed
 
 - The "build tiers" report (`pcons -v` and `pcons explain`) now lists one
@@ -2335,7 +2337,8 @@ see **Changed** below for each one and what to write instead.
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.29.1...HEAD
+[0.29.1]: https://github.com/DarkStarSystems/pcons/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/DarkStarSystems/pcons/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/DarkStarSystems/pcons/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/DarkStarSystems/pcons/compare/v0.26.0...v0.27.0
