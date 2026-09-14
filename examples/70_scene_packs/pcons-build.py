@@ -157,5 +157,3 @@ scene_refs = Scanner(
     ),
 )
 scene_refs.attach(pack_common, pack_extras, pack_level1, pack_level2)
-
-project.Default(pack_common, pack_extras, pack_level1, pack_level2)

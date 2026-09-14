@@ -388,7 +388,9 @@ class TestInstallWithNinja:
         (tmp_path / "pcons-build.py").write_text(
             "from pcons import Project\n"
             'project = Project("repro")\n'
-            'project.InstallDir("staged", project.root_dir / "assets", no_prefix=True)\n'
+            "staged = project.InstallDir("
+            '"staged", project.root_dir / "assets", no_prefix=True)\n'
+            "project.Default(staged)  # a step: named, so plain ninja runs it\n"
         )
 
         def run_ninja() -> subprocess.CompletedProcess[str]:

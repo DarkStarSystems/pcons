@@ -1005,51 +1005,43 @@ class NinjaGenerator(BaseGenerator):
         f.write("\n")
 
     def _write_defaults(self, f: TextIO, project: Project) -> None:
-        """Write default targets and 'all' phony target."""
+        """Write the default targets and the 'all' phony target.
+
+        Both sets come from `decide_build_tiers`: which targets a plain
+        `ninja` builds and which `ninja all` does is one decision, made in
+        core, not a rule each generator knows.
+        """
+        from pcons.core.tiers import decide_build_tiers
+
+        tiers = decide_build_tiers(project)
+
+        def outputs(targets: list[Target]) -> list[str]:
+            return [
+                self._output_ref(node)
+                for target in targets
+                for node in target.output_nodes
+                if isinstance(node, FileNode)
+            ]
+
         f.write("# Default targets\n")
-        user_defaults: list[str] = []
-        all_outputs: list[str] = []
-
-        # Collect user-specified default targets
-        for target in project.default_targets:
-            for out_node in target.output_nodes:
-                if isinstance(out_node, FileNode):
-                    user_defaults.append(self._output_ref(out_node))
-
-        # Collect all target outputs for 'all' target (utility targets
-        # with build_by_default=False are only built when requested).
-        for target in project.targets:
-            if not getattr(target, "build_by_default", True):
-                continue
-            for node in target.output_nodes:
-                if isinstance(node, FileNode):
-                    all_outputs.append(self._output_ref(node))
+        all_outputs = outputs(tiers.all_targets)
+        default_outputs = outputs(tiers.default_targets)
 
         if all_outputs:
-            # Create 'all' phony target — builds every target in the project
+            # 'all' builds every target but the manual ones
             f.write(f"build all: phony {' '.join(all_outputs)}\n")
 
-        # Collect programs and libraries for implicit default
-        prog_lib_outputs: list[str] = []
-        for target in project.targets:
-            if not getattr(target, "build_by_default", True):
-                continue
-            if target.target_type in (
-                "program",
-                "shared_library",
-                "static_library",
-            ):
-                for node in target.output_nodes:
-                    if isinstance(node, FileNode):
-                        prog_lib_outputs.append(self._escape_output_path(node.path))
-
-        # Set default: user-specified targets, or programs & libraries
-        if user_defaults:
-            f.write(f"default {' '.join(user_defaults)}\n")
-        elif prog_lib_outputs:
-            f.write(f"default {' '.join(prog_lib_outputs)}\n")
-        elif all_outputs:
-            f.write("default all\n")
+        if default_outputs:
+            f.write(f"default {' '.join(default_outputs)}\n")
+        elif project.targets:
+            # Nothing is in the default tier, so a plain ninja builds
+            # nothing: not the steps in `all`, and not ninja's own choice of
+            # every final output, which could include a manual target.
+            f.write("build pcons-nothing: phony\n")
+            f.write("default pcons-nothing\n")
+        # A build that creates nodes directly, registering no target at all,
+        # writes no default line: ninja then builds every final output,
+        # which is what such a build means.
 
     def _escape_path(self, path: Path | str) -> str:
         """Escape a path for use in Ninja files.

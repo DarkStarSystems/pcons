@@ -122,9 +122,9 @@ def _add_lupdate_target(
 ) -> None:
     """A `ninja lupdate` utility target refreshing the .ts catalogs.
 
-    Excluded from the default build and from 'all' (build_by_default is
-    False): it writes into the source tree, which only a translator
-    updating catalogs should trigger.
+    In the "manual" build tier: it writes into the source tree, so only a
+    translator updating catalogs should trigger it, by name or via the
+    `lupdate` alias.
     """
     stamp = qt_dir / f"{name}-lupdate.stamp"
     # env.Command has no tool-namespace expansion; use the concrete paths.
@@ -141,5 +141,5 @@ def _add_lupdate_target(
         command=command,
         name=f"{name}-lupdate",
     )
-    lupdate_target.build_by_default = False
+    lupdate_target.place_in_tier("manual", by="QtTranslations")
     project.Alias("lupdate", lupdate_target)

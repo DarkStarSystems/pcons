@@ -141,7 +141,14 @@ class TestNodeFactory:
             return str(path).replace("\\", "/")
 
 
-@builder("Test", target_type="test", factory_class=TestNodeFactory)
+@builder(
+    "Test",
+    target_type="test",
+    # A test runs through its own `test` phony and has no output for `all`
+    # or `default` to name; running tests is asked for by name.
+    build_tier="manual",
+    factory_class=TestNodeFactory,
+)
 class TestBuilder:
     """Declare a test to be run by ``pcons test`` (or ``ninja test``).
 

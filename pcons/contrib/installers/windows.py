@@ -31,7 +31,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.contrib.installers._helpers import staging_dir
+from pcons.contrib.installers._helpers import as_installer_step, staging_dir
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -186,45 +186,51 @@ def create_msix(
         stage_target.depends(*depends)
 
     # Generate AppxManifest.xml (use relative path for target)
-    manifest_target = env.Command(
-        target=project.build_dir / manifest_rel,
-        source=None,
-        command=[
-            python_cmd,
-            "-m",
-            "pcons.contrib.installers._helpers",
-            "gen_appx_manifest",
-            "--output",
-            str(manifest_rel),
-            "--name",
-            name,
-            "--version",
-            version,
-            "--publisher",
-            publisher,
-            "--executable",
-            executable,
-            *(["--display-name", display_name] if display_name else []),
-            *(["--description", description] if description else []),
-        ],
-        name=f"manifest_{name}",
+    manifest_target = as_installer_step(
+        env.Command(
+            target=project.build_dir / manifest_rel,
+            source=None,
+            command=[
+                python_cmd,
+                "-m",
+                "pcons.contrib.installers._helpers",
+                "gen_appx_manifest",
+                "--output",
+                str(manifest_rel),
+                "--name",
+                name,
+                "--version",
+                version,
+                "--publisher",
+                publisher,
+                "--executable",
+                executable,
+                *(["--display-name", display_name] if display_name else []),
+                *(["--description", description] if description else []),
+            ],
+            name=f"manifest_{name}",
+        ),
+        by="create_msix",
     )
 
     # Generate placeholder assets (required for MSIX)
     # Output a stamp file to track that assets were generated
     assets_stamp = staging_rel / "Assets" / ".stamp"
-    assets_target = env.Command(
-        target=project.build_dir / assets_stamp,
-        source=None,
-        command=[
-            python_cmd,
-            "-m",
-            "pcons.contrib.installers._helpers",
-            "gen_msix_assets",
-            "--output-dir",
-            str(staging_rel),
-        ],
-        name=f"assets_{name}",
+    assets_target = as_installer_step(
+        env.Command(
+            target=project.build_dir / assets_stamp,
+            source=None,
+            command=[
+                python_cmd,
+                "-m",
+                "pcons.contrib.installers._helpers",
+                "gen_msix_assets",
+                "--output-dir",
+                str(staging_rel),
+            ],
+            name=f"assets_{name}",
+        ),
+        by="create_msix",
     )
 
     # Build MSIX with MakeAppx (use relative path for staging dir)
@@ -238,11 +244,14 @@ def create_msix(
         "/o",  # Overwrite existing
     ]
 
-    msix_target = env.Command(
-        target=project.build_dir / output,
-        source=[stage_target, manifest_target, assets_target],
-        command=makeappx_cmd,
-        name=f"msix_{name}",
+    msix_target = as_installer_step(
+        env.Command(
+            target=project.build_dir / output,
+            source=[stage_target, manifest_target, assets_target],
+            command=makeappx_cmd,
+            name=f"msix_{name}",
+        ),
+        by="create_msix",
     )
 
     # Sign if certificate provided
@@ -278,11 +287,14 @@ def create_msix(
             *(["--password-env", sign_password_env] if sign_password_env else []),
         ]
 
-        signed_target = env.Command(
-            target=project.build_dir / signed_output,
-            source=[msix_target],
-            command=sign_cmd,
-            name=f"sign_{name}",
+        signed_target = as_installer_step(
+            env.Command(
+                target=project.build_dir / signed_output,
+                source=[msix_target],
+                command=sign_cmd,
+                name=f"sign_{name}",
+            ),
+            by="create_msix",
         )
         return signed_target
 

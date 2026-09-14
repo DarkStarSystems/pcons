@@ -3,7 +3,7 @@
 
 `project.MetalLibrary` is the whole pipeline: each `.metal` source compiles
 to an `.air`, and the `.air` files link into one `.metallib`. It returns a
-Target, so the library can be a default target, an alias member, or
+Target, so the library builds by default and can be an alias member or
 something to Install -- the same as a program or a shared library.
 
 `env.metal.Object` and `env.metal.Library` drive the two steps by hand and
@@ -21,4 +21,3 @@ env = project.Environment(toolchain="c")
 shaders = project.MetalLibrary(
     "effects", env, sources=["src/blur.metal", "src/warp.metal"]
 )
-project.Default(shaders)

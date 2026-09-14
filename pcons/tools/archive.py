@@ -201,6 +201,7 @@ class ArchiveTarget(Target):
 @builder(
     "Tarfile",
     target_type="archive",
+    build_tier="all",
     factory_class=ArchiveNodeFactory,
     requires_env=True,
 )
@@ -281,6 +282,7 @@ class TarfileBuilder:
 @builder(
     "Zipfile",
     target_type="archive",
+    build_tier="all",
     factory_class=ArchiveNodeFactory,
     requires_env=True,
 )

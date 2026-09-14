@@ -59,7 +59,3 @@ manifest = env.Command(
     ],
     launcher=[python, prefix_log, "command", log],
 )
-
-# Naming any default target replaces the automatic set, so both go here: a
-# command target is not built unless something asks for it.
-project.Default(hello, manifest)

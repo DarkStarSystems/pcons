@@ -19,6 +19,7 @@ from pcons.generators.generator import BaseGenerator
 if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.core.target import Target
+    from pcons.core.tiers import BuildTiers
 
 
 class MetadataGenerator(BaseGenerator):
@@ -30,14 +31,18 @@ class MetadataGenerator(BaseGenerator):
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate the metadata JSON file in output_dir."""
+        from pcons.core.tiers import decide_build_tiers
+
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / self._output_filename
 
+        # One decision for the whole tree, as the build generators use.
+        tiers = decide_build_tiers(project)
         metadata: dict[str, Any] = {
-            "schema_version": 2,
+            "schema_version": 3,
             "generator": self.name,
             "projects": [
-                self._serialize_project(p) for p in self._walk_projects(project)
+                self._serialize_project(p, tiers) for p in self._walk_projects(project)
             ],
         }
 
@@ -52,16 +57,15 @@ class MetadataGenerator(BaseGenerator):
             result.extend(self._walk_projects(child))
         return result
 
-    def _serialize_project(self, project: Project) -> dict[str, Any]:
+    def _serialize_project(self, project: Project, tiers: BuildTiers) -> dict[str, Any]:
         """Serialize project-level metadata."""
-        default_target_names = {target.name for target in project.default_targets}
         return {
             "name": project.name,
             "parent": project.parent.name if not project.is_top_level else None,
             "root_dir": project._path_resolver.make_project_relative(project.root_dir),
             "build_dir": project.build_dir.as_posix(),
             "targets": [
-                self._serialize_target(target, project, default_target_names)
+                self._serialize_target(target, project, tiers)
                 for target in sorted(project._targets, key=lambda t: t.name)
             ],
             "aliases": [
@@ -73,7 +77,7 @@ class MetadataGenerator(BaseGenerator):
         self,
         target: Target,
         project: Project,
-        default_target_names: set[str],
+        tiers: BuildTiers,
     ) -> dict[str, Any]:
         """Serialize one target to metadata."""
         outputs = [
@@ -87,6 +91,7 @@ class MetadataGenerator(BaseGenerator):
             if isinstance(node, FileNode)
         ]
         dependencies = sorted({dep.name for dep in target.dependencies})
+        decision = tiers.get(target)
 
         location: dict[str, Any] = {
             "file": project._path_resolver.make_project_relative(
@@ -102,7 +107,8 @@ class MetadataGenerator(BaseGenerator):
             "qualified_name": target.qualified_name,
             "sub_directory": str(target._subdir) if target._subdir.parts else None,
             "type": target.target_type or "other",
-            "is_default": target.name in default_target_names,
+            "build_tier": decision.tier if decision else target.build_tier,
+            "is_default": bool(decision and decision.tier == "default"),
             "dependencies": dependencies,
             "sources": sources,
             "outputs": outputs,

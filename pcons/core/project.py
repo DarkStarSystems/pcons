@@ -283,6 +283,7 @@ class Project(_ProjectBuilders):
         "_nodes",
         "_aliases",
         "_default_targets",
+        "_default_at",
         "_config",
         "_resolved",
         "_path_resolver",
@@ -372,6 +373,10 @@ class Project(_ProjectBuilders):
         self._nodes: dict[Path, Node] = {}
         self._aliases: dict[str, AliasNode] = {}
         self._default_targets: list[Target] = []
+        # Where each Default() call named each of its targets, by target
+        # identity. What that means is decided at generate; see
+        # pcons.core.tiers.
+        self._default_at: dict[int, SourceLocation] = {}
         self._config = config
         self._resolved = False
         # None caches a negative find_package result for the key.
@@ -1086,12 +1091,19 @@ class Project(_ProjectBuilders):
         return merged
 
     def Default(self, *targets: Target | Node | str) -> None:
-        """Set default targets for building.
+        """Name the targets a plain ``ninja`` builds: exactly these.
 
-        These are built when 'ninja' is run with no arguments.
-        Once called, it replaces the implicit default of all programs and
-        libraries; only targets passed to ``Default()`` are then built by
-        default.
+        Naming any target replaces the products pcons would have built on
+        its own, so this is how a project builds a subset by default — the
+        app but not the benchmarks. Calls append: each one adds to the set.
+        Nothing is decided here. The call is recorded, with its line, and
+        the tiers are decided at generate from every call together, so what
+        a target's own ``build_tier`` means never depends on the order the
+        script happens to be written in (see `pcons.core.tiers`).
+
+        A target named here is in the default tier whatever its builder
+        placed it in: ``Default(installed)`` is how an install becomes part
+        of the ordinary build.
 
         Args:
             *targets: Targets, output Nodes, or alias/target names to build
@@ -1105,10 +1117,11 @@ class Project(_ProjectBuilders):
                 or an alias resolves to no target-backed output.
             KeyError: If a string name matches neither an alias nor a target.
         """
+        location = get_caller_location()
         for t in targets:
             match t:
                 case Target():
-                    self._add_default_target(t)
+                    self._add_default_target(t, location)
                 case Node():
                     target = self._find_target_for_node(t)
                     if target is None:
@@ -1120,19 +1133,24 @@ class Project(_ProjectBuilders):
                             "Default() with the node after its target has "
                             "produced its outputs (e.g. after resolve())."
                         )
-                    self._add_default_target(target)
+                    self._add_default_target(target, location)
                 case str():
                     for target in self._resolve_default_name(t):
-                        self._add_default_target(target)
+                        self._add_default_target(target, location)
                 case _:
                     raise TypeError(
                         f"Default() arguments must be Target, Node, or str; "
                         f"got {type(t)!r}"
                     )
 
-    def _add_default_target(self, target: Target) -> None:
-        """Register `target` as a default build target, deduping by identity."""
-        if target not in self._default_targets:
+    def _add_default_target(self, target: Target, location: SourceLocation) -> None:
+        """Record that a ``Default()`` call at *location* named `target`.
+
+        Deduped by identity: the first call to name it owns the line, since
+        that is the one a reader is looking for.
+        """
+        if id(target) not in self._default_at:
+            self._default_at[id(target)] = location
             self._default_targets.append(target)
 
     def _find_target_for_node(self, node: Node) -> Target | None:
@@ -1189,7 +1207,12 @@ class Project(_ProjectBuilders):
 
     @property
     def default_targets(self) -> list[Target]:
-        """Get the default build targets."""
+        """The targets this project's ``Default()`` calls named, in order.
+
+        What a build actually builds is decided at generate, from these and
+        every target's ``build_tier``: ask
+        `pcons.core.tiers.decide_build_tiers`.
+        """
         return list(self._default_targets)
 
     @property
@@ -2170,7 +2193,13 @@ class Project(_ProjectBuilders):
         def builder_method(*args: Any, **kwargs: Any) -> Target:
             if accepts_defined_at and "defined_at" not in kwargs:
                 kwargs["defined_at"] = get_caller_location()
-            return create_target(self, *args, **kwargs)
+            target = create_target(self, *args, **kwargs)
+            # The builder's declared placement (see pcons.core.tiers). A
+            # builder that wraps another one places the target it returns,
+            # which is the declaration that fits what the caller asked for.
+            if isinstance(target, Target):
+                target.place_in_tier(registration.build_tier, by=registration.name)
+            return target
 
         if hasattr(create_target, "__doc__"):
             builder_method.__doc__ = create_target.__doc__

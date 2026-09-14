@@ -170,5 +170,3 @@ bundle = project.AssetBundle(  # ty: ignore[unresolved-attribute]
     options="assetc.opts",
 )
 bundle.depends(palette)
-
-project.Default(bundle)

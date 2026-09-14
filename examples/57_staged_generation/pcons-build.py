@@ -87,7 +87,3 @@ def _plugins(manifest_path: Path) -> None:
     # Private, not on the env: an env-wide include would change the compile
     # line of every other target too, including ones built in pass 1.
     demo.private.include_dirs.append(gen_dir)
-    project.Default(demo)
-
-
-project.Default(manifest)

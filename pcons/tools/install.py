@@ -239,6 +239,9 @@ def _make_install_target(
         project=project,
     )
     install_target._builder_name = builder_name
+    # An install operates on products, so it is a step: `ninja all`, an
+    # alias, or its name (see pcons.core.tiers).
+    install_target.place_in_tier("all", by=builder_name)
     install_target._builder_data = builder_data
     install_target._add_pending_sources(sources)
     return install_target
@@ -662,7 +665,12 @@ class InstallNodeFactory(PendingSourceFactory):
         target.output_nodes.append(stamp_node)
 
 
-@builder("Install", target_type="interface", factory_class=InstallNodeFactory)
+@builder(
+    "Install",
+    target_type="interface",
+    build_tier="all",
+    factory_class=InstallNodeFactory,
+)
 class InstallBuilder:
     """Install files to a destination directory.
 
@@ -714,7 +722,12 @@ class InstallBuilder:
         )
 
 
-@builder("InstallAs", target_type="interface", factory_class=InstallNodeFactory)
+@builder(
+    "InstallAs",
+    target_type="interface",
+    build_tier="all",
+    factory_class=InstallNodeFactory,
+)
 class InstallAsBuilder:
     """Install a file to a specific destination path.
 
@@ -780,7 +793,12 @@ class InstallAsBuilder:
         )
 
 
-@builder("InstallDir", target_type="interface", factory_class=InstallNodeFactory)
+@builder(
+    "InstallDir",
+    target_type="interface",
+    build_tier="all",
+    factory_class=InstallNodeFactory,
+)
 class InstallDirBuilder:
     """Install a directory tree to a destination.
 
@@ -833,6 +851,7 @@ class InstallDirBuilder:
 @builder(
     "OverlayDir",
     target_type="interface",
+    build_tier="all",
     factory_class=InstallNodeFactory,
     requires_env=True,
 )

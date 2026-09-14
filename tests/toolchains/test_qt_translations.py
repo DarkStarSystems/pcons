@@ -44,7 +44,7 @@ class TestQtTranslations:
         with pytest.raises(ValueError, match="ts_files is empty"):
             tr_project.QtTranslations("i18n", env, ts_files=[])
 
-    def test_lupdate_excluded_from_default_and_all(self, tr_project):
+    def test_lupdate_is_manual(self, tr_project):
         env = cxx_env_with_qt(tr_project)
         tr_project.QtTranslations(
             "i18n",
@@ -58,7 +58,7 @@ class TestQtTranslations:
         # The lupdate edge exists and is reachable via the alias...
         assert "i18n-lupdate.stamp" in content
         assert "build lupdate: phony" in content
-        # ...but neither 'all' nor the default line includes it.
+        # ...but the manual tier keeps it out of 'all' and the default line.
         for line in content.splitlines():
             if line.startswith("build all: phony") or line.startswith("default "):
                 assert "lupdate" not in line

@@ -13,6 +13,9 @@ The command's logic (run the script, resolve, select targets) lives in
         include_dirs:
           include  <- math (public)
 
+    build tiers:
+      simulator  default  product (Program)
+
     Environment #1  (toolchain: llvm)
       cc.flags:
         -O2  <- release (variant)
@@ -246,6 +249,7 @@ def render_explanation(
         node_paths,
     )
     from pcons.core.node import FileNode
+    from pcons.core.tiers import decide_build_tiers
 
     style = _Style(color)
     root = project.root_dir.absolute()
@@ -425,6 +429,14 @@ def render_explanation(
                 shown.add(node)
                 yield from node_lines(node, env)
             yield ""
+
+    # What each invocation builds, and why: the same lines `-v` logs at
+    # generate, from the same decision the generators write.
+    tier_lines = decide_build_tiers(project).report_lines(targets)
+    if tier_lines:
+        yield style.heading(tier_lines[0])
+        yield from tier_lines[1:]
+        yield ""
 
     if not used_envs:
         # A project can build with no environments at all (pure install

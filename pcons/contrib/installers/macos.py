@@ -41,7 +41,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.contrib.installers._helpers import staging_dir
+from pcons.contrib.installers._helpers import as_installer_step, staging_dir
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -197,11 +197,14 @@ def create_component_pkg(
 
     pkgbuild_args.append(str(output))
 
-    return env.Command(
-        target=project.build_dir / output,
-        source=[stage_target],
-        command=pkgbuild_args,
-        name=f"pkg_{identifier.replace('.', '_')}",
+    return as_installer_step(
+        env.Command(
+            target=project.build_dir / output,
+            source=[stage_target],
+            command=pkgbuild_args,
+            name=f"pkg_{identifier.replace('.', '_')}",
+        ),
+        by="create_component_pkg",
     )
 
 
@@ -332,19 +335,22 @@ def create_pkg(
         bundle_args: list[str] = []
         for bundle in bundle_names:
             bundle_args.extend(["--bundle", bundle])
-        plist_target = env.Command(
-            target=project.build_dir / component_plist_path,
-            source=None,
-            command=[
-                python_cmd,
-                "-m",
-                "pcons.contrib.installers._helpers",
-                "gen_plist",
-                "--output",
-                str(component_plist_path),
-                *bundle_args,
-            ],
-            name=f"plist_{name}",
+        plist_target = as_installer_step(
+            env.Command(
+                target=project.build_dir / component_plist_path,
+                source=None,
+                command=[
+                    python_cmd,
+                    "-m",
+                    "pcons.contrib.installers._helpers",
+                    "gen_plist",
+                    "--output",
+                    str(component_plist_path),
+                    *bundle_args,
+                ],
+                name=f"plist_{name}",
+            ),
+            by="create_pkg",
         )
         pkgbuild_args.extend(["--component-plist", str(component_plist_path)])
         component_deps.append(plist_target)
@@ -355,11 +361,14 @@ def create_pkg(
     pkgbuild_args.append(str(component_pkg_path))
 
     # Pass Targets directly as sources
-    component_target = env.Command(
-        target=project.build_dir / component_pkg_path,
-        source=component_deps,
-        command=pkgbuild_args,
-        name=f"component_{name}",
+    component_target = as_installer_step(
+        env.Command(
+            target=project.build_dir / component_pkg_path,
+            source=component_deps,
+            command=pkgbuild_args,
+            name=f"component_{name}",
+        ),
+        by="create_pkg",
     )
 
     # Generate distribution.xml
@@ -384,11 +393,14 @@ def create_pkg(
     if min_os_version:
         dist_cmd.extend(["--min-os-version", min_os_version])
 
-    dist_target = env.Command(
-        target=project.build_dir / dist_xml_path,
-        source=[component_target],
-        command=dist_cmd,
-        name=f"distribution_{name}",
+    dist_target = as_installer_step(
+        env.Command(
+            target=project.build_dir / dist_xml_path,
+            source=[component_target],
+            command=dist_cmd,
+            name=f"distribution_{name}",
+        ),
+        by="create_pkg",
     )
 
     # Collect all targets that productbuild depends on
@@ -425,11 +437,14 @@ def create_pkg(
 
     productbuild_args.append(str(output))
 
-    return env.Command(
-        target=project.build_dir / output,
-        source=productbuild_deps,
-        command=productbuild_args,
-        name=f"pkg_{name}",
+    return as_installer_step(
+        env.Command(
+            target=project.build_dir / output,
+            source=productbuild_deps,
+            command=productbuild_args,
+            name=f"pkg_{name}",
+        ),
+        by="create_pkg",
     )
 
 
@@ -517,11 +532,14 @@ def create_dmg(
             f'-srcfolder "{staging_rel}" -format {format} -ov "{output}"',
         ]
 
-    return env.Command(
-        target=project.build_dir / output,
-        source=[stage_target],
-        command=hdiutil_cmd,
-        name=f"dmg_{name}",
+    return as_installer_step(
+        env.Command(
+            target=project.build_dir / output,
+            source=[stage_target],
+            command=hdiutil_cmd,
+            name=f"dmg_{name}",
+        ),
+        by="create_dmg",
     )
 
 

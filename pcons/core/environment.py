@@ -1804,6 +1804,10 @@ class Environment(_EnvironmentStubs):
             env=self,
         )
         cmd_target._builder_name = "Command"
+        # A command makes a product, so a plain `ninja` builds it. A script
+        # that wants it kept out of the ordinary build says so:
+        # `cmd.build_tier = "all"` (see pcons.core.tiers).
+        cmd_target.place_in_tier("default", by="Command")
 
         # Register nodes with the environment and add to target
         for node in nodes:

@@ -368,10 +368,10 @@ translator.load(QLocale(), "app", "_", ":/i18n");
 QCoreApplication::installTranslator(&translator);
 ```
 
-Refreshing the catalogs from sources is **`ninja lupdate`** — a utility
-target that is *never* part of the default build or `ninja all`, because
-it writes into the source tree. (This uses `target.build_by_default =
-False`, available for any utility target.)
+Refreshing the catalogs from sources is **`ninja lupdate`** — a target
+that is *never* part of the default build or `ninja all`, because it writes
+into the source tree. (It sits in the `manual` build tier;
+`target.build_tier = "manual"` puts any target there.)
 
 ## Deployment
 
