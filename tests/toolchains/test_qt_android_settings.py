@@ -40,6 +40,18 @@ def _qml_module(project, env, name: str, directory: str) -> None:
     )
 
 
+def _written_settings(project, path: Path) -> dict:
+    """The file's content, once pcons has drained its pending generation.
+
+    That is when the settings are decided, so a test that declares targets
+    after the call reads the file here rather than at the call.
+    """
+    from pcons.generators.generator import BaseGenerator
+
+    BaseGenerator._generate_pending(project)
+    return json.loads(path.read_text())
+
+
 @pytest.fixture(autouse=True)
 def _project(test_project):
     """Environment() reads the active project, so one has to exist."""
@@ -456,8 +468,7 @@ class TestTheQmlKeys:
         root = Path(test_project.root_dir)
         (root / "child").mkdir()
         (root / "child" / "pcons-build.py").write_text(
-            "from pcons.core.project import Project\n"
-            "project = Project('child')\n"
+            "from pcons.core.project import Project\nproject = Project('child')\n"
         )
         env = android_env()
         child = add_subdirectory("child", project=test_project, env=env)
@@ -484,7 +495,7 @@ class TestTheOptionalKeys:
         path = android_deployment_settings(
             test_project, android_env(), app="myapp", output=tmp_path / "s.json"
         )
-        settings = json.loads(path.read_text())
+        settings = _written_settings(test_project, path)
 
         assert "android-package-name" not in settings
         assert "android-package-source-directory" not in settings
@@ -502,7 +513,7 @@ class TestTheOptionalKeys:
             package_name="org.example.myapp",
             build_tools="37.0.0",
         )
-        settings = json.loads(path.read_text())
+        settings = _written_settings(test_project, path)
 
         assert settings["android-package-name"] == "org.example.myapp"
         assert settings["sdkBuildToolsRevision"] == "37.0.0"
@@ -521,7 +532,7 @@ class TestThePackageSourceDirectory:
             output=tmp_path / "s.json",
             package_source_dir=source_dir,
         )
-        return json.loads(path.read_text())
+        return _written_settings(project, path)
 
     def test_a_relative_path_is_made_absolute_from_the_project_root(
         self, found_qt, test_project, tmp_path
@@ -552,7 +563,7 @@ class TestThePermissions:
             permissions=["android.permission.INTERNET", "android.permission.CAMERA"],
         )
 
-        assert json.loads(path.read_text())["permissions"] == [
+        assert _written_settings(test_project, path)["permissions"] == [
             {"name": "android.permission.INTERNET"},
             {"name": "android.permission.CAMERA"},
         ]
@@ -570,7 +581,7 @@ class TestTheFileOnDisk:
         )
 
         assert path == tmp_path / "sub" / "s.json"
-        assert json.loads(path.read_text())["abi"] == "arm64-v8a"
+        assert _written_settings(test_project, path)["abi"] == "arm64-v8a"
 
 
 class TestAnAbiNobodyMapped:
@@ -603,7 +614,7 @@ class TestWhereTheFileGoes:
         assert path == Path(test_project.root_dir) / test_project.build_dir / (
             "android-deployment-settings.json"
         )
-        assert json.loads(path.read_text())["abi"] == "arm64-v8a"
+        assert _written_settings(test_project, path)["abi"] == "arm64-v8a"
 
     def test_an_environments_own_build_dir_does_not_move_it(
         self, found_qt, test_project
@@ -647,6 +658,44 @@ class TestWhereTheFileGoes:
         assert path == Path(test_project.root_dir) / "out" / "s.json"
 
 
+class TestWhenTheContentIsDecided:
+    """Not when the call is made. A build script names its application first
+    and its libraries after, and an add_subdirectory() below the call declares
+    targets of its own; a snapshot of what was declared so far leaves those
+    out of a file whose whole job is to list them."""
+
+    def test_a_qml_module_declared_after_the_call(self, found_qt, test_project) -> None:
+        env = android_env()
+        path = android_deployment_settings(test_project, env, app="myapp")
+        _qml_module(test_project, env, "ui", "qml")
+
+        settings = _written_settings(test_project, path)
+
+        assert settings["qml-root-path"] == [str(Path(test_project.root_dir) / "qml")]
+        assert "qml-skip-import-scanning" not in settings
+
+    def test_a_subdirectory_added_after_the_call(self, found_qt, test_project) -> None:
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        root = Path(test_project.root_dir)
+        (root / "child").mkdir()
+        (root / "child" / "a.c").write_text("int f(void){return 0;}\n")
+        (root / "child" / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\n"
+            "project = Project('child')\n"
+            "env = project.parent.default_environment\n"
+            "lib = project.SharedLibrary('dep', env, sources=['a.c'])\n"
+        )
+        env = android_env()
+        path = android_deployment_settings(test_project, env, app="myapp")
+        child = add_subdirectory("child", project=test_project, env=env)
+
+        settings = _written_settings(test_project, path)
+
+        landed = root / child.lib.output_nodes[0].path
+        assert settings["extraLibraryDirs"] == [str(landed.parent)]
+
+
 class TestRewritingIt:
     def test_the_same_settings_leave_the_file_alone(
         self, found_qt, test_project
@@ -654,11 +703,13 @@ class TestRewritingIt:
         """A build edge reads this file, so a configure that decided the same
         thing again must not make it look newer."""
         first = android_deployment_settings(test_project, android_env(), app="myapp")
+        _written_settings(test_project, first)
         stamp = first.stat().st_mtime_ns
         os.utime(first, ns=(stamp - 2_000_000_000, stamp - 2_000_000_000))
         before = first.stat().st_mtime_ns
 
         again = android_deployment_settings(test_project, android_env(), app="myapp")
+        _written_settings(test_project, again)
 
         assert again == first
         assert again.stat().st_mtime_ns == before
@@ -670,4 +721,6 @@ class TestRewritingIt:
             test_project, android_env(), app="myapp", build_tools="37.0.0"
         )
 
-        assert json.loads(path.read_text())["sdkBuildToolsRevision"] == "37.0.0"
+        assert _written_settings(test_project, path)["sdkBuildToolsRevision"] == (
+            "37.0.0"
+        )

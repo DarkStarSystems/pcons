@@ -415,11 +415,15 @@ settings = android_deployment_settings(
 )
 ```
 
-It is written at configure time, like `configure_file`, and the path is
-returned. A configure that decides the same settings again leaves the file
-alone, so androiddeployqt does not re-run for it. Everything in it comes from the cross preset and from the Qt
-found for that environment, so `android()` must be given `sdk=` as well as
-`ndk=`.
+The path is returned right away, and the content is decided when pcons
+generates, once the whole build description is in. That matters: the file
+names the directories this environment's shared libraries land in and the
+QML source directories of its modules, so a target declared below the call
+-- or inside an `add_subdirectory()` under it -- still reaches the file. A
+configure that decides the same settings again leaves it alone, so
+androiddeployqt does not re-run for it. Everything else comes from the cross
+preset and from the Qt found for that environment, so `android()` must be
+given `sdk=` as well as `ndk=`.
 
 `package_source_dir` is a directory of Android sources -- the manifest,
 Java, resources -- that androiddeployqt overlays on Qt's own templates. It

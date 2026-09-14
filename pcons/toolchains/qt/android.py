@@ -31,10 +31,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pcons.configure.config_file import write_file
+from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.presets import CrossPreset
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.core.target import Target
@@ -189,10 +191,11 @@ def deployment_settings(
 ) -> dict:
     """The settings androiddeployqt reads, as a dict.
 
-    Every value comes from what the environment was retargeted with or from
-    the Qt installation found for it; nothing here searches for anything.
-    Use :func:`android_deployment_settings` to write it, unless you mean to
-    add keys of your own first.
+    Every value comes from what the environment was retargeted with, from
+    the Qt installation found for it, or from the targets declared in the
+    project; nothing here searches for anything. Use
+    :func:`android_deployment_settings` to write it, unless you mean to add
+    keys of your own first.
 
     Args:
         project: The project.
@@ -295,6 +298,26 @@ def _absolute(project: Project, directory: Path) -> Path:
     return Path(project.top.root_dir) / directory
 
 
+class _SettingsFile(BaseGenerator):
+    """The settings file, written when the pending generation runs.
+
+    Its content is a walk of the project's targets, so a shared library or a
+    QtQmlModule declared after :func:`android_deployment_settings` -- or
+    inside an ``add_subdirectory()`` below it -- has to reach it. Deferring
+    through a generator is how the rest of pcons puts work at that point.
+    """
+
+    def __init__(self, output: Path, content: Callable[[], str]) -> None:
+        super().__init__("android-deployment-settings")
+        self._output = output
+        self._content = content
+
+    def _generate_impl(self, project: Project, output_dir: Path) -> None:
+        from pcons.toolchains.qt.builders import _write_if_changed
+
+        _write_if_changed(self._output, self._content())
+
+
 def android_deployment_settings(
     project: Project,
     env: Environment,
@@ -308,12 +331,14 @@ def android_deployment_settings(
 ) -> Path:
     """Write the deployment settings file and return where it was written.
 
-    Written at configure time, like every other file whose content is
-    decided by the build script rather than by running something: see
-    :func:`pcons.configure.config_file.write_file`, which does the writing.
-    Editing the build script re-runs pcons, which rewrites this. Content
-    that has not changed keeps its timestamp, so androiddeployqt does not
-    re-run for a configure that decided the same thing again.
+    The path is decided here and the content when pcons generates, once the
+    whole build description is in: the file lists the directories this
+    environment's shared libraries land in and the QML source directories of
+    its modules, and a build script declares plenty of both after naming its
+    application. Editing the build script re-runs pcons, which rewrites
+    this. Content that has not changed keeps its timestamp, so
+    androiddeployqt does not re-run for a configure that decided the same
+    thing again.
 
     Args:
         project: The project.
@@ -341,18 +366,7 @@ def android_deployment_settings(
     Returns:
         The path written.
     """
-    settings = deployment_settings(project, env, app=app)
-    if package_name is not None:
-        settings["android-package-name"] = package_name
-    if package_source_dir is not None:
-        directory = Path(package_source_dir)
-        if not directory.is_absolute():
-            directory = Path(project.root_dir) / directory
-        settings["android-package-source-directory"] = str(directory)
-    if permissions:
-        settings["permissions"] = [{"name": name} for name in permissions]
-    if build_tools is not None:
-        settings["sdkBuildToolsRevision"] = build_tools
+    _android_preset(env)
 
     if output is None:
         output = _absolute(
@@ -361,4 +375,22 @@ def android_deployment_settings(
     output = Path(output)
     if not output.is_absolute():
         output = Path(project.root_dir) / output
-    return write_file(output, json.dumps(settings, indent=3) + "\n")
+
+    def content() -> str:
+        settings = deployment_settings(project, env, app=app)
+        if package_name is not None:
+            settings["android-package-name"] = package_name
+        if package_source_dir is not None:
+            directory = Path(package_source_dir)
+            if not directory.is_absolute():
+                directory = Path(project.root_dir) / directory
+            settings["android-package-source-directory"] = str(directory)
+        if permissions:
+            settings["permissions"] = [{"name": name} for name in permissions]
+        if build_tools is not None:
+            settings["sdkBuildToolsRevision"] = build_tools
+        return json.dumps(settings, indent=3) + "\n"
+
+    project.node(output)
+    _SettingsFile(output, content).generate(project)
+    return output
