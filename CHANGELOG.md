@@ -27,6 +27,8 @@ read the whole changelog!
 
 ### Added
 
+#### Scanners and discovered dependencies
+
 - **Scanners: runtime-discovered dependencies.** A `Scanner` declares
   that some edges' real dependencies, their extra outputs, and even
   parts of their command lines, come from their inputs' *content*. Users can now give
@@ -44,15 +46,7 @@ read the whole changelog!
     machinery itself, `discovered` draws what the last build's dyndep files
     actually found, and `headers` draws the compiler's `.d` edges.
 
-- **Static libraries may link each other without causing a dependency
-  loop.** Two static libraries that call into each other can each
-  `link()` the other; that cycle is no longer an error, since neither
-  has to be built before the other and every linker can resolve it. On
-  Linux the archives reach GNU ld wrapped in `-Wl,--start-group ...
-  -Wl,--end-group`; Apple's ld and MSVC's link rescan archives on
-  their own and get them as they are. Object libraries and header-only
-  libraries may be in such a cycle too. See
-  `examples/85_static_lib_cycle`. (#120)
+#### Multiple environments and cross builds
 
 - **Multiple environments in one project: each can decide where its targets
   are built.** A firmware image and the host tools that build it, or a cross
@@ -85,74 +79,6 @@ read the whole changelog!
   `examples/74_bare_metal` (a firmware image plus host tools) and
   `examples/75_multi_env` show all of this. (#96, #118)
 
-- **Pcons now prints the variant it's using**: `Generated build files
-  for variant debug` on the terminal, or one entry per environment when
-  they differ. (#125)
-- **The installer helpers now take `depends=`.** `create_pkg`,
-  `create_component_pkg`, `create_dmg` and `create_msix` staged their
-  sources with an internally-generated `Install`, so a directory source
-  that other targets fill had no way to wait for them. `depends=[...]`
-  orders the staging copy after those targets. (#151)
-- **`create_macos_bundle` and `create_flat_bundle` take `resources` as a
-  mapping** of bundle name to source file, so you can rename bundle
-  resources, and `create_macos_bundle` takes `pkginfo` as a `Path` to copy
-  in. (#152)
-- **`target.set_option("exported_symbols", [...])`**: use this to make a shared library
-  or executable export only the named symbols, realized per toolchain as a macOS symbol
-  list, a Linux version script, or an MSVC `.def` file. C names, with
-  patterns on macOS and Linux. The list is written under the target's build
-  directory and the link depends on it. (#149)
-- **A `PathToken` file in a command's flags is now a dependency of that
-  command.** A `PathToken` in a flag (`-Wl,--version-script=exports.txt`, a
-  response file, an options file) is read by the tool, but the command
-  previously didn't rerun when the file changed. Now it does, whenever
-  pcons knows the file. Include and library directories are unaffected. (#150)
-- **A `release-fastest` variant**: the compiler's highest optimization level
-  that doesn't change results (`-O3`; `/O2 /Ob3` on MSVC), realized per
-  toolchain like the other variants. (#153)
-- **`env.clone(name=...)`** names a clone at creation. Named environments
-  are how two targets may share a target name. (#147)
-- **`get_var()` supports list args.** With a list default, a comma-separated
-  value becomes a list: `get_var("PORTS", ["ofx"])` returns `["ofx", "ae"]`
-  for `PORTS=ofx,ae`. `type=list` works without a default. (#155)
-- **`OverlayDir`: merge several source trees into one directory.** Each
-  tree's contents land in the destination keeping their relative paths, the
-  later source wins a shared path, and `exclude=` drops globs matched against
-  each source root. See `examples/78_overlay_dirs`. (#159)
-- **`env.use_clang_tidy()`**: run clang-tidy alongside every C and C++
-  compile, with the compile's own flags. The compile runs either way, so the
-  object still appears; clang-tidy's own exit status decides the build, which
-  means a warning doesn't fail it and an error does. Pass
-  `args=["--warnings-as-errors=*"]` to make warnings fail it too. Composes
-  with `use_compiler_cache()`. The driver, `pcons.tools.co_compile`, is a
-  launcher; see `examples/76_clang_tidy`.
-
-- **`env.Command` takes `tool=`: the program that runs the command.** The
-  program is not one of the command's inputs, so it has its own argument:
-  `tool=collate` with `command="$TOOL $TARGET $SOURCES"`. pcons writes it the
-  way the shell it is generating for will run it, so no build script writes a
-  `./` or a platform conditional, and the tool is an implicit dependency
-  rather than a source, so `$SOURCES` and the indices written against it keep
-  their files. A `Target` may come from another environment, which is what a
-  host tool over a cross-compiled artifact needs; a `str` or `Path` names a
-  program that already exists and adds no dependency. A `Target` or
-  `FileNode` written inside a list-form `command=` renders as its path and
-  becomes an implicit dependency the same way, and first in the list it is
-  the program. `examples/77_android_apk` packages and signs an APK with four
-  host SDK tools over a cross-compiled library. (#141)
-
-- **`env.Command` takes `depfile=` and `deps_style=`.** A custom command can
-  now report the files it turned out to read, the way a compiler does:
-  `deps_style="gcc"` for a make-style depfile, `"msvc"` for `/showIncludes`
-  output.
-
-- **`env.Command` takes `env_vars=`: environment variables for one command
-  alone.** Written into the generated build file (`env NAME=VALUE` on POSIX,
-  a new `pcons.util.commands env` helper on Windows), so they survive a
-  direct `ninja` run, and no other command sees them — unlike `os.environ`
-  in the build script, which reaches everything. `examples/73_command_env`.
-  (#109)
-
 - **A cross build's outputs are named and installed for the platform it
   targets.** New attribute `env.target` is a `Platform` derived from the cross preset's
   triple, or the host when there is no preset. Toolchains consult it, so
@@ -164,18 +90,118 @@ read the whole changelog!
     (`libQt6Core_arm64-v8a.so`), and `find_qt` now reads that from the
     install.
   - `android_deployment_settings()`, in `pcons.toolchains.qt.android`,
-    writes the JSON file androiddeployqt reads, the one Qt's CMake writes.
+    writes the JSON file needed by `androiddeployqt`.
     Without it no Android package can be built. It is written at configure
     time, like `configure_file`, from the cross preset and the Qt found for
     that environment, and covers one ABI, one application and no QML. The transitive Qt libraries and the QML imports are left to
-    androiddeployqt, which works them out from the built application. See
+    `androiddeployqt`, which works them out from the built application. See
     the end of `docs/qt.md`.
   - `find_qt(probe=...)` picks the discovery method: `"pkg-config"`,
     `"qtpaths"`, or `"auto"` (the default, which tries both). A cross Qt needs
     `probe="qtpaths"`: its `.pc` files describe the target, and only qtpaths
     reports where the host's moc/uic/rcc live. (#127)
 
+#### Commands
+
+- **`env.Command` takes `tool=`: the program that runs the command.** Pass
+  the program separately from the inputs, and refer to it as `$TOOL`:
+  `env.Command(tool=collate, command="$TOOL $TARGET $SOURCES", ...)`.
+  - If `tool=` is a target that this build makes, pcons builds it first (it's
+    an implicit dependency, not a source, so `$SOURCES` and `${SOURCES[0]}`
+    still mean your inputs), and writes it on the command line the way the
+    shell will run it: no more `./` or platform conditionals in the script.
+    The target can come from another environment, e.g. a host tool
+    processing a cross-compiled file.
+  - A `str` or `Path` (`tool="clang-format"`, `tool=Path("/opt/bin/gen")`)
+    is treated a program this build doesn't make: found on `$PATH` or at that
+    absolute path, with no dependency added. It is not looked up as a target name.
+  - In the list form of `command=`, a `Target` or `FileNode` can be an
+    element directly, and it becomes a dependency the same way:
+    `command=[gen, "$TARGET", "$SOURCES"]` runs the program `gen` builds,
+    and `command=[python, "$SRCDIR/tools/pack.py", "$TARGET", packer]`
+    passes `packer`'s output as an argument. The first element is the
+    program; anywhere else, it's an argument written as its path.
+
+  `examples/77_android_apk` packages and signs an APK with four host SDK
+  tools over a cross-compiled library. (#141)
+
+- **`env.Command` takes `depfile=` and `deps_style=`.** A custom command can
+  now report the files it turned out to read, the way a compiler does:
+  `deps_style="gcc"` for a make-style depfile, `"msvc"` for `/showIncludes`
+  output.
+
+- **`env.Command` takes `env_vars=`: environment variables for one command
+  alone.** Written into the generated build file (`env NAME=VALUE` on POSIX,
+  a new `pcons.util.commands env` helper on Windows), so they survive a
+  direct `ninja` run, and no other command sees them — unlike setting `os.environ`
+  in the build script, which reaches everything and isn't recommended. `examples/73_command_env`.
+  (#109)
+
+- **A `PathToken` file in a command's flags is now a dependency of that
+  command.** A `PathToken` in a flag (`-Wl,--version-script=exports.txt`, a
+  response file, an options file) is read by the tool, but the command
+  previously didn't rerun when the file changed. Now it does, whenever
+  pcons knows the file. Include and library directories are unaffected. (#150)
+
+#### Linking and libraries
+
+- **Static libraries may link each other without causing a dependency
+  loop.** Two static libraries that call into each other can each
+  `link()` the other; that cycle is no longer an error, since neither
+  has to be built before the other and every linker can resolve it. On
+  Linux the archives reach GNU ld wrapped in `-Wl,--start-group ...
+  -Wl,--end-group`; Apple's ld and MSVC's link rescan archives on
+  their own and get them as they are. Object libraries and header-only
+  libraries may be in such a cycle too. See
+  `examples/85_static_lib_cycle`. (#120)
+
+- **`target.set_option("exported_symbols", [...])`**: use this to make a shared library
+  or executable export only the named symbols, realized per toolchain as a macOS symbol
+  list, a Linux version script, or an MSVC `.def` file. C names, with
+  patterns on macOS and Linux. The list is written under the target's build
+  directory and the link depends on it. (#149)
+- **A `release-fastest` variant**: the compiler's highest optimization level
+  that doesn't change results (`-O3`; `/O2 /Ob3` on MSVC), realized per
+  toolchain like the other variants. If you want unsafe options like `-ffast-math`, add them explicitly. (#153)
+
+#### Installers and bundles
+
+- **`OverlayDir`: merge several source trees into one directory.** Each
+  tree's contents land in the destination keeping their relative paths, the
+  later source wins a shared path, and `exclude=` drops globs matched against
+  each source root. See `examples/78_overlay_dirs`. (#159)
+- **The installer helpers now take `depends=`.** `create_pkg`,
+  `create_component_pkg`, `create_dmg` and `create_msix` staged their
+  sources with an internally-generated `Install`, so a directory source
+  that other targets fill had no way to wait for them. `depends=[...]`
+  orders the staging copy after those targets. (#151)
+- **`create_macos_bundle` and `create_flat_bundle` take `resources` as a
+  mapping** of bundle name to source file, so you can rename bundle
+  resources, and `create_macos_bundle` takes `pkginfo` as a `Path` to copy
+  in. (#152)
+
+#### Tools and conveniences
+
+- **`env.use_clang_tidy()`**: run clang-tidy alongside every C and C++
+  compile, with the compile's own flags. The compile runs either way, so the
+  object still appears; clang-tidy's own exit status decides the build, which
+  means a warning doesn't fail it and an error does. Pass
+  `args=["--warnings-as-errors=*"]` to make warnings fail it too. Composes
+  with `use_compiler_cache()`. The driver, `pcons.tools.co_compile`, is a
+  launcher; see `examples/76_clang_tidy`.
+
+- **Pcons now prints the variant it's using**: `Generated build files
+  for variant debug` on the terminal, or one entry per environment when
+  they differ. (#125)
+- **`env.clone(name=...)`** names a clone at creation. Named environments
+  are how two targets may share a target name. (#147)
+- **`get_var()` supports list args.** With a list default, a comma-separated
+  value becomes a list: `get_var("PORTS", ["ofx"])` returns `["ofx", "ae"]`
+  for `PORTS=ofx,ae`. `type=list` works without a default. (#155)
+
 ### Changed
+
+#### Build tiers
 
 - **Restructured which targets build by default, or with `all`.** This release introduces a new concept of "build tiers": `default`, `all` and `manual`. All targets with `build_tier = default` build by default with plain `pcons` or `ninja` or `make` (building all their dependencies as usual); targets with `build_tier = all` build only when individually named or with `all` (e.g. `pcons all`, `ninja all` etc.), and other targets must be named on the cmd line to get built (unless something already getting built depends on them of course).
 
@@ -187,21 +213,12 @@ read the whole changelog!
     is `"default"`, `False` is `"manual"`, which is what `False` did: out of
     the default build and out of `all`. (#121)
 
-- **The `debug` and `relwithdebinfo` variants compile with `/Z7` on MSVC and
-  clang-cl**, not `/Zi`. This is the modern standard.
-- **MSVC's C++ compiler gets `/Zc:__cplusplus` by default.** Without it
-  cl.exe reports `__cplusplus` as `199711L` whatever `/std:` says (!!).
-- **Breaking:** `HeaderOnlyLibrary(name, env, ...)` takes the environment
-  second, like every other builder, and `include_dirs` is now keyword-only. (#124)
-- **`ConanFinder.sync_profile()` takes its `build_type` from the environment's
-  variant** when none is passed: `debug` is `Debug`, the release flavors are
-  `Release`, `relwithdebinfo` and `minsizerel` their Conan names. It used to
-  default to `Release` whatever the variant. The docs also say how to make a
-  conf such as `tools.build:cxxflags` part of Conan's package id. (#156)
-- **`depends()` is now the one way to declare a dependency that is not linked,
-  and every dependency edge lives in one list** with the linked libraries,
-  so every part of pcons that walks the dependency graph sees the same
-  graph. Several fixes in this release were each one place that did not
+#### Dependencies
+
+- **`depends()` is now the one way to declare a dependency that doesn't go
+  on the command line**, and every dependency edge lives in one list with
+  the linked libraries, so every part of pcons that walks the dependency
+  graph sees the same graph. Several fixes in this release are related to this cleanup
   (#104, #111, #129, #139). What changes for a build script:
   - **Breaking:** `add_dependency()` is gone; write `depends()`. 
   - Each step in a builder decides how tightly it holds a dependency.
@@ -214,16 +231,28 @@ read the whole changelog!
     that shows much of this, including one input a depfile can't see.
     For a file a step reads but never reports (a response file, a
     sanitizer ignore-list), `depends(file, on_change=True)` makes every
-    step rerun when it changes (standard implicit dependency); `on_change=False` makes it exist-first only (order-only dependency).
+    step rerun when it changes (standard implicit dependency); `on_change=False` makes it an order-only dependency.
   - **Breaking:** `depends(..., propagate=False)` is gone. It chose which
     steps a dependency reached; the rule above makes that choice automatic per step.
   - A dependency cycle through `depends()` is reported by the build-order
-    check like any other. `depends()` after `resolve()` raises.
+    check like any other, and `depends()` after `resolve()` raises, like
+    creating a target after `resolve()` does (see below).
   - The link line comes from linked targets only, so a `depends()` on a
     target that builds a library no longer puts that library on the link
     line. Link it, or leave it a plain dependency.
-    `transitive_dependencies(for_link=True)` is now
-    `transitive_link_dependencies()`.
+
+- A target created without an environment (`HeaderOnlyLibrary`, the install
+  and archive builders) now gets the first environment registered in its
+  project, or the nearest enclosing one, rather than the most recently
+  registered one. Single-environment projects are unaffected. (#118)
+
+- **Breaking:** a target created after `project.resolve()` is refused. This
+  only affects projects that explicitly call `resolve`; most projects
+  let pcons do resolution after the project files are read, during the
+  generation phase. But if you call `resolve` and then create a new
+  target, it would get silently ignored. Now pcons will notify you.
+
+#### C++ and Fortran modules
 
 - **C++20 modules are rebuilt on the Scanner primitive, for clang, GCC and
   MSVC.** Nothing is scanned at configure time any more. Each translation
@@ -276,6 +305,8 @@ read the whole changelog!
 - **A scanned build declares `ninja_required_version = 1.11`,** where
   cross-file dyndep references resolve reliably.
 
+#### Paths, environments and cross builds
+
 - **A relative path given to `env.Command`, `Install`, `InstallAs`,
   `InstallDir`, `Tarfile` or `Zipfile` is now anchored at the script that
   declares it**, as it always was for `Program` and `StaticLibrary`. This
@@ -307,73 +338,25 @@ read the whole changelog!
   The API level is the oldest Android release the app runs on, a product
   decision rather than something a build tool should guess. (#127)
 
-- A target created without an environment (`HeaderOnlyLibrary`, the install
-  and archive builders) now gets the first environment registered in its
-  project, or the nearest enclosing one, rather than the most recently
-  registered one. Single-environment projects are unaffected. (#118)
+- **Breaking:** `HeaderOnlyLibrary(name, env, ...)` takes the environment
+  second, like every other builder, and `include_dirs` is now keyword-only. (#124)
 
-- **Breaking:** a target created after `project.resolve()` is refused. This
-  only affects projects that explicitly call `resolve`; most projects
-  let pcons do resolution after the project files are read, during the
-  generation phase. But if you call `resolve` and then create a new
-  target, it would get silently ignored. Now pcons will notify you.
+#### MSVC and Conan
+
+- **The `debug` and `relwithdebinfo` variants compile with `/Z7` on MSVC and
+  clang-cl**, not `/Zi`. This is the modern standard.
+- **MSVC's C++ compiler gets `/Zc:__cplusplus` by default.** Without it
+  cl.exe reports `__cplusplus` as `199711L` whatever `/std:` says (!!).
+- **`ConanFinder.sync_profile()` takes its `build_type` from the environment's
+  variant** when none is passed: `debug` is `Debug`, the release flavors are
+  `Release`, `relwithdebinfo` and `minsizerel` their Conan names. It used to
+  default to `Release` whatever the variant. The docs also say how to make a
+  conf such as `tools.build:cxxflags` part of Conan's package id. (#156)
 
 ### Fixed
 
-- **A custom builder's steps land in the subdirectory that declared the
-  target.** Before this, a factory that calls a builder during resolve (the
-  `examples/84_asset_pipeline` pattern) ran after `add_subdirectory` had
-  returned, so a relative target or source it wrote got created at the top-level
-  root rather than into the proper subdir.
-- **Import libraries on Windows are handled automatically in cross builds.** A shared
-  library on Windows has an associated `foo.lib`, so now
-  a cross build to Windows declares and links it the same way a native build
-  does. 
-- **`${TARGET}` and `$TARGET` in a compile or link flag expand to the
-  output**, so `link_flags += ["-Wl,-Map=${TARGET}.map"]` puts a map file
-  next to the program. `${TARGET}` used to reach the command line as a
-  Python repr and `$TARGET` raised "undefined variable". Text attached to
-  `$SOURCE`/`$TARGET` in a command with several inputs or outputs repeats
-  per path; one such substitution per argument. (#122, thanks @rootsec1)
-- **`create_macos_bundle()` and `create_flat_bundle()` assemble the bundle
-  under the proper build directory**, where `bundle_dir` says.
-- **clang-cl's `debug` and `relwithdebinfo` variants link with `/DEBUG`**, so
-  the build produces a PDB. Only MSVC added the linker flag before; the
-  compiled-in debug info went nowhere on clang-cl.
-- **MSVC and clang-cl variants select the CRT**: `/MDd` for `debug`, `/MD` for
-  the others. Previously cl.exe's default static release CRT was used,
-  even with the debug variant's `_DEBUG`, which selects the debug STL.
-  The dynamic CRT is also what Conan packages are built against.
-- **The Conan profile for clang-cl** now carries the MSVC runtime settings
-  (`compiler.runtime`, `runtime_type`, `runtime_version`), no `libcxx`, and
-  the conf that makes Conan build with clang-cl and Ninja. 
-- **Incorrect calls** like `link("/opt/vendor/lib/libfoo.a")` (passing a lib's path to `link`) are now refused by `link()` itself, where the build script can see it, with a message saying what to do. A bare `ws2_32.lib` is still accepted, since that's how MSVC's linker takes an import library. (#123)
-- `project.Command()` takes `tool=` too, avoiding the previous "unexpected keyword argument" error. (#141)
-- `create_macos_bundle()` and `create_flat_bundle()` return a target that
-  depends on the bundle's other installs (Info.plist, PkgInfo, resources,
-  DLLs), so `Default(bundle)` or `create_pkg(depends=[bundle])` covers the
-  whole bundle instead of the plugin binary alone.
-- An `ObjectLibrary` used as another target's source no longer makes each
-  of its objects an order-only dependency of itself and of every sibling. That was causing erroneous build cycle errors.
-- Conan packages link in dependents-first order. A listed library now follows every library that uses it, as `pkg-config --libs` orders them. (#157)
-- The installer helpers (`create_pkg`, `create_component_pkg`, `create_dmg`,
-  `create_msix`) work in an environment with a `build_prefix`: staging and
-  outputs now sit under the prefix and the command lines say so. Staging
-  is also per environment, so two variants can package the same name. (#143)
-- A `FlagPair` survives assignment and cloning. Assigning a plain list to a
-  flag variable (`env.cc.flags = ["-Wall"]`) keeps it a `FlagList`, and so
-  does `env.clone()`, which used to copy each list in a way that dropped the
-  grouping. A `FlagPair` appended afterwards still reaches the command line
-  as two tokens. (#144)
-- An `ObjectLibrary`'s objects used as another target's sources are no
-  longer reported as missing source files on every run. (#145)
-- `PathToken` accepts a `Path` as well as a string. (#146)
-- **`InstallDir` sees a file added, removed or renamed anywhere under its
-  source tree.** It used to notice only the files that existed at configure
-  time, so a new file in a subdirectory was never copied. The copy edge now
-  records every directory and file it read in a depfile, and a per-install
-  manifest removes files that no longer exist in the source, leaving files
-  that other installs put in the same destination alone. (#128, #132)
+#### Dependencies and build order
+
 - **A dependency's generated sources no longer recompile the whole
   dependent.** When a target linked a library whose sources are generated,
   every compile in that target listed the generated files as *implicit*
@@ -397,7 +380,28 @@ read the whole changelog!
   is applied. Before, such edges were silently dropped. Reported in #129.
 - `depends(path, propagate=False)` no longer drops the file dependency
   (the flag itself is gone; see Changed).
+- `depends()` on an interface target such as `HeaderOnlyLibrary` was
+  accepted and silently dropped. The target builds nothing of its own, so
+  the ordering now applies to every target that consumes it. (#111, #114)
 - A scanner can be attached to a target whose sources are other targets.
+
+- An `ObjectLibrary` used as another target's source no longer makes each
+  of its objects an order-only dependency of itself and of every sibling. That was causing erroneous build cycle errors.
+- An `ObjectLibrary`'s objects used as another target's sources are no
+  longer reported as missing source files on every run. (#145)
+- **A custom builder's steps land in the subdirectory that declared the
+  target.** Before this, a factory that calls a builder during resolve (the
+  `examples/84_asset_pipeline` pattern) ran after `add_subdirectory` had
+  returned, so a relative target or source it wrote got created at the top-level
+  root rather than into the proper subdir.
+- **`InstallDir` sees a file added, removed or renamed anywhere under its
+  source tree.** It used to notice only the files that existed at configure
+  time, so a new file in a subdirectory was never copied. The copy edge now
+  records every directory and file it read in a depfile, and a per-install
+  manifest removes files that no longer exist in the source, leaving files
+  that other installs put in the same destination alone. (#128, #132)
+
+#### Scanners, modules and Fortran
 
 - **Fortran no longer rebuilds its whole module scope forever.** gfortran
   leaves a `.mod` untouched when a recompile produces an identical one, and
@@ -407,33 +411,6 @@ read the whole changelog!
   for free: a body-only edit recompiles one file, an interface change
   propagates to the module's users.
 
-- **The Makefile and Xcode generators refuse a project that uses discovered
-  dependencies,** with an error naming the edge, instead of writing build
-  files that couldn't work. Only ninja can express `dyndep`.
-
-- `--graph` and `--mermaid` write their labels with forward slashes on every
-  platform. A backslash starts an escape in a DOT label, so a Windows path
-  came out mangled.
-- A `pragma Singleton` QML file was registered in the qmldir as a plain
-  type, so the engine handed out the type instead of the instance. (#118)
-- Two environments could share a name, which left `common@mcu` meaning two
-  things. `env.name = ...` after creation now refuses a taken name, as the
-  constructor does. (#118)
-- `target.public.include_dirs += ["inc"]` (and `+=` on any other usage
-  requirement list) silently threw away what it added. Only `+=`
-  was affected; `.append()` and `.extend()` always worked. (#108)
-- `depends()` on an interface target such as `HeaderOnlyLibrary` was
-  accepted and silently dropped. The target builds nothing of its own, so
-  the ordering now applies to every target that consumes it. (#111, #114)
-- `pcons build VAR=value` accepted the variable and never re-ran the build
-  script that reads it, so an already-generated directory kept building
-  with the old value. A variable, `--reconfigure` or `--fresh` on
-  `pcons build` now forces regeneration; a plain `pcons build` still skips
-  the script. (#116)
-- A verb in a `cli_group` can now name the targets it needs, with
-  `verb.depends(target)`, and `pcons run` builds what every level of the
-  command path declared. `pcons run <group>` with only the group's own options no longer
-  builds the group's targets and then fails with "Missing command". (#107)
 - **Collate no longer leaves `.sha256` files in the build directory.** The
   dyndep, modmap and exports writers recorded a digest beside each output to
   decide whether it had changed; they compare the file itself now, which also
@@ -444,8 +421,80 @@ read the whole changelog!
   dependencies provided, leaving the compiler to say only "module 'X' not
   found". It now warns, naming the compile, the module, and the `link()` or
   `depends()` edge that would carry the providing target's module exports.
-  A warning, not an error: a header unit or a module from outside the build
+  This is just a warning, since a header unit or a module from outside the build
   is legitimate.
+
+- **The Makefile and Xcode generators refuse a project that uses discovered
+  dependencies,** with an error naming the edge, instead of writing build
+  files that couldn't work. Only ninja can express `dyndep`.
+
+#### Windows, MSVC and Conan
+
+- **Import libraries on Windows are handled automatically in cross builds.** A shared
+  library on Windows has an associated `foo.lib`, so now
+  a cross build to Windows declares and links it the same way a native build
+  does. 
+- **clang-cl's `debug` and `relwithdebinfo` variants link with `/DEBUG`**, so
+  the build produces a PDB. Only MSVC added the linker flag before; the
+  compiled-in debug info went nowhere on clang-cl.
+- **MSVC and clang-cl variants select the CRT**: `/MDd` for `debug`, `/MD` for
+  the others. Previously cl.exe's default static release CRT was used,
+  even with the debug variant's `_DEBUG`, which selects the debug STL.
+  The dynamic CRT is also what Conan packages are built against.
+- **The Conan profile for clang-cl** now carries the MSVC runtime settings
+  (`compiler.runtime`, `runtime_type`, `runtime_version`), no `libcxx`, and
+  the conf that makes Conan build with clang-cl and Ninja. 
+- Conan packages link in dependents-first order. A listed library now follows every library that uses it, as `pkg-config --libs` orders them. (#157)
+#### Installers and bundles
+
+- **`create_macos_bundle()` and `create_flat_bundle()` assemble the bundle
+  under the proper build directory**, where `bundle_dir` says.
+- `create_macos_bundle()` and `create_flat_bundle()` return a target that
+  depends on the bundle's other installs (Info.plist, PkgInfo, resources,
+  DLLs), so `Default(bundle)` or `create_pkg(depends=[bundle])` covers the
+  whole bundle instead of the plugin binary alone.
+- The installer helpers (`create_pkg`, `create_component_pkg`, `create_dmg`,
+  `create_msix`) work in an environment with a `build_prefix`: staging and
+  outputs now sit under the prefix and the command lines say so. Staging
+  is also per environment, so two variants can package the same name. (#143)
+
+#### Environments, variables and the CLI
+
+- **`${TARGET}` and `$TARGET` in a compile or link flag expand to the
+  output**, so `link_flags += ["-Wl,-Map=${TARGET}.map"]` puts a map file
+  next to the program. `${TARGET}` used to reach the command line as a
+  Python repr and `$TARGET` raised "undefined variable". Text attached to
+  `$SOURCE`/`$TARGET` in a command with several inputs or outputs repeats
+  per path; one such substitution per argument. (#122, thanks @rootsec1)
+
+- A `FlagPair` survives assignment and cloning. Assigning a plain list to a
+  flag variable (`env.cc.flags = ["-Wall"]`) keeps it a `FlagList`, and so
+  does `env.clone()`, which used to copy each list in a way that dropped the
+  grouping. A `FlagPair` appended afterwards still reaches the command line
+  as two tokens. (#144)
+- `PathToken` accepts a `Path` as well as a string. (#146)
+- Two environments could share a name, which left `common@mcu` meaning two
+  things. `env.name = ...` after creation now refuses a taken name, as the
+  constructor does. (#118)
+- `target.public.include_dirs += ["inc"]` (and `+=` on any other usage
+  requirement list) silently threw away what it added. Only `+=`
+  was affected; `.append()` and `.extend()` always worked. (#108)
+- `pcons build VAR=value` accepted the variable and never re-ran the build
+  script that reads it, so an already-generated directory kept building
+  with the old value. A variable, `--reconfigure` or `--fresh` on
+  `pcons build` now forces regeneration; a plain `pcons build` still skips
+  the script. (#116)
+- A verb in a `cli_group` can now name the targets it needs, with
+  `verb.depends(target)`, and `pcons run` builds what every level of the
+  command path declared. `pcons run <group>` with only the group's own options no longer
+  builds the group's targets and then fails with "Missing command". (#107)
+- **Incorrect calls** like `link("/opt/vendor/lib/libfoo.a")` (passing a lib's path to `link`) are now refused by `link()` itself, where the build script can see it, with a message saying what to do. A bare `ws2_32.lib` is still accepted, since that's how MSVC's linker takes an import library. (#123)
+- `project.Command()` takes `tool=` too, avoiding the previous "unexpected keyword argument" error. (#141)
+- `--graph` and `--mermaid` write their labels with forward slashes on every
+  platform. A backslash starts an escape in a DOT label, so a Windows path
+  came out mangled.
+- A `pragma Singleton` QML file was registered in the qmldir as a plain
+  type, so the engine handed out the type instead of the instance. (#118)
 
 ### Removed
 
