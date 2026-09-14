@@ -288,8 +288,19 @@ jobs:
       - name: Install Qt (macOS)
         if: runner.os == 'macOS'
         run: brew install qt
-      - name: Install Qt (Windows)
+      - name: Cache Qt (Windows)
+        id: cache-qt-windows
         if: runner.os == 'Windows'
+        # The aqtinstall download is this job's largest cost and its main
+        # flakiness surface; a warm cache takes it off the clock. No
+        # restore-keys: a partial Qt tree is worse than none, and the key
+        # carries the version so a bump re-downloads.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:\Qt
+          key: qt-windows-6.8.3-win64_msvc2022_64
+      - name: Install Qt (Windows)
+        if: runner.os == 'Windows' && steps.cache-qt-windows.outputs.cache-hit != 'true'
         # aqtinstall fetches the official-installer layout (no pkg-config
         # files) — exercising the qtpaths discovery route in CI.
         run: uvx --from aqtinstall aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 --outputdir C:\Qt
@@ -461,7 +472,18 @@ jobs:
             echo "::error::the APK example skipped instead of running"
             exit 1
           fi
+      - name: Cache Qt for Android
+        id: cache-qt-android
+        # The two aqtinstall downloads are this job's largest cost and its
+        # main flakiness surface; a warm cache takes them off the clock. No
+        # restore-keys: a partial Qt tree is worse than none, and the key
+        # carries the version so a bump re-downloads.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Qt
+          key: qt-android-6.8.3-linux_gcc_64-android_arm64_v8a
       - name: Install Qt for Android
+        if: steps.cache-qt-android.outputs.cache-hit != 'true'
         # Two installs, and they must land side by side: a Qt for Android
         # ships no runnable moc, rcc or androiddeployqt, and reaches its host
         # Qt through a relative HostPrefix (../../gcc_64) in its
@@ -471,7 +493,8 @@ jobs:
             --outputdir "$HOME/Qt"
           uvx --from aqtinstall aqt install-qt linux android 6.8.3 android_arm64_v8a \
             --outputdir "$HOME/Qt"
-          echo "PCONS_QT_ANDROID_ROOT=$HOME/Qt/6.8.3/android_arm64_v8a" >> "$GITHUB_ENV"
+      - name: Point pcons at the Qt for Android
+        run: echo "PCONS_QT_ANDROID_ROOT=$HOME/Qt/6.8.3/android_arm64_v8a" >> "$GITHUB_ENV"
       - name: Verify the Qt for Android is usable
         # The same guard as the desktop Qt job: fail here rather than let the
         # example skip itself green because the install produced nothing.
