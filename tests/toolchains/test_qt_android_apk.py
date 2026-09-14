@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from pcons.core.environment import Environment
+from pcons.core.subst import to_shell_command
 from pcons.toolchains.qt.android import android_deployment_settings, deployment_settings
 from pcons.toolchains.qt.apk import android_apk, stage_application_library
 
@@ -48,6 +49,19 @@ def _written(path: Path | None) -> str:
     """How build.ninja spells a path: posix separators on every host."""
     assert path is not None
     return path.as_posix()
+
+
+def _written_token(path: Path) -> str:
+    """How a command line spells one whole token, quoting included.
+
+    The generator quotes a token a shell could misread, and a native
+    Windows path brings backslashes with it, so an absolute path is one
+    argument on Linux and a quoted one on Windows. Asking the generator's
+    own quoter keeps the expectation from drifting from that rule;
+    ``generate_ninja`` normalizes separators on the way back, so the same
+    replacement applies here.
+    """
+    return to_shell_command([str(path)], shell="ninja").replace("\\", "/")
 
 
 class TestWhereTheLibraryGoes:
@@ -555,7 +569,7 @@ class TestTheSigningEdge:
             store_password="env:KS",
         )
 
-        assert f"--ks {_written(keystore)}" in content
+        assert f"--ks {_written_token(keystore)}" in content
 
     def test_the_alias_is_passed_when_it_is_given(
         self, app_project, deployable, sdk
