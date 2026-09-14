@@ -420,5 +420,5 @@ def android_deployment_settings(
         return json.dumps(settings, indent=3) + "\n"
 
     project.node(output)
-    _SettingsFile(output, content).generate(project)
+    _SettingsFile(output, content).generate(project.top)
     return output

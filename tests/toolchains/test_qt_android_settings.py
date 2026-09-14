@@ -681,6 +681,27 @@ class TestWhereTheFileGoes:
             "android-deployment-settings.json"
         )
 
+    def test_a_sub_projects_file_is_written_when_pcons_drains(
+        self, found_qt, test_project
+    ) -> None:
+        """``_generate_pending()`` walks the top-level projects, so a write
+        queued on a child is never drained and the file never appears."""
+        from pcons.generators.generator import BaseGenerator
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        root = Path(test_project.root_dir)
+        (root / "child").mkdir()
+        (root / "child" / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\nproject = Project('child')\n"
+        )
+        env = android_env()
+        child = add_subdirectory("child", project=test_project, env=env)
+
+        path = android_deployment_settings(child.project, env, app="myapp")
+        BaseGenerator._generate_pending()
+
+        assert path.is_file()
+
     def test_a_relative_path_is_from_the_project_root(
         self, found_qt, test_project
     ) -> None:
