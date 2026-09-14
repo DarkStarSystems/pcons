@@ -1,0 +1,38 @@
+# Test configuration for the Qt-on-Android APK example
+
+[test]
+description = "A Qt Quick application packaged for Android by androiddeployqt: a QML module cross-compiled with host moc/rcc, one Java class in the package source directory, and the deployment settings file pcons writes"
+
+expected_outputs = [
+    "build/qt.demo_ui/qrc_demo_ui.cpp",
+    "build/libqtapp.so",
+    "build/android-deployment-settings.json",
+    "build/qtapp/libs/arm64-v8a/libqtapp_arm64-v8a.so",
+    "build/qtapp/androiddeployqt.stamp",
+]
+
+[skip]
+# macOS and Windows runners ship an NDK and set the same variables, so the
+# environment check alone would let this run where it has never been tried.
+platforms = ["windows", "darwin"]
+# PCONS_QT_ANDROID_ROOT names the Qt built for Android. There is no probing
+# for it: the host Qt on PATH answers every discovery question, and a desktop
+# Qt would link an x86-64 application into an arm64 package.
+require_env = ["ANDROID_NDK_HOME", "ANDROID_HOME", "PCONS_QT_ANDROID_ROOT"]
+requires = ["clang", "file"]
+generators = ["make", "xcode"]
+
+[verify]
+commands = [
+    # It really cross-compiled: a host compiler would have made an x86-64 file.
+    { run = "file build/libqtapp.so", expect_stdout = "ARM aarch64" },
+    # androiddeployqt reads the application under this exact name, ABI suffix
+    # and all, and packages nothing at all when it is missing.
+    { run = "file build/qtapp/libs/arm64-v8a/libqtapp_arm64-v8a.so", expect_stdout = "ARM aarch64" },
+    # The application has a QtQmlModule, so the settings point qmlimportscanner
+    # at its QML rather than telling androiddeployqt to skip the scan.
+    { run = "cat build/android-deployment-settings.json", expect_stdout = "qml-root-path" },
+    # The Java that makes classes.dex real is named, and androiddeployqt reads
+    # the directory itself, so the path is absolute.
+    { run = "cat build/android-deployment-settings.json", expect_stdout = "android-package-source-directory" },
+]

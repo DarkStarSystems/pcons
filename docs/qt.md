@@ -406,26 +406,229 @@ qt = find_qt(project, env, modules=["Core"])
 app = project.SharedLibrary("myapp", env, sources=["main.cpp"])
 
 settings = android_deployment_settings(
-    project, env, app=app, package_name="org.example.myapp"
+    project,
+    env,
+    app=app,
+    package_name="org.example.myapp",
+    package_source_dir="android",
+    permissions=["android.permission.INTERNET"],
 )
 ```
 
-It is written at configure time, like `configure_file`, and the path is
-returned. A configure that decides the same settings again leaves the file
-alone, so androiddeployqt does not re-run for it. Everything in it comes from the cross preset and from the Qt
-found for that environment, so `android()` must be given `sdk=` as well as
-`ndk=`.
+The path is returned right away, and the content is decided when pcons
+generates, once the whole build description is in. That matters: the file
+names the directories this environment's shared libraries land in and the
+QML source directories of its modules, so a target declared below the call
+-- or inside an `add_subdirectory()` under it -- still reaches the file. A
+configure that decides the same settings again leaves it alone, so
+androiddeployqt does not re-run for it. Everything else comes from the cross
+preset and from the Qt found for that environment, so `android()` must be
+given `sdk=` as well as `ndk=`.
 
-This covers one ABI, one application, and no QML. Two things pcons never
-writes, because androiddeployqt works them out itself with the built
-application in front of it: the transitive Qt library set, which it reads
-out of the staged `.so`, and the QML imports, which it finds by running
-`qmlimportscanner`. `android-deploy-plugins` is left out for the same
-reason — absent, Qt's own XML decides which plugin directories are
-bundled, which makes a larger package and never a broken one.
+`package_source_dir` is a directory of Android sources -- the manifest,
+Java, resources -- that androiddeployqt overlays on Qt's own templates. It
+is made absolute against the project root, because androiddeployqt reads it
+directly rather than through a build directory. Assembling that directory
+is the caller's: `project.Install()` is one way to build it out of a shared
+tree and a per-application one. `permissions` takes bare names; the
+`[{"name": ...}]` shape the file wants is not the caller's business.
 
-Running the tool, staging the `.so` into `<output>/libs/<abi>/`, and
-Gradle are not pcons's job yet.
+`sdkBuildToolsRevision` is always written, because androiddeployqt detects
+no revision of its own: without it gradle.properties gets an empty
+`androidBuildToolsVersion` and Gradle stops with `Invalid revision`. The
+default is the highest revision installed under the SDK the preset names,
+so a build script says nothing. `build_tools="37.0.0"` pins another one.
+The same lookup is a public helper, for a script driving the SDK tools
+itself:
+
+```python
+from pcons.toolchains.android import build_tools_program, newest_build_tools
+
+revision = newest_build_tools(sdk).name       # "37.0.0"
+zipalign = build_tools_program(sdk, "zipalign")
+```
+
+`newest_build_tools` orders the revisions as versions rather than as text,
+where `9.0.0` sorts above `37.0.0` and is four years older.
+`build_tools_program` skips a newer revision that does not hold the program
+and spells it the way the host does, `apksigner.bat` on Windows.
+
+The tools androiddeployqt runs itself -- `rcc`, `qmlimportscanner`,
+`qmldom` -- are named in the file, and they are **host** programs. A Qt for
+Android ships none of them, and `qtpaths --query` on such an install reports
+`QT_HOST_BINS` and `QT_HOST_LIBEXECS` pointing at the host Qt beside it, so
+`find_qt` already answers with the right directories. `qmldom` is not in
+every Qt build and is left out when it is missing.
+
+This covers one ABI and one application. Two things pcons never writes,
+because androiddeployqt works them out itself with the built application in
+front of it: the transitive Qt library set, which it reads out of the staged
+`.so`, and the QML imports, which it finds by running `qmlimportscanner`.
+`android-deploy-plugins` is left out for the same reason — absent, Qt's own
+XML decides which plugin directories are bundled, which makes a larger
+package and never a broken one.
+
+#### QML
+
+androiddeployqt runs `qmlimportscanner` to decide which Qt QML modules to
+bundle, and the scanner reads the filesystem. So pcons writes
+`qml-root-path`: the QML source directory of every `QtQmlModule` built in
+this environment. Nothing is asked of the build script -- a module already
+knows where its QML is.
+
+`qml-skip-import-scanning` is written only when the environment has no
+`QtQmlModule` at all. An application with QML gets the scan.
+
+A `QtQmlModule`'s generated `qmldir` is embedded in a resource, and pcons
+writes it flat, so an import path resolves none of the application's own
+modules. Measured against Qt 6.11.1: that costs nothing as long as every
+module's QML source directory is a root path. The scanner then reports the
+same Qt modules either way, and the application's own module is reported
+with no path -- which is right, since it is in the resource and there is
+nothing on disk to bundle.
+
+#### Staging the application library
+
+androiddeployqt reads the application out of `<output>/libs/<abi>/` and does
+not put it there. Its own dependency libraries it does copy, out of the
+`extraLibraryDirs` the settings file names, but not the application itself.
+With nothing staged it exits 0 and reports success, having packaged no
+application at all, so this step is not optional:
+
+```python
+from pcons.toolchains.qt.apk import stage_application_library
+
+staged = stage_application_library(project, env, app=app)
+```
+
+One copy, into `<build>/<app>/libs/<abi>/lib<app>_<abi>.so`. The ABI suffix
+is what androiddeployqt looks for, and the directory is named after the
+application because androiddeployqt owns the whole of it -- two applications
+built in one environment each get their own.
+
+pcons copies rather than building the application straight into the staging
+directory the way Qt's CMake does. One environment then builds any number of
+applications instead of needing one environment each because of a packaging
+detail.
+
+#### Building the package
+
+```python
+from pcons.toolchains.qt.apk import android_apk
+
+apk = android_apk(project, env, app=app, settings=settings)
+```
+
+The staging above happens on its own when `android_apk` is not given a
+`staged=`, so a package cannot be built without the application in it.
+androiddeployqt is a host tool, and the Qt located for an Android
+environment already answers with the host directories, so nothing has to be
+told where it is.
+
+The package lands at
+`<output>/build/outputs/apk/debug/<output>-debug.apk`. Gradle names it after
+the **output directory**, not after the application, and `release=True`
+gives `<output>/build/outputs/apk/release/<output>-release-unsigned.apk` --
+unsigned, so it installs on nothing until it is signed. The debug default is
+signed with Gradle's own debug key and installs.
+
+`no_build=True` passes `--no-build`, which is androiddeployqt's "install a
+package built earlier" mode rather than a way to stop before Gradle: on its
+own it writes nothing at all. The target is a stamp and is not built by
+default.
+
+!!! note "This edge runs a build system"
+    androiddeployqt drives Gradle, and pcons's first rule is configuration
+    rather than execution. It is still the right call -- the alternative is
+    owning Qt's Java, its manifest merging and its resource pipeline -- but
+    the cost is real. The first run downloads the Gradle distribution and
+    the Android Gradle plugin from the network, which takes minutes; later
+    runs use the cache. With a warm cache, Qt 6.11.1: 19 s and 35 Gradle
+    tasks for a debug package. No system Gradle is needed, androiddeployqt
+    brings its own wrapper. Gradle needs a JDK it supports: 21 works, 26
+    fails inside the Android Gradle plugin.
+
+#### Signing a release package
+
+A release package comes out of androiddeployqt unsigned and installs on
+nothing. `sign_apk` signs it with `apksigner`, on an edge of its own:
+
+```python
+from pcons.toolchains.qt.apk import android_apk, sign_apk
+
+apk = android_apk(project, env, app=app, settings=settings, release=True)
+signed = sign_apk(
+    project,
+    env,
+    app=app,
+    apk=apk,
+    keystore="/etc/keys/release.jks",
+    alias="upload",
+    store_password="env:MYAPP_KEYSTORE_PASS",
+)
+```
+
+**The password is named, never given.** `store_password` is an apksigner
+password source: `env:NAME` reads it from the environment the build runs
+in, `file:PATH` from the first line of a file. Either way the generated
+build file holds a variable name or a path, and apksigner reads the value
+itself when the edge runs. `pass:<password>` is refused, because pcons
+would write it into `build.ninja`, and so is `stdin`, because a build edge
+has no console to answer a prompt.
+
+A relative `file:` path is made absolute against the project root, the same
+anchor as `keystore`: apksigner runs from the build directory and would
+find neither where it was written.
+
+`alias` is needed only when the keystore holds more than one key.
+`key_password` names where the private key password comes from, in the same
+two forms; left out, apksigner opens the key with the keystore password.
+Two `file:` sources may not be the same file: apksigner reads one password
+per line from a file and fails on the second with `end of file reached`.
+
+The keystore is an implicit dependency of the edge, so a new keystore
+re-signs. It is never generated: without `keystore=` the call raises and
+names the argument, rather than falling back to a debug key. Debug packages
+need none of this -- Gradle signs them with its own debug key, and
+`android_apk` without `release=True` produces one that installs.
+
+The signed package lands beside the unsigned one, at
+`<output>/build/outputs/apk/release/<output>-release-signed.apk`, which is
+the name Qt's own `--sign` gives it.
+
+!!! note "Why not androiddeployqt --sign"
+    androiddeployqt signs on its own with `--sign <keystore> <alias>`, and
+    it does read `QT_ANDROID_KEYSTORE_STORE_PASS` and
+    `QT_ANDROID_KEYSTORE_KEY_PASS` from the build-time environment, so that
+    path would keep the password out of the build file too. A separate edge
+    wins on three counts: changing the keystore re-signs instead of
+    re-running Gradle, the build file says where the password comes from
+    instead of depending on ambient variables nothing declares, and
+    `--sign` renames the package androiddeployqt writes, which would make
+    the path depend on a signing argument.
+
+#### The worked example
+
+`examples/79_qt_android_apk` is the whole path end to end: a Qt Quick
+application, a `QtQmlModule` cross-compiled with the host Qt's moc and rcc,
+one Java class in the package source directory, a manifest naming
+`QtActivity`, the settings file, the staging and androiddeployqt.
+
+Three things it needs that nothing probes for:
+
+- `PCONS_QT_ANDROID_ROOT`, the Qt built for Android. `find_qt` is given it
+  as `qt_root=` with `probe="qtpaths"` -- the pkg-config probe would answer
+  with a libexec directory full of target executables.
+- a build-tools revision, see above.
+- for a real Gradle run, a JDK the Android Gradle plugin supports. 21 works;
+  26 fails in the `androidJdkImage` transform. That is a property of the
+  machine, so the example does not choose one: set `JAVA_HOME` if the
+  default is newer.
+
+CI runs it with `no_build=True`, which proves everything pcons writes --
+the settings, the staged `lib<app>_<abi>.so`, the command line -- without
+the network and the minutes Gradle's first run costs. `PCONS_ANDROID_GRADLE=1`
+switches the example to a real package.
 
 ### Packaging into installers
 
