@@ -124,8 +124,10 @@ Commands are shown as the build runs them, from the build directory (build).
       math     <- physics (public)
 
 build tiers:
-  simulator  default  product (Program)
-  bench      all      build_tier = "all"  pcons-build.py:31
+  default:
+    simulator  product (Program)
+  all:
+    bench      build_tier = "all"  pcons-build.py:31
 
 Environment #1  (toolchain: llvm)  pcons-build.py:8
   cc.flags:

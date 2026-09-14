@@ -825,7 +825,7 @@ tells you which two lines disagree.
 To see every target's tier and why it's there:
 
 ```bash
-pcons explain    # includes a "build tiers" section, one line per target
+pcons explain    # includes a "build tiers" section: one list per tier
 pcons -v         # logs the same lines while generating
 ```
 

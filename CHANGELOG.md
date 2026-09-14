@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The "build tiers" report (`pcons -v` and `pcons explain`) now lists one
+  section per tier, default first, with each section sorted by
+  subdirectory and then name. A subdirectory column shows where each
+  target lives when the project has any.
+
 ### Fixed
 
 - `pcons explain` crashed with an `AttributeError` when a tool or usage

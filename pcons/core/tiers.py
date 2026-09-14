@@ -111,11 +111,14 @@ class BuildTiers:
         return [d.target for d in self._decisions if d.tier != "manual"]
 
     def report_lines(self, targets: list[Target] | None = None) -> list[str]:
-        """The "build tiers" report: a header and one aligned line per target.
+        """The "build tiers" report: a header, then one section per tier.
 
         Used by ``pcons explain`` and by ``-v`` at generate, so both say the
-        same thing. *targets* restricts the report to those targets, in their
-        order; by default every target is reported.
+        same thing. Tiers come widest invocation first (default, all,
+        manual); within a tier, targets are listed by subdirectory and then
+        by name, so a reader finds a target where they expect it rather
+        than where the script happened to declare it. *targets* restricts
+        the report to those targets; by default every target is reported.
         """
         decisions = (
             [d for t in targets if (d := self.get(t)) is not None]
@@ -124,19 +127,26 @@ class BuildTiers:
         )
         if not decisions:
             return []
+        # The subdirectory column appears only when there is something to
+        # tell: a single-directory project has no use for a blank column.
+        subdirs = {id(d): _subdir_text(d.target) for d in decisions}
+        subdir_width = max(len(s) for s in subdirs.values())
         name_width = max(len(d.target.name) for d in decisions)
-        tier_width = max(len(d.tier) for d in decisions)
         reason_width = max(len(d.reason) for d in decisions)
         lines = ["build tiers:"]
-        for d in decisions:
-            line = (
-                f"  {d.target.name:<{name_width}}  "
-                f"{d.tier:<{tier_width}}  "
-                f"{d.reason:<{reason_width}}"
-            )
-            if d.location is not None:
-                line += f"  {self._where(d.location)}"
-            lines.append(line.rstrip())
+        for tier in BUILD_TIERS:
+            members = sorted((d for d in decisions if d.tier == tier), key=_listing_key)
+            if not members:
+                continue
+            lines.append(f"  {tier}:")
+            for d in members:
+                line = f"    {d.target.name:<{name_width}}  "
+                if subdir_width:
+                    line += f"{subdirs[id(d)]:<{subdir_width}}  "
+                line += f"{d.reason:<{reason_width}}"
+                if d.location is not None:
+                    line += f"  {self._where(d.location)}"
+                lines.append(line.rstrip())
         return lines
 
     def _where(self, location: SourceLocation) -> str:
@@ -147,6 +157,19 @@ class BuildTiers:
         if filename.is_absolute() and filename.is_relative_to(root):
             filename = filename.relative_to(root)
         return f"{filename.as_posix()}:{location.lineno}"
+
+
+def _subdir_text(target: Target) -> str:
+    """The subdirectory a target was declared in, empty at the top level."""
+    return target._subdir.as_posix() if target._subdir.parts else ""
+
+
+def _listing_key(decision: TierDecision) -> tuple[tuple[str, ...], str, str]:
+    """Sort key for the report: subdirectory, then name (case-insensitive,
+    with the exact name breaking ties so the order is stable)."""
+    target = decision.target
+    subdir = tuple(part.casefold() for part in target._subdir.parts)
+    return (subdir, target.name.casefold(), target.name)
 
 
 def decide_build_tiers(project: Project) -> BuildTiers:

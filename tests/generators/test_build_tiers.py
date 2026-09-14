@@ -373,7 +373,10 @@ class TestReport:
         lines = decide_build_tiers(project).report_lines()
         assert lines[0] == "build tiers:"
         rows = {line.split()[0]: line for line in lines[1:]}
-        assert "default" in rows["app"]
+        # One section per tier, widest invocation first.
+        assert [k for k in rows if k.endswith(":")] == ["default:", "all:"]
+        order = [line.split()[0] for line in lines[1:]]
+        assert order == ["default:", "app", "all:", "bench", "install_dist", "note"]
         assert "named in Default()" in rows["app"]
         assert "not named in Default()" in rows["note"]
         assert "step (Install)" in rows["install_dist"]
@@ -384,13 +387,35 @@ class TestReport:
         # A builder placement has no script line to name.
         assert ":" not in rows["install_dist"]
 
+    def test_sections_sort_by_subdirectory_then_name(self, project, env):
+        """Within a tier, the order is the tree's, not the script's:
+        top level first, then each subdirectory, names case-insensitively."""
+        command(env, "zeta", "zeta.txt")
+        with project._enter_subdir("lib"):
+            command(env, "Beta", "beta.txt")
+            command(env, "alpha", "alpha.txt")
+        with project._enter_subdir("app"):
+            command(env, "gamma", "gamma.txt")
+        command(env, "Alpha", "top-alpha.txt")
+
+        lines = decide_build_tiers(project).report_lines()
+        rows = [line.split() for line in lines[2:]]
+        assert [row[0] for row in rows] == ["Alpha", "zeta", "gamma", "alpha", "Beta"]
+        # The subdirectory column shows where each one lives.
+        assert [row[1] for row in rows if row[0] == "gamma"] == ["app"]
+        assert [row[1] for row in rows if row[0] == "Beta"] == ["lib"]
+
+    def test_flat_project_has_no_subdirectory_column(self, project, env):
+        command(env, "note", "note.txt")
+        line = decide_build_tiers(project).report_lines()[2]
+        assert line.split()[:2] == ["note", "product"]
+
     def test_a_subset_reports_only_those_targets(self, project, env):
         app = command(env, "app", "app.txt")
         command(env, "note", "note.txt")
 
         lines = decide_build_tiers(project).report_lines([app])
-        assert len(lines) == 2
-        assert lines[1].split()[0] == "app"
+        assert lines == ["build tiers:", "  default:", "    app  product (Command)"]
 
     def test_no_targets_no_report(self, project):
         assert decide_build_tiers(project).report_lines() == []
