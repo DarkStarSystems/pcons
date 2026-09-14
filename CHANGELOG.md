@@ -89,13 +89,31 @@ read the whole changelog!
   - Linking Qt for Android works: its libraries carry the ABI in their names
     (`libQt6Core_arm64-v8a.so`), and `find_qt` now reads that from the
     install.
-  - `android_deployment_settings()`, in `pcons.toolchains.qt.android`,
-    writes the JSON file needed by `androiddeployqt`.
-    Without it no Android package can be built. It is written at configure
-    time, like `configure_file`, from the cross preset and the Qt found for
-    that environment, and covers one ABI, one application and no QML. The transitive Qt libraries and the QML imports are left to
+  - **A Qt application can be packaged as an Android APK.** Three functions
+    in `pcons.toolchains.qt`:
+    - `android_deployment_settings()` writes the JSON file `androiddeployqt`
+      needs: the Qt directories, the host tools, the directories your shared
+      libraries landed in, the QML a `QtQmlModule` was built from, plus
+      `package_name`, `package_source_dir` (your manifest/Java/resources,
+      overlaid on Qt's templates), `permissions` and `build_tools` (the
+      newest installed revision by default; `newest_build_tools(sdk)` finds
+      it). The file is written once the build description is complete, so
+      it doesn't matter where in the script you call it.
+    - `android_apk()` stages the application where `androiddeployqt` looks
+      for it (without that step the tool reports success having packaged
+      nothing), then runs `androiddeployqt` and Gradle from a build edge.
+      `no_build=True` does everything but Gradle, which is what CI uses.
+      The package is an `all`-tier target, so plain `pcons` doesn't run
+      Gradle; `pcons all` or naming it does.
+    - `sign_apk()` signs a release package with `apksigner`. The password is
+      named, never given: `store_password="env:NAME"` or `"file:PATH"`,
+      which `apksigner` reads when the edge runs, so no secret reaches
+      `build.ninja`. `pass:` and stdin are refused. The signed package is
+      `manual`: it needs a keystore, so it builds only when named.
+
+    The transitive Qt libraries and the QML imports are left to
     `androiddeployqt`, which works them out from the built application. See
-    the end of `docs/qt.md`.
+    `examples/79_qt_android_apk` and the end of `docs/qt.md`. (#167)
   - `find_qt(probe=...)` picks the discovery method: `"pkg-config"`,
     `"qtpaths"`, or `"auto"` (the default, which tries both). A cross Qt needs
     `probe="qtpaths"`: its `.pc` files describe the target, and only qtpaths
