@@ -167,9 +167,10 @@ class TestItIsARealBuildEdge:
 
 class TestWhatItRefuses:
     def test_an_environment_that_was_never_retargeted(self, app_project) -> None:
+        """The refusal names staging, which is what the caller asked for."""
         env = Environment()
 
-        with pytest.raises(ValueError, match="retargeted with"):
+        with pytest.raises(ValueError, match="Staging the application library"):
             stage_application_library(app_project, env, app=_app(app_project, env))
 
 
@@ -711,20 +712,32 @@ class TestWhatSigningRefuses:
                 app_project, env, keystore="release.jks", store_password="env:KS"
             )
 
-    def test_an_environment_that_was_never_retargeted(self, app_project) -> None:
+    def _sign_apk_directly(self, project, env) -> None:
         from pcons.toolchains.qt.apk import sign_apk
 
-        env = Environment()
+        sign_apk(
+            project,
+            env,
+            app="myapp",
+            apk=None,  # ty: ignore[invalid-argument-type]
+            keystore="release.jks",
+            store_password="env:KS",
+        )
 
-        with pytest.raises(ValueError, match="retargeted with"):
-            sign_apk(
-                app_project,
-                env,
-                app="myapp",
-                apk=None,  # ty: ignore[invalid-argument-type]
-                keystore="release.jks",
-                store_password="env:KS",
-            )
+    def test_an_environment_that_was_never_retargeted(self, app_project) -> None:
+        with pytest.raises(ValueError, match="Signing an Android package"):
+            self._sign_apk_directly(app_project, Environment())
+
+    def test_a_preset_with_no_sdk_says_who_needs_one(self, app_project) -> None:
+        """apksigner lives under the SDK. A caller who asked for signing and
+        never mentioned androiddeployqt must not be told what androiddeployqt
+        needs: that sends them reading the wrong page."""
+        env = android_env(sdk=None)
+
+        with pytest.raises(
+            ValueError, match="Signing an Android package needs the Android SDK"
+        ):
+            self._sign_apk_directly(app_project, env)
 
 
 class TestWhereTheSignedPackageGoes:

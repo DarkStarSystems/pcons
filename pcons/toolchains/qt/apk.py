@@ -79,7 +79,7 @@ def stage_application_library(
     Raises:
         ValueError: If the environment is not an Android cross environment.
     """
-    abi = _android_preset(env).arch
+    abi = _android_preset(env, what="Staging the application library").arch
     directory = Path(output) if output is not None else android_output_dir(env, app)
     staged = directory / "libs" / abi / application_library_name(app, abi)
     return project.InstallAs(staged, app, name=f"{app.name}-apk-lib", no_prefix=True)
@@ -318,7 +318,7 @@ def sign_apk(
             source would put the password in the build file, or if no
             apksigner was found.
     """
-    cross = _android_preset(env)
+    cross = _android_preset(env, what="Signing an Android package")
     if keystore is None:
         raise ValueError(
             "sign_apk() needs the release keystore: pass keystore=<path>. "

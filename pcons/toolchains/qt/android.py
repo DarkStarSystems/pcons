@@ -165,17 +165,25 @@ def _library_dirs(project: Project, env: Environment) -> list[Path]:
     return list(found)
 
 
-def _android_preset(env: Environment) -> CrossPreset:
+def _android_preset(env: Environment, *, what: str = "androiddeployqt") -> CrossPreset:
+    """The Android preset *env* was retargeted with.
+
+    Args:
+        env: The environment to read.
+        what: What is asking, named in both refusals. Half the callers here
+              are not androiddeployqt, and a message telling someone who
+              called sign_apk() what androiddeployqt needs sends them
+              looking in the wrong place.
+    """
     cross = env.cross
     if cross is None or getattr(cross, "ndk", None) is None:
         raise ValueError(
-            "androiddeployqt settings need an environment retargeted with "
-            "an Android preset: env.apply_cross_preset(android(ndk=..., "
-            "api=...))."
+            f"{what} needs an environment retargeted with an Android "
+            f"preset: env.apply_cross_preset(android(ndk=..., api=...))."
         )
     if cross.sdk is None:
         raise ValueError(
-            f"androiddeployqt needs the Android SDK and preset "
+            f"{what} needs the Android SDK and preset "
             f"'{cross.name}' has none. Pass it where the NDK is passed: "
             f"android(ndk=..., api=..., sdk=...)."
         )
