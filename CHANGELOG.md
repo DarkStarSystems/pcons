@@ -182,9 +182,15 @@ read the whole changelog!
   `Tarfile`, `Zipfile`, the installer helpers), `"manual"` for a target that
   runs only by name (`Test`, run by `ninja test`; Qt's `lupdate` and
   `QtDeploy`). `ninja all` builds everything but the manual ones, as before.
+  A macOS or flat bundle is a product: plain `ninja` assembles it, where it
+  used to build only the plugin inside.
   - **Migration:** a `Command` whose output nothing consumes used to build
     only when named or listed in `Default()`, and now builds by default. To
-    keep one out of the ordinary build, write `cmd.build_tier = "all"`.
+    keep one out of the ordinary build, write `cmd.build_tier = "all"`. The
+    other way round: a project whose only targets are steps (an install-only
+    script) used to have its steps run by a plain `ninja`, and now builds
+    nothing until it names one: `project.Default(staged)`, or
+    `staged.build_tier = "default"`.
   - `Default()` still names the default tier outright, demoting the products
     it doesn't name, but decides nothing at the call: the tiers are decided
     once at generate, from every `build_tier`, every `Default()` call and
@@ -195,7 +201,8 @@ read the whole changelog!
   - `pcons explain` gains a "build tiers" section — each target's tier, why,
     and the line responsible — and `pcons -v` logs the same lines at generate.
   - `target.build_by_default` is a deprecated alias, kept one release: `True`
-    is `"default"`, `False` is `"all"`. (#121)
+    is `"default"`, `False` is `"manual"`, which is what `False` did: out of
+    the default build and out of `all`. (#121)
 - **The `debug` and `relwithdebinfo` variants compile with `/Z7` on MSVC and
   clang-cl**, not `/Zi`. This is the modern standard.
 - **MSVC's C++ compiler gets `/Zc:__cplusplus` by default.** Without it

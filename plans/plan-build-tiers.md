@@ -45,8 +45,9 @@ what lived under the current directory; pcons has no such rule.)
 - The script may set it: `bench.build_tier = "all"`,
   `firmware.build_tier = "default"`, `lupdate.build_tier = "manual"`.
 - `build_by_default` is kept one release as a deprecated alias:
-  `True` reads/writes `"default"`, `False` reads/writes `"all"`. (Qt's two
-  utility targets move to `"manual"`, which is what they meant.)
+  `True` reads/writes `"default"`, `False` writes `"manual"`: the old False
+  kept a target out of `all` too, which is what manual means. (Qt's two
+  utility targets say `"manual"` outright.)
 - Core knows the three words and nothing about what makes a Program a
   product; that is the builder's declaration.
 

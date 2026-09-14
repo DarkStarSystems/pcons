@@ -629,12 +629,14 @@ class Target:
     @property
     def build_by_default(self) -> bool:
         """Deprecated alias for :attr:`build_tier`: True is ``"default"``,
-        False is ``"all"``. A manual target reads as False."""
+        False is ``"manual"``. False used to keep a target out of ``all`` as
+        well as out of the default build, which is what manual means; a
+        target in ``all`` reads as False too."""
         return self._build_tier == "default"
 
     @build_by_default.setter
     def build_by_default(self, value: bool) -> None:
-        self.build_tier = "default" if value else "all"
+        self.build_tier = "default" if value else "manual"
 
     def place_in_tier(self, tier: str, *, by: str | None = None) -> None:
         """Declare the tier this target's builder places it in.

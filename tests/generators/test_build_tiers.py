@@ -329,10 +329,13 @@ class TestBuildByDefaultAlias:
         assert note.build_by_default is True
         assert note.build_tier == "default"
 
-    def test_false_writes_all(self, project, env):
+    def test_false_writes_manual(self, project, env):
+        """False kept a target out of `all` as well as the default build,
+        which is what manual means; mapping it to `all` would put a
+        source-rewriting target on `ninja all` with nothing said."""
         note = command(env, "note", "note.txt")
         note.build_by_default = False
-        assert note.build_tier == "all"
+        assert note.build_tier == "manual"
         assert note.build_by_default is False
 
     def test_true_writes_default(self, project, env):
@@ -354,7 +357,7 @@ class TestBuildByDefaultAlias:
         note.place_in_tier("default", by="Command")
 
         decided = decide_build_tiers(project)[note]
-        assert decided.tier == "all"
+        assert decided.tier == "manual"
         assert decided.location is not None
 
 
@@ -550,5 +553,53 @@ class TestMakefileManualOnlyProject:
 
         content = _generate(project, MakefileGenerator())
 
-        assert "default:" not in content
+        assert "\ndefault:\n" in content  # an explicit nothing
         assert "\nall:" not in content
+
+
+class TestAnEmptyDefaultTier:
+    """When nothing is in the default tier, a plain build builds nothing:
+    not the steps in `all`, and not the build tool's own choice of the first
+    edge, which could be a manual target."""
+
+    @pytest.fixture
+    def steps_only(self, project, env):
+        note = command(env, "note", "note.txt")
+        note.build_tier = "manual"
+        project.Install("dist", [note])
+        project.resolve()
+        return project
+
+    def test_ninja_names_an_explicit_nothing(self, steps_only):
+        content = _generate(steps_only, NinjaGenerator())
+        assert "default pcons-nothing\n" in content
+        assert "default all" not in content
+        assert "build all: phony" in content  # the install is still one word away
+
+    def test_make_names_an_explicit_nothing(self, steps_only):
+        content = _generate(steps_only, MakefileGenerator())
+        assert "\ndefault:\n" in content
+        assert ".DEFAULT_GOAL := default" in content
+        assert "\nall: " in content
+
+
+class TestRegisteredHelpersDeclareTheirTier:
+    """A registered builder's declaration is what places the target it
+    returns, so a helper that wraps a Command or an Install must declare
+    its own tier or the wrapped builder's placement is overwritten."""
+
+    @pytest.mark.parametrize("name", ["Pkg", "ComponentPkg", "Dmg", "Msix", "Appx"])
+    def test_an_installer_is_a_step(self, name):
+        from pcons.core.builder_registry import BuilderRegistry
+
+        registration = BuilderRegistry.get(name)
+        assert registration is not None
+        assert registration.build_tier == "all"
+
+    @pytest.mark.parametrize("name", ["MacosBundle", "FlatBundle"])
+    def test_a_bundle_is_a_product(self, name):
+        from pcons.core.builder_registry import BuilderRegistry
+
+        registration = BuilderRegistry.get(name)
+        assert registration is not None
+        assert registration.build_tier == "default"

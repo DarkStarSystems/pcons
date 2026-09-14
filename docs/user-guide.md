@@ -832,9 +832,9 @@ Naming a target in `Default()` *and* setting its `build_tier` to `"all"` or
 
 !!! note "`build_by_default`"
     The older boolean is a deprecated alias, kept one release: `True` reads
-    and writes `"default"`, `False` reads and writes `"all"`. Write
-    `build_tier` instead — and for a target that must not run unasked,
-    `"manual"` is what `False` was usually reaching for.
+    and writes `"default"`, `False` writes `"manual"`, which is what `False`
+    did: out of the default build and out of `all`. Write `build_tier`
+    instead, and say `"all"` for a step that `ninja all` may run.
 
 **Aliases** create named phony targets for convenient building:
 
