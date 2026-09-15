@@ -846,7 +846,7 @@ def anchor_target_paths(
     project = getattr(env, "_project", None) if env is not None else None
     if project is None or env is None:
         return [Path(t.name) if isinstance(t, Node) else Path(t) for t in targets]
-    resolver = project._path_resolver
+    resolver = project.top_path_resolver
     build_dir = env.build_dir_for(Project.current()._node_offset)
     at = get_caller_location()
     anchored: list[Path] = []

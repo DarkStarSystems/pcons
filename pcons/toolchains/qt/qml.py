@@ -315,14 +315,14 @@ class QtQmlModuleBuilder:
         )
         qt_env = info.qt_env
         qt_dir = info.qt_dir
-        root = project._path_resolver.project_root
+        root = project.top_path_resolver.project_root
         qml_root = project.current_dir
         qml_entries = _qml_entries(name, qml_files, qml_root)
 
         # ---- C++ type registration (only when there are moc'ed types) ----
         registrar_node: Node | None = None
         qmltypes_name = f"{name}.qmltypes"
-        resolver = project._path_resolver
+        resolver = project.top_path_resolver
         metatypes = info.metatypes_node
         if metatypes is not None:
             foreign = _qt_metatypes(project, env, link)

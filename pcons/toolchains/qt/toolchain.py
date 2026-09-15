@@ -114,7 +114,7 @@ def _source_path(source: Node) -> Path:
 def _source_rel_dir(env: Environment, source: Node) -> tuple[str, ...]:
     """Project-relative dir parts of a source, for collision-free layout."""
     project = getattr(env, "_project", None)
-    root = None if project is None else project._path_resolver.project_root
+    root = None if project is None else project.top_path_resolver.project_root
     return output_rel_dir(_source_path(source), root)
 
 

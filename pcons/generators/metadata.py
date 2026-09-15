@@ -62,7 +62,9 @@ class MetadataGenerator(BaseGenerator):
         return {
             "name": project.name,
             "parent": project.parent.name if not project.is_top_level else None,
-            "root_dir": project._path_resolver.make_project_relative(project.root_dir),
+            "root_dir": project.top_path_resolver.make_project_relative(
+                project.root_dir
+            ),
             "build_dir": project.build_dir.as_posix(),
             "targets": [
                 self._serialize_target(target, project, tiers)
@@ -81,12 +83,12 @@ class MetadataGenerator(BaseGenerator):
     ) -> dict[str, Any]:
         """Serialize one target to metadata."""
         outputs = [
-            project._path_resolver.make_project_relative(node.path)
+            project.top_path_resolver.make_project_relative(node.path)
             for node in target.output_nodes
             if isinstance(node, FileNode)
         ]
         sources = [
-            project._path_resolver.make_project_relative(node.path)
+            project.top_path_resolver.make_project_relative(node.path)
             for node in target.sources
             if isinstance(node, FileNode)
         ]
@@ -94,7 +96,7 @@ class MetadataGenerator(BaseGenerator):
         decision = tiers.get(target)
 
         location: dict[str, Any] = {
-            "file": project._path_resolver.make_project_relative(
+            "file": project.top_path_resolver.make_project_relative(
                 Path(target.defined_at.filename)
             ),
             "line": target.defined_at.lineno,
@@ -130,7 +132,9 @@ class MetadataGenerator(BaseGenerator):
         entries: list[str] = []
         for node in alias.targets:
             if isinstance(node, FileNode):
-                entries.append(project._path_resolver.make_project_relative(node.path))
+                entries.append(
+                    project.top_path_resolver.make_project_relative(node.path)
+                )
             else:
                 pass  # Ignore for now
 

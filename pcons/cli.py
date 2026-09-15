@@ -363,7 +363,7 @@ def _buildable_names(project: Project) -> list[str]:
     """
     from pcons.core.node import FileNode
 
-    resolver = project._path_resolver
+    resolver = project.top_path_resolver
     names = {"all", *project.tree_aliases}
     for target in project.targets:
         for node in target.output_nodes:
@@ -382,7 +382,7 @@ def _env_target_paths(project: Project) -> dict[str, list[str]]:
     """
     from pcons.core.node import FileNode
 
-    resolver = project._path_resolver
+    resolver = project.top_path_resolver
     spellings: dict[str, list[str]] = {}
     for target in project.targets:
         env = target.env
@@ -1419,7 +1419,7 @@ def _project_env_lookup(project: Project) -> Callable[[str], list[str] | None]:
         except (KeyError, ValueError) as exc:
             logger.debug("%s", exc.args[0] if exc.args else exc)
             return None
-        resolver = project._path_resolver
+        resolver = project.top_path_resolver
         paths = [
             resolver.make_execution_relative(node.path)
             for node in target.output_nodes
@@ -2975,7 +2975,7 @@ class RunGroup(MergingGroup):
         may declare several, and only the target's own knows its root.
         """
         return [
-            target.project._path_resolver.make_execution_relative(node.path)
+            target.project.top_path_resolver.make_execution_relative(node.path)
             for target in targets
             for node in target.output_nodes
         ]

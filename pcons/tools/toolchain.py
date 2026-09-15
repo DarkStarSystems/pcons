@@ -1363,7 +1363,7 @@ class BaseToolchain(ABC):
         every other path in the build files, so moving the tree does not
         rewrite the link rules."""
         path = self._write_link_input(target, suffix, text)
-        rel = target.project._path_resolver.make_execution_relative(path)
+        rel = target.project.top_path_resolver.make_execution_relative(path)
         return PathToken(prefix=prefix, path=rel, path_type="build")
 
     def get_link_flags_for_target(

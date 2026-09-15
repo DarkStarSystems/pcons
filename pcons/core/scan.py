@@ -439,7 +439,7 @@ class ScannerResolver:
             return
 
         scope_id = self._scope_id(scanner, target)
-        rel = project._path_resolver.make_execution_relative
+        rel = project.top_path_resolver.make_execution_relative
         base_rel = f"scan/{scanner.name}"
         build_dir = project.build_dir
         # Node identity uses the canonical (possibly relative) build_dir

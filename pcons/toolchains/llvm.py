@@ -507,7 +507,7 @@ class LlvmToolchain(UnixToolchain):
         if not scopes:
             return
         flag_spec = _clang_std_module_flag_spec()
-        rel = project._path_resolver.make_execution_relative
+        rel = project.top_path_resolver.make_execution_relative
 
         # Per-object facts the scanner callbacks read. Keys are id(obj_node);
         # the callbacks run later in the same resolve pass.

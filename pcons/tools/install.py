@@ -131,7 +131,7 @@ def _dest_suffix(project: Project, dest: Path) -> str:
     is applied, so PCONS_INSTALL_PREFIX can't leak into target names and make
     build.ninja vary between runs.
     """
-    canonical = project._path_resolver.canonicalize(dest)
+    canonical = project.top_path_resolver.canonicalize(dest)
     parts = canonical.parts[1:] if canonical.anchor else canonical.parts
     return "_".join(_UNSAFE_IN_NAME.sub("_", part) for part in parts)
 

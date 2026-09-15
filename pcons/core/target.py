@@ -724,7 +724,7 @@ class Target:
     @property
     def path_resolver(self) -> PathResolver:
         """Get the Path resolver for this target's directory."""
-        resolver = self.project._path_resolver  # top-anchored
+        resolver = self.project.top_path_resolver  # top-anchored
         return resolver.subdir(self._subdir) if self._subdir.parts else resolver
 
     @property
