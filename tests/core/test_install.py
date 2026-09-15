@@ -575,7 +575,9 @@ class TestInstallWithNinja:
 
         node = install.output_nodes[0]
         assert node.role is None
-        assert node.path == Path(".pkg_staging/payload/app")
+        # Anchored like any other target: the node path carries the build
+        # directory prefix, which the generator strips again below.
+        assert node.path == Path("build/.pkg_staging/payload/app")
 
         gen = NinjaGenerator()
         gen.generate(project)

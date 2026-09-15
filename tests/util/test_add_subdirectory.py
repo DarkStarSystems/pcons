@@ -1145,6 +1145,137 @@ class TestSubdirectoryInstallPaths:
         assert "$topdir/data.txt" in text
 
 
+class TestSubdirectoryInstallDestinations:
+    """An install destination anchors at the declaring script too.
+
+    Install used to read its destination against the subdirectory's own
+    resolver and stop there, so a destination written in a subdirectory lost
+    the offset it should have gained and one already carrying it had it
+    absorbed. Both landed at the top of the build directory, colliding with
+    the same install from a sibling, while ``env.Command`` given the very
+    same path put it under the subdirectory.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    #: Three ways to write one destination: relative to the script, with the
+    #: project's build directory written out, and already anchored.
+    CHILD = (
+        "from pathlib import Path\n"
+        "from pcons.core.builder import anchor_target_paths\n"
+        "from pcons.core.project import Project\n"
+        "project = Project.current()\n"
+        "env = project.default_environment\n"
+        "project.Install('rel', ['data.txt'], no_prefix=True, name='i_rel')\n"
+        "project.InstallAs(\n"
+        "    project.build_dir / 'bd' / 'as.txt',\n"
+        "    'data.txt',\n"
+        "    no_prefix=True,\n"
+        "    name='i_bd',\n"
+        ")\n"
+        "anchored = anchor_target_paths(env, [Path('anch')])[0]\n"
+        "project.InstallAs(\n"
+        "    anchored / 'as.txt', 'data.txt', no_prefix=True, name='i_anch'\n"
+        ")\n"
+        "project.InstallDir('dir', 'tree', no_prefix=True, name='i_dir')\n"
+        "env.Command(\n"
+        "    target='rel/cmd.txt',\n"
+        "    source='data.txt',\n"
+        "    command='cp $SOURCE $TARGET',\n"
+        ")\n"
+    )
+
+    @pytest.fixture
+    def child(self, test_project: Project) -> None:
+        test_project.Environment(toolchain="c")
+        subdir = _make_subdir(test_project, "child", self.CHILD)
+        (subdir / "data.txt").write_text("x")
+        (subdir / "tree").mkdir()
+        (subdir / "tree" / "leaf.txt").write_text("x")
+
+    def test_a_relative_destination_gains_the_offset(
+        self, test_project: Project, tmp_path: Path, child: None
+    ) -> None:
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build child/rel/data.txt: " in text
+        # The same path given to env.Command lands in the same place.
+        assert "build child/rel/cmd.txt: " in text
+
+    def test_a_build_dir_destination_gains_the_offset(
+        self, test_project: Project, tmp_path: Path, child: None
+    ) -> None:
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build child/bd/as.txt: " in text
+
+    def test_an_anchored_destination_keeps_its_offset(
+        self, test_project: Project, tmp_path: Path, child: None
+    ) -> None:
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build child/anch/as.txt: " in text
+
+    def test_a_directory_destination_reaches_the_command(
+        self, test_project: Project, tmp_path: Path, child: None
+    ) -> None:
+        """copytree is told where to write, and it runs in the top-level
+        build directory, so its argument carries the offset as well."""
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert " child/dir/tree\n" in text
+        assert "build child/.stamps/child_dir_tree.stamp: " in text
+
+    def test_siblings_do_not_collide(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        """The offset is what keeps one subdirectory's install out of
+        another's, destination directories and stamps alike."""
+        test_project.Environment(toolchain="c")
+        for name in ("one", "two"):
+            subdir = _make_subdir(
+                test_project,
+                name,
+                "from pcons.core.project import Project\n"
+                "project = Project.current()\n"
+                "project.Install('rel', ['data.txt'], no_prefix=True)\n"
+                "project.InstallDir('dir', 'tree', no_prefix=True)\n",
+            )
+            (subdir / "data.txt").write_text("x")
+            (subdir / "tree").mkdir()
+            (subdir / "tree" / "leaf.txt").write_text("x")
+
+        add_subdirectory("one")
+        add_subdirectory("two")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build one/rel/data.txt: " in text
+        assert "build two/rel/data.txt: " in text
+        assert "build one/.stamps/one_dir_tree.stamp: " in text
+        assert "build two/.stamps/two_dir_tree.stamp: " in text
+
+    def test_a_top_level_destination_is_unchanged(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        (Path(test_project.root_dir) / "data.txt").write_text("x")
+        test_project.Install("rel", ["data.txt"], no_prefix=True)
+
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build rel/data.txt: " in text
+
+
 class TestSubdirectoryFactoryPaths:
     """A factory's own builder calls anchor at the target's subdirectory.
 

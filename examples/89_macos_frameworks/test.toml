@@ -1,0 +1,24 @@
+# Test configuration for the macos_frameworks example
+
+[test]
+description = "A static library's public.frameworks usage requirement propagates a macOS framework to a program that links it, without env.Framework()"
+
+expected_outputs = [
+    "build/libfwlib.a",
+    "build/app",
+]
+
+[verify]
+commands = [
+    { run = "./build/app", expect_stdout = "string length: 18" },
+]
+
+[[rebuild]]
+description = "Nothing changed: nothing to do"
+expect_no_work = true
+
+[skip]
+# Frameworks are an Apple linker concept.
+platforms = ["linux", "windows"]
+# The xcode generator writes outputs under build/Release/, not build/.
+generators = ["xcode"]

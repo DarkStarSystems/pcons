@@ -169,6 +169,8 @@ def _format_requirements(target: Target, root: Path, style: _Style) -> Iterator[
         ("link_flags", link_reqs.link_flags, link_reqs),
         ("link_libs", link_reqs.link_libs, link_reqs),
         ("link_dirs", link_reqs.link_dirs, link_reqs),
+        ("frameworks", link_reqs.frameworks, link_reqs),
+        ("framework_dirs", link_reqs.framework_dirs, link_reqs),
     ):
         if field in ("compile_flags", "link_flags"):
             # Units, not tokens: "-framework Foo" is one row, keyed the way

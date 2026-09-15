@@ -339,7 +339,7 @@ class GccToolchain(UnixToolchain):
         if not scopes:
             return
         flag_spec = _gcc_std_module_flag_spec()
-        rel = project._path_resolver.make_execution_relative
+        rel = project.top_path_resolver.make_execution_relative
 
         edge_facts: dict[int, dict[str, object]] = {}
         by_compiler: dict[str, list[object]] = {}

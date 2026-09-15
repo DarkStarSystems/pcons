@@ -6,7 +6,7 @@ description = "A Qt Quick application packaged for Android by androiddeployqt: a
 expected_outputs = [
     "build/qt.demo_ui/qrc_demo_ui.cpp",
     "build/libqtapp.so",
-    "build/android-deployment-settings.json",
+    "build/qtapp/android-deployment-settings.json",
     "build/qtapp/libs/arm64-v8a/libqtapp_arm64-v8a.so",
     "build/qtapp/androiddeployqt.stamp",
 ]
@@ -31,8 +31,8 @@ commands = [
     { run = "file build/qtapp/libs/arm64-v8a/libqtapp_arm64-v8a.so", expect_stdout = "ARM aarch64" },
     # The application has a QtQmlModule, so the settings point qmlimportscanner
     # at its QML rather than telling androiddeployqt to skip the scan.
-    { run = "cat build/android-deployment-settings.json", expect_stdout = "qml-root-path" },
+    { run = "cat build/qtapp/android-deployment-settings.json", expect_stdout = "qml-root-path" },
     # The Java that makes classes.dex real is named, and androiddeployqt reads
     # the directory itself, so the path is absolute.
-    { run = "cat build/android-deployment-settings.json", expect_stdout = "android-package-source-directory" },
+    { run = "cat build/qtapp/android-deployment-settings.json", expect_stdout = "android-package-source-directory" },
 ]

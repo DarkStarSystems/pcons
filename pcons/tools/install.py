@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from pcons.core.builder import anchor_target_paths
+from pcons.core.builder import anchor_target_path, anchor_target_paths
 from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode, PathRole
 from pcons.core.resolver import PendingSourceFactory
@@ -91,7 +91,7 @@ class InstallContext:
         )
 
 
-def _stamp_name_for(path: Path) -> str:
+def _stamp_name_for(path: Path | str) -> str:
     """Convert a path to a flat stamp file name.
 
     POSIX absolute paths start with "/" which becomes "_"; a Windows
@@ -113,18 +113,6 @@ def _is_rooted(dest: Path) -> bool:
     return bool(dest.anchor)
 
 
-def _install_role(dest: Path) -> PathRole | None:
-    """Return the node role for an install destination.
-
-    A rooted destination lives outside the build tree, so it is an
-    ``"install_output"``.
-    A relative destination is a build-dir-relative staging path
-    (e.g. the ``no_prefix`` installers in ``pcons.contrib.installers``),
-    for which ``None`` is returned.
-    """
-    return "install_output" if _is_rooted(dest) else None
-
-
 #: Characters that would be confusing or illegal in a target name. Dots are
 #: kept: today's names already carry them (install_icon.png).
 _UNSAFE_IN_NAME = re.compile(r"[^A-Za-z0-9._+-]")
@@ -143,7 +131,7 @@ def _dest_suffix(project: Project, dest: Path) -> str:
     is applied, so PCONS_INSTALL_PREFIX can't leak into target names and make
     build.ninja vary between runs.
     """
-    canonical = project._path_resolver.canonicalize(dest)
+    canonical = project.top_path_resolver.canonicalize(dest)
     parts = canonical.parts[1:] if canonical.anchor else canonical.parts
     return "_".join(_UNSAFE_IN_NAME.sub("_", part) for part in parts)
 
@@ -229,15 +217,24 @@ def _make_install_target(
     builder_data: dict[str, Any],
     sources: Sequence[Target | Node | Path | str],
     *,
+    env: Environment | None = None,
     defined_at: SourceLocation,
 ) -> Target:
-    """Create an interface Target carrying install builder metadata."""
+    """Create an interface Target carrying install builder metadata.
+
+    *env*, when the caller named one, is the environment the destination is
+    anchored under and the copy command comes from. It is set after
+    construction, so the target's registered name stays the one asked for.
+    """
     install_target = Target(
         target_name,
         target_type="interface",
         defined_at=defined_at,
         project=project,
     )
+    if env is not None:
+        builder_data["env"] = env
+        install_target._env = env
     install_target._builder_name = builder_name
     # An install operates on products, so it is a step: `ninja all`, an
     # alias, or its name (see pcons.core.tiers).
@@ -378,24 +375,69 @@ class InstallNodeFactory(PendingSourceFactory):
             return
 
         resolved_sources = self._resolve_sources(target)
+        key = "dest" if builder_name == "InstallAs" else "dest_dir"
+        dest = Path(target._builder_data[key])
+        # OverlayDir takes an environment, so its destination was anchored
+        # against that environment when the target was declared.
+        if builder_name != "OverlayDir":
+            dest = self._anchor_dest(target, dest)
 
         if builder_name == "Install":
-            dest_dir = Path(target._builder_data["dest_dir"])
-            self._create_install_nodes(target, resolved_sources, dest_dir)
+            self._create_install_nodes(target, resolved_sources, dest)
         elif builder_name == "InstallAs":
-            dest = Path(target._builder_data["dest"])
             self._create_install_as_node(target, resolved_sources, dest)
         elif builder_name == "InstallDir":
-            dest_dir = Path(target._builder_data["dest_dir"])
-            self._create_install_dir_node(target, resolved_sources, dest_dir)
-        elif builder_name == "OverlayDir":
-            dest_dir = Path(target._builder_data["dest_dir"])
+            self._create_install_dir_node(target, resolved_sources, dest)
+        else:
             exclude = cast("Sequence[str]", target._builder_data.get("exclude", ()))
-            self._create_overlay_nodes(target, resolved_sources, dest_dir, exclude)
+            self._create_overlay_nodes(target, resolved_sources, dest, exclude)
+
+    def _anchor_dest(self, target: Target, dest: Path) -> Path:
+        """Anchor an install destination the way every builder's targets are.
+
+        A destination is a target path, so it goes through the one rule in
+        :func:`~pcons.core.builder.anchor_target_path`: it carries the
+        declaring script's offset, absorbs a written-out build directory
+        prefix once, and passes through when it is rooted (the ordinary
+        install, outside the build tree).
+
+        The anchor is the environment's build directory when the caller
+        named one, ``build_prefix`` and all, and the project's plain build
+        directory otherwise: a target that merely inherited an environment
+        did not choose it, so that one's prefix is nobody's intent.
+        """
+        resolver = self.project.top_path_resolver
+        env = cast("Environment | None", target._builder_data.get("env"))
+        build_dir = (
+            env.build_dir_for(target._subdir)
+            if env is not None
+            else resolver.build_dir / target._subdir
+        )
+        return anchor_target_path(resolver, build_dir, dest, target_name=target.name)
+
+    def _destdir(self, dest: Path) -> str:
+        """*dest* as the copy command sees it.
+
+        The command runs in the top-level build directory whichever
+        subdirectory declared the install, so the offset an anchored
+        destination carries belongs in the argument too.
+        """
+        return self.project.top_path_resolver.make_execution_relative(dest)
+
+    def _install_role(self, dest: Path) -> PathRole | None:
+        """The node role for an anchored install destination.
+
+        A destination outside the build tree is an ``"install_output"``:
+        the generators name it from the project root, not from the build
+        directory they run in. Anything anchoring put inside the build tree
+        is an ordinary build output, staging directories included (e.g. the
+        ``no_prefix`` installers in ``pcons.contrib.installers``).
+        """
+        return "install_output" if Path(self._destdir(dest)).anchor else None
 
     def _get_install_env(self, target: Target) -> Environment | None:
         """Get the target's env, or any project env with the install tool."""
-        env = getattr(target, "_env", None)
+        env = target._builder_data.get("env") or getattr(target, "_env", None)
         if env is not None:
             return env
 
@@ -413,11 +455,6 @@ class InstallNodeFactory(PendingSourceFactory):
         Directory sources (those with child nodes in the project graph)
         use copytreecmd (depfile + stamp); file sources use copycmd.
         """
-        path_resolver = target.path_resolver
-        dest_dir = path_resolver.normalize_target_path(
-            dest_dir, target_name=target.name
-        )
-
         env = self._get_install_env(target)
 
         installed_nodes: list[FileNode] = []
@@ -435,7 +472,7 @@ class InstallNodeFactory(PendingSourceFactory):
 
             # Via project.node() for deduplication; install_output role
             # only for outside-build destinations (see _install_role).
-            dest_node = self.project.node(dest_path, role=_install_role(dest_path))
+            dest_node = self.project.node(dest_path, role=self._install_role(dest_path))
             dest_node.add_inputs([file_node])
 
             dest_node._build_info = {
@@ -467,11 +504,8 @@ class InstallNodeFactory(PendingSourceFactory):
         source_path = source_node.path
         dest_path = dest_dir / source_path.name
 
-        # Dest relative to build dir for a platform-neutral stamp name
-        try:
-            rel_dest = dest_path.relative_to(target.build_dir)
-        except ValueError:
-            rel_dest = dest_path
+        # Dest as the command sees it, which is also a platform-neutral stamp name
+        rel_dest = self._destdir(dest_path)
 
         stamps_dir = target.build_dir / ".stamps"
         stamp_name = _stamp_name_for(rel_dest)
@@ -485,9 +519,7 @@ class InstallNodeFactory(PendingSourceFactory):
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
 
-        context = InstallContext.from_target(
-            target, env, destdir=str(rel_dest).replace("\\", "/")
-        )
+        context = InstallContext.from_target(target, env, destdir=rel_dest)
 
         stamp_node._build_info = cast(
             BuildInfo,
@@ -520,19 +552,14 @@ class InstallNodeFactory(PendingSourceFactory):
         the overlay command when it runs, so a file another edge generates
         into a source tree is staged by the build that writes it.
         """
-        try:
-            rel_dest = dest_dir.relative_to(target.build_dir)
-        except ValueError:
-            rel_dest = dest_dir
+        rel_dest = self._destdir(dest_dir)
 
         stamp_path = target.build_dir / ".stamps" / _stamp_name_for(rel_dest)
         stamp_node = self.project.node(stamp_path)
         stamp_node.add_inputs(sources)
 
         env = self._get_install_env(target)
-        context = InstallContext.from_target(
-            target, env, destdir=str(rel_dest).replace("\\", "/")
-        )
+        context = InstallContext.from_target(target, env, destdir=rel_dest)
 
         stamp_node._build_info = cast(
             BuildInfo,
@@ -571,14 +598,11 @@ class InstallNodeFactory(PendingSourceFactory):
                 location=target.defined_at,
             )
 
-        path_resolver = target.path_resolver
-        dest = path_resolver.normalize_target_path(dest, target_name=target.name)
-
         source_node = sources[0]
 
         # Via project.node() for deduplication; install_output role only
         # for outside-build destinations (see _install_role).
-        dest_node = self.project.node(dest, role=_install_role(dest))
+        dest_node = self.project.node(dest, role=self._install_role(dest))
         dest_node.add_inputs([source_node])
 
         env = self._get_install_env(target)
@@ -609,21 +633,13 @@ class InstallNodeFactory(PendingSourceFactory):
                 location=target.defined_at,
             )
 
-        path_resolver = target.path_resolver
-        dest_dir = path_resolver.normalize_target_path(
-            dest_dir, target_name=target.name
-        )
-
         source_node = sources[0]
         source_path = source_node.path
 
         dest_path = dest_dir / source_path.name
 
-        # Dest relative to build dir for a platform-neutral stamp name
-        try:
-            rel_dest = dest_path.relative_to(target.build_dir)
-        except ValueError:
-            rel_dest = dest_path
+        # Dest as the command sees it, which is also a platform-neutral stamp name
+        rel_dest = self._destdir(dest_path)
 
         stamps_dir = target.build_dir / ".stamps"
         stamp_name = _stamp_name_for(rel_dest)
@@ -640,9 +656,7 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_node.implicit_deps.extend(child_nodes)
 
         env = self._get_install_env(target)
-        context = InstallContext.from_target(
-            target, env, destdir=str(rel_dest).replace("\\", "/")
-        )
+        context = InstallContext.from_target(target, env, destdir=rel_dest)
 
         stamp_node._build_info = cast(
             BuildInfo,
@@ -684,6 +698,7 @@ class InstallBuilder:
         dest_dir: Path | str,
         sources: Sequence[Target | FileNode | Path | str],
         *,
+        env: Environment | None = None,
         name: str | None = None,
         no_prefix: bool = False,
         mode: int | None = None,
@@ -694,6 +709,12 @@ class InstallBuilder:
             project: The project to add the target to.
             dest_dir: Destination directory path.
             sources: Files to install.
+            env: Environment whose build directory the destination is
+                anchored under, and whose install tool provides the copy
+                command. Without one the destination is anchored under the
+                project's build directory, which is what a plain
+                ``project.Install("lib", ...)`` wants; name an environment
+                when the destination has to follow its ``build_prefix``.
             name: Optional name for the install target.
             no_prefix: If True, do not prepend the install prefix to the destination.
             mode: Permissions for the installed copy, e.g. ``0o755``. The copy
@@ -718,6 +739,7 @@ class InstallBuilder:
             "Install",
             _with_mode({"dest_dir": str(dest_dir)}, mode),
             list(sources),
+            env=env,
             defined_at=get_caller_location(),
         )
 
@@ -741,6 +763,7 @@ class InstallAsBuilder:
         dest: Path | str,
         source: Target | FileNode | Path | str,
         *,
+        env: Environment | None = None,
         name: str | None = None,
         no_prefix: bool = False,
         mode: int | None = None,
@@ -751,6 +774,12 @@ class InstallAsBuilder:
             project: The project to add the target to.
             dest: Full destination path (including filename).
             source: Source file.
+            env: Environment whose build directory the destination is
+                anchored under, and whose install tool provides the copy
+                command. Without one the destination is anchored under the
+                project's build directory, which is what a plain
+                ``project.Install("lib", ...)`` wants; name an environment
+                when the destination has to follow its ``build_prefix``.
             name: Optional name for the install target.
             no_prefix: If True, do not prepend the install prefix to the destination.
             mode: Permissions for the installed copy, e.g. ``0o755``. The copy
@@ -789,6 +818,7 @@ class InstallAsBuilder:
             "InstallAs",
             _with_mode({"dest": str(dest)}, mode),
             [source],
+            env=env,
             defined_at=get_caller_location(),
         )
 
@@ -815,6 +845,7 @@ class InstallDirBuilder:
         dest_dir: Path | str,
         source: Target | FileNode | Path | str,
         *,
+        env: Environment | None = None,
         name: str | None = None,
         no_prefix: bool = False,
     ) -> Target:
@@ -824,6 +855,12 @@ class InstallDirBuilder:
             project: The project to add the target to.
             dest_dir: Destination directory.
             source: Source directory.
+            env: Environment whose build directory the destination is
+                anchored under, and whose install tool provides the copy
+                command. Without one the destination is anchored under the
+                project's build directory, which is what a plain
+                ``project.Install("lib", ...)`` wants; name an environment
+                when the destination has to follow its ``build_prefix``.
             name: Optional name for the install target.
             no_prefix: If True, do not prepend the install prefix to the destination.
 
@@ -844,6 +881,7 @@ class InstallDirBuilder:
             "InstallDir",
             {"dest_dir": str(dest_dir)},
             [source],
+            env=env,
             defined_at=get_caller_location(),
         )
 

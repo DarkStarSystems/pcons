@@ -46,6 +46,8 @@ def _app(project, env, name: str = "myapp"):
 
 
 def _staged_path(target) -> Path:
+    """The staged copy's node path, which is anchored under the build
+    directory like every other target path."""
     return Path(target.output_nodes[0].path)
 
 
@@ -62,7 +64,7 @@ class TestWhereTheLibraryGoes:
         app_project.resolve()
 
         assert _staged_path(staged) == Path(
-            "myapp/libs/arm64-v8a/libmyapp_arm64-v8a.so"
+            "build/myapp/libs/arm64-v8a/libmyapp_arm64-v8a.so"
         )
 
     def test_the_abi_decides_the_directory_and_the_suffix(self, app_project) -> None:
@@ -70,7 +72,9 @@ class TestWhereTheLibraryGoes:
         staged = stage_application_library(app_project, env, app=_app(app_project, env))
         app_project.resolve()
 
-        assert _staged_path(staged) == Path("myapp/libs/x86_64/libmyapp_x86_64.so")
+        assert _staged_path(staged) == Path(
+            "build/myapp/libs/x86_64/libmyapp_x86_64.so"
+        )
 
     def test_an_explicit_output_directory_is_honoured(self, app_project) -> None:
         env = android_env()
@@ -80,7 +84,7 @@ class TestWhereTheLibraryGoes:
         app_project.resolve()
 
         assert _staged_path(staged) == Path(
-            "package/libs/arm64-v8a/libmyapp_arm64-v8a.so"
+            "build/package/libs/arm64-v8a/libmyapp_arm64-v8a.so"
         )
 
     def test_two_applications_in_one_environment_do_not_collide(
@@ -97,8 +101,12 @@ class TestWhereTheLibraryGoes:
         )
         app_project.resolve()
 
-        assert _staged_path(first) == Path("one/libs/arm64-v8a/libone_arm64-v8a.so")
-        assert _staged_path(second) == Path("two/libs/arm64-v8a/libtwo_arm64-v8a.so")
+        assert _staged_path(first) == Path(
+            "build/one/libs/arm64-v8a/libone_arm64-v8a.so"
+        )
+        assert _staged_path(second) == Path(
+            "build/two/libs/arm64-v8a/libtwo_arm64-v8a.so"
+        )
 
 
 class TestItAgreesWithTheSettingsFile:
@@ -340,7 +348,9 @@ class TestAPackageDeclaredInASubdirectory:
 
         content = self._content(app_project, deployable, tmp_path, env)
 
-        assert f"--output {written_token(Path('sub') / 'myapp')}" in content
+        # The argument is the execution-relative form, forward slashes
+        # on every platform, so it is written as a plain string would be.
+        assert f"--output {written_token('sub/myapp')}" in content
         assert _edge(content, f"sub/{DEBUG_APK}")
 
     def test_the_staged_library_lands_where_the_tool_reads_it(
@@ -365,7 +375,7 @@ class TestAPackageDeclaredInASubdirectory:
 
         content = self._content(app_project, deployable, tmp_path, env, "package")
 
-        assert f"--output {written_token(Path('sub') / 'package')}" in content
+        assert f"--output {written_token('sub/package')}" in content
         assert _edge(content, "sub/package/build/outputs/apk/debug/package-debug.apk")
 
     def test_a_build_prefix_is_not_repeated(
@@ -380,7 +390,7 @@ class TestAPackageDeclaredInASubdirectory:
         content = self._content(app_project, deployable, tmp_path, env)
 
         prefixed = Path("android-arm64-v8a") / "sub" / "myapp"
-        assert f"--output {written_token(prefixed)}" in content
+        assert f"--output {written_token(prefixed.as_posix())}" in content
         assert "android-arm64-v8a/sub/android-arm64-v8a" not in content
 
 

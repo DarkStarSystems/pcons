@@ -79,7 +79,7 @@ class NinjaGenerator(BaseGenerator):
         self._rule_counter = 0
         self._output_dir = output_dir.resolve()
         self._project_root = project.root_dir.resolve()
-        self._path_resolver = getattr(project, "_path_resolver", None)
+        self._path_resolver = getattr(project, "top_path_resolver", None)
         self._build_dir_parts = Path(project.build_dir).parts
         self._path_flags = self._collect_path_flags(project)
         self._warned_absolute_paths = set()

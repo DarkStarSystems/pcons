@@ -3765,6 +3765,8 @@ mylib = project.StaticLibrary("mylib", env, sources=["lib.c"])
 mylib.public.include_dirs.append("include")
 mylib.public.defines.append("USE_MYLIB")
 mylib.public.defines.append(("MYLIB_VERSION", "2"))
+mylib.public.frameworks.append("CoreFoundation")
+mylib.public.framework_dirs.append("/Library/Frameworks")
 app = project.Program("app", env, sources=["main.c"])
 app.link(mylib)
 """
@@ -3776,6 +3778,14 @@ app.link(mylib)
         assert "requirements:" in result.stdout
         assert "<- mylib (public)" in result.stdout
         assert "USE_MYLIB" in result.stdout
+        # Frameworks and their search dirs get rows like link_libs/link_dirs.
+        for label in ("CoreFoundation", "/Library/Frameworks"):
+            row = next(
+                line
+                for line in result.stdout.splitlines()
+                if line.lstrip().startswith(label)
+            )
+            assert "<- mylib (public)" in row
         # A (name, value) define shows as -D would and keeps its contributor.
         version_row = next(
             line

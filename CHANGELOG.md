@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `android_deployment_settings()` now writes into the application's own
+  package directory instead of one fixed name under the project's build
+  directory. Two applications, two build prefixes, or two
+  `add_subdirectory` scripts each get their own file now, instead of
+  silently overwriting one another's.
+
 - On Windows, a Qt target whose moc flags changed needed one more `ninja`
   run than it should have to settle. moc writes its depfile target with a
   drive letter, and the automoc tool cut the line at that colon, so moc's
@@ -49,6 +55,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   linked, contributes a `link_dirs` entry of its own. The environment's
   directories now follow the target's, the way `env.link.libs` already
   followed usage-requirement libraries.
+
+- `Install`, `InstallAs` and `InstallDir` now anchor their destination the
+  way every other builder anchors its targets. A `no_prefix` destination
+  written in a subdirectory script lands under that subdirectory's build
+  directory, rather than at the top of the build directory, where two
+  subdirectories installing to the same relative destination collided; and
+  `InstallDir` tells its copy command the directory the stamp names.
+  The three builders take an optional `env=` for a destination that has to
+  follow an environment's `build_prefix` as well.
 
 ## [0.29.1] - 2026-09-14
 

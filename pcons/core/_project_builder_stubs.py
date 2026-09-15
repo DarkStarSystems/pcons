@@ -150,6 +150,7 @@ if TYPE_CHECKING:
             dest_dir: Path | str,
             sources: Sequence[Target | FileNode | Path | str],
             *,
+            env: Env | None = None,
             name: str | None = None,
             no_prefix: bool = False,
             mode: int | None = None,
@@ -162,6 +163,7 @@ if TYPE_CHECKING:
             dest: Path | str,
             source: Target | FileNode | Path | str,
             *,
+            env: Env | None = None,
             name: str | None = None,
             no_prefix: bool = False,
             mode: int | None = None,
@@ -174,6 +176,7 @@ if TYPE_CHECKING:
             dest_dir: Path | str,
             source: Target | FileNode | Path | str,
             *,
+            env: Env | None = None,
             name: str | None = None,
             no_prefix: bool = False,
         ) -> Target:

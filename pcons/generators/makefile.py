@@ -60,7 +60,7 @@ class MakefileGenerator(BaseGenerator):
         self._project_root = project.root_dir.resolve()
         self._build_dir = output_dir
         self._relative_build_dir = project.build_dir
-        self._path_resolver = getattr(project, "_path_resolver", None)
+        self._path_resolver = getattr(project, "top_path_resolver", None)
 
         with open(makefile_path, "w", encoding="utf-8") as f:
             self._write_header(f, project)
