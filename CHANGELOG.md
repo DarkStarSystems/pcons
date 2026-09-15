@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Every successful ninja build now checks that it converged, not only one
+  under `--watch`: pcons asks ninja whether it still has work to do and
+  warns if so, naming the outputs. A command that never writes the output
+  it declares used to rerun silently on every build. `--no-converge-check`
+  turns it off. (#174)
+
 - A Qt target declared in a subdirectory now generates into the proper subdir
   `build/<subdir>/qt.<name>/`. Anything
   naming the old path (a `.gitignore` entry, an install rule, an IDE
