@@ -789,10 +789,13 @@ class Target:
 
         Args:
             *libs: Targets to depend on, and/or raw library-name strings. A
-                string starting with ``:`` is GNU ld's explicit-filename
-                form, ``-l:libfoo.a``, which names a file to find on the
-                library search path rather than a library to derive a file
-                name from.
+                string starting with ``:`` is the explicit-filename form,
+                ``-l:libfoo.a``: a file to find on the library search path,
+                rather than a library to derive a file name from. GNU ld and
+                LLD take it. It is not portable. Apple's ld64 rejects it, and
+                MSVC's linker receives ``:libfoo.a.lib``, since that
+                toolchain appends the suffix to every library name. pcons
+                passes the name through either way.
 
         Returns:
             self, for method chaining.
