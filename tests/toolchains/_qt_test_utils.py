@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from pcons.configure.platform import get_platform
+from pcons.core.subst import to_shell_command
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
 from pcons.toolchains.qt.finder import QtPackage
@@ -154,6 +155,19 @@ def generate_ninja(project: Project) -> str:
     if not build_dir.is_absolute():
         build_dir = Path(project.root_dir) / build_dir
     return (build_dir / "build.ninja").read_text().replace("\\", "/")
+
+
+def written_token(value: str | Path) -> str:
+    """How a command line spells one whole token, quoting included.
+
+    The generator quotes a token a shell could misread, and a native
+    Windows path brings backslashes with it, so an absolute path is one
+    argument on Linux and a quoted one on Windows. Asking the generator's
+    own quoter keeps the expectation from drifting from that rule;
+    ``generate_ninja`` normalizes separators on the way back, so the same
+    replacement applies here.
+    """
+    return to_shell_command([str(value)], shell="ninja").replace("\\", "/")
 
 
 def object_of(project: Project, target: str, source: str) -> str:

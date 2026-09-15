@@ -22,7 +22,12 @@ from pcons.packages.description import PackageDescription
 from pcons.toolchains.qt import _automoc, find_qt
 from pcons.util.add_subdirectory import add_subdirectory
 
-from ._qt_test_utils import cxx_env_with_qt, generate_ninja, object_of
+from ._qt_test_utils import (
+    cxx_env_with_qt,
+    generate_ninja,
+    object_of,
+    written_token,
+)
 
 _MODULES = ("Core", "Qml")
 _TOOLS = ("macdeployqt", "moc", "qmltyperegistrar")
@@ -222,8 +227,12 @@ class TestQtInstallAcrossSubdirectories:
         add_subdirectory("child")
         content = generate_ninja(top)
 
-        metatypes = str(qt_prefix / "lib" / "metatypes").replace("\\", "/")
-        assert f"--foreign-types {metatypes}" in content
+        metatypes = qt_prefix / "lib" / "metatypes"
+        foreign = ",".join(
+            str(metatypes / f"qt6{module.lower()}_metatypes.json")
+            for module in _MODULES
+        )
+        assert f"--foreign-types {written_token(foreign)}" in content
 
     def test_child_qml_files_resolve_against_the_child(self, top, tmp_path, qt_prefix):
         """qml_files are script-relative, like every other builder path.
