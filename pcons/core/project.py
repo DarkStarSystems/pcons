@@ -965,8 +965,18 @@ class Project(_ProjectBuilders):
 
     @property
     def environments(self) -> list[Env]:
-        """Get all registered environments."""
-        return list(self._environments)
+        """Get all registered environments, sub-projects' included.
+
+        Like :attr:`targets`, this spans the whole tree: a generator walks
+        the environments to reach nodes a builder registered without a
+        target (a tool invocation's outputs, a scanner's bookkeeping files,
+        Qt's generated sources), and those must be written whichever script
+        declared them. Use ``_environments`` for the ones this project owns.
+        """
+        results: list[Env] = list(self._environments)
+        for child in self._children:
+            results.extend(child.environments)
+        return results
 
     @property
     def default_environment(self) -> Env:
