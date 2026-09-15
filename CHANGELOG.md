@@ -44,6 +44,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bookkeeping) reach the build file through the project's environments,
   and that walk stopped at the top-level project.
 
+- A relative `link_dirs` or `framework_dirs` entry declared in a subdirectory
+  script lost its subdirectory when it reached the generator, so `-L` (and
+  `-F`) pointed one level too high. Both now anchor at the top-level root,
+  the same as `include_dirs` already did. (#182, following #178)
+
+- `frameworks` and `framework_dirs` on a target's public/private usage
+  requirements now reach the link line and propagate to dependents, the same
+  as `link_libs`/`link_dirs` already did. Previously a plain target's
+  `-framework`/`-F` settings were silently ignored; only packages worked.
+  (#182)
+
 ## [0.29.1] - 2026-09-14
 
 ### Changed

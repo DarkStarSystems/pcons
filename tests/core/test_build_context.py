@@ -76,6 +76,48 @@ class TestCompileLinkContext:
         assert len(libdirs) == 1
         assert isinstance(libdirs[0], ProjectPath)
 
+    def test_link_overrides_frameworks(self) -> None:
+        """Verify link mode returns frameworkdirs/frameworks (macOS -F/-framework)."""
+        from typing import cast
+
+        from pcons.core.subst import ProjectPath
+
+        ctx = CompileLinkContext(
+            frameworks=["Cocoa", "Metal"],
+            frameworkdirs=["/System/Library/Frameworks"],
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+
+        assert overrides["frameworks"] == ["Cocoa", "Metal"]
+        frameworkdirs = cast(list[ProjectPath], overrides["frameworkdirs"])
+        assert len(frameworkdirs) == 1
+        assert isinstance(frameworkdirs[0], ProjectPath)
+        assert frameworkdirs[0].path == "/System/Library/Frameworks"
+
+    def test_link_overrides_without_frameworks_omits_keys(self) -> None:
+        """No frameworks/framework_dirs means no overrides, like libdirs/libs."""
+        ctx = CompileLinkContext(libs=["m"], mode="link")
+        overrides = ctx.get_env_overrides()
+
+        assert "frameworks" not in overrides
+        assert "frameworkdirs" not in overrides
+
+    def test_from_effective_requirements_carries_frameworks(self) -> None:
+        """from_effective_requirements populates frameworks/frameworkdirs."""
+        from pathlib import Path
+
+        from pcons.tools.requirements import EffectiveRequirements
+
+        effective = EffectiveRequirements(
+            frameworks=["Cocoa"],
+            framework_dirs=[Path("/System/Library/Frameworks")],
+        )
+        ctx = CompileLinkContext.from_effective_requirements(effective, mode="link")
+
+        assert ctx.frameworks == ["Cocoa"]
+        assert ctx.frameworkdirs == ["/System/Library/Frameworks"]
+
     def test_link_overrides_merge_with_env_link_flags(self) -> None:
         """Verify link_flags are merged with env.link.flags, not replaced.
 
@@ -458,6 +500,24 @@ class TestMsvcCompileLinkContext:
         libs = overrides["libs"]
         assert "kernel32.lib" in libs  # string gets .lib suffix
         assert token in libs  # token forwarded unchanged
+
+    def test_msvc_link_overrides_frameworks_do_not_crash(self) -> None:
+        """MSVC has no framework concept, but a non-empty list must not crash.
+
+        A target's public.frameworks/framework_dirs still reach the context
+        (MSVC inherits _link_overrides from the base class); MSVC's own
+        command templates simply never reference the overridden keys, so
+        they are computed but unused rather than special-cased away.
+        """
+        ctx = MsvcCompileLinkContext(
+            frameworks=["Cocoa"],
+            frameworkdirs=["/System/Library/Frameworks"],
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+
+        assert overrides["frameworks"] == ["Cocoa"]
+        assert len(overrides["frameworkdirs"]) == 1
 
     def test_msvc_link_overrides_merge_with_env_link_flags(self) -> None:
         """Verify MSVC link_flags are merged with env.link.flags.

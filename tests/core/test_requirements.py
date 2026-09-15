@@ -74,6 +74,28 @@ class TestEffectiveRequirementsMerge:
         assert eff.includes == [Path("inc")]
         assert eff.defines == ["DEF"]
 
+    def test_merge_frameworks_and_framework_dirs(self):
+        """frameworks/framework_dirs merge and dedupe like link_libs/link_dirs."""
+        eff = EffectiveRequirements()
+        usage = UsageRequirements(
+            frameworks=["Cocoa"],
+            framework_dirs=[Path("/System/Library/Frameworks")],
+        )
+        eff.merge(usage)
+
+        assert eff.frameworks == ["Cocoa"]
+        assert eff.framework_dirs == [Path("/System/Library/Frameworks")]
+
+        # A second merge with the same values adds nothing new.
+        eff.merge(usage)
+        assert eff.frameworks == ["Cocoa"]
+        assert eff.framework_dirs == [Path("/System/Library/Frameworks")]
+
+        # A string framework_dir is normalized to a Path, so it dedupes
+        # against an equivalent Path entry too.
+        eff.merge(UsageRequirements(framework_dirs=["/System/Library/Frameworks"]))
+        assert eff.framework_dirs == [Path("/System/Library/Frameworks")]
+
     def test_merge_preserves_order(self):
         """Test that merge preserves order."""
         eff = EffectiveRequirements(includes=[Path("inc1")])
@@ -196,6 +218,30 @@ class TestRequirementOrigins:
         # A Target in link_libs is recorded under its name; a plain lib as-is.
         assert eff.origins[("link_libs", "m")] == ("libA", "public")
         assert eff.origins[("link_libs", "libA")] == ("libB", "public")
+
+    def test_frameworks_are_attributed_transitively(self):
+        """A dependency's public frameworks/framework_dirs reach the app,
+        attributed to the dependency, exactly like link_libs/link_dirs."""
+        project = Project("test")
+        env = project.Environment()
+
+        libA = Target("libA", target_type="static_library")
+        libA._env = env
+        libA.public.frameworks.append("Cocoa")
+        libA.public.framework_dirs.append(Path("/System/Library/Frameworks"))
+
+        app = Target("app", target_type="program")
+        app._env = env
+        app.private.link_libs.append(libA)
+
+        eff = compute_effective_requirements(app, env)
+
+        assert eff.frameworks == ["Cocoa"]
+        assert eff.framework_dirs == [Path("/System/Library/Frameworks")]
+        assert eff.origins[("frameworks", "Cocoa")] == ("libA", "public")
+        assert eff.origins[
+            ("framework_dirs", str(Path("/System/Library/Frameworks")))
+        ] == ("libA", "public")
 
     def test_separated_arg_flags_attribute_as_units(self):
         """Repeated separated-arg flags keep one origin per (flag, arg) pair."""
