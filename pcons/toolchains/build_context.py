@@ -9,7 +9,7 @@ via get_env_overrides().
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.errors import PconsError
 
@@ -123,19 +123,23 @@ class CompileLinkContext:
         merge_flags(result, flags, separated_arg_flags, passthrough_flags)
         return result
 
-    def _merge_with_base_libs(self, libs: list[str]) -> list[str]:
-        """Append env.link.libs after `libs`, dropping duplicates.
+    def _merge_with_base_link(self, name: str, values: list[Any]) -> list[Any]:
+        """Append ``env.link.<name>`` after `values`, dropping duplicates.
 
-        Env-level libs go last: left-to-right static linkers (GNU ld) only
-        pull symbols to satisfy references already seen, so system libs
-        like ``pthread``/``dl`` must follow the usage-requirement
-        libraries whose undefined symbols they resolve.
+        An override replaces the environment's list on the edge, so the
+        environment's own entries must ride along or they vanish from the
+        link line. Env-level entries go last: left-to-right static linkers
+        (GNU ld) only pull symbols to satisfy references already seen, so
+        system libs like ``pthread``/``dl`` must follow the
+        usage-requirement libraries whose undefined symbols they resolve,
+        and a target's own search directories come before the
+        environment's.
         """
-        base_libs: list[str] = []
+        base: list[Any] = []
         if self._env and self._env.has_tool("link"):
             link_cfg = getattr(self._env, "link", None)
-            base_libs = list(getattr(link_cfg, "libs", None) or [])
-        return [lib for lib in libs if lib not in base_libs] + base_libs
+            base = list(getattr(link_cfg, name, None) or [])
+        return [v for v in values if v not in base] + base
 
     def _compile_overrides(self) -> dict[str, object]:
         """Return compile-time overrides: includes, defines, flags."""
@@ -161,8 +165,10 @@ class CompileLinkContext:
         result: dict[str, object] = {}
 
         if self.libdirs:
-            result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
-        merged_libs = self._merge_with_base_libs(self.libs)
+            result["libdirs"] = self._merge_with_base_link(
+                "libdirs", [ProjectPath(p) for p in self.libdirs]
+            )
+        merged_libs = self._merge_with_base_link("libs", self.libs)
         if merged_libs:
             result["libs"] = self._format_libs(merged_libs)
         if self.link_flags:
@@ -170,9 +176,13 @@ class CompileLinkContext:
         if self.linker_cmd:
             result["cmd"] = self.linker_cmd
         if self.frameworkdirs:
-            result["frameworkdirs"] = [ProjectPath(p) for p in self.frameworkdirs]
+            result["frameworkdirs"] = self._merge_with_base_link(
+                "frameworkdirs", [ProjectPath(p) for p in self.frameworkdirs]
+            )
         if self.frameworks:
-            result["frameworks"] = list(self.frameworks)
+            result["frameworks"] = self._merge_with_base_link(
+                "frameworks", self.frameworks
+            )
 
         return result
 

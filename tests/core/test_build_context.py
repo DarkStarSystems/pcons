@@ -183,6 +183,48 @@ class TestCompileLinkContext:
             libs = [str(lib) for lib in overrides["libs"]]
             assert libs == ["rust_greet", "dl", "pthread"]
 
+    def test_link_overrides_keep_env_dirs_and_frameworks(self) -> None:
+        """A target's link dirs and frameworks are added to the env's, not
+        put in their place: the override replaces the edge's variable, so
+        env.link.libdirs / frameworkdirs / frameworks must ride along."""
+        import tempfile
+        from pathlib import Path
+
+        from pcons.core.project import Project
+        from pcons.toolchains.gcc import GccToolchain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+            toolchain = GccToolchain()
+            toolchain._configured = True
+            env = project.Environment(toolchain=toolchain)
+            env.add_tool("link")
+            env.link.libdirs = ["/env/lib"]
+            env.link.frameworkdirs = ["/env/fw"]
+            env.link.frameworks = ["Foundation"]
+
+            ctx = CompileLinkContext(
+                libdirs=["/target/lib"],
+                frameworkdirs=["/target/fw"],
+                frameworks=["Cocoa"],
+                mode="link",
+                _env=env,
+            )
+            overrides = ctx.get_env_overrides()
+
+            from typing import cast
+
+            def paths(key: str) -> list[str]:
+                return [
+                    str(getattr(d, "path", d))
+                    for d in cast(list[object], overrides[key])
+                ]
+
+            assert paths("libdirs") == ["/target/lib", "/env/lib"]
+            assert paths("frameworkdirs") == ["/target/fw", "/env/fw"]
+            assert overrides["frameworks"] == ["Cocoa", "Foundation"]
+
     def test_link_overrides_without_env(self) -> None:
         """Verify link_flags work when no env is provided (no base to merge)."""
         ctx = CompileLinkContext(

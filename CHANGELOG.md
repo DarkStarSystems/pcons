@@ -55,6 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-framework`/`-F` settings were silently ignored; only packages worked.
   (#182)
 
+- A library search directory set on the environment (`env.link.libdirs`)
+  was dropped from a link line whenever the target, or something it
+  linked, contributed a `link_dirs` entry of its own. The environment's
+  directories now follow the target's, the way `env.link.libs` already
+  followed usage-requirement libraries.
+
 ## [0.29.1] - 2026-09-14
 
 ### Changed
