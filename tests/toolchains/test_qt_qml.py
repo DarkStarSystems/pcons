@@ -327,6 +327,29 @@ class TestQmlSourceDirs:
 
         assert qml_source_dirs(qml_project) == [child_qml]
 
+    def test_a_subdirectory_entry_is_anchored_at_the_declaring_script(
+        self, qml_project, tmp_path
+    ):
+        """A scanner root has to be a directory that exists, so the entry is
+        resolved against the same root the resource path came from."""
+        from pcons.toolchains.qt.qml import qml_source_dirs
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        sub = tmp_path / "tools" / "widget"
+        (sub / "qml").mkdir(parents=True)
+        (sub / "qml" / "Chip.qml").write_text("import QtQml\nQtObject {}\n")
+        (sub / "pcons-build.py").write_text(
+            "from pcons import context\n"
+            "project = context.current_project\n"
+            "project.QtQmlModule('subui', project.default_environment,\n"
+            "                    uri='My.Sub', qml_files=['qml/Chip.qml'])\n"
+        )
+        env = cxx_env_with_qt(qml_project)
+
+        add_subdirectory("tools/widget", env=env)
+
+        assert qml_source_dirs(qml_project) == [sub / "qml"]
+
 
 class TestQmlFilesKeepTheirPath:
     """An entry is also its path inside the module resource.

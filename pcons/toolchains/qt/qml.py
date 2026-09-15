@@ -384,15 +384,15 @@ class QtQmlModuleBuilder:
         target.add_sources([rcc_node])
 
         _qml_module_sources.setdefault(project.top, []).append(
-            (target, _source_dirs(root, qml_files))
+            (target, _source_dirs(qml_root, qml_entries))
         )
         return target
 
 
-def _source_dirs(root: Path, qml_files: Sequence[str | Path]) -> list[Path]:
+def _source_dirs(root: Path, qml_entries: Sequence[tuple[str, Path]]) -> list[Path]:
     dirs: list[Path] = []
-    for qml in qml_files:
-        directory = (root / Path(qml)).parent
+    for _, qml in qml_entries:
+        directory = (root / qml).parent
         if directory not in dirs:
             dirs.append(directory)
     return dirs
