@@ -298,6 +298,92 @@ class TestStaging:
         assert app_project.get_target("myapp-apk-lib_1", False) is None
 
 
+class TestAPackageDeclaredInASubdirectory:
+    """Every path around the package is one spelling, offset included once.
+
+    androiddeployqt runs in the build directory and writes where ``--output``
+    says. The declared target, the staged library and that argument are three
+    separate computations of one directory, so a subdirectory offset applied
+    to some of them and not the others declares a file the tool never writes
+    and the build dies on a package it built seconds earlier.
+    """
+
+    CHILD = (
+        "from pcons import context\n"
+        "from pcons.toolchains.qt.android import android_deployment_settings\n"
+        "from pcons.toolchains.qt.apk import android_apk\n"
+        "project = context.current_project\n"
+        "env = project.default_environment\n"
+        "app = project.SharedLibrary('myapp', env, sources=['../app.c'])\n"
+        "settings = android_deployment_settings(project, env, app=app)\n"
+        "android_apk(project, env, app=app, settings=settings{output})\n"
+    )
+
+    def _content(
+        self, app_project, deployable, tmp_path, env, output: str | None = None
+    ) -> str:
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        from ._qt_test_utils import generate_ninja
+
+        root = Path(app_project.root_dir)
+        (root / "sub").mkdir()
+        argument = "" if output is None else f", output={output!r}"
+        (root / "sub" / "pcons-build.py").write_text(self.CHILD.format(output=argument))
+        add_subdirectory("sub", env=env)
+        return generate_ninja(app_project)
+
+    def test_the_output_argument_is_where_the_edge_declares_the_package(
+        self, app_project, deployable, tmp_path
+    ) -> None:
+        env = android_env()
+
+        content = self._content(app_project, deployable, tmp_path, env)
+
+        assert f"--output {written_token(Path('sub') / 'myapp')}" in content
+        assert _edge(content, f"sub/{DEBUG_APK}")
+
+    def test_the_staged_library_lands_where_the_tool_reads_it(
+        self, app_project, deployable, tmp_path
+    ) -> None:
+        env = android_env()
+
+        content = self._content(app_project, deployable, tmp_path, env)
+
+        staged = "sub/myapp/libs/arm64-v8a/libmyapp_arm64-v8a.so"
+        assert _edge(content, staged)
+        assert staged in _edge(content, f"sub/{DEBUG_APK}")
+
+    def test_an_explicit_output_directory_is_anchored_too(
+        self, app_project, deployable, tmp_path
+    ) -> None:
+        """A directory the caller names is still a directory under the build
+        root, so it carries the declaring subdirectory like the default one.
+        Left alone it went where the script was written and the package went
+        one level up, which is the divergence this class is about."""
+        env = android_env()
+
+        content = self._content(app_project, deployable, tmp_path, env, "package")
+
+        assert f"--output {written_token(Path('sub') / 'package')}" in content
+        assert _edge(content, "sub/package/build/outputs/apk/debug/package-debug.apk")
+
+    def test_a_build_prefix_is_not_repeated(
+        self, app_project, deployable, tmp_path
+    ) -> None:
+        """The declared path carried the offset that ``--output`` did not, so
+        an environment with a build prefix saw that prefix twice, with the
+        declaring subdirectory wedged between the copies."""
+        env = android_env()
+        env.build_prefix = "android-arm64-v8a"
+
+        content = self._content(app_project, deployable, tmp_path, env)
+
+        prefixed = Path("android-arm64-v8a") / "sub" / "myapp"
+        assert f"--output {written_token(prefixed)}" in content
+        assert "android-arm64-v8a/sub/android-arm64-v8a" not in content
+
+
 class TestNoBuild:
     """--no-build is androiddeployqt's "install a package built earlier"
     mode, not a way to stop before Gradle: without --install it writes
