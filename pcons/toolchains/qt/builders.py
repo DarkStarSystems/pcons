@@ -20,7 +20,8 @@ What this automates, per file kind:
   path of every TU
 - .qrc                  -> rcc edge -> qrc_*.cpp compiled and linked
 
-Everything lands under ``build/qt.<target>/``. Which files need moc is a
+Everything lands under ``build/<declaring-subdir>/qt.<target>/``, beside
+the target's own object directory. Which files need moc is a
 fact about their content, so one build-time edge per target does the scan
 and runs moc, and its single static output — ``mocs_compilation.cpp``,
 the CMake AUTOMOC shape — is what the target compiles. A generated
@@ -42,6 +43,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.sax.saxutils import escape
 
+from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import PathToken
@@ -113,6 +115,29 @@ def _stamped_command(env: Environment, *command: str) -> list[str]:
         "--",
         *command,
     ]
+
+
+def _qt_gen_dir_for(
+    project: Project, env: Environment, subdir: str
+) -> tuple[Path, Path]:
+    """Where a Qt builder writes its generated files: ``(root, gen_dir)``.
+
+    *gen_dir* is a builder target path anchored by ``anchor_target_paths``,
+    the one place that turns a build-relative name into node-canonical form,
+    so it carries the declaring script's offset from the top-level root and
+    two subdirectories declaring a target of one name keep their own
+    generated files.
+
+    *root* is the top-level project's root directory, the one node paths are
+    anchored at. A sub-project's own ``root_dir`` names a directory the
+    generated build files never refer to, so a file written there is a file
+    no rule knows how to make. ``root / gen_dir`` is therefore the directory
+    on disk, and ``project.node(gen_dir / ...)`` the node a builder reads.
+    """
+    return (
+        project._path_resolver.project_root,
+        anchor_target_paths(env, [Path(subdir)])[0],
+    )
 
 
 def _env_include_dirs(project: Project, env: Environment) -> list[Path]:
@@ -351,8 +376,8 @@ def _qt_make_target(
     """Shared implementation of QtProgram/QtSharedLibrary/QtStaticLibrary."""
     _require_qt_tool(env, f"Qt{kind}()")
     defined_at = defined_at or get_caller_location()
-    build_dir = Path(env.get("build_dir", "build"))
-    qt_dir = build_dir / f"qt.{name}"
+    root, qt_dir = _qt_gen_dir_for(project, env, f"qt.{name}")
+    build_dir = qt_dir.parent
     qt_env = env.clone()
 
     # ---- partition sources ----------------------------------------------
@@ -362,8 +387,17 @@ def _qt_make_target(
     qrc_files: list[Path] = []
 
     def entry_path(entry: str | Path | FileNode) -> Path:
-        path = _source_path(entry) if isinstance(entry, FileNode) else Path(entry)
-        return path if path.is_absolute() else project.root_dir / path
+        """A source entry as a filesystem path.
+
+        A node path is already anchored at the top-level root, so *root* is
+        what turns it back into one. A path the build script wrote is
+        relative to that script's own directory, like every other path handed
+        to a builder, so it carries the declaring project's offset.
+        """
+        if isinstance(entry, FileNode):
+            return root / _source_path(entry)
+        path = Path(entry)
+        return path if path.is_absolute() else project.current_dir / path
 
     for entry in sources or []:
         suffix = None
@@ -392,7 +426,7 @@ def _qt_make_target(
             path = entry_path(entry)
             # Generated sources (under the build dir) are not scanned.
             try:
-                path.relative_to(project.root_dir / build_dir)
+                path.relative_to(root / build_dir)
             except ValueError:
                 cpp_paths.append(path)
 
@@ -414,10 +448,15 @@ def _qt_make_target(
         qt_env.qt.mocflags = list(qt_env.qt.mocflags) + ["--compiler-flavor", "msvc"]
     elif env.has_tool("cxx"):
         predefs_node = qt_env.qt.Predefs(qt_dir / "moc_predefs.h")[0]
-        predefs_path = project.root_dir / qt_dir / "moc_predefs.h"
+        predefs_path = root / qt_dir / "moc_predefs.h"
         qt_env.qt.mocpredefs = [
             "--include",
-            PathToken(path=f"qt.{name}/moc_predefs.h", path_type="build"),
+            PathToken(
+                path=project._path_resolver.make_execution_relative(
+                    qt_dir / "moc_predefs.h"
+                ),
+                path_type="build",
+            ),
         ]
 
     # ---- uic / rcc edges -------------------------------------------------
@@ -440,30 +479,27 @@ def _qt_make_target(
     metatypes_node: Node | None = None
     moc_header_dirs: list[Path] = []
     if automoc and cpp_paths:
-        root = project._path_resolver.project_root
         metatypes_rel = qt_dir / f"{name}_metatypes.json" if moc_json else None
         spec_rel = qt_dir / "automoc.json"
         _write_if_changed(
-            project.root_dir / spec_rel,
+            root / spec_rel,
             json.dumps(
                 {
                     "version": 1,
                     "target": name,
                     "project_root": str(root),
-                    "gen_dir": str(project.root_dir / qt_dir),
+                    "gen_dir": str(root / qt_dir),
                     "sources": sorted(str(p) for p in cpp_paths),
                     "include_dirs": [
                         str(p) for p in _scan_include_dirs(project, env, link)
                     ],
-                    "no_moc": sorted(str(project.root_dir / p) for p in no_moc),
+                    "no_moc": sorted(str(entry_path(p)) for p in no_moc),
                     "moc": [str(qt_env.qt.moc)],
                     "moc_args": _moc_args(qt_env, predefs_path),
                     "moc_deps": [str(predefs_path)] if predefs_path else [],
                     "has_includes": bool(includes),
                     "metatypes": (
-                        None
-                        if metatypes_rel is None
-                        else str(project.root_dir / metatypes_rel)
+                        None if metatypes_rel is None else str(root / metatypes_rel)
                     ),
                 },
                 indent=1,
@@ -471,7 +507,7 @@ def _qt_make_target(
             ),
         )
         edge = qt_env.qt.Automoc(
-            qt_dir / "mocs_compilation.cpp", [spec_rel, *cpp_paths]
+            qt_dir / "mocs_compilation.cpp", [project.node(spec_rel), *cpp_paths]
         )[0]
         _set_node_vars(
             edge,
@@ -726,12 +762,12 @@ class QtResourcesBuilder:
                 alias = path.name
             entries.append((alias, path))
 
-        build_dir = Path(env.get("build_dir", "build"))
-        qrc_rel = build_dir / "qt.res" / f"{name}.qrc"
-        _write_if_changed(root / qrc_rel, _qrc_xml(prefix, entries))
+        top_root, res_dir = _qt_gen_dir_for(project, env, "qt.res")
+        qrc_rel = res_dir / f"{name}.qrc"
+        _write_if_changed(top_root / qrc_rel, _qrc_xml(prefix, entries))
 
         cpp_node = env.qt.Rcc(
-            build_dir / "qt.res" / f"qrc_{name}.cpp", qrc_rel, name=name
+            res_dir / f"qrc_{name}.cpp", project.node(qrc_rel), name=name
         )[0]
         # getattr: the generated builder stubs omit the internal
         # defined_at parameter, but passing it keeps "defined at"

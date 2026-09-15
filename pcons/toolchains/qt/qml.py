@@ -207,7 +207,8 @@ class QtQmlModuleBuilder:
             uri: Module URI, e.g. "com.example.app". QML imports it and
                 the resources live under :/qt/qml/<uri-as-path>/.
             version: Module version "major.minor".
-            qml_files: QML files to embed (type name = file stem).
+            qml_files: QML files to embed (type name = file stem),
+                relative to the declaring script's directory.
             sources: C++ sources; QML_ELEMENT classes register
                 automatically (via the same automoc scan as QtProgram).
             link: Targets to link — pass Qt modules (link=[qt.Quick]).
@@ -236,7 +237,8 @@ class QtQmlModuleBuilder:
         )
         qt_env = info.qt_env
         qt_dir = info.qt_dir
-        root = project.root_dir
+        root = project._path_resolver.project_root
+        qml_root = project.current_dir
 
         # ---- C++ type registration (only when there are moc'ed types) ----
         registrar_node: Node | None = None
@@ -280,15 +282,15 @@ class QtQmlModuleBuilder:
             qml_path = Path(qml)
             # The qmldir is written now, from the file's own content, so a
             # pragma added later has to re-run pcons and not only rcc.
-            project.add_configure_dependency(root / qml_path)
-            kind = "singleton " if _declares_singleton(root / qml_path) else ""
+            project.add_configure_dependency(qml_root / qml_path)
+            kind = "singleton " if _declares_singleton(qml_root / qml_path) else ""
             qmldir_lines.append(
                 f"{kind}{qml_path.stem} {major}.{minor} {qml_path.name}"
             )
         _write_if_changed(root / qt_dir / "qmldir", "\n".join(qmldir_lines) + "\n")
 
         # ---- resources under :/qt/qml/<uri>/ ---------------------------
-        entries = [(Path(qml).name, root / qml) for qml in qml_files]
+        entries = [(Path(qml).name, qml_root / qml) for qml in qml_files]
         entries.append(("qmldir", root / qt_dir / "qmldir"))
         if registrar_node is not None:
             entries.append((qmltypes_name, root / qt_dir / qmltypes_name))
@@ -296,7 +298,7 @@ class QtQmlModuleBuilder:
         _write_if_changed(root / qrc_rel, _qrc_xml(f"/qt/qml/{uri_path}", entries))
 
         rcc_node = qt_env.qt.Rcc(
-            qt_dir / f"qrc_{name}.cpp", qrc_rel, name=f"qml_{name}"
+            qt_dir / f"qrc_{name}.cpp", project.node(qrc_rel), name=f"qml_{name}"
         )[0]
         if registrar_node is not None:
             # rcc embeds the .qmltypes the registrar writes.

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from pcons.core.builder_registry import builder
 from pcons.toolchains.qt.builders import (
     _qrc_xml,
+    _qt_gen_dir_for,
     _require_qt_tool,
     _stamped_command,
     _write_if_changed,
@@ -81,9 +82,7 @@ class QtTranslationsBuilder:
         defined_at = defined_at or get_caller_location()
         if not ts_files:
             raise ValueError(f"QtTranslations '{name}': ts_files is empty")
-        root = project.root_dir
-        build_dir = Path(env.get("build_dir", "build"))
-        qt_dir = build_dir / f"qt.{name}"
+        root, qt_dir = _qt_gen_dir_for(project, env, f"qt.{name}")
 
         # lrelease each catalog: .ts -> .qm
         qm_nodes: list[Node] = []
@@ -101,7 +100,9 @@ class QtTranslationsBuilder:
         qrc_rel = qt_dir / f"{name}.qrc"
         _write_if_changed(root / qrc_rel, _qrc_xml(prefix, entries))
 
-        rcc_node = env.qt.Rcc(qt_dir / f"qrc_{name}.cpp", qrc_rel, name=name)[0]
+        rcc_node = env.qt.Rcc(
+            qt_dir / f"qrc_{name}.cpp", project.node(qrc_rel), name=name
+        )[0]
         rcc_node.implicit_deps.extend(qm_nodes)
 
         factory = getattr(project, "ObjectLibrary")  # noqa: B009
