@@ -316,7 +316,7 @@ jobs:
           print('moc:', moc);
           raise SystemExit(0 if moc else 'Qt not discoverable')"
       - name: Run Qt example tests
-        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -v -k "52_qt or 53_qt or 54_qt or 55_qt or 56_qt"
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -v -k "52_qt or 53_qt or 54_qt or 55_qt or 56_qt or 81_qml"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:

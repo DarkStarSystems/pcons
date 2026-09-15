@@ -392,11 +392,53 @@ to pass: the pragma is read from the file, and editing one re-runs pcons so
 the qmldir keeps up. A generated QML file that does not exist yet when the
 build is described reads as not a singleton.
 
+Each `qml_files` entry is also the file's path inside the module
+resource, which is what `qt_add_qml_module` does. `qml/pages/Detail.qml`
+is reachable at `qrc:/qt/qml/<uri>/qml/pages/Detail.qml`, and the qmldir
+names that same path, so a hardcoded nested URL resolves.
+
+Every resource directory below the module root gets a qmldir of its own,
+holding one line:
+
+```
+prefer :/qt/qml/<uri>/
+```
+
+The engine resolves an unqualified type name through the implicit import
+of the loaded file's own directory. Without that line a file below the
+root sees none of the module's other types, and a singleton it does see
+resolves as a type rather than as the instance. `prefer` redirects the
+implicit import to the root qmldir, which lists them all. This is what
+`qt_add_qml_module` writes under `qt_policy(SET QTP0004 NEW)`. Nothing is
+asked of the build script.
+
+The engine honours that line from Qt 6.8, the release that introduced
+QTP0004. Measured on one binary against each runtime: 6.4.2, 6.5.3, 6.6.3
+and 6.7.3 report the neighbouring type as not a type, 6.8.3 and 6.11 resolve
+it. Below 6.8 the files are written and ignored, so a file in a
+subdirectory has to import its own module explicitly to use its types.
+
+Entries are relative to the directory of the build script that declares
+the module, the same root `sources=` uses, and the same one CMake uses
+(`CMAKE_CURRENT_SOURCE_DIR`). A module declared through
+`add_subdirectory` therefore spells `qml/Theme.qml` whatever its depth,
+and the location of that build script is not part of the resource
+layout. An absolute entry under that directory works too, and is turned
+back into a relative one. An entry landing *outside* it is refused, `..`
+included: there is no place under the module's resource prefix for it.
+`qt_add_qml_module` differs on both counts, refusing every absolute entry
+and keeping the dot-dots of an upward one.
+
+Two entries whose file names share a stem, such as `pages/Detail.qml` and
+`widgets/Detail.qml`, declare the same QML type twice. The engine
+resolves the name to one of them and the other is unreachable, so pcons
+refuses the module and names both files. Rename one, or split them into
+two modules. `examples/81_qml_nested_layout` shows a nested layout end to
+end.
+
 Not yet included: `qmlcachegen` ahead-of-time QML compilation (the
 embedded QML runs through the normal engine path — functionally
 identical, slightly slower startup) and separate QML plugin libraries.
-`qml_files` entries are embedded under their base name, so a nested layout
-is flattened and two files with one base name collide.
 
 ## Translations
 
@@ -529,13 +571,13 @@ knows where its QML is.
 `qml-skip-import-scanning` is written only when the environment has no
 `QtQmlModule` at all. An application with QML gets the scan.
 
-A `QtQmlModule`'s generated `qmldir` is embedded in a resource, and pcons
-writes it flat, so an import path resolves none of the application's own
-modules. Measured against Qt 6.11.1: that costs nothing as long as every
-module's QML source directory is a root path. The scanner then reports the
-same Qt modules either way, and the application's own module is reported
-with no path -- which is right, since it is in the resource and there is
-nothing on disk to bundle.
+A `QtQmlModule`'s generated `qmldir` is embedded in a resource, and on disk
+it does not sit under a `<uri>`-shaped directory, so an import path resolves
+none of the application's own modules. Measured against Qt 6.11.1: that
+costs nothing as long as every module's QML source directory is a root path.
+The scanner then reports the same Qt modules either way, and the
+application's own module is reported with no path -- which is right, since it
+is in the resource and there is nothing on disk to bundle.
 
 #### Staging the application library
 

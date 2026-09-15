@@ -340,6 +340,7 @@ _SKIP_SECTION_KEYS = {
     "require_qt",
     "require_qt_modules",
     "require_qt_tools",
+    "require_qt_version",
     "generators",
     "rebuild_on_windows",
 }
@@ -473,6 +474,20 @@ def _qt_module_available(module: str) -> bool:
 
 
 @functools.cache
+def _qt_version() -> str | None:
+    """The version of the Qt 6 a build would find, or None without one (cached)."""
+    from pcons.toolchains.qt.finder import _find_qtpaths_query, _pkgconfig_finder
+
+    finder = _pkgconfig_finder(None)
+    if finder.is_available():
+        core = finder.find("Qt6Core")
+        if core is not None:
+            return core.version
+    query = _find_qtpaths_query(None)
+    return None if query is None else query.get("QT_VERSION")
+
+
+@functools.cache
 def _qt_tool_available(tool: str) -> bool:
     """Whether one Qt tool (e.g. "lrelease") is discoverable (cached)."""
     from pcons.toolchains.qt.toolchain import _find_tool, _locate_tool_dirs
@@ -520,6 +535,13 @@ def should_skip(config: dict[str, Any]) -> str | None:
     for tool in skip_config.get("require_qt_tools", []):
         if not _qt_tool_available(tool):
             return f"Qt tool '{tool}' not installed"
+    wanted_qt = skip_config.get("require_qt_version")
+    if wanted_qt is not None:
+        from pcons.toolchains.qt.finder import _version_satisfies
+
+        found_qt = _qt_version()
+        if found_qt is None or not _version_satisfies(found_qt, wanted_qt):
+            return f"Qt {wanted_qt} required, found {found_qt or 'none'}"
 
     def _check_msvc_module_support() -> bool | str:
         """On Windows we expect MSVC (which has its own std-module path).

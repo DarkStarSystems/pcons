@@ -24,7 +24,7 @@ int main(int argc, char *argv[]) {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     engine.loadFromModule("PconsDemo", "Main");
 #else
-    engine.load(QUrl(QStringLiteral("qrc:/qt/qml/PconsDemo/Main.qml")));
+    engine.load(QUrl(QStringLiteral("qrc:/qt/qml/PconsDemo/qml/Main.qml")));
 #endif
     if (engine.rootObjects().isEmpty())
         return 1;

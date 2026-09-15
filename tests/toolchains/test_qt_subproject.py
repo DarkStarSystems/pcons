@@ -263,7 +263,7 @@ class TestQtInstallAcrossSubdirectories:
         qt_dir = tmp_path / "build" / "child" / "qt.ui"
         qrc = (qt_dir / "ui.qrc").read_text()
         assert f">{child / 'qml' / 'Main.qml'}<" in qrc
-        assert "singleton Main 1.0 Main.qml" in (qt_dir / "qmldir").read_text()
+        assert "singleton Main 1.0 qml/Main.qml" in (qt_dir / "qmldir").read_text()
         assert Path("child/qml/Main.qml") in set(top.configure_dependencies)
 
     def test_child_reusing_the_top_project_scans_its_own_sources(
