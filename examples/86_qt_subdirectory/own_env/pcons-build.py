@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 """A subdirectory that brings its own Project, Environment and Qt.
 
-Nothing here refers to the enclosing project, so this script also builds
-on its own (``cd own_env && pcons``). find_qt() caches the install it
-locates on this project; a child that asks for Qt itself gets its own.
+Standalone subdir Qt project. No refs to the enclosing project,
+so this script also builds on its own (``cd own_env && pcons``).
+find_qt() caches the install it locates on this project;
+Qt children get their own.
 """
 
 from pcons import Project, find_c_toolchain

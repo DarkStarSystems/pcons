@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Qt targets declared by add_subdirectory() scripts.
+"""Qt targets declared in add_subdirectory() scripts.
 
-Two ways a subdirectory script can get the environment it builds in, both
-of which have to produce the same Qt codegen edges as a top-level script:
+This shows two ways a subdirectory script can get the environment it
+builds in, both of which work essentially the same as Qt in a
+top-level script.
 
 - ``own_env`` makes its own Project, its own Environment and its own
   find_qt(), the way a library written to build standalone does.

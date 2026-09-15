@@ -779,14 +779,10 @@ class Target:
         (link order can matter for static libraries).
 
         Args:
-            *libs: Targets to depend on, and/or raw library-name strings. A
-                string starting with ``:`` is the explicit-filename form,
-                ``-l:libfoo.a``: a file to find on the library search path,
-                rather than a library to derive a file name from. GNU ld and
-                LLD take it. It is not portable. Apple's ld64 rejects it, and
-                MSVC's linker receives ``:libfoo.a.lib``, since that
-                toolchain appends the suffix to every library name. pcons
-                passes the name through either way.
+            *libs: Targets to depend on, and/or raw library-name strings. Note: A
+                string starting with ``:`` is the GNU-style explicit-filename form,
+                so ``-l:libfoo.a`` is a file to find on the library search path, for
+                linkers that support that syntax.
 
         Returns:
             self, for method chaining.
@@ -862,13 +858,13 @@ class Target:
             if isinstance(lib, str) and _looks_like_a_path(lib):
                 raise TypeError(
                     f"{method}() got {lib!r}, which looks like a file path; a "
-                    f"string here is a library name, which the toolchain turns "
-                    f"into a link argument such as -l{lib}. To link a library "
+                    f"string here should be a library name, which the toolchain turns "
+                    f"into a link argument like -l{lib}. To link a library "
                     f"file, add it to the sources of the target that links it: "
                     f"an archive or object there goes on the link line after "
                     f"the objects, where the linker can pull from it. To link "
                     f"it by name instead, put its directory in link_dirs and "
-                    f"name the library."
+                    f"use just the library name here."
                 )
             if lib is self:
                 raise ValueError(f"Target '{self.name}' cannot link itself.")

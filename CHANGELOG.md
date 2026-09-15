@@ -9,55 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- A Qt target declared in a subdirectory now generates into
-  `build/<subdir>/qt.<name>/`, beside the `build/<subdir>/obj.<name>/`
-  its objects already used, instead of `build/qt.<name>/`. Two
-  subdirectories may now each declare a target of the same name. Anything
+- A Qt target declared in a subdirectory now generates into the proper subdir
+  `build/<subdir>/qt.<name>/`. Anything
   naming the old path (a `.gitignore` entry, an install rule, an IDE
   search path) needs updating. (#172)
 
-- `link()` now refuses a string only when it holds a directory separator.
-  A library name that is really a file name, `link("libfoo.a")`, is
-  refused by the toolchain when it forms the link line, which is where the
-  `-l` naming rule is known, and that now catches a direct
-  `link_libs.append()` too. The message points at the form that works:
-  add the file to the sources of the target that links it. The old advice,
-  a `PathToken` in `link_flags`, put the archive ahead of the objects,
-  where the linker pulls nothing from it.
+- `link()` now errors on a string only when it contains a directory
+  separator. Other incorrect lib name strings (e.g. passing full
+  filenames instead of lib names) are handled by each toolchain. This
+  allows the `-l:libfoo.a` GNU linker format.
 
 ### Fixed
 
 - `link(":libfoo.a")` is accepted again. That is the explicit-filename
-  form, `-l:libfoo.a`, the way to link an archive the `-l` naming rule
-  cannot produce. GNU ld and LLD take it; Apple's ld64 rejects it, and
-  MSVC's linker receives `:libfoo.a.lib`, so it is not portable. (#176,
+  form, `-l:libfoo.a` accepted by GNU ld and LLD.  (#176,
   #177)
 
 - Qt builders now work under `add_subdirectory()`. Generated moc, uic and
-  rcc files were written under the subdirectory's own root while the build
-  edges named them anchored at the top-level root, so ninja refused to
-  load any build with a Qt target in a subdirectory. (#172)
+  rcc files now get written to the proper subdir. (#172)
 
 - A subdirectory script that creates its own `Environment` no longer
-  loses build edges. Files a builder generates without a target of their
-  own (Qt's moc output, a tool invocation's outputs, a scanner's
-  bookkeeping) reach the build file through the project's environments,
-  and that walk stopped at the top-level project.
+  loses build edges: generators now walk sub-projects' environments too.
 
 - A relative `link_dirs` or `framework_dirs` entry declared in a subdirectory
-  script lost its subdirectory when it reached the generator, so `-L` (and
-  `-F`) pointed one level too high. Both now anchor at the top-level root,
-  the same as `include_dirs` already did. (#182, following #178)
+  script now work, so `-L` (and `-F`) no longer point one level too high.  (#182, following #178)
 
 - `frameworks` and `framework_dirs` on a target's public/private usage
-  requirements now reach the link line and propagate to dependents, the same
-  as `link_libs`/`link_dirs` already did. Previously a plain target's
-  `-framework`/`-F` settings were silently ignored; only packages worked.
+  requirements now get passed to the link line and propagate to dependents, the same
+  as `link_libs`/`link_dirs` already did.
   (#182)
 
 - A library search directory set on the environment (`env.link.libdirs`)
-  was dropped from a link line whenever the target, or something it
-  linked, contributed a `link_dirs` entry of its own. The environment's
+  now gets set properly on a link line whenever the target, or something it
+  linked, contributes a `link_dirs` entry of its own. The environment's
   directories now follow the target's, the way `env.link.libs` already
   followed usage-requirement libraries.
 

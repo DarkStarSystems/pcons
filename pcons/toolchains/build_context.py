@@ -20,10 +20,9 @@ if TYPE_CHECKING:
     from pcons.tools.requirements import EffectiveRequirements
 
 
-# File suffixes a Unix-style ``-l`` cannot take: ``-lfoo`` looks for
-# ``libfoo.a`` or ``libfoo.so``, so a library name carrying one of these is
-# a file name and the linker will find nothing. ``.lib`` is not here: MSVC
-# names import libraries that way, and MsvcCompileLinkContext formats them.
+# File suffixes we reject in a library name (at resolve time, wherever
+# the name came from) because a Unix-style ``-l`` can't take them.
+# ``.lib`` is not here because MSVC references import libraries that way.
 _LIBRARY_FILE_SUFFIXES = (".a", ".so", ".dylib", ".dll", ".o", ".obj")
 
 
@@ -33,12 +32,12 @@ def _library_file_name_message(lib: str, target_name: str | None) -> str:
     file_name = lib.replace("\\", "/").rsplit("/", 1)[-1]
     return (
         f"Link library {lib!r}{where} is a file name, not a library name: "
-        f"the linker takes it as -l{lib} and finds nothing. Add the file to "
+        f"the linker would see it as -l{lib}. Add the file to "
         f"the sources of the target that links it, where it goes on the link "
         f"line after the objects. To link it by name instead, put its "
         f"directory in link_dirs and name the library ('foo' for libfoo.a). "
-        f"GNU ld and LLD also take ':{file_name}', the explicit-filename "
-        f"form, resolved on the library search path."
+        f"(GNU ld and LLD also take ':{file_name}', the explicit-filename "
+        f"form, resolved on the library search path.)"
     )
 
 
@@ -127,8 +126,8 @@ class CompileLinkContext:
         """Append ``env.link.<name>`` after `values`, dropping duplicates.
 
         An override replaces the environment's list on the edge, so the
-        environment's own entries must ride along or they vanish from the
-        link line. Env-level entries go last: left-to-right static linkers
+        environment's own entries must ride along.
+        Env-level entries go last: left-to-right static linkers
         (GNU ld) only pull symbols to satisfy references already seen, so
         system libs like ``pthread``/``dl`` must follow the
         usage-requirement libraries whose undefined symbols they resolve,
@@ -190,8 +189,8 @@ class CompileLinkContext:
         """Format library names for the linker. Base passes them unchanged.
 
         A name that is really a file name is refused here, where the ``-l``
-        convention is known. A leading colon is the explicit-filename form,
-        ``-l:libfoo.a``, so those pass: naming the file is the point of it.
+        convention is known. A leading colon is the unusual but possible
+        explicit-filename form, ``-l:libfoo.a``, so we allow those.
         """
         for lib in libs:
             if (
