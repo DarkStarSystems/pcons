@@ -396,25 +396,16 @@ def _make_default_requirements(
 def _looks_like_a_path(name: str) -> bool:
     """Whether a link() string is a file path rather than a library name.
 
-    A name is what ``-l`` takes: no directory separators, no library file
-    suffix. ``/opt/vendor/lib/libfoo.a`` fails at link time as
-    ``-l/opt/vendor/lib/libfoo.a``, with the mistake pointed at the linker.
-    A bare ``ws2_32.lib`` is a name too: MSVC's linker takes import
-    libraries that way, and its toolchain passes it through as written.
+    A name carries no directory separators. ``/opt/vendor/lib/libfoo.a``
+    reaches the linker as a name and fails there, with the mistake pointed
+    at the wrong tool.
 
-    A leading colon is GNU ld's explicit-filename form. ``-l:libfoo.a``
-    names a file to look for on the library search path, which is the only
-    way to link an archive whose name ``-lfoo`` cannot spell. Carrying the
-    suffix is the point of it, so only a separator is refused there: a
-    colon form holding one matches nothing the search path can offer.
+    What else a name may look like is the linker's own convention: which
+    file names it can derive, and whether it takes a file name directly.
+    That belongs to the toolchain, which checks it where it formats the
+    link line (see ``CompileLinkContext._format_libs``).
     """
-    if name.startswith(":"):
-        return "/" in name[1:] or "\\" in name[1:]
-    return (
-        "/" in name
-        or "\\" in name
-        or name.endswith((".a", ".so", ".dylib", ".dll", ".o", ".obj"))
-    )
+    return "/" in name or "\\" in name
 
 
 class Target:
@@ -788,11 +779,10 @@ class Target:
         (link order can matter for static libraries).
 
         Args:
-            *libs: Targets to depend on, and/or raw library-name strings. A
-                string starting with ``:`` is GNU ld's explicit-filename
-                form, ``-l:libfoo.a``, which names a file to find on the
-                library search path rather than a library to derive a file
-                name from.
+            *libs: Targets to depend on, and/or raw library-name strings. Note: A
+                string starting with ``:`` is the GNU-style explicit-filename form,
+                so ``-l:libfoo.a`` is a file to find on the library search path, for
+                linkers that support that syntax.
 
         Returns:
             self, for method chaining.
@@ -868,13 +858,13 @@ class Target:
             if isinstance(lib, str) and _looks_like_a_path(lib):
                 raise TypeError(
                     f"{method}() got {lib!r}, which looks like a file path; a "
-                    f"string here is a library name, passed to the linker as "
-                    f"-l{lib} on GCC and Clang. To link a library file by "
-                    f"path, put its directory in link.libdirs and name it, or "
-                    f"add the file itself to link_flags as a PathToken. An "
-                    f"archive the -l naming rule cannot spell is ':' plus its "
-                    f"file name, GNU ld's explicit-filename form, with its "
-                    f"directory in link.libdirs."
+                    f"string here should be a library name, which the toolchain turns "
+                    f"into a link argument like -l{lib}. To link a library "
+                    f"file, add it to the sources of the target that links it: "
+                    f"an archive or object there goes on the link line after "
+                    f"the objects, where the linker can pull from it. To link "
+                    f"it by name instead, put its directory in link_dirs and "
+                    f"use just the library name here."
                 )
             if lib is self:
                 raise ValueError(f"Target '{self.name}' cannot link itself.")

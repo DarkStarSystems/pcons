@@ -1230,6 +1230,13 @@ Build-file generators that execute from the build directory (Ninja, Make via
 graph generators (dot/mermaid) use display labels — neither goes through
 `execution_relative()`.
 
+`Project` offers two path resolvers, subdir-relative and top-relative.
+`project.path_resolver` follows the live declaring-directory offset,
+so a relative path a build script wrote resolves against that script's own
+directory. `project.top_path_resolver` is anchored
+at the top-level root, where node paths live; use that for a path that's already
+canonical.
+
 ### Project
 > **Status: Implemented**
 

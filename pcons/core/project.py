@@ -718,10 +718,27 @@ class Project(_ProjectBuilders):
 
     @property
     def path_resolver(self) -> PathResolver:
-        """Get the path resolver for this project's current directory."""
+        """The path resolver for this project's *current* directory.
+
+        Relative paths resolve against the directory being declared in, so
+        this follows the live ``add_subdirectory`` offset.
+        Use it for paths written by a build script, usually
+        from the script's own directory; use :attr:`top_path_resolver`
+        for anything already anchored, such as a node's path.
+        """
         offset = self._node_offset
         if offset.parts:
             return self._path_resolver.subdir(offset)
+        return self._path_resolver
+
+    @property
+    def top_path_resolver(self) -> PathResolver:
+        """The path resolver anchored at the top-level project's root.
+
+        Use this for node paths, or any path that is already
+        canonical. Unlike :attr:`path_resolver` it does not move with
+        the declaring directory.
+        """
         return self._path_resolver
 
     def Environment(
@@ -965,21 +982,24 @@ class Project(_ProjectBuilders):
 
     @property
     def environments(self) -> list[Env]:
-        """Get all registered environments."""
-        return list(self._environments)
+        """Get all registered environments, sub-projects' included.
+
+        Like :attr:`targets`, this spans the whole tree: walks
+        the environments to reach all nodes, including ones registered without a
+        target. Use ``_environments`` for only this project's.
+        """
+        results: list[Env] = list(self._environments)
+        for child in self._children:
+            results.extend(child.environments)
+        return results
 
     @property
     def default_environment(self) -> Env:
         """Get the default environment (first one registered).
 
-        A sub-project that registers no environment of its own inherits the
-        enclosing project's, so a library nested several levels down still
-        finds the toolchain the top-level build set up.
-
-        An ``add_subdirectory(..., env=...)`` in progress wins over both:
-        the caller named the environment the included tree builds in, and
-        the script it includes asks its parent, which has environments of
-        its own.
+        In a sub-project, returns that sub-project's first environment, or if none, the
+        enclosing project's. An ``add_subdirectory(..., env=...)`` in progress
+        overrides both.
 
         Raises:
             ValueError: If no environment is registered here or in any
@@ -994,12 +1014,11 @@ class Project(_ProjectBuilders):
         return env
 
     def _resolve_default_environment(self) -> Env | None:
-        """The environment a caller who named none is asking for.
+        """Returns the default environment for a project.
 
-        One rule, so that two callers asking the same question cannot get two
-        answers. The public ``default_environment`` raises when there is none
-        and ``_inherited_environment`` returns None, and that is the only way
-        they differ.
+        Normally the first env created, or in a sub-project, that
+        sub-project's first env or the parent's (recursively). An
+        ``add_subdirectory(..., env=...)`` in progress overrides both.
         """
         if Project.__default_env is not None:
             return Project.__default_env
@@ -1011,11 +1030,11 @@ class Project(_ProjectBuilders):
         return None
 
     def _inherited_environment(self) -> Env | None:
-        """The environment of a target created without one.
+        """The environment of a target created without its own env.
 
-        ``default_environment`` without the raise: a target that names no
-        environment may end up with none, which is what a project that has
-        registered none gives it.
+        Essentially the same as ``default_environment`` but doesn't
+        raise errors, so a target that names no environment may end up
+        with None.
         """
         return self._resolve_default_environment()
 

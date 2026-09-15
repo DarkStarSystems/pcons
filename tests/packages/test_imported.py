@@ -146,7 +146,12 @@ class TestImportedTarget:
         assert "-Wl,-rpath,/opt/test/lib" in target.public.link_flags
 
     def test_public_requirements_frameworks_macos(self, test_project):  # noqa: F811
-        """Test that macOS framework flags are populated in public requirements."""
+        """Frameworks/framework_dirs stay structured, like link_libs/link_dirs.
+
+        The resolve path (EffectiveRequirements -> CompileLinkContext) lowers
+        them to -F/-framework at link time; ImportedTarget just carries the
+        usage requirement, the same as it does for link_libs/link_dirs.
+        """
         pkg = PackageDescription(
             name="CoreFoundation",
             framework_dirs=["/System/Library/Frameworks"],
@@ -155,12 +160,11 @@ class TestImportedTarget:
 
         target = ImportedTarget.from_package(pkg)
 
-        # Verify framework flags are in public.link_flags
-        assert "-F" in target.public.link_flags
-        assert "/System/Library/Frameworks" in target.public.link_flags
-        assert "-framework" in target.public.link_flags
-        assert "CoreFoundation" in target.public.link_flags
-        assert "Security" in target.public.link_flags
+        assert target.public.framework_dirs == [Path("/System/Library/Frameworks")]
+        assert target.public.frameworks == ["CoreFoundation", "Security"]
+        # Not lowered to flags here; that happens at link time.
+        assert "-F" not in target.public.link_flags
+        assert "-framework" not in target.public.link_flags
 
     def test_public_requirements_with_components(self, test_project):  # noqa: F811
         """Test public requirements include merged component data."""

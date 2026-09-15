@@ -914,6 +914,158 @@ class TestSubdirectoryIncludeDirs:
         assert "$topdir/a/bb/inc" in text
 
 
+class TestSubdirectoryLinkDirs:
+    """A link dir anchors at the declaring script, the same as an include dir.
+
+    A library's own build step never reads ``link_dirs`` (``ar`` takes no
+    ``-L``), so the anchoring only shows up on a consumer: a top-level
+    program that links the subdirectory's library.
+
+    Pinned to a pre-configured GCC toolchain (the ``gcc_toolchain`` fixture)
+    rather than ``toolchain="c"`` host autodetection: the assertions check
+    for a literal ``-L`` prefix, which only a GCC/Clang-style linker emits
+    (MSVC would emit ``/LIBPATH:``), so autodetecting MSVC on Windows CI
+    would make these fail for the wrong reason.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    CHILD = (
+        "from pcons.core.project import Project\n"
+        "project = Project.current()\n"
+        "env = project.default_environment\n"
+        "lib = project.StaticLibrary('sublib', env, sources=['thing.c'])\n"
+        "lib.public.link_dirs.append({spelling})\n"
+    )
+
+    def _child(self, test_project: Project, spelling: str) -> Path:
+        subdir = _make_subdir(
+            test_project, "child", self.CHILD.format(spelling=spelling)
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+        return subdir
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["'libs'", "project.current_dir / 'libs'", "str(project.current_dir / 'libs')"],
+    )
+    def test_the_link_dir_keeps_the_subdirectory(
+        self, test_project: Project, tmp_path: Path, spelling: str, gcc_toolchain
+    ) -> None:
+        env = test_project.Environment(toolchain=gcc_toolchain)
+        self._child(test_project, spelling)
+        ns = add_subdirectory("child")
+
+        (test_project.root_dir / "main.c").write_text("int main(void) { return 0; }\n")
+        app = test_project.Program("app", env, sources=["main.c"])
+        app.link(ns.lib)
+        text = self._ninja(test_project, tmp_path)
+
+        assert "-L$topdir/child/libs" in text
+        assert "-L$topdir/libs" not in text
+
+    def test_a_nested_child_keeps_every_segment(
+        self, test_project: Project, tmp_path: Path, gcc_toolchain
+    ) -> None:
+        env = test_project.Environment(toolchain=gcc_toolchain)
+        subdir = _make_subdir(
+            test_project,
+            "a/bb",
+            self.CHILD.format(spelling="project.current_dir / 'libs'"),
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+        ns = add_subdirectory("a/bb")
+
+        (test_project.root_dir / "main.c").write_text("int main(void) { return 0; }\n")
+        app = test_project.Program("app", env, sources=["main.c"])
+        app.link(ns.lib)
+        text = self._ninja(test_project, tmp_path)
+
+        assert "-L$topdir/a/bb/libs" in text
+
+
+class TestSubdirectoryFrameworkDirs:
+    """A framework dir anchors the same way as a link dir.
+
+    ``target.public.frameworks``/``framework_dirs`` now reach the link line
+    (carried through ``EffectiveRequirements`` and ``CompileLinkContext``,
+    the same as ``link_libs``/``link_dirs``), so this asserts real ``-F``/
+    ``-framework`` text the same way :class:`TestSubdirectoryLinkDirs` does
+    for ``-L``. Pinned to ``gcc_toolchain`` for the same cross-platform
+    reason: MSVC has no framework concept and would emit neither flag.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    CHILD = (
+        "from pcons.core.project import Project\n"
+        "project = Project.current()\n"
+        "env = project.default_environment\n"
+        "lib = project.StaticLibrary('sublib', env, sources=['thing.c'])\n"
+        "lib.public.framework_dirs.append({spelling})\n"
+        "lib.public.frameworks.append('Cocoa')\n"
+    )
+
+    def _child(self, test_project: Project, spelling: str) -> Path:
+        subdir = _make_subdir(
+            test_project, "child", self.CHILD.format(spelling=spelling)
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+        return subdir
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["'fw'", "project.current_dir / 'fw'", "str(project.current_dir / 'fw')"],
+    )
+    def test_the_framework_dir_keeps_the_subdirectory(
+        self, test_project: Project, tmp_path: Path, spelling: str, gcc_toolchain
+    ) -> None:
+        env = test_project.Environment(toolchain=gcc_toolchain)
+        self._child(test_project, spelling)
+        ns = add_subdirectory("child")
+
+        (test_project.root_dir / "main.c").write_text("int main(void) { return 0; }\n")
+        app = test_project.Program("app", env, sources=["main.c"])
+        app.link(ns.lib)
+        text = self._ninja(test_project, tmp_path)
+
+        assert "-F$topdir/child/fw" in text
+        assert "-F$topdir/fw" not in text
+        assert "-framework" in text
+        assert "Cocoa" in text
+
+    def test_a_nested_child_keeps_every_segment(
+        self, test_project: Project, tmp_path: Path, gcc_toolchain
+    ) -> None:
+        env = test_project.Environment(toolchain=gcc_toolchain)
+        subdir = _make_subdir(
+            test_project,
+            "a/bb",
+            self.CHILD.format(spelling="project.current_dir / 'fw'"),
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+        ns = add_subdirectory("a/bb")
+
+        (test_project.root_dir / "main.c").write_text("int main(void) { return 0; }\n")
+        app = test_project.Program("app", env, sources=["main.c"])
+        app.link(ns.lib)
+        text = self._ninja(test_project, tmp_path)
+
+        assert "-F$topdir/a/bb/fw" in text
+
+
 class TestSubdirectoryInstallPaths:
     """Install and archive sources anchor at the declaring script too.
 

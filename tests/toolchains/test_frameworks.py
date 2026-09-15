@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for macOS Framework linking support."""
 
+from pathlib import Path
+
 from pcons.core.environment import Environment
 from pcons.packages.description import PackageDescription
 from pcons.toolchains.gcc import GccLinker
@@ -155,7 +157,10 @@ class TestEnvironmentUseWithFrameworks:
         env.use(pkg)
         assert "Metal" in env.link.frameworks
         assert "Foundation" in env.link.frameworks
-        assert "/System/Library/Frameworks" in env.link.frameworkdirs
+        # Framework dirs are Paths like link_dirs, so compare as such.
+        assert Path("/System/Library/Frameworks") in [
+            Path(d) for d in env.link.frameworkdirs
+        ]
 
     def test_use_no_duplicate_frameworks(self, test_project):  # noqa: F811
         """use() should not add duplicate frameworks."""

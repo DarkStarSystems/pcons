@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A Qt target declared in a subdirectory now generates into the proper subdir
+  `build/<subdir>/qt.<name>/`. Anything
+  naming the old path (a `.gitignore` entry, an install rule, an IDE
+  search path) needs updating. (#172)
+
+- `link()` now errors on a string only when it contains a directory
+  separator. Other incorrect lib name strings (e.g. passing full
+  filenames instead of lib names) are handled by each toolchain. This
+  allows the `-l:libfoo.a` GNU linker format.
+
+### Fixed
+
+- `link(":libfoo.a")` is accepted again. That is the explicit-filename
+  form, `-l:libfoo.a` accepted by GNU ld and LLD.  (#176,
+  #177)
+
+- Qt builders now work under `add_subdirectory()`. Generated moc, uic and
+  rcc files now get written to the proper subdir. (#172)
+
+- A subdirectory script that creates its own `Environment` no longer
+  loses build edges: generators now walk sub-projects' environments too.
+
+- A relative `link_dirs` or `framework_dirs` entry declared in a subdirectory
+  script now work, so `-L` (and `-F`) no longer point one level too high.  (#182, following #178)
+
+- `frameworks` and `framework_dirs` on a target's public/private usage
+  requirements now get passed to the link line and propagate to dependents, the same
+  as `link_libs`/`link_dirs` already did.
+  (#182)
+
+- A library search directory set on the environment (`env.link.libdirs`)
+  now gets set properly on a link line whenever the target, or something it
+  linked, contributes a `link_dirs` entry of its own. The environment's
+  directories now follow the target's, the way `env.link.libs` already
+  followed usage-requirement libraries.
+
 ## [0.29.1] - 2026-09-14
 
 ### Changed

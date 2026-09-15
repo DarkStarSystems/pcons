@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from pcons.core.errors import PconsError
 from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.build_context import CompileLinkContext, MsvcCompileLinkContext
 
@@ -73,6 +76,50 @@ class TestCompileLinkContext:
         assert len(libdirs) == 1
         assert isinstance(libdirs[0], ProjectPath)
 
+    def test_link_overrides_frameworks(self) -> None:
+        """Verify link mode returns frameworkdirs/frameworks (macOS -F/-framework)."""
+        from typing import cast
+
+        from pcons.core.subst import ProjectPath
+
+        ctx = CompileLinkContext(
+            frameworks=["Cocoa", "Metal"],
+            frameworkdirs=["/System/Library/Frameworks"],
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+
+        assert overrides["frameworks"] == ["Cocoa", "Metal"]
+        frameworkdirs = cast(list[ProjectPath], overrides["frameworkdirs"])
+        assert len(frameworkdirs) == 1
+        assert isinstance(frameworkdirs[0], ProjectPath)
+        assert frameworkdirs[0].path == "/System/Library/Frameworks"
+
+    def test_link_overrides_without_frameworks_omits_keys(self) -> None:
+        """No frameworks/framework_dirs means no overrides, like libdirs/libs."""
+        ctx = CompileLinkContext(libs=["m"], mode="link")
+        overrides = ctx.get_env_overrides()
+
+        assert "frameworks" not in overrides
+        assert "frameworkdirs" not in overrides
+
+    def test_from_effective_requirements_carries_frameworks(self) -> None:
+        """from_effective_requirements populates frameworks/frameworkdirs."""
+        from pathlib import Path
+
+        from pcons.tools.requirements import EffectiveRequirements
+
+        effective = EffectiveRequirements(
+            frameworks=["Cocoa"],
+            framework_dirs=[Path("/System/Library/Frameworks")],
+        )
+        ctx = CompileLinkContext.from_effective_requirements(effective, mode="link")
+
+        assert ctx.frameworks == ["Cocoa"]
+        assert [Path(d) for d in ctx.frameworkdirs] == [
+            Path("/System/Library/Frameworks")
+        ]
+
     def test_link_overrides_merge_with_env_link_flags(self) -> None:
         """Verify link_flags are merged with env.link.flags, not replaced.
 
@@ -137,6 +184,48 @@ class TestCompileLinkContext:
 
             libs = [str(lib) for lib in overrides["libs"]]
             assert libs == ["rust_greet", "dl", "pthread"]
+
+    def test_link_overrides_keep_env_dirs_and_frameworks(self) -> None:
+        """A target's link dirs and frameworks are added to the env's, not
+        put in their place: the override replaces the edge's variable, so
+        env.link.libdirs / frameworkdirs / frameworks must ride along."""
+        import tempfile
+        from pathlib import Path
+
+        from pcons.core.project import Project
+        from pcons.toolchains.gcc import GccToolchain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+            toolchain = GccToolchain()
+            toolchain._configured = True
+            env = project.Environment(toolchain=toolchain)
+            env.add_tool("link")
+            env.link.libdirs = ["/env/lib"]
+            env.link.frameworkdirs = ["/env/fw"]
+            env.link.frameworks = ["Foundation"]
+
+            ctx = CompileLinkContext(
+                libdirs=["/target/lib"],
+                frameworkdirs=["/target/fw"],
+                frameworks=["Cocoa"],
+                mode="link",
+                _env=env,
+            )
+            overrides = ctx.get_env_overrides()
+
+            from typing import cast
+
+            def paths(key: str) -> list[str]:
+                return [
+                    str(getattr(d, "path", d))
+                    for d in cast(list[object], overrides[key])
+                ]
+
+            assert paths("libdirs") == ["/target/lib", "/env/lib"]
+            assert paths("frameworkdirs") == ["/target/fw", "/env/fw"]
+            assert overrides["frameworks"] == ["Cocoa", "Foundation"]
 
     def test_link_overrides_without_env(self) -> None:
         """Verify link_flags work when no env is provided (no base to merge)."""
@@ -234,12 +323,15 @@ class TestCompileLinkContext:
             def has_tool(self, name: str) -> bool:
                 return False
 
+        class _StubTarget:
+            name = "foo"
+
         effective = EffectiveRequirements(link_flags=["-Wl,-soname,libfoo.so"])
         ctx = CompileLinkContext.from_effective_requirements(
             effective,
             mode="link",
             env=_StubEnv(),  # type: ignore[arg-type]
-            target=object(),  # type: ignore[arg-type]
+            target=_StubTarget(),  # type: ignore[arg-type]
             output_name="libfoo.so",
         )
 
@@ -453,6 +545,24 @@ class TestMsvcCompileLinkContext:
         assert "kernel32.lib" in libs  # string gets .lib suffix
         assert token in libs  # token forwarded unchanged
 
+    def test_msvc_link_overrides_frameworks_do_not_crash(self) -> None:
+        """MSVC has no framework concept, but a non-empty list must not crash.
+
+        A target's public.frameworks/framework_dirs still reach the context
+        (MSVC inherits _link_overrides from the base class); MSVC's own
+        command templates simply never reference the overridden keys, so
+        they are computed but unused rather than special-cased away.
+        """
+        ctx = MsvcCompileLinkContext(
+            frameworks=["Cocoa"],
+            frameworkdirs=["/System/Library/Frameworks"],
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+
+        assert overrides["frameworks"] == ["Cocoa"]
+        assert len(overrides["frameworkdirs"]) == 1
+
     def test_msvc_link_overrides_merge_with_env_link_flags(self) -> None:
         """Verify MSVC link_flags are merged with env.link.flags.
 
@@ -483,6 +593,49 @@ class TestMsvcCompileLinkContext:
             # Both env.link.flags and target link_flags must be present
             assert "/DEBUG" in overrides["flags"]
             assert "/LTCG" in overrides["flags"]
+
+
+class TestALibraryNameThatIsAFileName:
+    """``-l`` derives a file name from the name it is given, so a name that
+    already is a file name finds nothing. Which names those are is the
+    linker's convention, so the check lives with the ``-l`` formatting.
+    """
+
+    @pytest.mark.parametrize(
+        "lib",
+        ["libfoo.a", "foo.so", "foo.dylib", "foo.dll", "foo.o", "foo.obj"],
+    )
+    def test_a_library_file_name_is_refused(self, lib: str) -> None:
+        ctx = CompileLinkContext(libs=[lib], mode="link", _target_name="app")
+
+        with pytest.raises(PconsError, match="is a file name"):
+            ctx.get_env_overrides()
+
+    def test_the_explicit_filename_form_passes(self) -> None:
+        """``-l:libfoo.a`` names the file on purpose, and GNU ld resolves it
+        on the library search path."""
+        ctx = CompileLinkContext(libs=[":libfoo.a"], mode="link")
+
+        assert ctx.get_env_overrides()["libs"] == [":libfoo.a"]
+
+    def test_a_plain_library_name_passes(self) -> None:
+        ctx = CompileLinkContext(libs=["m", "python3.11"], mode="link")
+
+        assert ctx.get_env_overrides()["libs"] == ["m", "python3.11"]
+
+    def test_msvc_takes_its_own_file_names(self) -> None:
+        """MSVC names import libraries in full, so the Unix rule does not
+        apply: its context formats the names itself."""
+        ctx = MsvcCompileLinkContext(libs=["ws2_32.lib", "kernel32"], mode="link")
+
+        assert ctx.get_env_overrides()["libs"] == ["ws2_32.lib", "kernel32.lib"]
+
+    def test_msvc_passes_a_colon_name_through_as_written(self) -> None:
+        """pcons does not gate the explicit-filename form on the toolchain.
+        It is GNU ld and LLD only, and link.exe receives it unusable."""
+        ctx = MsvcCompileLinkContext(libs=[":libfoo.a"], mode="link")
+
+        assert ctx.get_env_overrides()["libs"] == [":libfoo.a.lib"]
 
 
 class TestNinjaQuoting:

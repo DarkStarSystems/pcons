@@ -9,7 +9,9 @@ via get_env_overrides().
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
+
+from pcons.core.errors import PconsError
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -18,14 +20,35 @@ if TYPE_CHECKING:
     from pcons.tools.requirements import EffectiveRequirements
 
 
+# File suffixes we reject in a library name (at resolve time, wherever
+# the name came from) because a Unix-style ``-l`` can't take them.
+# ``.lib`` is not here because MSVC references import libraries that way.
+_LIBRARY_FILE_SUFFIXES = (".a", ".so", ".dylib", ".dll", ".o", ".obj")
+
+
+def _library_file_name_message(lib: str, target_name: str | None) -> str:
+    """Message for a link library that is a file name rather than a name."""
+    where = f" on target '{target_name}'" if target_name else ""
+    file_name = lib.replace("\\", "/").rsplit("/", 1)[-1]
+    return (
+        f"Link library {lib!r}{where} is a file name, not a library name: "
+        f"the linker would see it as -l{lib}. Add the file to "
+        f"the sources of the target that links it, where it goes on the link "
+        f"line after the objects. To link it by name instead, put its "
+        f"directory in link_dirs and name the library ('foo' for libfoo.a). "
+        f"(GNU ld and LLD also take ':{file_name}', the explicit-filename "
+        f"form, resolved on the library search path.)"
+    )
+
+
 @dataclass
 class CompileLinkContext:
     """ToolchainContext for Unix-style C/C++ toolchains (GCC, Clang).
 
     ``mode`` selects what ``get_env_overrides()`` returns: ``"compile"``
-    (includes, defines, flags) or ``"link"`` (libdirs, libs, flags, cmd).
-    Paths and names are stored without prefixes; the ``*_prefix`` fields
-    supply them at formatting time.
+    (includes, defines, flags) or ``"link"`` (libdirs, libs, flags, cmd,
+    frameworkdirs, frameworks). Paths and names are stored without
+    prefixes; the ``*_prefix`` fields supply them at formatting time.
     """
 
     includes: list[str] = field(default_factory=list)
@@ -35,6 +58,13 @@ class CompileLinkContext:
     link_flags: list[FlagToken] = field(default_factory=list)
     libs: list[str] = field(default_factory=list)
     libdirs: list[str] = field(default_factory=list)
+    # macOS frameworks (-framework NAME) and their search dirs (-F DIR). A
+    # GNU-style linker always defines the frameworkdirs/frameworks/fprefix/
+    # Fprefix vars (see gnu_common.gnu_link_vars), so these are harmless
+    # overrides on a non-Apple toolchain too: unreferenced by its command
+    # template, so simply unused.
+    frameworks: list[str] = field(default_factory=list)
+    frameworkdirs: list[str] = field(default_factory=list)
     linker_cmd: str | None = None  # Override for link.cmd (e.g., "clang++" for C++)
     mode: str = "compile"  # "compile" or "link"
 
@@ -45,9 +75,11 @@ class CompileLinkContext:
     libdir_prefix: str = "-L"
     lib_prefix: str = "-l"
 
-    # Runtime-only fields for flag merging (not part of build identity)
+    # Runtime-only fields for flag merging and error messages (not part of
+    # build identity)
     _tool_name: str | None = field(default=None, repr=False, compare=False)
     _env: Environment | None = field(default=None, repr=False, compare=False)
+    _target_name: str | None = field(default=None, repr=False, compare=False)
 
     def get_env_overrides(self) -> dict[str, object]:
         """Return mode-appropriate overrides for env.<tool>.* before subst().
@@ -90,19 +122,23 @@ class CompileLinkContext:
         merge_flags(result, flags, separated_arg_flags, passthrough_flags)
         return result
 
-    def _merge_with_base_libs(self, libs: list[str]) -> list[str]:
-        """Append env.link.libs after `libs`, dropping duplicates.
+    def _merge_with_base_link(self, name: str, values: list[Any]) -> list[Any]:
+        """Append ``env.link.<name>`` after `values`, dropping duplicates.
 
-        Env-level libs go last: left-to-right static linkers (GNU ld) only
-        pull symbols to satisfy references already seen, so system libs
-        like ``pthread``/``dl`` must follow the usage-requirement
-        libraries whose undefined symbols they resolve.
+        An override replaces the environment's list on the edge, so the
+        environment's own entries must ride along.
+        Env-level entries go last: left-to-right static linkers
+        (GNU ld) only pull symbols to satisfy references already seen, so
+        system libs like ``pthread``/``dl`` must follow the
+        usage-requirement libraries whose undefined symbols they resolve,
+        and a target's own search directories come before the
+        environment's.
         """
-        base_libs: list[str] = []
+        base: list[Any] = []
         if self._env and self._env.has_tool("link"):
             link_cfg = getattr(self._env, "link", None)
-            base_libs = list(getattr(link_cfg, "libs", None) or [])
-        return [lib for lib in libs if lib not in base_libs] + base_libs
+            base = list(getattr(link_cfg, name, None) or [])
+        return [v for v in values if v not in base] + base
 
     def _compile_overrides(self) -> dict[str, object]:
         """Return compile-time overrides: includes, defines, flags."""
@@ -122,25 +158,47 @@ class CompileLinkContext:
         return result
 
     def _link_overrides(self) -> dict[str, object]:
-        """Return link-time overrides: libdirs, libs, flags, cmd."""
+        """Return link-time overrides: libdirs, libs, flags, cmd, frameworks."""
         from pcons.core.subst import ProjectPath
 
         result: dict[str, object] = {}
 
         if self.libdirs:
-            result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
-        merged_libs = self._merge_with_base_libs(self.libs)
+            result["libdirs"] = self._merge_with_base_link(
+                "libdirs", [ProjectPath(p) for p in self.libdirs]
+            )
+        merged_libs = self._merge_with_base_link("libs", self.libs)
         if merged_libs:
             result["libs"] = self._format_libs(merged_libs)
         if self.link_flags:
             result["flags"] = self._merge_with_base_flags("link", self.link_flags)
         if self.linker_cmd:
             result["cmd"] = self.linker_cmd
+        if self.frameworkdirs:
+            result["frameworkdirs"] = self._merge_with_base_link(
+                "frameworkdirs", [ProjectPath(p) for p in self.frameworkdirs]
+            )
+        if self.frameworks:
+            result["frameworks"] = self._merge_with_base_link(
+                "frameworks", self.frameworks
+            )
 
         return result
 
     def _format_libs(self, libs: list[str]) -> list[str]:
-        """Format library names for the linker. Base passes them unchanged."""
+        """Format library names for the linker. Base passes them unchanged.
+
+        A name that is really a file name is refused here, where the ``-l``
+        convention is known. A leading colon is the unusual but possible
+        explicit-filename form, ``-l:libfoo.a``, so we allow those.
+        """
+        for lib in libs:
+            if (
+                isinstance(lib, str)
+                and not lib.startswith(":")
+                and lib.endswith(_LIBRARY_FILE_SUFFIXES)
+            ):
+                raise PconsError(_library_file_name_message(lib, self._target_name))
         return list(libs)
 
     @classmethod
@@ -221,10 +279,13 @@ class CompileLinkContext:
             # link_libs may contain Targets (handled elsewhere) and strings.
             libs=[lib for lib in effective.link_libs if not isinstance(lib, Target)],
             libdirs=[str(p) for p in effective.link_dirs],
+            frameworks=list(effective.frameworks),
+            frameworkdirs=[str(p) for p in effective.framework_dirs],
             linker_cmd=linker_cmd,
             mode=mode,
             _tool_name=tool_name,
             _env=env,
+            _target_name=target.name if target is not None else None,
         )
 
     def as_hashable_tuple(self) -> tuple:
@@ -237,6 +298,8 @@ class CompileLinkContext:
             tuple(self.link_flags),
             tuple(self.libs),
             tuple(self.libdirs),
+            tuple(self.frameworks),
+            tuple(self.frameworkdirs),
             self.linker_cmd,
         )
 

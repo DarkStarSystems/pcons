@@ -3,7 +3,7 @@
 
 PathResolver provides centralized path handling where:
 - Target (output) paths are relative to build_dir
-- Source (input) paths are relative to project root
+- Source (input) paths are relative to project or subproject root
 - Absolute paths pass through unchanged
 - Path and string arguments behave identically
 """
@@ -24,13 +24,38 @@ logger = logging.getLogger(__name__)
 class PathResolver:
     """Centralized path handling for pcons builds.
 
-    Provides consistent path normalization for both source files (inputs)
-    and target files (outputs), ensuring all paths are properly relative
-    to their respective base directories.
+    A resolver is a pair of anchors: a project root that source (input)
+    paths are resolved against, and a build directory that target (output)
+    paths are resolved against. Absolute paths pass through. It does path
+    arithmetic only and never touches the filesystem.
+
+    Node paths are canonical in the top-level project's frame: relative to
+    the top root, with the build directory as a prefix when it lies inside
+    the tree. ``Project.top_path_resolver`` is anchored there and is the one
+    to use for a path that is already canonical, such as a node's, or to
+    make one execution-relative for a command line.
+
+    ``add_subdirectory`` complicates the picture in two ways, and the
+    resolver stays simple by taking both as arguments:
+
+    * A subdirectory script's relative paths are read against its own
+      directory. ``subdir()`` returns a resolver moved down by that offset,
+      root and build directory alike, which is what ``Project.path_resolver``
+      uses while such a script runs and during its resolve pass.
+
+    * A target's outputs land under the environment's build directory, which
+      is the top build directory, then the environment's ``build_prefix`` if
+      it has one, then the declaring script's offset. ``Environment.build_dir_for``
+      composes that, and callers hand it to ``normalize_target_path`` as
+      ``build_dir=``. Absorption of a written-out prefix accepts either that
+      base or the resolver's own, so ``project.build_dir / "x.h"`` and
+      ``"x.h"`` keep meaning the same file whichever way they were written.
 
     Attributes:
-        project_root: The root directory of the project.
-        build_dir: The build output directory.
+        project_root: The root directory of the project, absolute.
+        build_dir: The build output directory, relative to the project root
+            or absolute. When this is absolute (outside the tree), no build-directory
+            prefix appears in node paths.
     """
 
     __slots__ = ("project_root", "build_dir", "_resolved_build_dir")
