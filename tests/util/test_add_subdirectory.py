@@ -847,6 +847,73 @@ class TestSubdirectoryCommandPaths:
         assert "$topdir/child/schema.json" in text
 
 
+class TestSubdirectoryIncludeDirs:
+    """An include dir anchors at the declaring script, however it is spelled.
+
+    ``$topdir`` is the top-level root, so a subdirectory's include dir has to
+    reach the generator carrying its offset. A relative entry picks the offset
+    up on the way. An absolute one, which is what ``project.current_dir / ...``
+    gives and the natural way to write it, has to keep the segment it already
+    has.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    CHILD = (
+        "from pcons.core.project import Project\n"
+        "project = Project.current()\n"
+        "env = project.default_environment\n"
+        "lib = project.StaticLibrary('thing', env, sources=['thing.c'])\n"
+        "lib.public.include_dirs.append({spelling})\n"
+    )
+
+    def _child(self, test_project: Project, spelling: str) -> None:
+        subdir = _make_subdir(
+            test_project, "child", self.CHILD.format(spelling=spelling)
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+        (subdir / "inc").mkdir(exist_ok=True)
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["'inc'", "project.current_dir / 'inc'", "str(project.current_dir / 'inc')"],
+    )
+    def test_the_include_dir_keeps_the_subdirectory(
+        self, test_project: Project, tmp_path: Path, spelling: str
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        self._child(test_project, spelling)
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/inc" in text
+        assert "-I$topdir/inc" not in text
+
+    def test_a_nested_child_keeps_every_segment(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        subdir = _make_subdir(
+            test_project,
+            "a/bb",
+            self.CHILD.format(spelling="project.current_dir / 'inc'"),
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+        (subdir / "inc").mkdir(exist_ok=True)
+
+        add_subdirectory("a/bb")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/a/bb/inc" in text
+
+
 class TestSubdirectoryInstallPaths:
     """Install and archive sources anchor at the declaring script too.
 
