@@ -135,7 +135,7 @@ def _qt_gen_dir_for(
     on disk, and ``project.node(gen_dir / ...)`` the node a builder reads.
     """
     return (
-        project._path_resolver.project_root,
+        project.top_path_resolver.project_root,
         anchor_target_paths(env, [Path(subdir)])[0],
     )
 
@@ -452,7 +452,7 @@ def _qt_make_target(
         qt_env.qt.mocpredefs = [
             "--include",
             PathToken(
-                path=project._path_resolver.make_execution_relative(
+                path=project.top_path_resolver.make_execution_relative(
                     qt_dir / "moc_predefs.h"
                 ),
                 path_type="build",
@@ -513,7 +513,7 @@ def _qt_make_target(
             edge,
             {
                 "AUTOMOCSPEC": PathToken(
-                    path=project._path_resolver.make_execution_relative(spec_rel),
+                    path=project.top_path_resolver.make_execution_relative(spec_rel),
                     path_type="build",
                 )
             },
