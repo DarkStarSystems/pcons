@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import pcons.core.target
+from pcons.core.errors import PconsError
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import (
@@ -1183,14 +1184,21 @@ class TestLinkRefusesAPathShapedString:
         [
             "/opt/vendor/lib/libfoo.a",
             "vendor/libfoo.a",
-            "libfoo.a",
             "lib\\foo.lib",
         ],
     )
-    def test_a_path_is_refused_at_generate_time(self, test_project, bad):  # noqa: F811
+    def test_a_path_is_refused_at_script_time(self, test_project, bad):  # noqa: F811
         target = Target("app", target_type="program")
         with pytest.raises(TypeError, match="looks like a file path"):
             target.link(bad)
+
+    def test_the_message_names_the_form_that_works(self, test_project):  # noqa: F811
+        """Link flags precede the objects, so an archive given there pulls
+        nothing. The file belongs in the target's sources."""
+        target = Target("app", target_type="program")
+
+        with pytest.raises(TypeError, match="add it to the sources"):
+            target.link("/opt/vendor/lib/libfoo.a")
 
     def test_an_msvc_import_library_is_a_name(self, test_project):  # noqa: F811
         """MSVC's linker takes system import libraries as ``name.lib``."""
@@ -1206,9 +1214,9 @@ class TestLinkRefusesAPathShapedString:
 
 class TestLinkTakesTheExplicitFilenameForm:
     """``-l:libfoo.a`` names a file the linker still looks up on the search
-    path. It is the only way to link an archive whose name the ``-l`` rule
-    cannot spell, such as a vendor ``USBPD_CM33.a``, so the path-shaped
-    refusal must not read its suffix as a path.
+    path. It is the only way to link an archive the ``-l`` naming rule cannot
+    name, such as a vendor ``USBPD_CM33.a``, so the path-shaped refusal must
+    not read its suffix as a path.
     """
 
     @pytest.mark.parametrize(
@@ -1250,3 +1258,51 @@ class TestLinkTakesTheExplicitFilenameForm:
 
         content = (tmp_path / "build" / "build.ninja").read_text()
         assert "-l:VENDOR_CM33.a" in content
+
+
+class TestALibraryFileNameIsCaughtWhereTheLinkLineIsFormed:
+    """``link("libfoo.a")`` is a file name, and ``-llibfoo.a`` finds nothing.
+
+    Which file names ``-l`` can derive is the linker's convention, so the
+    toolchain catches it, not the core. That also covers the low-level form,
+    a direct append to ``link_libs``, which never reached ``link()``.
+    """
+
+    @staticmethod
+    def _program(tmp_path, gcc_toolchain):
+        project = Project("p", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+        return project, project.Program("app", env, sources=["main.c"])
+
+    def test_link_takes_it_and_the_link_line_refuses_it(self, tmp_path, gcc_toolchain):
+        project, app = self._program(tmp_path, gcc_toolchain)
+        app.link("libfoo.a")  # a name, as far as the core is concerned
+
+        with pytest.raises(PconsError, match="is a file name"):
+            project.resolve()
+
+    def test_the_message_names_the_target_and_both_forms(self, tmp_path, gcc_toolchain):
+        project, app = self._program(tmp_path, gcc_toolchain)
+        app.link("libfoo.a")
+
+        with pytest.raises(PconsError) as excinfo:
+            project.resolve()
+
+        message = str(excinfo.value)
+        assert "target 'app'" in message
+        assert "sources of the target that links it" in message
+        assert "':libfoo.a'" in message
+
+    def test_a_direct_append_is_caught_too(self, tmp_path, gcc_toolchain):
+        project, app = self._program(tmp_path, gcc_toolchain)
+        app.public.link_libs.append("/opt/vendor/lib/libfoo.a")
+
+        with pytest.raises(PconsError, match="is a file name"):
+            project.resolve()
+
+    def test_the_explicit_filename_form_passes(self, tmp_path, gcc_toolchain):
+        project, app = self._program(tmp_path, gcc_toolchain)
+        app.link(":libfoo.a")
+
+        project.resolve()  # naming the file is the point of this form

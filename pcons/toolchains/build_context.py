@@ -11,11 +11,35 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from pcons.core.errors import PconsError
+
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.subst import FlagToken
     from pcons.core.target import Target
     from pcons.tools.requirements import EffectiveRequirements
+
+
+# File suffixes a Unix-style ``-l`` cannot take: ``-lfoo`` looks for
+# ``libfoo.a`` or ``libfoo.so``, so a library name carrying one of these is
+# a file name and the linker will find nothing. ``.lib`` is not here: MSVC
+# names import libraries that way, and MsvcCompileLinkContext formats them.
+_LIBRARY_FILE_SUFFIXES = (".a", ".so", ".dylib", ".dll", ".o", ".obj")
+
+
+def _library_file_name_message(lib: str, target_name: str | None) -> str:
+    """Message for a link library that is a file name rather than a name."""
+    where = f" on target '{target_name}'" if target_name else ""
+    file_name = lib.replace("\\", "/").rsplit("/", 1)[-1]
+    return (
+        f"Link library {lib!r}{where} is a file name, not a library name: "
+        f"the linker takes it as -l{lib} and finds nothing. Add the file to "
+        f"the sources of the target that links it, where it goes on the link "
+        f"line after the objects. To link it by name instead, put its "
+        f"directory in link_dirs and name the library ('foo' for libfoo.a). "
+        f"GNU ld and LLD also take ':{file_name}', the explicit-filename "
+        f"form, resolved on the library search path."
+    )
 
 
 @dataclass
@@ -45,9 +69,11 @@ class CompileLinkContext:
     libdir_prefix: str = "-L"
     lib_prefix: str = "-l"
 
-    # Runtime-only fields for flag merging (not part of build identity)
+    # Runtime-only fields for flag merging and error messages (not part of
+    # build identity)
     _tool_name: str | None = field(default=None, repr=False, compare=False)
     _env: Environment | None = field(default=None, repr=False, compare=False)
+    _target_name: str | None = field(default=None, repr=False, compare=False)
 
     def get_env_overrides(self) -> dict[str, object]:
         """Return mode-appropriate overrides for env.<tool>.* before subst().
@@ -140,7 +166,19 @@ class CompileLinkContext:
         return result
 
     def _format_libs(self, libs: list[str]) -> list[str]:
-        """Format library names for the linker. Base passes them unchanged."""
+        """Format library names for the linker. Base passes them unchanged.
+
+        A name that is really a file name is refused here, where the ``-l``
+        convention is known. A leading colon is the explicit-filename form,
+        ``-l:libfoo.a``, so those pass: naming the file is the point of it.
+        """
+        for lib in libs:
+            if (
+                isinstance(lib, str)
+                and not lib.startswith(":")
+                and lib.endswith(_LIBRARY_FILE_SUFFIXES)
+            ):
+                raise PconsError(_library_file_name_message(lib, self._target_name))
         return list(libs)
 
     @classmethod
@@ -225,6 +263,7 @@ class CompileLinkContext:
             mode=mode,
             _tool_name=tool_name,
             _env=env,
+            _target_name=target.name if target is not None else None,
         )
 
     def as_hashable_tuple(self) -> tuple:

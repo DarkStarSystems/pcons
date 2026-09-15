@@ -5,6 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from pcons.core.errors import PconsError
 from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.build_context import CompileLinkContext, MsvcCompileLinkContext
 
@@ -234,12 +237,15 @@ class TestCompileLinkContext:
             def has_tool(self, name: str) -> bool:
                 return False
 
+        class _StubTarget:
+            name = "foo"
+
         effective = EffectiveRequirements(link_flags=["-Wl,-soname,libfoo.so"])
         ctx = CompileLinkContext.from_effective_requirements(
             effective,
             mode="link",
             env=_StubEnv(),  # type: ignore[arg-type]
-            target=object(),  # type: ignore[arg-type]
+            target=_StubTarget(),  # type: ignore[arg-type]
             output_name="libfoo.so",
         )
 
@@ -483,6 +489,49 @@ class TestMsvcCompileLinkContext:
             # Both env.link.flags and target link_flags must be present
             assert "/DEBUG" in overrides["flags"]
             assert "/LTCG" in overrides["flags"]
+
+
+class TestALibraryNameThatIsAFileName:
+    """``-l`` derives a file name from the name it is given, so a name that
+    already is a file name finds nothing. Which names those are is the
+    linker's convention, so the check lives with the ``-l`` formatting.
+    """
+
+    @pytest.mark.parametrize(
+        "lib",
+        ["libfoo.a", "foo.so", "foo.dylib", "foo.dll", "foo.o", "foo.obj"],
+    )
+    def test_a_library_file_name_is_refused(self, lib: str) -> None:
+        ctx = CompileLinkContext(libs=[lib], mode="link", _target_name="app")
+
+        with pytest.raises(PconsError, match="is a file name"):
+            ctx.get_env_overrides()
+
+    def test_the_explicit_filename_form_passes(self) -> None:
+        """``-l:libfoo.a`` names the file on purpose, and GNU ld resolves it
+        on the library search path."""
+        ctx = CompileLinkContext(libs=[":libfoo.a"], mode="link")
+
+        assert ctx.get_env_overrides()["libs"] == [":libfoo.a"]
+
+    def test_a_plain_library_name_passes(self) -> None:
+        ctx = CompileLinkContext(libs=["m", "python3.11"], mode="link")
+
+        assert ctx.get_env_overrides()["libs"] == ["m", "python3.11"]
+
+    def test_msvc_takes_its_own_file_names(self) -> None:
+        """MSVC names import libraries in full, so the Unix rule does not
+        apply: its context formats the names itself."""
+        ctx = MsvcCompileLinkContext(libs=["ws2_32.lib", "kernel32"], mode="link")
+
+        assert ctx.get_env_overrides()["libs"] == ["ws2_32.lib", "kernel32.lib"]
+
+    def test_msvc_passes_a_colon_name_through_as_written(self) -> None:
+        """pcons does not gate the explicit-filename form on the toolchain.
+        It is GNU ld and LLD only, and link.exe receives it unusable."""
+        ctx = MsvcCompileLinkContext(libs=[":libfoo.a"], mode="link")
+
+        assert ctx.get_env_overrides()["libs"] == [":libfoo.a.lib"]
 
 
 class TestNinjaQuoting:

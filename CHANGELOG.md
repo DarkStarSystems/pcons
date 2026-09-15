@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `link(":libfoo.a")` is accepted again. That is the explicit-filename
+  form, `-l:libfoo.a`, the way to link an archive the `-l` naming rule
+  cannot produce. GNU ld and LLD take it; Apple's ld64 rejects it, and
+  MSVC's linker receives `:libfoo.a.lib`, so it is not portable. (#176,
+  #177)
+
+### Changed
+
+- `link()` now refuses a string only when it holds a directory separator.
+  A library name that is really a file name, `link("libfoo.a")`, is
+  refused by the toolchain when it forms the link line, which is where the
+  `-l` naming rule is known, and that now catches a direct
+  `link_libs.append()` too. The message points at the form that works:
+  add the file to the sources of the target that links it. The old advice,
+  a `PathToken` in `link_flags`, put the archive ahead of the objects,
+  where the linker pulls nothing from it.
+
 ## [0.29.1] - 2026-09-14
 
 ### Changed
