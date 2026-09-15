@@ -235,6 +235,12 @@ declare a target named `app` without writing over each other. The resource
 layout of a QML module does not follow: `qml_files` entries keep the paths
 the declaring script gave them, so moving the script moves no QML URL.
 
+Such a script may build in the enclosing project's environment
+(`project.parent.default_environment`) or create its own with its own
+`find_qt()`, the way a library written to build standalone does. Either
+way its codegen edges are written. `examples/86_qt_subdirectory` builds
+one of each.
+
 ## Current limitations
 
 Worth knowing before porting a large CMake project:
@@ -679,3 +685,5 @@ Build in two steps so packaging always sees the deployed tree:
 - `examples/54_qt_qml` — a QML module with C++ types.
 - `examples/55_qt_translations` — embedded catalogs + `ninja lupdate`.
 - `examples/56_qt_deploy` — a relocatable .app via `ninja deploy`.
+- `examples/86_qt_subdirectory` — Qt targets declared by
+  `add_subdirectory` scripts, with and without their own `Environment`.

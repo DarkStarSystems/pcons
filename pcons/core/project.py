@@ -718,10 +718,32 @@ class Project(_ProjectBuilders):
 
     @property
     def path_resolver(self) -> PathResolver:
-        """Get the path resolver for this project's current directory."""
+        """The path resolver for this project's *current* directory.
+
+        Relative paths resolve against the directory being declared in, so
+        this follows the live ``add_subdirectory`` offset: it answers one
+        way while a subdirectory script runs (and while the resolver
+        re-enters that directory for a target's factory) and another way
+        outside. Use it for paths a build script wrote, which are read
+        from the script's own directory; use :attr:`top_path_resolver`
+        for anything already anchored, such as a node's path.
+        """
         offset = self._node_offset
         if offset.parts:
             return self._path_resolver.subdir(offset)
+        return self._path_resolver
+
+    @property
+    def top_path_resolver(self) -> PathResolver:
+        """The path resolver anchored at the top-level project's root.
+
+        This is where node paths live, so it is the right resolver for a
+        path that is already canonical: making one execution-relative for
+        a command line, or asking for the root the generators resolve
+        against. Unlike :attr:`path_resolver` it does not move with the
+        declaring directory, so it gives the same answer wherever it is
+        asked from.
+        """
         return self._path_resolver
 
     def Environment(
@@ -965,8 +987,18 @@ class Project(_ProjectBuilders):
 
     @property
     def environments(self) -> list[Env]:
-        """Get all registered environments."""
-        return list(self._environments)
+        """Get all registered environments, sub-projects' included.
+
+        Like :attr:`targets`, this spans the whole tree: a generator walks
+        the environments to reach nodes a builder registered without a
+        target (a tool invocation's outputs, a scanner's bookkeeping files,
+        Qt's generated sources), and those must be written whichever script
+        declared them. Use ``_environments`` for the ones this project owns.
+        """
+        results: list[Env] = list(self._environments)
+        for child in self._children:
+            results.extend(child.environments)
+        return results
 
     @property
     def default_environment(self) -> Env:

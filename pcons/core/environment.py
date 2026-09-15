@@ -430,7 +430,7 @@ class Environment(_EnvironmentStubs):
         project = self._project
         if project is None:
             return
-        for other in project.environments:
+        for other in project._environments:
             if other is not self and other.name == name:
                 raise PconsError(
                     f"Project '{project.name}' already has an environment named "

@@ -7,15 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `link(":libfoo.a")` is accepted again. That is the explicit-filename
-  form, `-l:libfoo.a`, the way to link an archive the `-l` naming rule
-  cannot produce. GNU ld and LLD take it; Apple's ld64 rejects it, and
-  MSVC's linker receives `:libfoo.a.lib`, so it is not portable. (#176,
-  #177)
-
 ### Changed
+
+- A Qt target declared in a subdirectory now generates into
+  `build/<subdir>/qt.<name>/`, beside the `build/<subdir>/obj.<name>/`
+  its objects already used, instead of `build/qt.<name>/`. Two
+  subdirectories may now each declare a target of the same name. Anything
+  naming the old path (a `.gitignore` entry, an install rule, an IDE
+  search path) needs updating. (#172)
 
 - `link()` now refuses a string only when it holds a directory separator.
   A library name that is really a file name, `link("libfoo.a")`, is
@@ -25,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   add the file to the sources of the target that links it. The old advice,
   a `PathToken` in `link_flags`, put the archive ahead of the objects,
   where the linker pulls nothing from it.
+
+### Fixed
+
+- `link(":libfoo.a")` is accepted again. That is the explicit-filename
+  form, `-l:libfoo.a`, the way to link an archive the `-l` naming rule
+  cannot produce. GNU ld and LLD take it; Apple's ld64 rejects it, and
+  MSVC's linker receives `:libfoo.a.lib`, so it is not portable. (#176,
+  #177)
+
+- Qt builders now work under `add_subdirectory()`. Generated moc, uic and
+  rcc files were written under the subdirectory's own root while the build
+  edges named them anchored at the top-level root, so ninja refused to
+  load any build with a Qt target in a subdirectory. (#172)
+
+- A subdirectory script that creates its own `Environment` no longer
+  loses build edges. Files a builder generates without a target of their
+  own (Qt's moc output, a tool invocation's outputs, a scanner's
+  bookkeeping) reach the build file through the project's environments,
+  and that walk stopped at the top-level project.
 
 ## [0.29.1] - 2026-09-14
 
