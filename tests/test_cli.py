@@ -6697,7 +6697,7 @@ class TestWatchReachesTheWatcher:
         )
         return seen
 
-    def test_build_watch_hands_over_the_script_and_the_targets(
+    def test_build_watch_hands_over_the_script_and_the_build(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         script = tmp_path / "pcons-build.py"
@@ -6707,7 +6707,8 @@ class TestWatchReachesTheWatcher:
         assert _invoke("build", "--watch", "hello").exit_code == 0
         assert len(seen) == 1
         assert seen[0]["script"] == script
-        assert seen[0]["targets"] == ["hello"]
+        # The targets travel inside the build closure, not to the watch.
+        assert "targets" not in seen[0]
         assert callable(seen[0]["build"])
 
     def test_without_the_flag_nothing_watches(
@@ -8089,3 +8090,69 @@ class TestGenerateNamesTheVariant:
         result = _invoke("generate")
         assert result.exit_code == 0
         assert "Generated" not in result.output
+
+
+class TestAPlainBuildChecksThatItConverged:
+    """The after-build convergence check runs on every ninja build, not only
+    under --watch (#174)."""
+
+    def _build_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        (build_dir / "build.ninja").write_text("")
+        return build_dir
+
+    def _stub(
+        self, monkeypatch: pytest.MonkeyPatch, *, ninja_code: int
+    ) -> tuple[list[tuple[Path, list[str] | None]], list[list[str]]]:
+        """Record what the check is asked and what it reports."""
+        asked: list[tuple[Path, list[str] | None]] = []
+        warned: list[list[str]] = []
+        monkeypatch.setattr(cli_module, "run_ninja", lambda *a, **k: ninja_code)
+
+        def reasons(
+            build_dir: Path, targets: list[str] | None = None, runner: str | None = None
+        ) -> list[str]:
+            asked.append((build_dir, targets))
+            return ["output gen.h doesn't exist"]
+
+        monkeypatch.setattr(cli_module, "unconverged_reasons", reasons)
+        monkeypatch.setattr(
+            cli_module, "_warn_unconverged", lambda r, limit=5: warned.append(r)
+        )
+        return asked, warned
+
+    def test_a_successful_build_is_checked_for_its_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._build_dir(tmp_path, monkeypatch)
+        asked, warned = self._stub(monkeypatch, ninja_code=0)
+
+        assert _invoke("build", "app").exit_code == 0
+
+        # The directory as the build was asked for it, the -B default.
+        assert asked == [(Path("build"), ["app"])]
+        assert warned == [["output gen.h doesn't exist"]]
+
+    def test_no_converge_check_skips_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._build_dir(tmp_path, monkeypatch)
+        asked, warned = self._stub(monkeypatch, ninja_code=0)
+
+        assert _invoke("build", "--no-converge-check").exit_code == 0
+
+        assert asked == []
+        assert warned == []
+
+    def test_a_failed_build_is_not_checked(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._build_dir(tmp_path, monkeypatch)
+        asked, _warned = self._stub(monkeypatch, ninja_code=3)
+
+        assert _invoke("build").exit_code == 3
+
+        assert asked == []

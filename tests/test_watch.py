@@ -314,10 +314,7 @@ class TestCliWiring:
         # A build reports where it ran, which is how the watch learns the
         # directory the build script actually chose.
         assert (
-            cli._watch(
-                build=lambda: (0, [build_dir]), script=script, targets=[], ninja=None
-            )
-            == 0
+            cli._watch(build=lambda: (0, [build_dir]), script=script, ninja=None) == 0
         )
         return captured
 
@@ -513,7 +510,7 @@ class TestBuildDispatch:
 
         monkeypatch.setattr(watch, "ensure_available", lambda: None)
 
-        assert cli._watch(build=interrupted, script=None, targets=[], ninja=None) == 0
+        assert cli._watch(build=interrupted, script=None, ninja=None) == 0
 
 
 class TestNinjaQueries:
@@ -653,7 +650,7 @@ class TestAvailability:
         def refuse() -> tuple[int, Path]:
             pytest.fail("should not build")
 
-        assert cli._watch(build=refuse, script=None, targets=[], ninja=None) == 1
+        assert cli._watch(build=refuse, script=None, ninja=None) == 1
 
 
 def test_native_watcher_reports_a_change(tmp_path: Path) -> None:
