@@ -38,9 +38,6 @@ if get_platform().is_macos:
         name="demo_plist",
     )
     deploy = project.QtDeploy("deploy", env, app=app, bundle="Demo.app")
-    # Depend on the installed binary by path: Install targets resolve
-    # late, so depending on bundle_bin itself wouldn't add the edge yet.
-    _ = bundle_bin
-    deploy.depends("Demo.app/Contents/MacOS/demo", plist)
+    deploy.depends(bundle_bin, plist)
 elif get_platform().is_windows:
     deploy = project.QtDeploy("deploy", env, app=app, deploy_dir="deploy")

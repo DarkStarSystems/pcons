@@ -56,6 +56,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directories now follow the target's, the way `env.link.libs` already
   followed usage-requirement libraries.
 
+- `Install`, `InstallAs` and `InstallDir` now anchor their destination the
+  way every other builder anchors its targets. A `no_prefix` destination
+  written in a subdirectory script lands under that subdirectory's build
+  directory, rather than at the top of the build directory, where two
+  subdirectories installing to the same relative destination collided; and
+  `InstallDir` tells its copy command the directory the stamp names.
+  The three builders take an optional `env=` for a destination that has to
+  follow an environment's `build_prefix` as well.
+
 ## [0.29.1] - 2026-09-14
 
 ### Changed
