@@ -1,0 +1,39 @@
+# Test configuration for the Qt-under-add_subdirectory example
+
+[test]
+description = "Qt targets declared by add_subdirectory() scripts: one with its own Environment and find_qt, one reusing the parent's"
+
+# Qt examples pay the cold toolchain-discovery cost on slow Windows
+# runners; the same budget 52_qt_widgets carries.
+timeout = 180
+
+# Each subdirectory's script also builds standalone, which is the point of
+# own_env owning its Environment.
+standalone_subdirs = ["own_env"]
+
+# Generated Qt files land in the declaring subdirectory's build directory,
+# beside the objects compiled from them.
+expected_outputs = [
+    "build/own_env/qt.own_env_app/own_env/src/moc_counter.cpp",
+    "build/own_env/qt.own_env_app/mocs_compilation.cpp",
+    "build/own_env/own_env_app",
+    "build/shared_env/qt.shared_env_app/shared_env/src/moc_greeter.cpp",
+    "build/shared_env/qt.shared_env_app/mocs_compilation.cpp",
+    "build/shared_env/shared_env_app",
+]
+
+[verify]
+commands = [
+    { run = "./build/own_env/own_env_app", expect_stdout = "own_env: Counter signal=1" },
+    { run = "./build/shared_env/shared_env_app", expect_stdout = "shared_env: Greeter hello from shared_env" },
+]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[skip]
+require_qt = true
+require_qt_modules = ["Core"]
+# Depfile-driven codegen is ninja territory.
+generators = ["make", "xcode"]
