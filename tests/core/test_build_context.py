@@ -116,7 +116,9 @@ class TestCompileLinkContext:
         ctx = CompileLinkContext.from_effective_requirements(effective, mode="link")
 
         assert ctx.frameworks == ["Cocoa"]
-        assert ctx.frameworkdirs == ["/System/Library/Frameworks"]
+        assert [Path(d) for d in ctx.frameworkdirs] == [
+            Path("/System/Library/Frameworks")
+        ]
 
     def test_link_overrides_merge_with_env_link_flags(self) -> None:
         """Verify link_flags are merged with env.link.flags, not replaced.
