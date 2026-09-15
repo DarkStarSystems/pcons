@@ -370,6 +370,12 @@ implicit import to the root qmldir, which lists them all. This is what
 `qt_add_qml_module` writes under `qt_policy(SET QTP0004 NEW)`. Nothing is
 asked of the build script.
 
+The engine honours that line from Qt 6.8, the release that introduced
+QTP0004. Measured on one binary against each runtime: 6.4.2, 6.5.3, 6.6.3
+and 6.7.3 report the neighbouring type as not a type, 6.8.3 and 6.11 resolve
+it. Below 6.8 the files are written and ignored, so a file in a
+subdirectory has to import its own module explicitly to use its types.
+
 Entries are relative to the directory of the build script that declares
 the module, the same root `sources=` uses, and the same one CMake uses
 (`CMAKE_CURRENT_SOURCE_DIR`). A module declared through

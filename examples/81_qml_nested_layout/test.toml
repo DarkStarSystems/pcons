@@ -25,4 +25,5 @@ commands = [
 [skip]
 require_qt = true
 require_qt_modules = ["Qml"]
+require_qt_version = ">=6.8"
 generators = ["make", "xcode"]
