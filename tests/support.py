@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: MIT
-"""Helpers shared by tests that run pcons in a subprocess."""
+"""Helpers shared by tests across directories."""
 
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pcons.core.project import Project
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -129,3 +133,18 @@ def refresh_dependency_metadata(*paths: Path) -> None:
     """
     for path in paths:
         os.listdir(path)
+
+
+def object_of(project: Project, target: str, source: str) -> str:
+    """The object file *target* compiles *source* to, named as the toolchain names it.
+
+    The suffix is ``.o`` or ``.obj`` depending on the detected toolchain, so no
+    test may spell it out.
+    """
+    nodes = [
+        node
+        for node in project.get_target(target).intermediate_nodes
+        if node.path.name.startswith(source)
+    ]
+    assert len(nodes) == 1, [node.path.name for node in nodes]
+    return nodes[0].path.name

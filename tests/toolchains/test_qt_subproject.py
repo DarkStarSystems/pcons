@@ -21,11 +21,11 @@ from pcons.core.project import Project
 from pcons.packages.description import PackageDescription
 from pcons.toolchains.qt import _automoc, find_qt
 from pcons.util.add_subdirectory import add_subdirectory
+from tests.support import object_of
 
 from ._qt_test_utils import (
     cxx_env_with_qt,
     generate_ninja,
-    object_of,
     written_token,
 )
 
