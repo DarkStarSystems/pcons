@@ -309,8 +309,10 @@ class TestQtPathsRoute:
             qt = find_qt(project, modules=["Widgets"])
         assert qt is not None
         assert qt.is_framework
-        flags = qt.Widgets.public.link_flags
-        assert "-framework" in flags and "QtWidgets" in flags
+        # Structured, not baked into link_flags: the resolve path lowers
+        # these to -F/-framework at link time.
+        assert "QtWidgets" in qt.Widgets.public.frameworks
+        assert qt.Widgets.public.framework_dirs
 
     def test_missing_module_dir(self, project, tmp_path):
         query = _make_qt_tree(tmp_path / "qt", framework=False, modules=["Core"])

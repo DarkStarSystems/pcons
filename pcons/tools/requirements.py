@@ -63,6 +63,8 @@ class EffectiveRequirements:
         link_flags: Linker flags.
         link_libs: Libraries to link against.
         link_dirs: Library search directories.
+        frameworks: macOS frameworks to link (``-framework``).
+        framework_dirs: macOS framework search directories (``-F``).
         separated_arg_flags: Set of flags that take separate arguments,
                             used for proper flag deduplication.
         passthrough_flags: Set of driver flags whose argument goes to a
@@ -76,6 +78,8 @@ class EffectiveRequirements:
     link_flags: list[FlagToken] = field(default_factory=list)
     link_libs: list[str | Target] = field(default_factory=list)
     link_dirs: list[Path] = field(default_factory=list)
+    frameworks: list[str] = field(default_factory=list)
+    framework_dirs: list[Path] = field(default_factory=list)
     separated_arg_flags: frozenset[str] = field(default_factory=frozenset)
     passthrough_flags: frozenset[str] = field(default_factory=frozenset)
     #: Where each merged value came from: ``(field, str(value))`` ->
@@ -150,6 +154,15 @@ class EffectiveRequirements:
             if dir_path not in self.link_dirs:
                 self.link_dirs.append(dir_path)
                 self._record("link_dirs", dir_path, origin)
+        for fw in reqs.frameworks:
+            if fw not in self.frameworks:
+                self.frameworks.append(fw)
+                self._record("frameworks", fw, origin)
+        for fw_dir in reqs.framework_dirs:
+            fw_path = Path(fw_dir) if isinstance(fw_dir, str) else fw_dir
+            if fw_path not in self.framework_dirs:
+                self.framework_dirs.append(fw_path)
+                self._record("framework_dirs", fw_path, origin)
 
     def as_hashable_tuple(self) -> tuple:
         """Return a hashable representation for caching."""
@@ -161,6 +174,8 @@ class EffectiveRequirements:
             tuple(self.link_flags),
             tuple(self.link_libs),
             tuple(str(p) for p in self.link_dirs),
+            tuple(self.frameworks),
+            tuple(str(p) for p in self.framework_dirs),
         )
 
     def clone(self) -> EffectiveRequirements:
@@ -173,6 +188,8 @@ class EffectiveRequirements:
             link_flags=list(self.link_flags),
             link_libs=list(self.link_libs),
             link_dirs=list(self.link_dirs),
+            frameworks=list(self.frameworks),
+            framework_dirs=list(self.framework_dirs),
             separated_arg_flags=self.separated_arg_flags,
             passthrough_flags=self.passthrough_flags,
             origins=dict(self.origins),
@@ -260,8 +277,8 @@ def apply_requirements_to_env(
         if eff.link_flags:
             merge_flags(var(link, "flags"), eff.link_flags, sep, through)
         # Structured frameworks (macOS) — same variables env.Framework() uses.
-        extend_unique(link, "frameworks", reqs.frameworks)
-        extend_unique(link, "frameworkdirs", (str(d) for d in reqs.framework_dirs))
+        extend_unique(link, "frameworks", eff.frameworks)
+        extend_unique(link, "frameworkdirs", (str(d) for d in eff.framework_dirs))
 
 
 #: Usage-requirement lists that name directories (as opposed to flags or

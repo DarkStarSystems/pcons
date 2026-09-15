@@ -23,9 +23,9 @@ class CompileLinkContext:
     """ToolchainContext for Unix-style C/C++ toolchains (GCC, Clang).
 
     ``mode`` selects what ``get_env_overrides()`` returns: ``"compile"``
-    (includes, defines, flags) or ``"link"`` (libdirs, libs, flags, cmd).
-    Paths and names are stored without prefixes; the ``*_prefix`` fields
-    supply them at formatting time.
+    (includes, defines, flags) or ``"link"`` (libdirs, libs, flags, cmd,
+    frameworkdirs, frameworks). Paths and names are stored without
+    prefixes; the ``*_prefix`` fields supply them at formatting time.
     """
 
     includes: list[str] = field(default_factory=list)
@@ -35,6 +35,13 @@ class CompileLinkContext:
     link_flags: list[FlagToken] = field(default_factory=list)
     libs: list[str] = field(default_factory=list)
     libdirs: list[str] = field(default_factory=list)
+    # macOS frameworks (-framework NAME) and their search dirs (-F DIR). A
+    # GNU-style linker always defines the frameworkdirs/frameworks/fprefix/
+    # Fprefix vars (see gnu_common.gnu_link_vars), so these are harmless
+    # overrides on a non-Apple toolchain too: unreferenced by its command
+    # template, so simply unused.
+    frameworks: list[str] = field(default_factory=list)
+    frameworkdirs: list[str] = field(default_factory=list)
     linker_cmd: str | None = None  # Override for link.cmd (e.g., "clang++" for C++)
     mode: str = "compile"  # "compile" or "link"
 
@@ -122,7 +129,7 @@ class CompileLinkContext:
         return result
 
     def _link_overrides(self) -> dict[str, object]:
-        """Return link-time overrides: libdirs, libs, flags, cmd."""
+        """Return link-time overrides: libdirs, libs, flags, cmd, frameworks."""
         from pcons.core.subst import ProjectPath
 
         result: dict[str, object] = {}
@@ -136,6 +143,10 @@ class CompileLinkContext:
             result["flags"] = self._merge_with_base_flags("link", self.link_flags)
         if self.linker_cmd:
             result["cmd"] = self.linker_cmd
+        if self.frameworkdirs:
+            result["frameworkdirs"] = [ProjectPath(p) for p in self.frameworkdirs]
+        if self.frameworks:
+            result["frameworks"] = list(self.frameworks)
 
         return result
 
@@ -221,6 +232,8 @@ class CompileLinkContext:
             # link_libs may contain Targets (handled elsewhere) and strings.
             libs=[lib for lib in effective.link_libs if not isinstance(lib, Target)],
             libdirs=[str(p) for p in effective.link_dirs],
+            frameworks=list(effective.frameworks),
+            frameworkdirs=[str(p) for p in effective.framework_dirs],
             linker_cmd=linker_cmd,
             mode=mode,
             _tool_name=tool_name,
@@ -237,6 +250,8 @@ class CompileLinkContext:
             tuple(self.link_flags),
             tuple(self.libs),
             tuple(self.libdirs),
+            tuple(self.frameworks),
+            tuple(self.frameworkdirs),
             self.linker_cmd,
         )
 

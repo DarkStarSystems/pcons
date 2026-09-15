@@ -44,7 +44,7 @@ def requirements_from_package(package: Any) -> UsageRequirements:
     for fw in getattr(package, "frameworks", ()) or ():
         reqs.frameworks.append(fw)
     for fw_dir in getattr(package, "framework_dirs", ()) or ():
-        reqs.framework_dirs.append(str(fw_dir))
+        reqs.framework_dirs.append(Path(fw_dir))
     return reqs
 
 
@@ -113,11 +113,7 @@ class ImportedTarget(Target):
             self._populate_public_from_package(package)
 
     def _populate_public_from_package(self, package: PackageDescription) -> None:
-        """Populate public usage requirements from the package description.
-
-        Frameworks are lowered to ``-F``/``-framework`` link-flag pairs
-        here because the resolve path consumes ``link_flags``.
-        """
+        """Populate public usage requirements from the package description."""
         reqs = requirements_from_package(package)
         for name in (
             "include_dirs",
@@ -127,14 +123,12 @@ class ImportedTarget(Target):
             "link_libs",
             "link_dirs",
             "link_flags",
+            "frameworks",
+            "framework_dirs",
         ):
             dst = getattr(self.public, name)
             for value in getattr(reqs, name):
                 dst.append(value)
-        for fw_dir in reqs.framework_dirs:
-            self.public.link_flags.extend(["-F", str(fw_dir)])
-        for fw in reqs.frameworks:
-            self.public.link_flags.extend(["-framework", fw])
 
     @classmethod
     def from_package(
