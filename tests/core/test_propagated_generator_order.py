@@ -25,6 +25,7 @@ from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
+from tests.support import object_of
 
 SLOW_GENERATOR = textwrap.dedent(
     """\
@@ -90,21 +91,6 @@ def build_files(project: Project) -> Path:
     NinjaGenerator().generate(project)
     BaseGenerator._generate_pending(project)
     return Path(project.root_dir) / project.build_dir
-
-
-def object_of(project: Project, target: str, source: str) -> str:
-    """The object file *target* compiles *source* to, named as the toolchain names it.
-
-    The suffix is ``.o`` or ``.obj`` depending on the detected toolchain, so no
-    test may spell it out.
-    """
-    nodes = [
-        node
-        for node in project.get_target(target).intermediate_nodes
-        if node.path.name.startswith(source)
-    ]
-    assert len(nodes) == 1, [node.path.name for node in nodes]
-    return nodes[0].path.name
 
 
 def edge_for(build_ninja: str, output: str) -> str:

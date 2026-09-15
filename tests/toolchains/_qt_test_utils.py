@@ -168,18 +168,3 @@ def written_token(value: str | Path) -> str:
     replacement applies here.
     """
     return to_shell_command([str(value)], shell="ninja").replace("\\", "/")
-
-
-def object_of(project: Project, target: str, source: str) -> str:
-    """The object file *target* compiles *source* to, named as the toolchain names it.
-
-    The suffix is ``.o`` or ``.obj`` depending on the detected toolchain, so no
-    test may spell it out.
-    """
-    nodes = [
-        node
-        for node in project.get_target(target).intermediate_nodes
-        if node.path.name.startswith(source)
-    ]
-    assert len(nodes) == 1, [node.path.name for node in nodes]
-    return nodes[0].path.name
