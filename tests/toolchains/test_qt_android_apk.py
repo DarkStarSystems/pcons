@@ -348,7 +348,9 @@ class TestAPackageDeclaredInASubdirectory:
 
         content = self._content(app_project, deployable, tmp_path, env)
 
-        assert f"--output {written_token(Path('sub') / 'myapp')}" in content
+        # The argument is the execution-relative form, forward slashes
+        # on every platform, so it is written as a plain string would be.
+        assert f"--output {written_token('sub/myapp')}" in content
         assert _edge(content, f"sub/{DEBUG_APK}")
 
     def test_the_staged_library_lands_where_the_tool_reads_it(
@@ -373,7 +375,7 @@ class TestAPackageDeclaredInASubdirectory:
 
         content = self._content(app_project, deployable, tmp_path, env, "package")
 
-        assert f"--output {written_token(Path('sub') / 'package')}" in content
+        assert f"--output {written_token('sub/package')}" in content
         assert _edge(content, "sub/package/build/outputs/apk/debug/package-debug.apk")
 
     def test_a_build_prefix_is_not_repeated(
@@ -388,7 +390,7 @@ class TestAPackageDeclaredInASubdirectory:
         content = self._content(app_project, deployable, tmp_path, env)
 
         prefixed = Path("android-arm64-v8a") / "sub" / "myapp"
-        assert f"--output {written_token(prefixed)}" in content
+        assert f"--output {written_token(prefixed.as_posix())}" in content
         assert "android-arm64-v8a/sub/android-arm64-v8a" not in content
 
 
