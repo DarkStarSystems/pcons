@@ -401,7 +401,15 @@ def _looks_like_a_path(name: str) -> bool:
     ``-l/opt/vendor/lib/libfoo.a``, with the mistake pointed at the linker.
     A bare ``ws2_32.lib`` is a name too: MSVC's linker takes import
     libraries that way, and its toolchain passes it through as written.
+
+    A leading colon is GNU ld's explicit-filename form. ``-l:libfoo.a``
+    names a file to look for on the library search path, which is the only
+    way to link an archive whose name ``-lfoo`` cannot spell. Carrying the
+    suffix is the point of it, so only a separator is refused there: a
+    colon form holding one matches nothing the search path can offer.
     """
+    if name.startswith(":"):
+        return "/" in name[1:] or "\\" in name[1:]
     return (
         "/" in name
         or "\\" in name
@@ -780,7 +788,11 @@ class Target:
         (link order can matter for static libraries).
 
         Args:
-            *libs: Targets to depend on, and/or raw library-name strings.
+            *libs: Targets to depend on, and/or raw library-name strings. A
+                string starting with ``:`` is GNU ld's explicit-filename
+                form, ``-l:libfoo.a``, which names a file to find on the
+                library search path rather than a library to derive a file
+                name from.
 
         Returns:
             self, for method chaining.
@@ -859,7 +871,10 @@ class Target:
                     f"string here is a library name, passed to the linker as "
                     f"-l{lib} on GCC and Clang. To link a library file by "
                     f"path, put its directory in link.libdirs and name it, or "
-                    f"add the file itself to link_flags as a PathToken."
+                    f"add the file itself to link_flags as a PathToken. An "
+                    f"archive the -l naming rule cannot spell is ':' plus its "
+                    f"file name, GNU ld's explicit-filename form, with its "
+                    f"directory in link.libdirs."
                 )
             if lib is self:
                 raise ValueError(f"Target '{self.name}' cannot link itself.")
