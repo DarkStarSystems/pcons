@@ -22,6 +22,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+    from pcons.core.paths import PathResolver
     from pcons.core.toolconfig import ToolConfig
 
 
@@ -794,6 +795,29 @@ def _tokenize_one(token: Any) -> Any:
     return replace(marker, prefix=prefix, suffix=suffix)
 
 
+def anchor_target_path(
+    resolver: PathResolver,
+    build_dir: Path,
+    target: str | Path,
+    *,
+    target_name: str | None = None,
+    warn_at: SourceLocation | None = None,
+) -> Path:
+    """Anchor one target path under *build_dir*, in node-canonical form.
+
+    The rule itself, for callers that know their anchors directly rather
+    than through an environment: *resolver* is the top-anchored one, so a
+    path written with either build directory prefix is absorbed once, and
+    *build_dir* is where the declaring script's targets land. Absolute
+    paths keep their identity; see :func:`anchor_target_paths`, which is
+    this call over a builder's target list.
+    """
+    p = resolver.normalize_target_path(
+        target, target_name=target_name, warn_at=warn_at, build_dir=build_dir
+    )
+    return p if p.is_absolute() else build_dir / p
+
+
 def anchor_target_paths(
     env: Environment | None,
     targets: Sequence[str | Path | Node],
@@ -830,13 +854,15 @@ def anchor_target_paths(
         if isinstance(t, Node):
             anchored.append(Path(t.name))
             continue
-        p = resolver.normalize_target_path(
-            t,
-            target_name=target_name,
-            warn_at=at if isinstance(t, str) else None,
-            build_dir=build_dir,
+        anchored.append(
+            anchor_target_path(
+                resolver,
+                build_dir,
+                t,
+                target_name=target_name,
+                warn_at=at if isinstance(t, str) else None,
+            )
         )
-        anchored.append(p if p.is_absolute() else build_dir / p)
     return anchored
 
 

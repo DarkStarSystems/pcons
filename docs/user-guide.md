@@ -3232,6 +3232,11 @@ pcons PCONS_INSTALL_PREFIX=/usr/local
 
 Absolute (rooted) destinations are used as-is. Pass `no_prefix=True` to keep a
 relative destination inside the build directory instead (useful for staging).
+Such a destination is anchored like any other target path: it is read from the
+directory of the script that declared it, so an install in a subdirectory lands
+under that subdirectory's build directory and doesn't collide with a sibling's.
+Pass `env=` when the destination has to follow an environment's `build_prefix`
+too.
 
 ```python
 # Install library and headers (Install takes a list of sources)

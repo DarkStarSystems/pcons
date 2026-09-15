@@ -45,10 +45,10 @@ class TestBundleIsABuildProduct:
 
         outputs = {o for o in _outputs(project) if "MyPlugin.bundle" in o}
         assert outputs == {
-            "MyPlugin.bundle/Contents/Info.plist",
-            "MyPlugin.bundle/Contents/MacOS/myplugin.so",
-            "MyPlugin.bundle/Contents/PkgInfo",
-            "MyPlugin.bundle/Contents/Resources/logo.png",
+            "build/MyPlugin.bundle/Contents/Info.plist",
+            "build/MyPlugin.bundle/Contents/MacOS/myplugin.so",
+            "build/MyPlugin.bundle/Contents/PkgInfo",
+            "build/MyPlugin.bundle/Contents/Resources/logo.png",
         }
 
     def test_flat_bundle_lands_in_the_build_dir(self, tmp_path: Path) -> None:
@@ -66,11 +66,11 @@ class TestBundleIsABuildProduct:
             resources={"art/logo.png": "logo.png"},
         )
 
-        outputs = {o for o in _outputs(project) if o.startswith("MyPlugin/")}
+        outputs = {o for o in _outputs(project) if o.startswith("build/MyPlugin/")}
         assert outputs == {
-            "MyPlugin/myplugin.so",
-            "MyPlugin/helper.dll",
-            "MyPlugin/art/logo.png",
+            "build/MyPlugin/myplugin.so",
+            "build/MyPlugin/helper.dll",
+            "build/MyPlugin/art/logo.png",
         }
         assert not any("dist/" in o for o in _outputs(project))
 
