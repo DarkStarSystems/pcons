@@ -41,6 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.builder import anchor_target_paths
 from pcons.toolchains.android import build_tools_program
 from pcons.toolchains.qt.android import (
     _android_preset,
@@ -80,9 +81,37 @@ def stage_application_library(
         ValueError: If the environment is not an Android cross environment.
     """
     abi = _android_preset(env, what="Staging the application library").arch
-    directory = Path(output) if output is not None else android_output_dir(env, app)
-    staged = directory / "libs" / abi / application_library_name(app, abi)
+    _, as_written = _output_dirs(project, env, app, output)
+    staged = as_written / "libs" / abi / application_library_name(app, abi)
     return project.InstallAs(staged, app, name=f"{app.name}-apk-lib", no_prefix=True)
+
+
+def _output_dirs(
+    project: Project,
+    env: Environment,
+    app: Target | str,
+    output: str | Path | None,
+) -> tuple[Path, Path]:
+    """The output directory in the two spellings the builders need.
+
+    androiddeployqt runs in the build directory, so ``--output`` and every
+    path declared around the package have to name one directory or the edge
+    declares a file the tool never writes. The anchored form is what
+    ``env.Command`` takes, which absorbs the prefix rather than doubling it.
+    The execution-relative form is what the argument and ``InstallAs`` take:
+    ``InstallAs`` normalizes its destination against the declaring script's
+    resolver, which reads an anchored ``build/sub/myapp`` back as ``myapp``
+    and never puts the offset on again, so only that form round-trips.
+
+    Returns:
+        The anchored directory and the execution-relative one.
+    """
+    anchored = (
+        anchor_target_paths(env, [Path(output)])[0]
+        if output is not None
+        else android_output_dir(env, app)
+    )
+    return anchored, Path(project._path_resolver.make_execution_relative(anchored))
 
 
 def apk_path(
@@ -183,7 +212,7 @@ def android_apk(
         )
     tool = qt.tool_path("androiddeployqt", required=True)
 
-    directory = Path(output) if output is not None else android_output_dir(env, app)
+    directory, as_written = _output_dirs(project, env, app, output)
     if staged is None:
         staged = stage_application_library(project, env, app=app, output=directory)
 
@@ -191,7 +220,7 @@ def android_apk(
         "--input",
         "${SOURCES[0]}",
         "--output",
-        project._path_resolver.make_execution_relative(directory),
+        str(as_written),
     ]
     if release:
         arguments.append("--release")

@@ -31,6 +31,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.builder import anchor_target_paths
 from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.android import newest_build_tools
 from pcons.toolchains.presets import CrossPreset
@@ -125,6 +126,14 @@ def android_output_dir(env: Environment, app: Target | str) -> Path:
     it builds after it. Two applications built in one environment therefore
     cannot share one.
 
+    Anchored by :func:`~pcons.core.builder.anchor_target_paths`, the one
+    place that turns a build-relative name into node-canonical form, so it
+    carries the declaring script's offset exactly once. Passing the path on
+    inside the declaring script is safe, because that function absorbs an
+    offset already there rather than adding a second one. Handing it to a
+    script with another offset is what applies a second one, so pass
+    ``project.node()`` of it across scripts.
+
     Args:
         env: The environment the application is built in.
         app: The application target, or its name.
@@ -133,7 +142,7 @@ def android_output_dir(env: Environment, app: Target | str) -> Path:
         The directory, relative to the project root unless the environment's
         build directory is absolute.
     """
-    return env.build_dir_for(Path()) / application_binary(app)
+    return anchor_target_paths(env, [Path(application_binary(app))])[0]
 
 
 def _library_dirs(project: Project, env: Environment) -> list[Path]:
