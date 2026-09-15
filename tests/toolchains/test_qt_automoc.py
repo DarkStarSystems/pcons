@@ -31,6 +31,7 @@ from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
 from pcons.toolchains.qt import _automoc
 from pcons.toolchains.qt.toolchain import _qt_available
+from tests.support import qt_runtime_env
 
 from ._qt_test_utils import cxx_env_with_qt, generate_ninja
 
@@ -88,6 +89,17 @@ def run_ninja(build_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def run_program(program: Path) -> str:
+    """Run a built program and return its stdout, Qt's DLLs findable."""
+    return subprocess.run(
+        [str(program)],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=qt_runtime_env(),
+    ).stdout
+
+
 def build_files(project: Project) -> Path:
     """Write the build files; return the build directory as an absolute path."""
     NinjaGenerator().generate(project)
@@ -142,11 +154,9 @@ class TestGeneratedHeaderReachesTheMocSet:
         assert result.returncode == 0, result.stderr or result.stdout
 
         assert "moc_generated.cpp" in aggregator(tmp_path).read_text()
-        program = subprocess.run(
-            [str(build_dir / "app")], capture_output=True, text=True, check=True
-        )
-        assert "meta=Generated" in program.stdout
-        assert "answer=42" in program.stdout
+        output = run_program(build_dir / "app")
+        assert "meta=Generated" in output
+        assert "answer=42" in output
 
     def test_second_build_does_nothing(self, tmp_path, monkeypatch):
         project = self._project(tmp_path, monkeypatch)
@@ -292,9 +302,7 @@ class TestAMocOnlyInputChangeReachesTheObject:
         return build_files(project), root / app.output_nodes[0].path
 
     def _run(self, program: Path) -> str:
-        return subprocess.run(
-            [str(program)], capture_output=True, text=True, check=True
-        ).stdout
+        return run_program(program)
 
     def test_a_changed_mocflag_reaches_the_object_in_one_run(
         self, tmp_path, monkeypatch
@@ -466,14 +474,9 @@ class TestSubdirectoryTargetsBuild:
             build_dir / "child" / "qt.app" / "mocs_compilation.cpp"
         ).read_text()
         assert "moc_generated.cpp" in aggregated
-        program = subprocess.run(
-            [str(build_dir / "child" / "app")],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert "meta=Generated" in program.stdout
-        assert "answer=42" in program.stdout
+        output = run_program(build_dir / "child" / "app")
+        assert "meta=Generated" in output
+        assert "answer=42" in output
 
     def test_two_children_of_one_name_keep_their_own_generated_files(
         self, tmp_path, monkeypatch
@@ -502,13 +505,8 @@ class TestSubdirectoryTargetsBuild:
             assert f"{name}/src/moc_thing.cpp" in aggregated
             other = "beta" if name == "alpha" else "alpha"
             assert other not in aggregated
-            program = subprocess.run(
-                [str(build_dir / name / "app")],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            assert program.stdout.strip() == f"Thing_{name} {name}"
+            output = run_program(build_dir / name / "app")
+            assert output.strip() == f"Thing_{name} {name}"
 
 
 class TestNinjaShape:
@@ -843,8 +841,6 @@ class TestAGeneratedDirectoryConverges:
         assert second.returncode == 0, second.stderr or second.stdout
         assert "no work to do" in second.stdout, second.stdout
 
-        program = subprocess.run(
-            [str(build_dir / "app")], capture_output=True, text=True, check=True
-        )
-        assert "meta=Generated" in program.stdout
-        assert "answer=42 bits=3" in program.stdout
+        output = run_program(build_dir / "app")
+        assert "meta=Generated" in output
+        assert "answer=42 bits=3" in output
