@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -64,7 +65,11 @@ def _read_depfile(depfile: Path) -> list[Path]:
         text = depfile.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
-    _, _, rest = text.partition(":")
+    # The target ends at a colon followed by whitespace. A drive letter's
+    # colon never is: moc writes ``D:\\build\\moc_x.cpp: D:\\src\\x.h`` on
+    # Windows, and splitting there would make the output its own input.
+    match = re.search(r":(?=\s|$)", text)
+    rest = text[match.end() :] if match else text
     rest = rest.replace("\\\r\n", " ").replace("\\\n", " ")
     deps: list[Path] = []
     token = ""

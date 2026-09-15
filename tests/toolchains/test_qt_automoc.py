@@ -677,6 +677,19 @@ class TestDepfileReading:
         depfile = write(tmp_path / "moc_thing.cpp.d", "moc_thing.cpp: /src/a.h")
         assert _automoc._read_depfile(depfile) == [Path("/src/a.h")]
 
+    def test_a_drive_letter_in_the_target_is_not_where_it_ends(self, tmp_path):
+        """moc on Windows writes the target with its drive; splitting at that
+        colon would list the output itself as a prerequisite, and the edge
+        would then need a second run to settle."""
+        depfile = write(
+            tmp_path / "moc_thing.cpp.d",
+            "D:\\build\\moc_thing.cpp: D:\\src\\thing.h \\\n  C:/Qt/include/qobject.h\n",
+        )
+        assert _automoc._read_depfile(depfile) == [
+            Path("D:\\src\\thing.h"),
+            Path("C:/Qt/include/qobject.h"),
+        ]
+
 
 class TestBuildTimeFreshness:
     """ninja never sees the moc outputs, so the tool decides when they age."""
