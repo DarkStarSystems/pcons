@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from tests.support import subprocess_env
+from tests.support import qt_runtime_env, subprocess_env
 
 # Try to import tomllib (Python 3.11+) or tomli as fallback
 try:
@@ -1352,16 +1352,10 @@ def run_example(
     has_platform_override = f"commands_{current_platform}" in verify_config
     verify_commands = get_platform_value(verify_config, "commands", [])
 
-    # Windows has no rpath: Qt executables need the Qt DLL directory on
-    # PATH at runtime. Give require_qt examples the discovered Qt dirs.
+    # A require_qt example's programs need Qt's DLLs on PATH on Windows.
     verify_env = None
     if IS_WINDOWS and config.get("skip", {}).get("require_qt"):
-        from pcons.toolchains.qt.toolchain import _locate_tool_dirs
-
-        qt_dirs = os.pathsep.join(str(d) for d in _locate_tool_dirs())
-        if qt_dirs:
-            verify_env = dict(os.environ)
-            verify_env["PATH"] = qt_dirs + os.pathsep + verify_env.get("PATH", "")
+        verify_env = qt_runtime_env()
 
     for cmd_config in verify_commands:
         run_cmd = cmd_config.get("run")

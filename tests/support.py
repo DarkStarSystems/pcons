@@ -18,6 +18,23 @@ EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
 """What a Program's output is called, for a test asserting a build tool name."""
 
 
+def qt_runtime_env() -> dict[str, str]:
+    """Environment for running a program linked against Qt.
+
+    Windows has no rpath: a Qt executable finds its DLLs on PATH, so the
+    discovered Qt tool directories go first. Elsewhere the environment is
+    returned as it is.
+    """
+    env = dict(os.environ)
+    if sys.platform == "win32":
+        from pcons.toolchains.qt.toolchain import _locate_tool_dirs
+
+        qt_dirs = os.pathsep.join(str(d) for d in _locate_tool_dirs())
+        if qt_dirs:
+            env["PATH"] = qt_dirs + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def subprocess_env(**overrides: str) -> dict[str, str]:
     """Environment for a pcons subprocess, with coverage carried into it.
 

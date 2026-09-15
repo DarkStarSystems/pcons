@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On Windows, a Qt target whose moc flags changed needed one more `ninja`
+  run than it should have to settle. moc writes its depfile target with a
+  drive letter, and the automoc tool cut the line at that colon, so moc's
+  own output was recorded as an input of the edge that writes it.
+
 - `link(":libfoo.a")` is accepted again. That is the explicit-filename
   form, `-l:libfoo.a` accepted by GNU ld and LLD.  (#176,
   #177)
