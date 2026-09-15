@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A relative `link_dirs` or `framework_dirs` entry declared in a subdirectory
+  script lost its subdirectory when it reached the generator, so `-L` (and
+  `-F`) pointed one level too high. Both now anchor at the top-level root,
+  the same as `include_dirs` already did. Closes #182, following #178.
+
 ## [0.29.1] - 2026-09-14
 
 ### Changed

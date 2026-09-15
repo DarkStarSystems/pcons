@@ -914,6 +914,132 @@ class TestSubdirectoryIncludeDirs:
         assert "$topdir/a/bb/inc" in text
 
 
+class TestSubdirectoryLinkDirs:
+    """A link dir anchors at the declaring script, the same as an include dir.
+
+    A library's own build step never reads ``link_dirs`` (``ar`` takes no
+    ``-L``), so the anchoring only shows up on a consumer: a top-level
+    program that links the subdirectory's library.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    CHILD = (
+        "from pcons.core.project import Project\n"
+        "project = Project.current()\n"
+        "env = project.default_environment\n"
+        "lib = project.StaticLibrary('sublib', env, sources=['thing.c'])\n"
+        "lib.public.link_dirs.append({spelling})\n"
+    )
+
+    def _child(self, test_project: Project, spelling: str) -> Path:
+        subdir = _make_subdir(
+            test_project, "child", self.CHILD.format(spelling=spelling)
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+        return subdir
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["'libs'", "project.current_dir / 'libs'", "str(project.current_dir / 'libs')"],
+    )
+    def test_the_link_dir_keeps_the_subdirectory(
+        self, test_project: Project, tmp_path: Path, spelling: str
+    ) -> None:
+        env = test_project.Environment(toolchain="c")
+        self._child(test_project, spelling)
+        ns = add_subdirectory("child")
+
+        (test_project.root_dir / "main.c").write_text("int main(void) { return 0; }\n")
+        app = test_project.Program("app", env, sources=["main.c"])
+        app.link(ns.lib)
+        text = self._ninja(test_project, tmp_path)
+
+        assert "-L$topdir/child/libs" in text
+        assert "-L$topdir/libs" not in text
+
+    def test_a_nested_child_keeps_every_segment(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        env = test_project.Environment(toolchain="c")
+        subdir = _make_subdir(
+            test_project,
+            "a/bb",
+            self.CHILD.format(spelling="project.current_dir / 'libs'"),
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+        ns = add_subdirectory("a/bb")
+
+        (test_project.root_dir / "main.c").write_text("int main(void) { return 0; }\n")
+        app = test_project.Program("app", env, sources=["main.c"])
+        app.link(ns.lib)
+        text = self._ninja(test_project, tmp_path)
+
+        assert "-L$topdir/a/bb/libs" in text
+
+
+class TestSubdirectoryFrameworkDirs:
+    """A framework dir anchors the same way as a link dir.
+
+    ``target.public.framework_dirs`` has no consumer today outside
+    :func:`~pcons.tools.requirements._anchor_dir_lists_for` itself: nothing
+    lowers it to ``-F`` for a plain (non-package) target's link command, so
+    there is no ninja text to assert on the way :class:`TestSubdirectoryLinkDirs`
+    does. This exercises the anchoring helper directly on a target created by
+    a subdirectory script, so it picks up a real ``_subdir`` offset.
+    """
+
+    CHILD = (
+        "from pcons.core.project import Project\n"
+        "project = Project.current()\n"
+        "env = project.default_environment\n"
+        "lib = project.StaticLibrary('sublib', env, sources=['thing.c'])\n"
+        "lib.public.framework_dirs.append({spelling})\n"
+    )
+
+    @pytest.mark.parametrize(
+        "spelling",
+        ["'fw'", "project.current_dir / 'fw'", "str(project.current_dir / 'fw')"],
+    )
+    def test_the_framework_dir_keeps_the_subdirectory(
+        self, test_project: Project, spelling: str
+    ) -> None:
+        from pcons.tools.requirements import _anchor_dir_lists_for
+
+        test_project.Environment(toolchain="c")
+        subdir = _make_subdir(
+            test_project, "child", self.CHILD.format(spelling=spelling)
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+
+        ns = add_subdirectory("child")
+        anchored = _anchor_dir_lists_for(ns.lib.public, ns.lib)
+
+        assert anchored.framework_dirs == [Path("child/fw")]
+
+    def test_a_nested_child_keeps_every_segment(self, test_project: Project) -> None:
+        from pcons.tools.requirements import _anchor_dir_lists_for
+
+        test_project.Environment(toolchain="c")
+        subdir = _make_subdir(
+            test_project,
+            "a/bb",
+            self.CHILD.format(spelling="project.current_dir / 'fw'"),
+        )
+        (subdir / "thing.c").write_text("int thing(void) { return 0; }\n")
+
+        ns = add_subdirectory("a/bb")
+        anchored = _anchor_dir_lists_for(ns.lib.public, ns.lib)
+
+        assert anchored.framework_dirs == [Path("a/bb/fw")]
+
+
 class TestSubdirectoryInstallPaths:
     """Install and archive sources anchor at the declaring script too.
 

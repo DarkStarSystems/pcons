@@ -264,22 +264,36 @@ def apply_requirements_to_env(
         extend_unique(link, "frameworkdirs", (str(d) for d in reqs.framework_dirs))
 
 
-def _resolve_and_add_includes_for(
-    reqs: UsageRequirements, owner: Target
-) -> UsageRequirements:
-    """Resolve include directories in requirements and return a new UsageRequirements."""
+#: Usage-requirement lists that name directories (as opposed to flags or
+#: libraries), so a subdirectory's entries need the anchoring below.
+_ANCHORED_DIR_LISTS = (
+    "include_dirs",
+    "system_include_dirs",
+    "link_dirs",
+    "framework_dirs",
+)
+
+
+def _anchor_dir_lists_for(reqs: UsageRequirements, owner: Target) -> UsageRequirements:
+    """Anchor a subdirectory target's directory lists at the top-level root.
+
+    Return a clone of *reqs* with ``include_dirs``, ``system_include_dirs``,
+    ``link_dirs`` and ``framework_dirs`` re-anchored so generators (which use
+    the top-level resolver) see consistent project-relative paths for
+    directories coming from subprojects.
+    """
     result = reqs.clone()
 
     top = owner.project.top
     build_parts = () if top.build_dir.is_absolute() else top.build_dir.parts
     root_anchored_resolver = top._path_resolver
 
-    def _update_include(inc: str | Path) -> Path:
-        p = Path(inc) if not isinstance(inc, Path) else inc
-        # A relative include dir is relative to the owner's source directory,
-        # so it picks up the subproject offset — unless it already carries the
-        # build-dir prefix, which makes it a generated-header directory that
-        # is anchored at the build tree instead (e.g. project.build_dir).
+    def _anchor(entry: str | Path) -> Path:
+        p = Path(entry) if not isinstance(entry, Path) else entry
+        # A relative dir is relative to the owner's source directory, so it
+        # picks up the subproject offset — unless it already carries the
+        # build-dir prefix, which makes it a generated directory that is
+        # anchored at the build tree instead (e.g. project.build_dir).
         is_build_relative = bool(build_parts) and p.parts[: len(build_parts)] == (
             build_parts
         )
@@ -287,13 +301,13 @@ def _resolve_and_add_includes_for(
             p = owner._subdir / p
         # Canonicalize relative to the top-level project's resolver so
         # generators (which use the top-level resolver) see consistent
-        # project-relative paths for includes coming from subprojects.
+        # project-relative paths for dirs coming from subprojects.
         return root_anchored_resolver.canonicalize(p)
 
-    result.include_dirs = [_update_include(inc) for inc in reqs.include_dirs]
-    result.system_include_dirs = [
-        _update_include(inc) for inc in reqs.system_include_dirs
-    ]
+    for list_name in _ANCHORED_DIR_LISTS:
+        setattr(
+            result, list_name, [_anchor(entry) for entry in getattr(reqs, list_name)]
+        )
     return result
 
 
@@ -372,11 +386,11 @@ def compute_effective_requirements(
     # Layer 2: Target's own requirements. Public is also available to the
     # target's own sources, not just consumers.
     result.merge(
-        _resolve_and_add_includes_for(target.private, target),
+        _anchor_dir_lists_for(target.private, target),
         origin=(target.name, "private"),
     )
     result.merge(
-        _resolve_and_add_includes_for(target.public, target),
+        _anchor_dir_lists_for(target.public, target),
         origin=(target.name, "public"),
     )
 
@@ -384,7 +398,7 @@ def compute_effective_requirements(
     # libraries and depends() targets alike.
     for dep in target.transitive_dependencies():
         result.merge(
-            _resolve_and_add_includes_for(dep.public, dep), origin=(dep.name, "public")
+            _anchor_dir_lists_for(dep.public, dep), origin=(dep.name, "public")
         )
 
     return result
