@@ -162,7 +162,10 @@ class TestQtProgram:
         )
         content = generate_ninja(project).replace("\\", "/")
 
-        assert "build qt.app/mocs_compilation.cpp: qt_automoccmd" in content
+        assert (
+            "build qt.app/mocs_compilation.cpp | qt.app/automoc.exports.json: "
+            "qt_automoccmd" in content
+        )
         # autouic / autorcc edges.
         assert "build qt.app/src/ui_form.h: qt_uiccmd" in content
         assert "build qt.app/qrc_res.cpp: qt_rcccmd" in content

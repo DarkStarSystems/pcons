@@ -212,7 +212,12 @@ class QtQmlModuleBuilder:
             sources: C++ sources; QML_ELEMENT classes register
                 automatically (via the same automoc scan as QtProgram).
             link: Targets to link — pass Qt modules (link=[qt.Quick]).
-            no_moc: Files to exclude from the moc scan.
+            no_moc: Files that must not get a moc edge. This excludes moc
+                *generation* for the file itself, nothing else: the scan
+                still opens it and still follows its includes, so a
+                Q_OBJECT header behind an excluded one is still moc'ed.
+                Only a directory the target's includes never reach keeps
+                the walk out.
 
         Returns:
             An object target; app.link(module) pulls everything in.

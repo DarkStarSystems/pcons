@@ -99,12 +99,16 @@ class TargetScan:
         scanned: Every file whose content influenced the result.
         scanned_dirs: Directories whose listing influenced header
             resolution (a new file appearing there can change it).
+        reached_from: For each header the walk opened, the file that
+            included it first. Following it back names the include chain
+            that brought a header into this target.
     """
 
     moc_headers: list[Path] = field(default_factory=list)
     moc_sources: list[Path] = field(default_factory=list)
     scanned: list[Path] = field(default_factory=list)
     scanned_dirs: list[Path] = field(default_factory=list)
+    reached_from: dict[Path, Path] = field(default_factory=dict)
 
 
 class MocIncludeError(GenerateError):
@@ -230,7 +234,10 @@ class QtScanner:
                 project-relative paths).
             include_dirs: The target's include dirs, used both to
                 resolve includes and as additional scan roots.
-            no_moc: Files to exclude from moc even if they match.
+            no_moc: Files excluded from moc *generation*. The walk is
+                not affected: an excluded file is still opened and its
+                includes are still followed, so a Q_OBJECT header behind
+                an excluded one is still moc'ed.
 
         Returns:
             A TargetScan; moc_headers/moc_sources are sorted for stable
@@ -253,29 +260,32 @@ class QtScanner:
             return None
 
         visited: set[Path] = set()
+        reached_from: dict[Path, Path] = {}
         moc_headers: set[Path] = set()
         moc_sources: set[Path] = set()
         scanned_dirs: set[Path] = set()
 
-        def follow_includes(scan: FileScan, from_dir: Path, depth: int) -> None:
+        def follow_includes(scan: FileScan, from_file: Path, depth: int) -> None:
             for name, quoted in (
                 *((inc, True) for inc in scan.includes),
                 *((inc, False) for inc in scan.angle_includes),
             ):
-                resolved = resolve_include(name, from_dir if quoted else None)
+                resolved = resolve_include(name, from_file.parent if quoted else None)
                 if resolved is not None and resolved.suffix in _HEADER_SUFFIXES:
-                    visit_header(resolved, depth)
+                    visit_header(resolved, depth, from_file)
 
-        def visit_header(path: Path, depth: int) -> None:
+        def visit_header(path: Path, depth: int, includer: Path | None = None) -> None:
             path = path.resolve()
             if path in visited or depth > _MAX_INCLUDE_DEPTH:
                 return
             visited.add(path)
+            if includer is not None:
+                reached_from[path] = includer
             scanned_dirs.add(path.parent)
             scan = self.scan_file(path)
             if scan.macros and path not in excluded:
                 moc_headers.add(path)
-            follow_includes(scan, path.parent, depth + 1)
+            follow_includes(scan, path, depth + 1)
 
         for source in sources:
             source = Path(source).resolve()
@@ -296,13 +306,14 @@ class QtScanner:
             for suffix in _HEADER_SUFFIXES:
                 sibling = source.with_suffix(suffix)
                 if sibling.is_file():
-                    visit_header(sibling, 1)
-            follow_includes(scan, source.parent, 1)
+                    visit_header(sibling, 1, source)
+            follow_includes(scan, source, 1)
 
         result.moc_headers = sorted(moc_headers)
         result.moc_sources = sorted(moc_sources)
         result.scanned = sorted(visited)
         result.scanned_dirs = sorted(scanned_dirs)
+        result.reached_from = reached_from
         return result
 
     def check_moc_include(self, source: Path) -> None:
