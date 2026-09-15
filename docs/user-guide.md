@@ -2162,6 +2162,8 @@ if sys.platform == "darwin":
 
 This adds the appropriate `-framework` and `-F` flags to the linker command. Framework linking is only available on macOS with GCC or LLVM toolchains.
 
+`env.Framework()` puts the flags on the environment, so every target built with it links the framework. To scope a framework to one library and have it propagate only to targets that link that library, use the target-level usage requirement instead: `lib.public.frameworks.append("CoreFoundation")` (and `lib.public.framework_dirs` for search paths). See `examples/89_macos_frameworks` for a worked example.
+
 For more complex scenarios where you need framework flags in compile commands (e.g., for headers), you can also access the raw flags:
 
 ```python
