@@ -21,6 +21,8 @@ from pcons.core.target import (
     register_usage_requirement,
     split_qualified_name,
 )
+from pcons.generators.generator import BaseGenerator
+from pcons.generators.ninja import NinjaGenerator
 
 
 class TestUsageRequirements:
@@ -1200,3 +1202,51 @@ class TestLinkRefusesAPathShapedString:
         target = Target("app", target_type="program")
         target.link("m", "pthread", "boost_system")
         assert list(target.public.link_libs) == ["m", "pthread", "boost_system"]
+
+
+class TestLinkTakesTheExplicitFilenameForm:
+    """``-l:libfoo.a`` names a file the linker still looks up on the search
+    path. It is the only way to link an archive whose name the ``-l`` rule
+    cannot spell, such as a vendor ``USBPD_CM33.a``, so the path-shaped
+    refusal must not read its suffix as a path.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            ":libfoo.a",
+            ":VENDOR_CM33.a",
+            ":libfoo.so.1",
+            ":foo.dll",
+        ],
+    )
+    def test_a_colon_prefixed_file_name_is_a_name(self, test_project, name):  # noqa: F811
+        target = Target("app", target_type="program")
+
+        target.link(name)
+
+        assert list(target.public.link_libs) == [name]
+
+    @pytest.mark.parametrize("bad", [":../lib/libfoo.a", ":lib/libfoo.a"])
+    def test_a_colon_prefixed_path_is_still_refused(self, test_project, bad):  # noqa: F811
+        """The search path is what resolves it, so a separator names nothing."""
+        target = Target("app", target_type="program")
+
+        with pytest.raises(TypeError, match="looks like a file path"):
+            target.link(bad)
+
+    def test_it_reaches_the_link_line(self, tmp_path, gcc_toolchain):
+        """The whole string is what follows ``-l``, colon included."""
+        project = Project("p", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+        app = project.Program("app", env, sources=["main.c"])
+        app.public.link_dirs.append(tmp_path / "vendor")
+        app.link(":VENDOR_CM33.a")
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert "-l:VENDOR_CM33.a" in content

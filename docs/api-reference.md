@@ -51,7 +51,7 @@ API:
 | `target.public.make_includes_system()` | Move every include dir to `system_include_dirs`, in place |
 | `target.public.link_libs.append(t)` | Low-level form of `link()` (append a `Target` or `-l` name) |
 | `target.private.link_libs.append(t)` | Low-level form of `link_private()` |
-| `target.public.link_libs` | Libraries to link (`-l`; placed after objects) |
+| `target.public.link_libs` | Libraries to link (`-l`; placed after objects). A name starting with `:` is GNU ld's explicit-filename form, `-l:libfoo.a`, for an archive the `-l` naming rule cannot spell |
 | `target.public.link_flags` | Linker flags (placed before objects; use `link_libs` for `-l` libraries). Use `PathToken` for flags containing paths. |
 | `target.public.defines` | Defines for consumers |
 | `target.public.link_dirs` | Library search directories (`-L`) |
