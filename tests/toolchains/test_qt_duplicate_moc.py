@@ -164,9 +164,10 @@ class TestTheReportEdge:
 
         ninja = generate_ninja(project)
 
+        program = app.output_nodes[0].path.name
         stamp = _report_edges(ninja)[0].split(":")[0].removeprefix("build ").strip()
         link = next(
-            line for line in ninja.splitlines() if line.startswith("build app: ")
+            line for line in ninja.splitlines() if line.startswith(f"build {program}: ")
         )
         assert f"|| {stamp}" in link
 
