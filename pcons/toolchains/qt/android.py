@@ -375,7 +375,14 @@ def android_deployment_settings(
         env: The environment the application is built in.
         app: The application target, or its name.
         output: Where to write it. Default:
-                ``<build_dir>/android-deployment-settings.json``.
+                ``<android_output_dir>/android-deployment-settings.json`` --
+                the same directory :func:`~pcons.toolchains.qt.apk.android_apk`
+                packages into, so two applications, two build prefixes, or
+                two ``add_subdirectory`` scripts each get a file of their
+                own. Anchored by
+                :func:`~pcons.core.builder.anchor_target_paths` like that
+                directory, so a relative path given here carries the
+                declaring script's offset the same way.
         package_name: The Android package name ("org.example.myapp"). Left
                       out, androiddeployqt takes it from the manifest.
         package_source_dir: A directory of Android sources -- the manifest,
@@ -406,13 +413,12 @@ def android_deployment_settings(
     """
     _android_preset(env)
 
-    if output is None:
-        output = _absolute(
-            project, project.build_dir / "android-deployment-settings.json"
-        )
-    output = Path(output)
-    if not output.is_absolute():
-        output = Path(project.root_dir) / output
+    anchored = (
+        anchor_target_paths(env, [Path(output)])[0]
+        if output is not None
+        else android_output_dir(env, app) / "android-deployment-settings.json"
+    )
+    output = _absolute(project, anchored)
 
     def content() -> str:
         settings = deployment_settings(project, env, app=app)

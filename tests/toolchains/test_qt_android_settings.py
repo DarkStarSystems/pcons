@@ -639,77 +639,110 @@ class TestAnAbiNobodyMapped:
 
 
 class TestWhereTheFileGoes:
-    def test_the_default_is_the_projects_build_directory(
+    """Anchored the way :func:`~pcons.toolchains.qt.android.android_output_dir`
+    anchors the package directory: under the application's own directory,
+    below the environment's build directory, offset and build_prefix
+    included. The bug this guards: the file used to be named from
+    ``project.build_dir`` alone, one file per *project* rather than one per
+    *application* -- so two applications, two build prefixes, or two
+    ``add_subdirectory`` scripts each declaring one all wrote into the same
+    file, the last one silently winning.
+    """
+
+    def test_the_default_is_under_the_applications_own_directory(
         self, found_qt, test_project
     ) -> None:
         path = android_deployment_settings(test_project, android_env(), app="myapp")
 
-        assert path == Path(test_project.root_dir) / test_project.build_dir / (
-            "android-deployment-settings.json"
+        assert path == (
+            Path(test_project.root_dir)
+            / test_project.build_dir
+            / "myapp"
+            / "android-deployment-settings.json"
         )
         assert _written_settings(test_project, path)["abi"] == "arm64-v8a"
 
-    def test_an_environments_own_build_dir_does_not_move_it(
+    def test_an_environments_own_build_dir_moves_it(
         self, found_qt, test_project
     ) -> None:
-        """Where the build writes is the project's answer. An environment
-        that carries a build_dir of its own is not a second one."""
         env = android_env()
         env.build_dir = Path("elsewhere")
 
         path = android_deployment_settings(test_project, env, app="myapp")
 
-        assert path.parent == Path(test_project.root_dir) / test_project.build_dir
+        assert path.parent == Path(test_project.root_dir) / "elsewhere" / "myapp"
 
-    def test_a_sub_projects_default_is_the_top_level_build_directory(
-        self, found_qt, test_project
-    ) -> None:
-        """``project.build_dir`` already carries the sub-project offset."""
-        from pcons.util.add_subdirectory import add_subdirectory
-
-        root = Path(test_project.root_dir)
-        (root / "child").mkdir()
-        (root / "child" / "pcons-build.py").write_text(
-            "from pcons.core.project import Project\nproject = Project('child')\n"
-        )
+    def test_two_applications_do_not_share_a_file(self, found_qt, test_project) -> None:
         env = android_env()
-        child = add_subdirectory("child", project=test_project, env=env)
 
-        path = android_deployment_settings(child.project, env, app="myapp")
+        one = android_deployment_settings(test_project, env, app="one")
+        two = android_deployment_settings(test_project, env, app="two")
 
-        assert path == root / child.project.build_dir / (
-            "android-deployment-settings.json"
-        )
+        assert one != two
+        assert one.parent.name == "one"
+        assert two.parent.name == "two"
 
-    def test_a_sub_projects_file_is_written_when_pcons_drains(
+    def test_two_build_prefixes_do_not_share_a_file(
         self, found_qt, test_project
     ) -> None:
-        """``_generate_pending()`` walks the top-level projects, so a write
-        queued on a child is never drained and the file never appears."""
+        """Two ABIs, each built through its own environment: same
+        application name, different ``build_prefix``."""
+        first = android_env()
+        first.build_prefix = "abi1"
+        second = android_env()
+        second.build_prefix = "abi2"
+
+        one = android_deployment_settings(test_project, first, app="myapp")
+        two = android_deployment_settings(test_project, second, app="myapp")
+
+        assert one != two
+        assert "abi1" in one.parts and "abi2" not in one.parts
+        assert "abi2" in two.parts and "abi1" not in two.parts
+
+    def test_a_subdirectorys_file_carries_its_offset(
+        self, found_qt, test_project
+    ) -> None:
+        """Called from inside the declaring script, the way
+        ``android_output_dir`` expects: ``Project.current()`` is then the
+        child, and its offset is what ``anchor_target_paths`` reads."""
         from pcons.generators.generator import BaseGenerator
         from pcons.util.add_subdirectory import add_subdirectory
 
         root = Path(test_project.root_dir)
         (root / "child").mkdir()
         (root / "child" / "pcons-build.py").write_text(
-            "from pcons.core.project import Project\nproject = Project('child')\n"
+            "from pcons import context\n"
+            "from pcons.toolchains.qt.android import android_deployment_settings\n"
+            "project = context.current_project\n"
+            "env = project.default_environment\n"
+            "android_deployment_settings(project, env, app='myapp')\n"
         )
         env = android_env()
-        child = add_subdirectory("child", project=test_project, env=env)
-
-        path = android_deployment_settings(child.project, env, app="myapp")
+        add_subdirectory("child", project=test_project, env=env)
         BaseGenerator._generate_pending()
 
-        assert path.is_file()
+        expected = (
+            root
+            / test_project.build_dir
+            / "child"
+            / "myapp"
+            / "android-deployment-settings.json"
+        )
+        assert expected.is_file()
 
-    def test_a_relative_path_is_from_the_project_root(
+    def test_a_relative_output_is_anchored_under_the_build_directory(
         self, found_qt, test_project
     ) -> None:
+        """Like ``android_output_dir``'s own explicit ``output=``: a bare
+        relative path is build-dir-relative, not project-root-relative, so
+        it cannot collide with a source file of the same name."""
         path = android_deployment_settings(
             test_project, android_env(), app="myapp", output="out/s.json"
         )
 
-        assert path == Path(test_project.root_dir) / "out" / "s.json"
+        assert path == (
+            Path(test_project.root_dir) / test_project.build_dir / "out" / "s.json"
+        )
 
 
 class TestWhenTheContentIsDecided:
