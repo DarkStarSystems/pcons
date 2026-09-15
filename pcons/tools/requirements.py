@@ -272,6 +272,7 @@ def _resolve_and_add_includes_for(
 
     top = owner.project.top
     build_parts = () if top.build_dir.is_absolute() else top.build_dir.parts
+    root_anchored_resolver = top._path_resolver
 
     def _update_include(inc: str | Path) -> Path:
         p = Path(inc) if not isinstance(inc, Path) else inc
@@ -287,7 +288,7 @@ def _resolve_and_add_includes_for(
         # Canonicalize relative to the top-level project's resolver so
         # generators (which use the top-level resolver) see consistent
         # project-relative paths for includes coming from subprojects.
-        return top.path_resolver.canonicalize(p)
+        return root_anchored_resolver.canonicalize(p)
 
     result.include_dirs = [_update_include(inc) for inc in reqs.include_dirs]
     result.system_include_dirs = [
