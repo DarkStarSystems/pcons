@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `android_deployment_settings()` now writes into the application's own
+  package directory instead of one fixed name under the project's build
+  directory. Two applications, two build prefixes, or two
+  `add_subdirectory` scripts each get their own file now, instead of
+  silently overwriting one another's.
+
 - On Windows, a Qt target whose moc flags changed needed one more `ninja`
   run than it should have to settle. moc writes its depfile target with a
   drive letter, and the automoc tool cut the line at that colon, so moc's
