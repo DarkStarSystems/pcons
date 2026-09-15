@@ -523,13 +523,13 @@ knows where its QML is.
 `qml-skip-import-scanning` is written only when the environment has no
 `QtQmlModule` at all. An application with QML gets the scan.
 
-A `QtQmlModule`'s generated `qmldir` is embedded in a resource, and pcons
-writes it flat, so an import path resolves none of the application's own
-modules. Measured against Qt 6.11.1: that costs nothing as long as every
-module's QML source directory is a root path. The scanner then reports the
-same Qt modules either way, and the application's own module is reported
-with no path -- which is right, since it is in the resource and there is
-nothing on disk to bundle.
+A `QtQmlModule`'s generated `qmldir` is embedded in a resource, and on disk
+it does not sit under a `<uri>`-shaped directory, so an import path resolves
+none of the application's own modules. Measured against Qt 6.11.1: that
+costs nothing as long as every module's QML source directory is a root path.
+The scanner then reports the same Qt modules either way, and the
+application's own module is reported with no path -- which is right, since it
+is in the resource and there is nothing on disk to bundle.
 
 #### Staging the application library
 
