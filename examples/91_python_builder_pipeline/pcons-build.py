@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Two PyActions, each called twice, feeding a real compile and link.
+"""Two PyBuilders, each called twice, feeding a real compile and link.
 
 ``fetch`` downloads a JSON document and writes one field of it to a file.
 ``embed`` turns that file's bytes into a C program that writes them back out.
@@ -8,7 +8,7 @@ twice: ``embed`` takes the ``Target`` that ``fetch`` returned as its
 ``source=``, and ``project.Program`` takes the ``Target`` that ``embed``
 returned, which is how ninja learns the order.
 
-Each action is decorated once and called twice, once per document. That is
+Each function is decorated once and called twice, once per document. That is
 the point of a builder: two edges, one generated module, one argument pickle
 per edge. The arguments differ, the body does not.
 
@@ -21,7 +21,7 @@ of one chain would want one pickle. ``name=`` parts them, and it is also what
 Why a byte array rather than a C string literal: the fetched document is
 arbitrary bytes. Escaping it into a string literal means handling quotes,
 backslashes, newlines, trigraphs and anything non-ASCII, a rabbit hole that
-teaches nothing about PyAction. A byte array is four lines and is correct for
+teaches nothing about PyBuilder. A byte array is four lines and is correct for
 any input, a NUL byte included. ``src/awkward.bin`` is a third chain that
 proves it, with no network in the way: it holds a NUL, an invalid UTF-8 byte,
 a quote, a backslash, a trigraph and an escape.
@@ -54,11 +54,11 @@ from pcons import Project
 LOREM_URL = "https://www.lipsum.com/feed/json?amount=3&what=paras&start=yes"
 MOTTO_URL = "https://www.lipsum.com/feed/json?amount=12&what=words"
 
-project = Project("python_action_pipeline")
+project = Project("python_builder_pipeline")
 env = project.Environment(toolchain="c")
 
 
-@env.PyAction()
+@env.PyBuilder()
 def fetch(sources, targets, url, field):
     import json
     from pathlib import Path
@@ -80,7 +80,7 @@ def fetch(sources, targets, url, field):
     Path(targets[0]).write_bytes(payload.encode("utf-8"))
 
 
-@env.PyAction()
+@env.PyBuilder()
 def embed(sources, targets, symbol):
     from pathlib import Path
 

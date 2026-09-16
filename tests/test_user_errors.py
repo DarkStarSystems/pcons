@@ -28,7 +28,7 @@ from pcons.core.errors import (
 from pcons.core.invocation import RUN_NAME
 from pcons.core.project import Project
 from pcons.core.subst import PathToken
-from pcons.util.pyaction import run
+from pcons.util.pybuilder import run
 
 
 @pytest.fixture
@@ -600,13 +600,13 @@ class TestBuilderEdgeCases:
         assert install is not None
 
 
-PYACTION_DEFAULT = "a value the build script computed"
+PYBUILDER_DEFAULT = "a value the build script computed"
 
 
 def build_script_function(tmp_path, source, name="render"):
     """Define a function the way a build script does, under ``__pcons__``.
 
-    The module name is half of what PyAction's messages reason about: a
+    The module name is half of what PyBuilder's messages reason about: a
     helper defined here has nowhere to be imported from, and a test module,
     which is importable, cannot stand in for that.
     """
@@ -620,7 +620,7 @@ def build_script_function(tmp_path, source, name="render"):
 SCRIPT_VALUE = "a value the build script computed"
 
 
-class TestEveryPyActionRemedyWorks:
+class TestEveryPyBuilderRemedyWorks:
     """Every remedy above, typed out and run.
 
     A remedy nobody has followed is a remedy nobody has checked. Each test
@@ -635,9 +635,9 @@ class TestEveryPyActionRemedyWorks:
         info = target.output_nodes[0]._build_info
         return [node.path.as_posix() for node in info["sources"]]
 
-    def run_edge(self, project, action, tmp_path, **call):
+    def run_edge(self, project, builder, tmp_path, **call):
         """Make the edge, then run its function the way the runner will."""
-        made = action(**call)
+        made = builder(**call)
         project.resolve()
         module, args = (
             tmp_path / Path(token.path)
@@ -649,10 +649,10 @@ class TestEveryPyActionRemedyWorks:
         return made, out
 
     def test_a_partial_becomes_an_argument_of_the_call(self, project_env, tmp_path):
-        """ "give its bound arguments to the call: action(target=..., bound=value)"."""
+        """ "give its bound arguments to the call: builder(target=..., bound=value)"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, n):
             from pathlib import Path
 
@@ -666,7 +666,7 @@ class TestEveryPyActionRemedyWorks:
         """ "Write a def beside the other targets and pass what it needs at the call"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, value):
             from pathlib import Path
 
@@ -680,7 +680,7 @@ class TestEveryPyActionRemedyWorks:
         """ "write it as a def"."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             return 1
 
@@ -690,7 +690,7 @@ class TestEveryPyActionRemedyWorks:
         """ "move the def out of the class"."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             return 1
 
@@ -700,7 +700,7 @@ class TestEveryPyActionRemedyWorks:
         """ "Write it as a plain def"."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             return 1
 
@@ -712,7 +712,7 @@ class TestEveryPyActionRemedyWorks:
         title = "from the enclosing scope"
 
         def make():
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets, title):
                 from pathlib import Path
 
@@ -728,7 +728,7 @@ class TestEveryPyActionRemedyWorks:
         """ "Import Path inside the function body, the way this script imports it"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             from pathlib import Path
 
@@ -742,7 +742,7 @@ class TestEveryPyActionRemedyWorks:
         """'Write "import json" at the top of the function body'."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             import json
             from pathlib import Path
@@ -759,7 +759,7 @@ class TestEveryPyActionRemedyWorks:
         """ "write the parameter without a default and pass it at the call"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, label):
             from pathlib import Path
 
@@ -775,7 +775,7 @@ class TestEveryPyActionRemedyWorks:
         """ "Take SRC_DIR as a parameter and pass it at the call"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, SRC_DIR):  # noqa: N803
             from pathlib import Path
 
@@ -793,7 +793,7 @@ class TestEveryPyActionRemedyWorks:
         """ "write out what it does inside the function body"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             from pathlib import Path
 
@@ -810,7 +810,7 @@ class TestEveryPyActionRemedyWorks:
         """'Take the path it means as a parameter: f(target=..., here=...)'."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, here):
             from pathlib import Path
 
@@ -830,7 +830,7 @@ class TestEveryPyActionRemedyWorks:
         """ "Rename it in the def and at the call"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, input_file):
             from pathlib import Path
 
@@ -846,7 +846,7 @@ class TestEveryPyActionRemedyWorks:
         """The bind message prints the signature; typing it works."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, title):
             return title
 
@@ -861,7 +861,7 @@ class TestEveryPyActionRemedyWorks:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             return sources
 
@@ -874,7 +874,7 @@ class TestEveryPyActionRemedyWorks:
         """The same remedy, for a node."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             return sources
 
@@ -887,7 +887,7 @@ class TestEveryPyActionRemedyWorks:
         """ "Read what the function needs from it here, and pass that"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, env_name):
             from pathlib import Path
 
@@ -904,7 +904,7 @@ class TestEveryPyActionRemedyWorks:
         project, env = project_env
         env.cc.flags = ["-O2"]
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, flags):
             from pathlib import Path
 
@@ -920,7 +920,7 @@ class TestEveryPyActionRemedyWorks:
         """ "Pass what describes it instead, a path or a string"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, path):
             from pathlib import Path
 
@@ -957,17 +957,17 @@ class TestEveryPyActionRemedyWorks:
             name="render_more",
         )
 
-        env.PyAction()(first)(target="a.txt")
-        env.PyAction()(second)(target="b.txt")
+        env.PyBuilder()(first)(target="a.txt")
+        env.PyBuilder()(second)(target="b.txt")
 
-        assert (tmp_path / "build/pyact/render.py").is_file()
-        assert (tmp_path / "build/pyact/render_more.py").is_file()
+        assert (tmp_path / "build/pybuilder/render.py").is_file()
+        assert (tmp_path / "build/pybuilder/render_more.py").is_file()
 
     def test_one_decoration_called_twice(self, project_env, tmp_path):
-        """ "Decorate the function once and call the action twice"."""
+        """ "Decorate the function once and call the builder twice"."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             return 1
 
@@ -976,7 +976,7 @@ class TestEveryPyActionRemedyWorks:
 
         generated = sorted(
             q.name
-            for q in (tmp_path / "build" / "pyact").iterdir()
+            for q in (tmp_path / "build" / "pybuilder").iterdir()
             if q.suffix in (".py", ".pkl")
         )
 
@@ -986,7 +986,7 @@ class TestEveryPyActionRemedyWorks:
         """'Name one of the edges, name="something-else"'."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             return 1
 
@@ -994,7 +994,7 @@ class TestEveryPyActionRemedyWorks:
         second = render(target="sub/report.txt", name="sub-report")
 
         assert second.name == "sub-report"
-        assert (tmp_path / "build/pyact/sub_report.args.pkl").is_file()
+        assert (tmp_path / "build/pybuilder/sub_report.args.pkl").is_file()
 
     def test_one_environment_gets_a_build_prefix(self, project_env, tmp_path):
         """ "Give one environment its own build_prefix"."""
@@ -1004,7 +1004,7 @@ class TestEveryPyActionRemedyWorks:
         other.build_prefix = "other"
 
         def decorate(environment):
-            @environment.PyAction()
+            @environment.PyBuilder()
             def render(sources, targets):
                 return 1
 
@@ -1013,14 +1013,14 @@ class TestEveryPyActionRemedyWorks:
         decorate(env)(target="report.txt")
         decorate(other)(target="report.txt")
 
-        assert (tmp_path / "build/pyact/render.py").is_file()
-        assert (tmp_path / "build/other/pyact/render.py").is_file()
+        assert (tmp_path / "build/pybuilder/render.py").is_file()
+        assert (tmp_path / "build/other/pybuilder/render.py").is_file()
 
     def test_the_first_two_parameters_become_positional(self, project_env):
         """ "write the first two as plain parameters: def f(sources, targets, ...)"."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, title):
             return title
 
@@ -1030,7 +1030,7 @@ class TestEveryPyActionRemedyWorks:
         """ "Move the / up so it follows targets: def f(sources, targets, /, title)"."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, /, title):
             from pathlib import Path
 
@@ -1046,7 +1046,7 @@ class TestEveryPyActionRemedyWorks:
         """ "The edge's own files are spelled source="."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, title):
             return title
 
@@ -1056,8 +1056,8 @@ class TestEveryPyActionRemedyWorks:
         assert self.edge_sources(edge) == ["src/main.c"]
 
 
-class TestPyActionErrors:
-    """What env.PyAction() says when a function cannot travel to build time.
+class TestPyBuilderErrors:
+    """What env.PyBuilder() says when a function cannot travel to build time.
 
     Every message is read here as the user reads it, whole, because the
     feature's failures are all configure-time refusals whose only job is to
@@ -1069,10 +1069,10 @@ class TestPyActionErrors:
         _, env = project_env
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(lambda sources, targets: None)
+            env.PyBuilder()(lambda sources, targets: None)
 
         message = str(caught.value)
-        assert "PyAction was given a lambda." in message
+        assert "PyBuilder was given a lambda." in message
         assert "write it as a def" in message
         assert "<lambda>" not in message
 
@@ -1081,7 +1081,7 @@ class TestPyActionErrors:
         title = "report"
 
         def make():
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets):
                 return title
 
@@ -1093,7 +1093,8 @@ class TestPyActionErrors:
         message = str(caught.value)
         assert message.startswith(str(caught.value.location) + ": ")
         assert (
-            "PyAction render() reads title from the function it is nested in" in message
+            "PyBuilder render() reads title from the function it is nested in"
+            in message
         )
         assert "Take it as a parameter and pass it at the call: " in message
         assert "render(target=..., title=...)." in message
@@ -1103,12 +1104,12 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets):
                 return Path(targets[0])
 
         message = str(caught.value)
-        assert "PyAction render() uses Path from the build script" in message
+        assert "PyBuilder render() uses Path from the build script" in message
         assert "Import Path inside the function body, the way this script" in message
 
     def test_a_default_says_to_drop_it_and_pass_it_at_the_call(self, project_env):
@@ -1116,16 +1117,16 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
-            def render(sources, targets, n=PYACTION_DEFAULT):
+            @env.PyBuilder()
+            def render(sources, targets, n=PYBUILDER_DEFAULT):
                 return n
 
         message = str(caught.value)
-        assert "PYACTION_DEFAULT is a parameter's default value" in message
+        assert "PYBUILDER_DEFAULT is a parameter's default value" in message
         assert "so write the parameter without a default." in message
         assert (
-            "Take PYACTION_DEFAULT as a parameter and pass it at the call, "
-            "render(target=..., PYACTION_DEFAULT=PYACTION_DEFAULT)." in message
+            "Take PYBUILDER_DEFAULT as a parameter and pass it at the call, "
+            "render(target=..., PYBUILDER_DEFAULT=PYBUILDER_DEFAULT)." in message
         )
 
     def test_a_target_in_kwargs_points_at_source(self, project_env):
@@ -1137,7 +1138,7 @@ class TestPyActionErrors:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, t):
             return t
 
@@ -1159,7 +1160,7 @@ class TestPyActionErrors:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, inputs):
             return inputs
 
@@ -1171,7 +1172,7 @@ class TestPyActionErrors:
     def test_the_environment_in_kwargs_says_to_read_it_here(self, project_env):
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, e):
             return e
 
@@ -1188,7 +1189,7 @@ class TestPyActionErrors:
         _, env = project_env
         handle = (tmp_path / "src" / "main.c").open()
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, f):
             return f
 
@@ -1204,7 +1205,7 @@ class TestPyActionErrors:
         """A two-name list reads "f and g", never "f, g"."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, f, g):
             return f, g
 
@@ -1217,7 +1218,7 @@ class TestPyActionErrors:
         """The same list helper, at the other site that once lost it."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, title):
             return title
 
@@ -1242,7 +1243,7 @@ class TestPyActionErrors:
         )
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(render)(target="out.txt")
+            env.PyBuilder()(render)(target="out.txt")
 
         message = str(caught.value)
         assert "uses SRC_DIR and VERSION from the build script" in message
@@ -1256,7 +1257,7 @@ class TestPyActionErrors:
         """The pickle is per edge, so two edges of one name collide on it."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets):
             return 1
 
@@ -1266,8 +1267,8 @@ class TestPyActionErrors:
             render(target="sub/report.txt")
 
         message = str(caught.value)
-        assert "PyAction edge 'report' would overwrite" in message
-        assert "build/pyact/report.args.pkl" in message
+        assert "PyBuilder edge 'report' would overwrite" in message
+        assert "build/pybuilder/report.args.pkl" in message
         assert "already written by the edge at " in message
         assert "test_user_errors.py:" in message.split("already written by")[1]
         assert 'Name one of the edges, name="something-else".' in message
@@ -1277,7 +1278,7 @@ class TestPyActionErrors:
         _, env = project_env
 
         def decorate():
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets):
                 return 1
 
@@ -1289,15 +1290,15 @@ class TestPyActionErrors:
             decorate()(target="b.txt")
 
         message = str(caught.value)
-        assert "would overwrite build/pyact/render.py" in message
-        assert "Decorate the function once and call the action twice." in message
+        assert "would overwrite build/pybuilder/render.py" in message
+        assert "Decorate the function once and call the builder twice." in message
         assert "Rename" not in message
 
     def test_a_wrong_keyword_is_refused_at_the_call(self, project_env):
         """A build-time TypeError inside a generated module, moved forward."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, title):
             return title
 
@@ -1313,7 +1314,7 @@ class TestPyActionErrors:
     def test_a_missing_argument_is_refused_at_the_call(self, project_env):
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, title):
             return title
 
@@ -1325,12 +1326,12 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets, source):
                 return source
 
         message = str(caught.value)
-        assert "PyAction render() has source as a parameter name" in message
+        assert "PyBuilder render() has source as a parameter name" in message
         assert "the call spends that name on the edge itself" in message
         assert "Rename it in the def and at the call" in message
 
@@ -1339,12 +1340,12 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets, depends, target):
                 return depends, target
 
         message = str(caught.value)
-        assert "PyAction render() has depends and target as parameter names" in message
+        assert "PyBuilder render() has depends and target as parameter names" in message
         assert "the call spends those names on the edge itself" in message
         assert "Rename them in the def and at the call" in message
 
@@ -1354,7 +1355,7 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
+            @env.PyBuilder()
             def render(*, sources, targets, title):
                 return title
 
@@ -1369,7 +1370,7 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, *, targets):
                 return 1
 
@@ -1382,7 +1383,7 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets, title, /):
                 return title
 
@@ -1396,7 +1397,7 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets, title, count, /):
                 return title, count
 
@@ -1408,7 +1409,7 @@ class TestPyActionErrors:
         """The good shape: only parameters past targets must take keywords."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, /, title):
             return title
 
@@ -1418,7 +1419,7 @@ class TestPyActionErrors:
         """bind would say "multiple values for argument 'sources'"."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, title):
             return title
 
@@ -1434,7 +1435,7 @@ class TestPyActionErrors:
     def test_targets_as_a_call_keyword_points_at_target(self, project_env):
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, title):
             return title
 
@@ -1447,7 +1448,7 @@ class TestPyActionErrors:
         """Only the function's own first two parameters are refused."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(first, second, **rest):
             return rest
 
@@ -1457,7 +1458,7 @@ class TestPyActionErrors:
         """env is not reserved: the call has no env= to collide with."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, env):
             return env
 
@@ -1484,14 +1485,16 @@ class TestPyActionErrors:
                 return 2
             """,
         )
-        env.PyAction()(first)(target="a.txt")
+        env.PyBuilder()(first)(target="a.txt")
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(second)(target="b.txt")
+            env.PyBuilder()(second)(target="b.txt")
 
         message = str(caught.value)
-        assert "PyAction render() would overwrite " in message
-        assert "build/pyact/render.py, already written by the PyAction at " in message
+        assert "PyBuilder render() would overwrite " in message
+        assert (
+            "build/pybuilder/render.py, already written by the PyBuilder at " in message
+        )
         assert "Rename one of the functions." in message
         assert "name=" not in message
         assert "in environment" not in message
@@ -1503,11 +1506,11 @@ class TestPyActionErrors:
             return n
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(functools.partial(render, n=1))
+            env.PyBuilder()(functools.partial(render, n=1))
 
         message = str(caught.value)
-        assert "PyAction was given a functools.partial." in message
-        assert "action(target=..., bound=value)." in message
+        assert "PyBuilder was given a functools.partial." in message
+        assert "builder(target=..., bound=value)." in message
 
     def test_a_bound_method_says_to_write_a_def(self, project_env):
         _, env = project_env
@@ -1517,14 +1520,14 @@ class TestPyActionErrors:
                 return 1
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(Holder().render)
+            env.PyBuilder()(Holder().render)
 
         message = str(caught.value)
         assert message.split(": ", 1)[1].startswith(
-            "PyAction needs a function written in a build script, not "
+            "PyBuilder needs a function written in a build script, not "
         )
         assert "Write a def beside the other targets and pass what it needs " in message
-        assert "at the call: action(target=..., value=...)." in message
+        assert "at the call: builder(target=..., value=...)." in message
 
     def test_a_method_says_to_move_it_out_of_the_class(self, project_env):
         _, env = project_env
@@ -1534,14 +1537,14 @@ class TestPyActionErrors:
                 return 1
 
         with pytest.raises(PconsError, match="move the def out of the class"):
-            env.PyAction()(Holder.render)
+            env.PyBuilder()(Holder.render)
 
     def test_a_coroutine_says_to_write_a_plain_def(self, project_env):
         _, env = project_env
 
         with pytest.raises(PconsError, match="Write it as a plain def"):
 
-            @env.PyAction()
+            @env.PyBuilder()
             async def render(sources, targets):
                 return 1
 
@@ -1550,7 +1553,7 @@ class TestPyActionErrors:
 
         with pytest.raises(PconsError) as caught:
 
-            @env.PyAction()
+            @env.PyBuilder()
             def render(sources, targets):
                 return __file__
 
@@ -1566,7 +1569,7 @@ class TestPyActionErrors:
         _, env = project_env
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(lambda sources, targets: None)
+            env.PyBuilder()(lambda sources, targets: None)
 
         location = caught.value.location
         assert location is not None
@@ -1592,10 +1595,10 @@ class TestPyActionErrors:
         )
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(render)
+            env.PyBuilder()(render)
 
         message = str(caught.value)
-        assert "PyAction render() uses helper from the build script" in message
+        assert "PyBuilder render() uses helper from the build script" in message
         assert "helper lives only in this build script" in message
         assert "write out what it does inside the function body" in message
         assert "import" not in message.split("nothing defines that name there.")[1][:40]
@@ -1617,7 +1620,7 @@ class TestPyActionErrors:
         )
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(render)
+            env.PyBuilder()(render)
 
         message = str(caught.value)
         assert "Import join inside the function body, the way this script" in message
@@ -1638,13 +1641,13 @@ class TestPyActionErrors:
         )
 
         with pytest.raises(PconsError, match='Write "import json"'):
-            env.PyAction()(render)
+            env.PyBuilder()(render)
 
     def test_a_tool_namespace_in_kwargs_points_at_its_values(self, project_env):
         """env.cc pickles, and drags the environment behind it."""
         _, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, cc):
             return cc
 
@@ -1663,7 +1666,7 @@ class TestPyActionErrors:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, m):
             return m
 
@@ -1680,7 +1683,7 @@ class TestPyActionErrors:
             command=["cp", "$SOURCE", "$TARGET"],
         )
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, s):
             return s
 
@@ -1693,7 +1696,7 @@ class TestPyActionErrors:
         """A node is the fifth build-description type, and reads as a path."""
         project, env = project_env
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, n):
             return n
 
@@ -1718,7 +1721,7 @@ class TestPyActionErrors:
         looping["self"] = looping
         looping["t"] = made
 
-        @env.PyAction()
+        @env.PyBuilder()
         def render(sources, targets, loop):
             return loop
 
@@ -1732,7 +1735,7 @@ class TestPyActionErrors:
         renamed.__name__ = "renamed"
 
         with pytest.raises(PconsError) as caught:
-            env.PyAction()(renamed)
+            env.PyBuilder()(renamed)
 
         message = str(caught.value)
         assert "is not a def, it reads as Assign" in message

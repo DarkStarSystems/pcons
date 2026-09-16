@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""End-to-end: a PyAction edge built by real ninja.
+"""End-to-end: a PyBuilder edge built by real ninja.
 
 The only test that proves the three halves agree: what the decorator emits,
 what the generator writes, and what the runner does with the argv it gets.
@@ -44,13 +44,13 @@ def build(tmp_path: Path) -> str:
 
 
 def sources_project(tmp_path: Path, title: str) -> Project:
-    """A project whose single PyAction concatenates two files under a title."""
+    """A project whose single PyBuilder concatenates two files under a title."""
     (tmp_path / "a.txt").write_text("first\n", encoding="utf-8")
     (tmp_path / "b.txt").write_text("second\n", encoding="utf-8")
     project = Project("e2e", root_dir=tmp_path)
     env: Any = project.Environment()
 
-    @env.PyAction()
+    @env.PyBuilder()
     def report(sources, targets, title):
         from pathlib import Path
 
@@ -117,7 +117,7 @@ def test_two_targets_and_no_sources(tmp_path: Path) -> None:
     project = Project("e2e", root_dir=tmp_path)
     env: Any = project.Environment()
 
-    @env.PyAction()
+    @env.PyBuilder()
     def split(sources, targets, n):
         from pathlib import Path
 
@@ -148,7 +148,7 @@ def test_one_function_makes_two_edges_from_one_module(tmp_path: Path) -> None:
     project = Project("e2e", root_dir=tmp_path)
     env: Any = project.Environment()
 
-    @env.PyAction()
+    @env.PyBuilder()
     def report(sources, targets, title):
         from pathlib import Path
 
@@ -160,7 +160,7 @@ def test_one_function_makes_two_edges_from_one_module(tmp_path: Path) -> None:
     generate(project)
     build(tmp_path)
 
-    generated = sorted(q.name for q in (tmp_path / "build" / "pyact").iterdir())
+    generated = sorted(q.name for q in (tmp_path / "build" / "pybuilder").iterdir())
     assert [q for q in generated if q.endswith((".py", ".pkl"))] == [
         "both.args.pkl",
         "just_a.args.pkl",
@@ -184,7 +184,7 @@ def test_a_subdirectory_builds_its_own_edge(tmp_path: Path) -> None:
         child = Project("child", root_dir=tmp_path / "sub")
         env: Any = child.Environment()
 
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             from pathlib import Path
 

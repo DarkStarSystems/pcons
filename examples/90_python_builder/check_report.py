@@ -20,18 +20,20 @@ for name, expected in EXPECTED.items():
 assert len(set(EXPECTED.values())) == 3, "the three reports are not all different"
 
 host = sorted(
-    q.name for q in Path("build/pyact").iterdir() if q.suffix in {".py", ".pkl"}
+    q.name for q in Path("build/pybuilder").iterdir() if q.suffix in {".py", ".pkl"}
 )
 assert host == ["report.args.pkl", "report.py", "report2.args.pkl"], host
 
 strict = sorted(
-    q.name for q in Path("build/strict/pyact").iterdir() if q.suffix in {".py", ".pkl"}
+    q.name
+    for q in Path("build/strict/pybuilder").iterdir()
+    if q.suffix in {".py", ".pkl"}
 )
 assert strict == ["report.args.pkl", "report.py"], strict
 
 assert (
-    Path("build/pyact/report.py").read_bytes()
-    == Path("build/strict/pyact/report.py").read_bytes()
+    Path("build/pybuilder/report.py").read_bytes()
+    == Path("build/strict/pybuilder/report.py").read_bytes()
 ), "the two environments got different module bytes from one function"
 
 print("report ok")

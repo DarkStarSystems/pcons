@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Build-time runner for ``env.PyAction`` edges.
+"""Build-time runner for ``env.PyBuilder`` edges.
 
 pcons writes the decorated function's source to a generated module and its
 keyword arguments to a pickle beside it, then emits a build edge shaped like::
 
-    python <pcons>/util/pyaction.py <module.py> <args.pkl> --n-targets N
+    python <pcons>/util/pybuilder.py <module.py> <args.pkl> --n-targets N
         <target>... <source>...
 
 The function name is not on the command line, it travels in the pickle, so the
@@ -14,7 +14,7 @@ rewrite when either changes.
 Nothing here imports pcons. This module runs once per build edge, and a build
 must not depend on the tree that described it still being importable.
 
-The edge names this file by path, never as ``-m pcons.util.pyaction``, and
+The edge names this file by path, never as ``-m pcons.util.pybuilder``, and
 that is what keeps the claim above true of the process as well as of the file.
 The ``-m`` form executes ``pcons/__init__.py`` first, which drags in the
 generators, toolchains and packages on every edge and costs several times the
@@ -37,7 +37,7 @@ from typing import Any
 PROTOCOL_VERSION = 1
 
 USAGE = (
-    "Usage: python pyaction.py <module.py> <args.pkl> "
+    "Usage: python pybuilder.py <module.py> <args.pkl> "
     "--n-targets N <target>... <source>..."
 )
 
@@ -74,13 +74,13 @@ def _load_payload(args_path: str) -> dict[str, Any]:
         payload = pickle.load(handle)
     if not isinstance(payload, dict):
         raise _stale(
-            args_path, f"holds a {type(payload).__name__}, not a pyaction payload"
+            args_path, f"holds a {type(payload).__name__}, not a pybuilder payload"
         )
     version = payload.get("version")
     if version != PROTOCOL_VERSION:
         raise _stale(
             args_path,
-            f"was written for pyaction protocol {version!r}, but this pcons "
+            f"was written for pybuilder protocol {version!r}, but this pcons "
             f"speaks {PROTOCOL_VERSION}",
         )
     missing = sorted({"module", "function", "kwargs"} - set(payload))
@@ -108,7 +108,7 @@ def _load_module(module_path: str, name: str) -> ModuleType:
     """
     spec = importlib.util.spec_from_file_location(name, module_path)
     if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load a pyaction module from {module_path}")
+        raise ImportError(f"Cannot load a pybuilder module from {module_path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     try:
@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     paths = args[4:]
     if n_targets > len(paths):
         print(
-            f"pcons pyaction: --n-targets {n_targets} but only "
+            f"pcons pybuilder: --n-targets {n_targets} but only "
             f"{len(paths)} paths were given",
             file=sys.stderr,
         )

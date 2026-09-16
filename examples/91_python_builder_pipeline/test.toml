@@ -1,7 +1,7 @@
-# Test configuration for the python-action pipeline example
+# Test configuration for the python-builder pipeline example
 
 [test]
-description = "Two PyActions, each called twice, feeding a C compile and link: one fetches a document, one embeds it as a byte array"
+description = "Two PyBuilders, each called twice, feeding a C compile and link: one fetches a document, one embeds it as a byte array"
 
 # Two network fetches plus three compiles and links. The budget is for the
 # fetches, which are the only part that depends on somebody else's machine.
@@ -16,8 +16,8 @@ expected_outputs = [
     "build/lorem.c",
     "build/motto.c",
     "build/awkward.c",
-    "build/pyact/fetch.py",
-    "build/pyact/embed.py",
+    "build/pybuilder/fetch.py",
+    "build/pybuilder/embed.py",
     "build/lorem",
     "build/motto",
     "build/awkward",
@@ -39,7 +39,7 @@ expect_rebuild = ["awkward.c", "awkward"]
 expect_no_rebuild = ["lorem.txt", "motto.txt", "lorem.c", "motto.c"]
 
 [[rebuild]]
-description = "The build script changed but no action did: regenerating alone re-runs nothing"
+description = "The build script changed but no builder did: regenerating alone re-runs nothing"
 touch = "pcons-build.py"
 expect_rebuild = ["build.ninja"]
 expect_no_rebuild = ["lorem.txt", "motto.txt", "lorem.c", "motto.c", "awkward.c"]

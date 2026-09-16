@@ -38,8 +38,8 @@ WATCHED = (
     BUILD / "motto.txt",
     BUILD / "lorem.c",
     BUILD / "motto.c",
-    BUILD / "pyact" / "fetch.py",
-    BUILD / "pyact" / "embed.py",
+    BUILD / "pybuilder" / "fetch.py",
+    BUILD / "pybuilder" / "embed.py",
 )
 
 
@@ -93,11 +93,12 @@ try:
     rebuild()
     after = moved(before, mtimes())
     check(
-        after == {BUILD / "pyact" / "embed.py", BUILD / "lorem.c", BUILD / "motto.c"},
+        after
+        == {BUILD / "pybuilder" / "embed.py", BUILD / "lorem.c", BUILD / "motto.c"},
         f"an embed edit moved the wrong set: {sorted(str(p) for p in after)}",
     )
     check(
-        (BUILD / "pyact" / "fetch.py") not in after,
+        (BUILD / "pybuilder" / "fetch.py") not in after,
         "an embed edit rewrote the fetch module",
     )
 

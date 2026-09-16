@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""The whole of ``env.PyAction`` except its public name.
+"""The whole of ``env.PyBuilder`` except its public name.
 
-``Environment.PyAction`` is a forwarder into :func:`py_action` here, the
+``Environment.PyBuilder`` is a forwarder into :func:`py_builder` here, the
 way ``Project.cli_command`` forwards into ``pcons.commands``. Source
 extraction and emission are the other half.
 
@@ -18,7 +18,7 @@ node-canonical path the build edge names.
 The generated module holds the function and nothing else, so a body that uses
 a name the build script imported would fail at build time with ``NameError``.
 That is caught here instead, along with every other function shape this design
-cannot carry, each with its own :class:`PyActionError`.
+cannot carry, each with its own :class:`PyBuilderError`.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pcons.core.builder import anchor_target_paths
 from pcons.core.errors import PconsError
 from pcons.core.invocation import RUN_NAME
-from pcons.util import pyaction as runner
+from pcons.util import pybuilder as runner
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
@@ -52,23 +52,23 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
     from pcons.util.source_location import SourceLocation
 
-GEN_DIR = "pyact"
-MODULE_PREFIX = "pcons_pyact_"
+GEN_DIR = "pybuilder"
+MODULE_PREFIX = "pcons_pybuilder_"
 
 _SAFE_GLOBALS = frozenset({"__name__", "__doc__", "__builtins__"})
 
 
-class PyActionError(PconsError):
+class PyBuilderError(PconsError):
     """A function cannot be turned into a build edge."""
 
 
 _claimed: weakref.WeakKeyDictionary[
-    Project, dict[Path, tuple[SourceLocation, Environment, ValidatedAction | None]]
+    Project, dict[Path, tuple[SourceLocation, Environment, ValidatedFunction | None]]
 ] = weakref.WeakKeyDictionary()
 
 
 @dataclass(frozen=True, eq=False)
-class ValidatedAction:
+class ValidatedFunction:
     """A function that can be carried to build time, and the module for it.
 
     What :func:`validate` settles depends on the function alone, so it is
@@ -76,9 +76,9 @@ class ValidatedAction:
     :func:`emit_module` and :func:`emit_args` write depends on the
     environment and on the edge, so they run per call.
 
-    ``eq=False`` on purpose: the claim registry tells one action's module from
-    another's by identity, and two validations of one ``def`` inside a factory
-    are two actions that a generated ``__eq__`` would call equal. Identity is
+    ``eq=False`` on purpose: the claim registry tells one function's module
+    from another's by identity, and two validations of one ``def`` inside a
+    factory are two functions that a generated ``__eq__`` would call equal. Identity is
     the only equality this class has, so ``is`` is the only thing anyone can
     write.
 
@@ -113,7 +113,7 @@ def function_source(fn: Callable[..., object]) -> str:
         The function's source, dedented, ending in a newline.
 
     Raises:
-        PyActionError: If the source cannot be read, or is not a plain
+        PyBuilderError: If the source cannot be read, or is not a plain
             ``def``.
     """
     return _extract(fn, None)[0]
@@ -136,26 +136,26 @@ def _extract(
         The source, dedented and ending in a newline, and its ``FunctionDef``.
 
     Raises:
-        PyActionError: If the source cannot be read, or is not a plain
+        PyBuilderError: If the source cannot be read, or is not a plain
             ``def``.
     """
     try:
         text = textwrap.dedent(inspect.getsource(fn))
     except (OSError, TypeError) as exc:
-        raise PyActionError(
-            f"PyAction cannot read the source of {_describe(fn)}: {exc}. "
+        raise PyBuilderError(
+            f"PyBuilder cannot read the source of {_describe(fn)}: {exc}. "
             f"The function must be written out in a build script.",
             at,
         ) from exc
     node = ast.parse(text).body[0]
     if not isinstance(node, ast.FunctionDef):
-        raise PyActionError(
-            f"PyAction needs a plain function: {_not_a_def(fn, node)}", at
+        raise PyBuilderError(
+            f"PyBuilder needs a plain function: {_not_a_def(fn, node)}", at
         )
     return "".join(text.splitlines(keepends=True)[node.lineno - 1 :]), node
 
 
-def validate(fn: Callable[..., object], *, project: Project) -> ValidatedAction:
+def validate(fn: Callable[..., object], *, project: Project) -> ValidatedFunction:
     """Everything about *fn* that one look at the function settles.
 
     Nothing is written here. A function this refuses never reaches a build
@@ -172,7 +172,7 @@ def validate(fn: Callable[..., object], *, project: Project) -> ValidatedAction:
         The function, the module text, and where the build script asked.
 
     Raises:
-        PyActionError: If the function cannot be carried to build time.
+        PyBuilderError: If the function cannot be carried to build time.
     """
     at = get_caller_location()
     name = _decoration_name(fn)
@@ -181,7 +181,7 @@ def validate(fn: Callable[..., object], *, project: Project) -> ValidatedAction:
     _reject_reserved_parameters(function, at)
     source, node = _extract(function, at)
     _reject_script_globals(function, node, name, at)
-    return ValidatedAction(function, _module_text(source, project, at), at)
+    return ValidatedFunction(function, _module_text(source, project, at), at)
 
 
 def _decoration_name(fn: Callable[..., object]) -> str:
@@ -195,7 +195,7 @@ def _decoration_name(fn: Callable[..., object]) -> str:
 
 @functools.cache
 def _reserved_names() -> frozenset[str]:
-    """The parameter names :meth:`PyAction.__call__` spends on the edge.
+    """The parameter names :meth:`PyBuilder.__call__` spends on the edge.
 
     Read from that signature rather than listed beside it, so a name added to
     the call is reserved by the same edit and the two cannot disagree.
@@ -204,7 +204,7 @@ def _reserved_names() -> frozenset[str]:
     """
     return frozenset(
         name
-        for name, parameter in inspect.signature(PyAction.__call__).parameters.items()
+        for name, parameter in inspect.signature(PyBuilder.__call__).parameters.items()
         if parameter.kind is parameter.KEYWORD_ONLY
     )
 
@@ -222,14 +222,14 @@ def _reject_reserved_parameters(
     """Refuse a parameter whose name the call already spends on the edge.
 
     Raises:
-        PyActionError: Naming the parameters to rename.
+        PyBuilderError: Naming the parameters to rename.
     """
     taken = sorted(set(inspect.signature(function).parameters) & _reserved_names())
     if not taken:
         return
     plural = len(taken) > 1
-    raise PyActionError(
-        f"PyAction {function.__name__}() has {_and_list(taken)} as "
+    raise PyBuilderError(
+        f"PyBuilder {function.__name__}() has {_and_list(taken)} as "
         f"{'parameter names' if plural else 'a parameter name'}, and the call "
         f"spends {'those names' if plural else 'that name'} on the edge "
         f"itself. Rename {'them' if plural else 'it'} in the def and at the "
@@ -253,7 +253,7 @@ def _reject_uncallable_signature(
     typed that keyword.
 
     Raises:
-        PyActionError: Naming which half of the call shape is impossible.
+        PyBuilderError: Naming which half of the call shape is impossible.
     """
     signature = inspect.signature(function)
     parameters = list(signature.parameters.values())
@@ -262,8 +262,8 @@ def _reject_uncallable_signature(
         p for p in parameters if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
     ]
     if len(slots) < 2 and inspect.Parameter.VAR_POSITIONAL not in kinds:
-        raise PyActionError(
-            f"PyAction {function.__name__}{signature} cannot receive sources "
+        raise PyBuilderError(
+            f"PyBuilder {function.__name__}{signature} cannot receive sources "
             f"and targets: it has "
             f"{'only one parameter' if len(slots) == 1 else 'no parameters'} "
             f"that can be filled positionally. At build time it is called as "
@@ -275,8 +275,8 @@ def _reject_uncallable_signature(
     late = [p.name for p in parameters[2:] if p.kind is p.POSITIONAL_ONLY]
     if late:
         plural = len(late) > 1
-        raise PyActionError(
-            f"PyAction {function.__name__}{signature} cannot be given "
+        raise PyBuilderError(
+            f"PyBuilder {function.__name__}{signature} cannot be given "
             f"{_and_list(late)}: {'they are' if plural else 'it is'} "
             f"positional-only, and everything past sources and targets "
             f"arrives as a keyword of the call. Move the / up so it follows "
@@ -307,7 +307,7 @@ def _bind_arguments(
     side by side.
 
     Raises:
-        PyActionError: Naming the cause where the shape has one, and quoting
+        PyBuilderError: Naming the cause where the shape has one, and quoting
             what the signature says otherwise.
     """
     signature = inspect.signature(function)
@@ -316,8 +316,8 @@ def _bind_arguments(
         signature.bind(None, None, **kwargs)
     except TypeError as exc:
         given = _and_list(sorted(kwargs)) or "nothing"
-        raise PyActionError(
-            f"PyAction {function.__name__}{signature} cannot be called with "
+        raise PyBuilderError(
+            f"PyBuilder {function.__name__}{signature} cannot be called with "
             f"{given}: {exc}. At build time it is called as "
             f"{function.__name__}(sources, targets, **kwargs), so everything "
             f"past the first two parameters is a keyword of the call.",
@@ -341,7 +341,7 @@ def _reject_edge_supplied_keywords(
     ``**kwargs`` still gets it.
 
     Raises:
-        PyActionError: Naming the clash and the singular spelling.
+        PyBuilderError: Naming the clash and the singular spelling.
     """
     slots = [
         p.name
@@ -360,23 +360,25 @@ def _reject_edge_supplied_keywords(
         if meant
         else ""
     )
-    raise PyActionError(
-        f"PyAction {function.__name__}{signature} already receives "
+    raise PyBuilderError(
+        f"PyBuilder {function.__name__}{signature} already receives "
         f"{_and_list(clashing)} from the edge, so the call cannot pass "
         f"{'them' if plural else 'it'} as well.{advice}",
         at,
     )
 
 
-def emit_module(action: ValidatedAction, *, project: Project, env: Environment) -> Path:
+def emit_module(
+    function: ValidatedFunction, *, project: Project, env: Environment
+) -> Path:
     """Write the generated module for *env*, once per path it lands on.
 
-    The same action reaching one path again is one file two edges read, so
-    the second claim succeeds and skips the write. A different action on that
-    path is two functions of one name, which is an error.
+    The same function reaching one path again is one file two edges read, so
+    the second claim succeeds and skips the write. A different function on
+    that path is two functions of one name, which is an error.
 
     Args:
-        action: What :func:`validate` returned.
+        function: What :func:`validate` returned.
         project: Any project of the tree; the claim registry hangs off its top.
         env: The environment whose build directory holds the module.
 
@@ -387,26 +389,26 @@ def emit_module(action: ValidatedAction, *, project: Project, env: Environment) 
         ``project.node(path)``, or a subdirectory's offset is applied twice.
 
     Raises:
-        PyActionError: If another action already wrote that file.
+        PyBuilderError: If another builder already wrote that file.
     """
-    module_rel = _gen_dir(env) / f"{action.module_stem}.py"
+    module_rel = _gen_dir(env) / f"{function.module_stem}.py"
     claimed = _claim(
         project,
         env,
         module_rel,
-        action.function.__name__,
-        action.at,
-        owner=action,
+        function.function.__name__,
+        function.at,
+        owner=function,
     )
     if claimed:
         _write_if_changed(
             project._path_resolver.project_root / module_rel,
-            action.module_text.encode("utf-8"),
+            function.module_text.encode("utf-8"),
         )
     return module_rel
 
 
-def check_arguments(action: ValidatedAction, *, kwargs: Mapping[str, Any]) -> bytes:
+def check_arguments(function: ValidatedFunction, *, kwargs: Mapping[str, Any]) -> bytes:
     """Everything about one call's arguments, settled before anything is written.
 
     Nothing reaches the build directory until this has returned, so a refused
@@ -417,25 +419,25 @@ def check_arguments(action: ValidatedAction, *, kwargs: Mapping[str, Any]) -> by
     the line that passed the value.
 
     Args:
-        action: What :func:`validate` returned.
+        function: What :func:`validate` returned.
         kwargs: Keyword arguments for the build-time call.
 
     Returns:
         The sidecar pickle's bytes, ready for :func:`emit_args`.
 
     Raises:
-        PyActionError: If the arguments do not fit the function's signature,
+        PyBuilderError: If the arguments do not fit the function's signature,
             if one of them holds a piece of the build description, or if one
             of them cannot be pickled.
     """
     at = get_caller_location()
-    name = action.function.__name__
-    _bind_arguments(action.function, kwargs, at)
+    name = function.function.__name__
+    _bind_arguments(function.function, kwargs, at)
     _reject_description_objects(kwargs, name, at)
     return _payload_bytes(
         {
             "version": runner.PROTOCOL_VERSION,
-            "module": f"{MODULE_PREFIX}{action.module_stem}",
+            "module": f"{MODULE_PREFIX}{function.module_stem}",
             "function": name,
             "kwargs": dict(kwargs),
         },
@@ -448,7 +450,7 @@ def emit_args(*, project: Project, env: Environment, name: str, payload: bytes) 
     """Write one edge's argument pickle.
 
     One edge is one pickle, so this path is exclusive: nothing may share it,
-    not even the action that claimed the module beside it.
+    not even the function that claimed the module beside it.
 
     Args:
         project: Any project of the tree; the claim registry hangs off its top.
@@ -460,7 +462,7 @@ def emit_args(*, project: Project, env: Environment, name: str, payload: bytes) 
         The pickle's path, anchored the way :func:`emit_module` returns one.
 
     Raises:
-        PyActionError: If another edge already claimed that file.
+        PyBuilderError: If another edge already claimed that file.
     """
     args_rel = _gen_dir(env) / f"{_sanitized(name)}.args.pkl"
     _claim(project, env, args_rel, name, get_caller_location(), owner=None)
@@ -512,34 +514,34 @@ def _plain_function(
         The same function, known to be a plain one.
 
     Raises:
-        PyActionError: With one message per rejected shape.
+        PyBuilderError: With one message per rejected shape.
     """
     if isinstance(fn, functools.partial):
-        raise PyActionError(
-            "PyAction was given a functools.partial. Pass the function itself "
+        raise PyBuilderError(
+            "PyBuilder was given a functools.partial. Pass the function itself "
             "and give its bound arguments to the call: "
-            "action(target=..., bound=value).",
+            "builder(target=..., bound=value).",
             at,
         )
     if not isinstance(fn, types.FunctionType):
-        raise PyActionError(
-            f"PyAction needs a function written in a build script, not "
+        raise PyBuilderError(
+            f"PyBuilder needs a function written in a build script, not "
             f"{_describe(fn)} of type {type(fn).__name__}. Write a def beside "
             f"the other targets and pass what it needs at the call: "
-            f"action(target=..., value=...).",
+            f"builder(target=..., value=...).",
             at,
         )
     if fn.__name__ == "<lambda>":
-        raise PyActionError(
-            "PyAction was given a lambda. Its source cannot be extracted on "
+        raise PyBuilderError(
+            "PyBuilder was given a lambda. Its source cannot be extracted on "
             "its own: write it as a def.",
             at,
         )
     if fn.__closure__ is not None:
         free = sorted(fn.__code__.co_freevars)
         plural = len(free) > 1
-        raise PyActionError(
-            f"PyAction {name}() reads {_and_list(free)} from the function it "
+        raise PyBuilderError(
+            f"PyBuilder {name}() reads {_and_list(free)} from the function it "
             f"is nested in. Only the function's own source travels to build "
             f"time, so there is nothing to read "
             f"{'them' if plural else 'it'} from. Take "
@@ -550,8 +552,8 @@ def _plain_function(
             at,
         )
     if _class_scoped(fn):
-        raise PyActionError(
-            f"PyAction was given {_describe(fn)}, defined in a class body. "
+        raise PyBuilderError(
+            f"PyBuilder was given {_describe(fn)}, defined in a class body. "
             f"Only a plain function can be extracted: move the def out of "
             f"the class.",
             at,
@@ -670,7 +672,7 @@ def _reject_script_globals(
     ``@pytest_ar`` would otherwise be reported as a global of the body.
 
     Raises:
-        PyActionError: Naming those globals and what to type instead.
+        PyBuilderError: Naming those globals and what to type instead.
     """
     allowed = _SAFE_GLOBALS | {fn.__name__}
     defaults = _evaluated_names(node)
@@ -683,8 +685,8 @@ def _reject_script_globals(
         return
 
     if "__file__" in suspect:
-        raise PyActionError(
-            f"PyAction {name}() uses __file__, which at build time names the "
+        raise PyBuilderError(
+            f"PyBuilder {name}() uses __file__, which at build time names the "
             f"generated module rather than this script. Take the path it "
             f"means as a parameter and pass it at the call, "
             f'{name}(target=..., here=project.root_dir / "...").',
@@ -719,8 +721,8 @@ def _reject_script_globals(
             0, f"Write {written} at the top of the function body, not of the script."
         )
     those = "those names" if len(suspect) > 1 else "that name"
-    raise PyActionError(
-        f"PyAction {name}() uses {_and_list(suspect)} from the build script, "
+    raise PyBuilderError(
+        f"PyBuilder {name}() uses {_and_list(suspect)} from the build script, "
         f"and only the function's own source travels to build time, so "
         f"nothing defines {those} there. " + " ".join(remedies),
         at,
@@ -744,7 +746,7 @@ def _claim(
     name: str,
     at: SourceLocation,
     *,
-    owner: ValidatedAction | None,
+    owner: ValidatedFunction | None,
 ) -> bool:
     """Record that *path* is taken, and say whether the caller should write.
 
@@ -752,7 +754,7 @@ def _claim(
     so a second project in the same process starts clean.
 
     *owner* is what may legally reach one path twice. A module's owner is the
-    :class:`ValidatedAction` behind it, so one action emitting into two
+    :class:`ValidatedFunction` behind it, so one builder emitting into two
     environments that share a build directory writes one file and two edges
     read it. A pickle passes ``None``, which makes its path exclusive,
     because one edge's arguments are nobody else's.
@@ -767,7 +769,7 @@ def _claim(
         *owner* already holds that path and the bytes are there.
 
     Raises:
-        PyActionError: If somebody else already claimed that file.
+        PyBuilderError: If somebody else already claimed that file.
     """
     taken = _claimed.setdefault(project.top, {})
     first = taken.get(path)
@@ -778,9 +780,9 @@ def _claim(
     if owner is not None and owner is first_owner:
         return False
     advice = _collision_advice(owner, first_owner, same_env=first_env is env)
-    subject = f"PyAction {name}()" if owner is not None else f"PyAction edge {name!r}"
-    wrote = "the PyAction" if owner is not None else "the edge"
-    raise PyActionError(
+    subject = f"PyBuilder {name}()" if owner is not None else f"PyBuilder edge {name!r}"
+    wrote = "the PyBuilder" if owner is not None else "the edge"
+    raise PyBuilderError(
         f"{subject}{_env_label(env)} would overwrite {path.as_posix()}, "
         f"already written by {wrote}{_env_label(first_env)} at {first_at}. "
         f"{advice}",
@@ -789,8 +791,8 @@ def _claim(
 
 
 def _collision_advice(
-    owner: ValidatedAction | None,
-    first: ValidatedAction | None,
+    owner: ValidatedFunction | None,
+    first: ValidatedFunction | None,
     *,
     same_env: bool,
 ) -> str:
@@ -813,7 +815,7 @@ def _collision_advice(
     elif owner.module_text != first.module_text:
         fixes.append("rename one of the functions")
     elif same_env:
-        fixes.append("decorate the function once and call the action twice")
+        fixes.append("decorate the function once and call the builder twice")
     sentence = ", or ".join(fixes)
     return f"{sentence[:1].upper()}{sentence[1:]}."
 
@@ -901,7 +903,7 @@ def _reject_description_objects(
     """Refuse a kwarg holding a piece of the build description.
 
     Raises:
-        PyActionError: Naming where it sits and what to write instead.
+        PyBuilderError: Naming where it sits and what to write instead.
     """
     seen: set[int] = set()
 
@@ -912,8 +914,8 @@ def _reject_description_objects(
         described = _describe_description_object(value)
         if described is not None:
             where_it_is, remedy = described
-            raise PyActionError(
-                f"PyAction {name}(): {where} is {where_it_is}, and the build "
+            raise PyBuilderError(
+                f"PyBuilder {name}(): {where} is {where_it_is}, and the build "
                 f"description does not exist when the function runs. {remedy}",
                 at,
             )
@@ -939,7 +941,7 @@ def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> by
     sidecar and rebuild the world once for nothing.
 
     Raises:
-        PyActionError: Naming the arguments that cannot be pickled.
+        PyBuilderError: Naming the arguments that cannot be pickled.
     """
     try:
         return pickle.dumps(payload, protocol=5)
@@ -950,8 +952,8 @@ def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> by
             if bad
             else "one of its arguments"
         )
-        raise PyActionError(
-            f"PyAction {name}() cannot pickle {label}: {exc}. "
+        raise PyBuilderError(
+            f"PyBuilder {name}() cannot pickle {label}: {exc}. "
             f"Arguments travel to build time as a file, so each one must be "
             f"picklable. Pass what describes it instead, a path or a string, "
             f"and build the object inside the function.",
@@ -985,7 +987,7 @@ def _write_if_changed(path: Path, content: bytes) -> None:
 def _runner_path() -> str:
     """The build-time runner's absolute path, as a command token.
 
-    A path, never ``-m pcons.util.pyaction``: the ``-m`` form executes
+    A path, never ``-m pcons.util.pybuilder``: the ``-m`` form executes
     ``pcons/__init__.py`` first, importing the generators, toolchains and
     packages on every edge for several times the interpreter's own start-up,
     and ``pcons.workers.python_server.script_argv`` hands back any argv whose
@@ -1011,7 +1013,7 @@ def _derive_name(target: object) -> str:
 
 @dataclass(frozen=True)
 class _HowToRun:
-    """How the function runs, which every edge of one action shares.
+    """How the function runs, which every edge of one builder shares.
 
     These describe the body rather than any one edge, so they sit on the
     decoration. What to build sits on the call, and no option sits on both.
@@ -1037,13 +1039,13 @@ class _HowToRun:
         }
 
 
-class PyAction:
+class PyBuilder:
     """A build-script function, ready to be turned into build edges.
 
-    ``env.PyAction(...)`` returns the decorator that makes one of these, and
+    ``env.PyBuilder(...)`` returns the decorator that makes one of these, and
     calling it makes an edge, the way calling ``env.Program`` does::
 
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets, title):
             from pathlib import Path
 
@@ -1054,27 +1056,27 @@ class PyAction:
 
     One decoration is one generated module however many edges read it, and
     each call writes its own argument pickle. The module belongs to the
-    :class:`ValidatedAction` inside, which is what claims its path, so this
+    :class:`ValidatedFunction` inside, which is what claims its path, so this
     object is never itself in the claim registry.
     """
 
-    __slots__ = ("_action", "_env", "_how", "_project")
+    __slots__ = ("_env", "_function", "_how", "_project")
 
     def __init__(
-        self, action: ValidatedAction, env: Environment, how: _HowToRun
+        self, function: ValidatedFunction, env: Environment, how: _HowToRun
     ) -> None:
-        self._action = action
+        self._function = function
         self._env = env
         self._how = how
         self._project = env._project
 
     def __repr__(self) -> str:
-        return f"<PyAction {self._action.function.__name__}>"
+        return f"<PyBuilder {self._function.function.__name__}>"
 
     @property
     def function(self) -> types.FunctionType:
         """The function the build script wrote."""
-        return self._action.function
+        return self._function.function
 
     def __call__(
         self,
@@ -1115,14 +1117,14 @@ class PyAction:
             The edge's ``Target``.
 
         Raises:
-            PyActionError: If the arguments do not fit the function, if one
+            PyBuilderError: If the arguments do not fit the function, if one
                 of them holds a piece of the build description or cannot be
                 pickled, or if the generated module collides with another
-                action's.
+                builder's.
         """
         edge_name = name or _derive_name(target)
-        payload = check_arguments(self._action, kwargs=kwargs)
-        module_rel = emit_module(self._action, project=self._project, env=self._env)
+        payload = check_arguments(self._function, kwargs=kwargs)
+        module_rel = emit_module(self._function, project=self._project, env=self._env)
         args_rel = emit_args(
             project=self._project, env=self._env, name=edge_name, payload=payload
         )
@@ -1146,7 +1148,7 @@ class PyAction:
         )
 
 
-def py_action(
+def py_builder(
     env: Environment,
     *,
     python: str | None = None,
@@ -1156,8 +1158,8 @@ def py_action(
     launcher: Sequence[str] | None = None,
     env_vars: Mapping[str, str] | None = None,
     worker: Any = None,
-) -> Callable[[Callable[..., object]], PyAction]:
-    """The decorator ``Environment.PyAction`` returns.
+) -> Callable[[Callable[..., object]], PyBuilder]:
+    """The decorator ``Environment.PyBuilder`` returns.
 
     Nothing is checked here: the function has not arrived yet, and every
     refusal about it has to point at the ``def`` rather than at the line
@@ -1174,7 +1176,7 @@ def py_action(
         worker: See ``env.Command``.
 
     Returns:
-        A decorator that returns the ``PyAction`` the build script calls.
+        A decorator that returns the ``PyBuilder`` the build script calls.
     """
     how = _HowToRun(
         python=python,
@@ -1186,7 +1188,7 @@ def py_action(
         worker=worker,
     )
 
-    def decorate(fn: Callable[..., object]) -> PyAction:
-        return PyAction(validate(fn, project=env._project), env, how)
+    def decorate(fn: Callable[..., object]) -> PyBuilder:
+        return PyBuilder(validate(fn, project=env._project), env, how)
 
     return decorate

@@ -80,8 +80,8 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.add_toolchain(toolchain)` | Add additional toolchain (e.g., CUDA) |
 | `env.toolchain` | The primary toolchain this environment was created with |
 | `env.Command(target, source, cmd)` | Run arbitrary shell command |
-| `env.PyAction(python=, worker=, cwd=, launcher=, env_vars=, restat=, write_if_different=)` | Decorator: turn a Python function of the build script into a builder. Says how the function runs |
-| `action(target, source, name, depends, **kwargs)` | Call the builder: one build edge, with the function's own arguments as plain keywords |
+| `env.PyBuilder(python=, worker=, cwd=, launcher=, env_vars=, restat=, write_if_different=)` | Decorator: turn a Python function of the build script into a builder. Says how the function runs |
+| `builder(target, source, name, depends, **kwargs)` | Call the builder: one build edge, with the function's own arguments as plain keywords |
 | `env.Framework(*names)` | Link macOS frameworks (macOS only) |
 | `env.Glob(pattern)` | Find files matching a glob pattern |
 | `env.cc` | C compiler settings |

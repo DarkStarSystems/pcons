@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Tests for env.PyAction(), the decorator that makes a function a build edge."""
+"""Tests for env.PyBuilder(), the decorator that makes a function a build edge."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
-from pcons.tools.pyaction import PyAction
+from pcons.tools.pybuilder import PyBuilder
 from pcons.workers.python import PythonWorker
 from pcons.workers.python_server import script_argv
 
-RUNNER = Path("pcons/util/pyaction.py")
+RUNNER = Path("pcons/util/pybuilder.py")
 
 
 def make_project(tmp_path: Path) -> Project:
@@ -76,7 +76,7 @@ def env(project: Project) -> Any:
 def one_source(project: Project, env: Any, **how: Any) -> Target:
     """One edge with one target and one source, resolved."""
 
-    @env.PyAction(**how)
+    @env.PyBuilder(**how)
     def report(sources, targets):
         from pathlib import Path
 
@@ -91,19 +91,19 @@ class TestDecoration:
     def test_the_decorated_name_becomes_a_builder(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
-        assert isinstance(report, PyAction)
+        assert isinstance(report, PyBuilder)
         assert report.function.__name__ == "report"
 
     def test_the_builder_names_its_function(self, project: Project, env: Any) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
-        assert repr(report) == "<PyAction report>"
+        assert repr(report) == "<PyBuilder report>"
 
     def test_the_call_returns_the_target(self, project: Project, env: Any) -> None:
         made = one_source(project, env)
@@ -114,7 +114,7 @@ class TestDecoration:
     def test_one_decoration_makes_as_many_edges_as_it_is_called(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets, n):
             return n
 
@@ -122,7 +122,7 @@ class TestDecoration:
         project.resolve()
 
         assert [t.name for t in made] == ["r1", "r2", "r3"]
-        assert sorted(q.name for q in (tmp_path / "build" / "pyact").iterdir()) == [
+        assert sorted(q.name for q in (tmp_path / "build" / "pybuilder").iterdir()) == [
             "r1.args.pkl",
             "r2.args.pkl",
             "r3.args.pkl",
@@ -132,7 +132,7 @@ class TestDecoration:
     def test_the_module_is_named_after_the_function_and_the_pickle_after_the_edge(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def whatever(sources, targets):
             return 1
 
@@ -141,12 +141,12 @@ class TestDecoration:
 
         assert made.name == "out"
         assert node_tokens(made) == [
-            "build/pyact/whatever.py",
-            "build/pyact/out.args.pkl",
+            "build/pybuilder/whatever.py",
+            "build/pybuilder/out.args.pkl",
         ]
 
     def test_an_explicit_name_wins(self, project: Project, env: Any) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def whatever(sources, targets):
             return 1
 
@@ -157,7 +157,7 @@ class TestDecoration:
     def test_the_call_takes_no_positional_arguments(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
@@ -180,8 +180,8 @@ class TestCommandShape:
         command = tokens(report)
 
         assert node_tokens(report) == [
-            "build/pyact/report.py",
-            "build/pyact/report.args.pkl",
+            "build/pybuilder/report.py",
+            "build/pybuilder/report.args.pkl",
         ]
         assert command[4:6] == ["--n-targets", "1"]
         assert command[6] == TargetPath()
@@ -194,12 +194,12 @@ class TestCommandShape:
         report = one_source(project, env)
 
         assert implicit_deps(report) == [
-            "build/pyact/report.py",
-            "build/pyact/report.args.pkl",
+            "build/pybuilder/report.py",
+            "build/pybuilder/report.args.pkl",
         ]
 
     def test_the_sources_are_the_scripts_own(self, project: Project, env: Any) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
@@ -211,7 +211,7 @@ class TestCommandShape:
     def test_no_source_leaves_an_empty_source_list(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
@@ -222,7 +222,7 @@ class TestCommandShape:
         assert tokens(made)[-1] == SourcePath()
 
     def test_two_targets_are_counted(self, project: Project, env: Any) -> None:
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
@@ -238,7 +238,7 @@ class TestCommandShape:
             target="made.txt", source=["a.txt"], command=["cp", "$SOURCE", "$TARGET"]
         )
 
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
@@ -260,10 +260,10 @@ class TestGeneratedNinja:
         one_source(project, env)
         text = ninja_text(project, tmp_path)
 
-        assert "pyact/report.py" in text
-        assert "build/pyact/report.py" not in text
-        assert "$topdir/build/pyact" not in text
-        assert "pyaction.py" in text
+        assert "pybuilder/report.py" in text
+        assert "build/pybuilder/report.py" not in text
+        assert "$topdir/build/pybuilder" not in text
+        assert "pybuilder.py" in text
 
     def test_an_out_of_tree_build_directory_needs_no_absolute_path(
         self, tmp_path: Path
@@ -281,9 +281,9 @@ class TestGeneratedNinja:
         BaseGenerator._generate_pending(project)
         text = (build_dir / "build.ninja").read_text(encoding="utf-8")
 
-        assert "pyact/report.py" in text
+        assert "pybuilder/report.py" in text
         assert str(build_dir) not in text
-        assert "$topdir/pyact" not in text
+        assert "$topdir/pybuilder" not in text
 
     def test_a_subdirectory_names_its_module_once(
         self, project: Project, tmp_path: Path
@@ -291,7 +291,7 @@ class TestGeneratedNinja:
         """The offset is applied to a node path once, not twice.
 
         A plain build-relative path handed to ``source=`` would come back as
-        ``sub/build/sub/pyact/report.py``, and only in a subdirectory.
+        ``sub/build/sub/pybuilder/report.py``, and only in a subdirectory.
         """
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "a.txt").write_text("sub\n", encoding="utf-8")
@@ -299,7 +299,7 @@ class TestGeneratedNinja:
             child = Project("child", root_dir=tmp_path / "sub")
             env = child.Environment()
 
-            @env.PyAction()
+            @env.PyBuilder()
             def report(sources, targets):
                 return 1
 
@@ -309,10 +309,10 @@ class TestGeneratedNinja:
         text = ninja_text(project, tmp_path)
 
         assert node_tokens(made) == [
-            "build/sub/pyact/report.py",
-            "build/sub/pyact/report.args.pkl",
+            "build/sub/pybuilder/report.py",
+            "build/sub/pybuilder/report.args.pkl",
         ]
-        assert "sub/pyact/report.py" in text
+        assert "sub/pybuilder/report.py" in text
         assert "sub/build" not in text
 
     def test_restat_reaches_the_edge(
@@ -343,7 +343,7 @@ class TestGeneratedNinja:
     def test_write_if_different_wraps_the_edge(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        """The shape a PyAction usually has: it rewrites its output every run."""
+        """The shape a PyBuilder usually has: it rewrites its output every run."""
         one_source(project, env, write_if_different=True)
         text = ninja_text(project, tmp_path)
 
@@ -356,7 +356,7 @@ class TestGeneratedNinja:
     ) -> None:
         """``depends`` is a call option: it says what this edge waits on."""
 
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
@@ -372,7 +372,7 @@ class TestDecorationOptionsReachEveryEdge:
     def test_restat_and_the_worker_reach_both_edges(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        @env.PyAction(restat=True, worker=PythonWorker())
+        @env.PyBuilder(restat=True, worker=PythonWorker())
         def report(sources, targets, n):
             return n
 
@@ -387,7 +387,7 @@ class TestDecorationOptionsReachEveryEdge:
     def test_the_interpreter_reaches_both_edges(
         self, project: Project, env: Any
     ) -> None:
-        @env.PyAction(python="/usr/bin/python3")
+        @env.PyBuilder(python="/usr/bin/python3")
         def report(sources, targets):
             return 1
 
@@ -410,7 +410,7 @@ class TestArgumentsFitTheSignature:
     ) -> None:
         """A function that declares **kwargs really does take every keyword."""
 
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets, **rest):
             return rest
 
@@ -445,14 +445,14 @@ class TestTheCallDecidesTheSlice:
         """The environment follows the decoration, the offset follows the call.
 
         ``anchor_target_paths`` reads ``Project.current()._node_offset``, so
-        one action decorated at the top level and called in two places writes
+        one builder decorated at the top level and called in two places writes
         a module into each slice. Both edges run the same environment, which
         is the one that decorated the function.
         """
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "a.txt").write_text("sub\n", encoding="utf-8")
 
-        @env.PyAction()
+        @env.PyBuilder()
         def report(sources, targets):
             return 1
 
@@ -463,15 +463,15 @@ class TestTheCallDecidesTheSlice:
         project.resolve()
 
         assert node_tokens(outside) == [
-            "build/pyact/report.py",
-            "build/pyact/outside.args.pkl",
+            "build/pybuilder/report.py",
+            "build/pybuilder/outside.args.pkl",
         ]
         assert node_tokens(inside) == [
-            "build/sub/pyact/report.py",
-            "build/sub/pyact/inside.args.pkl",
+            "build/sub/pybuilder/report.py",
+            "build/sub/pybuilder/inside.args.pkl",
         ]
-        top = tmp_path / "build/pyact/report.py"
-        under = tmp_path / "build/sub/pyact/report.py"
+        top = tmp_path / "build/pybuilder/report.py"
+        under = tmp_path / "build/sub/pybuilder/report.py"
         assert top.is_file()
         assert under.is_file()
         assert top.read_bytes() == under.read_bytes()
@@ -487,7 +487,7 @@ class TestMultipleEnvironments:
         """The idiom: one factory, one decoration per environment."""
 
         def make_report(env: Any, title: str) -> Target:
-            @env.PyAction()
+            @env.PyBuilder()
             def report(sources, targets, title):
                 from pathlib import Path
 
@@ -505,9 +505,9 @@ class TestMultipleEnvironments:
         text = ninja_text(project, tmp_path)
 
         assert [t.name for t in made] == ["report", "report"]
-        assert node_tokens(made[0])[0] == "build/host/pyact/report.py"
-        assert node_tokens(made[1])[0] == "build/strict/pyact/report.py"
-        assert (tmp_path / "build/host/pyact/report.py").is_file()
-        assert (tmp_path / "build/strict/pyact/report.py").is_file()
+        assert node_tokens(made[0])[0] == "build/host/pybuilder/report.py"
+        assert node_tokens(made[1])[0] == "build/strict/pybuilder/report.py"
+        assert (tmp_path / "build/host/pybuilder/report.py").is_file()
+        assert (tmp_path / "build/strict/pybuilder/report.py").is_file()
         assert "host/report.txt" in text
         assert "strict/report.txt" in text

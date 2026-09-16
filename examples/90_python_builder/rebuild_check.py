@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 SCRIPT = Path("pcons-build.py")
-MODULES = (Path("build/pyact/report.py"), Path("build/strict/pyact/report.py"))
+MODULES = (Path("build/pybuilder/report.py"), Path("build/strict/pybuilder/report.py"))
 REPORTS = (
     Path("build/report.txt"),
     Path("build/report2.txt"),

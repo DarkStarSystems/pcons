@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from pcons.core.node import FileNode, Node
     from pcons.core.preset import Preset, ToolContribution
     from pcons.core.target import Target
-    from pcons.tools.pyaction import PyAction as PyActionBuilder
+    from pcons.tools import pybuilder
     from pcons.tools.toolchain import Toolchain
 else:
     # At runtime, Environment inherits from `object`; tool namespaces and
@@ -1867,7 +1867,7 @@ class Environment(_EnvironmentStubs):
 
         return cmd_target
 
-    def PyAction(
+    def PyBuilder(
         self,
         *,
         python: str | None = None,
@@ -1877,13 +1877,13 @@ class Environment(_EnvironmentStubs):
         launcher: Sequence[str] | None = None,
         env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
-    ) -> Callable[[Callable[..., object]], PyActionBuilder]:
+    ) -> Callable[[Callable[..., object]], pybuilder.PyBuilder]:
         """Turn a Python function of this build script into a builder.
 
         The decorated name is a builder, the way ``env.Program`` is, and
         calling it makes an edge::
 
-            @env.PyAction()
+            @env.PyBuilder()
             def report(sources, targets, title):
                 from pathlib import Path
 
@@ -1922,7 +1922,7 @@ class Environment(_EnvironmentStubs):
         Args:
             python: The interpreter that runs the function, defaulting to the
                     one running pcons. A string, never a detected tool: the
-                    day PyAction has to *find* an interpreter or ask its
+                    day PyBuilder has to *find* an interpreter or ask its
                     version, that is tool knowledge and this moves to a
                     python tool. One whose file name does not contain
                     "python" makes ``worker=`` a no-op, since that is how a
@@ -1940,9 +1940,9 @@ class Environment(_EnvironmentStubs):
         Returns:
             A decorator that returns the builder the script calls.
         """
-        from pcons.tools.pyaction import py_action
+        from pcons.tools.pybuilder import py_builder
 
-        return py_action(
+        return py_builder(
             self,
             python=python,
             restat=restat,

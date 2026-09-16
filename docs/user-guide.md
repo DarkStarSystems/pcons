@@ -2536,12 +2536,12 @@ sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
 or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
 the link then depends on.
 
-### Python Functions as Build Steps: env.PyAction()
+### Python Functions as Build Steps: env.PyBuilder()
 
-`env.Command()` runs a program. `env.PyAction()` turns a Python function you wrote in the build script into a *builder*, the way `env.Program` is a builder. Calling it makes one build edge, and calling it again makes another:
+`env.Command()` runs a program. `env.PyBuilder()` turns a Python function you wrote in the build script into a *builder*, the way `env.Program` is a builder. Calling it makes one build edge, and calling it again makes another:
 
 ```python
-@env.PyAction()
+@env.PyBuilder()
 def report(sources, targets, title):
     from pathlib import Path
 
@@ -2566,15 +2566,17 @@ second = report(
 project.Default(first, second)
 ```
 
-`report` is a builder; `first` and `second` are the `Target`s its calls returned. The whole of `examples/90_python_action` is that, plus a second environment.
+`report` is a builder; `first` and `second` are the `Target`s its calls returned. The whole of `examples/90_python_builder` is that, plus a second environment.
 
-The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pyact/report.py`, each call writes its own arguments to a pickle beside it, `build/pyact/report.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
+Underneath, a `PyBuilder` edge is an ordinary command edge: it takes `restat=` and `worker=` the way `env.Command()` does, and `pcons explain` shows it the same way, as a `(command)` edge with its command line, sources, environment and call site.
+
+The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, each call writes its own arguments to a pickle beside it, `build/pybuilder/report.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
 
 The function is called as `fn(sources, targets, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
 
 **The decoration says how the function runs, the call says what to build.** No option sits at both levels, so two edges that must run differently are two decorations.
 
-| on `env.PyAction()` | on the call |
+| on `env.PyBuilder()` | on the call |
 |---|---|
 | `python=`, `worker=` | `target=`, `source=` |
 | `cwd=`, `launcher=`, `env_vars=` | `name=`, `depends=` |
@@ -2582,7 +2584,7 @@ The function is called as `fn(sources, targets, **kwargs)`. Both path lists are 
 
 `depfile=` and `deps_style=` are deliberately absent: a function that discovers its own dependencies has to write a make-style depfile by hand, which is a separate subject. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run; see the `env.Command()` section above.
 
-**Edge names.** An edge is named after its first target's stem, and its argument pickle is named after the edge. So two calls of one action whose targets share a stem — `out/report.txt` and `tmp/report.txt`, or `lorem.txt` and `lorem.c` in a chain — both want `build/pyact/report.args.pkl`, and pcons refuses the second one. Give one of them `name=`:
+**Edge names.** An edge is named after its first target's stem, and its argument pickle is named after the edge. So two calls of one builder whose targets share a stem — `out/report.txt` and `tmp/report.txt`, or `lorem.txt` and `lorem.c` in a chain — both want `build/pybuilder/report.args.pkl`, and pcons refuses the second one. Give one of them `name=`:
 
 ```python
 one = report(target="out/report.txt", source=[src / "a.txt"], title="one")
@@ -2591,7 +2593,7 @@ two = report(
 )
 ```
 
-`name=` is also what `ninja tmp-report` then means. `examples/91_python_action_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem.
+`name=` is also what `ninja tmp-report` then means. `examples/91_python_builder_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem.
 
 **Reserved parameter names.** `target`, `source`, `name` and `depends` are refused as parameters of the function, because the call spends them on the edge. Rename them; the error says which ones and what the call does with them.
 
@@ -2605,11 +2607,11 @@ A lambda, a `functools.partial`, a method and a builtin are all refused: only a 
 
 **Rebuilds.** The generated module and the pickle are inputs of the edge, and both are written only when their bytes change. Edit the function body and every edge that reads it re-runs. Change one of a call's arguments and only that edge re-runs. Edit anything else in the build script, a comment or a line above the decoration, and pcons regenerates the build files but no edge re-runs, because nothing any of them depends on moved.
 
-**Several environments** are served by a plain Python helper that decorates once per environment. An action belongs to the environment that decorated it:
+**Several environments** are served by a plain Python helper that decorates once per environment. A builder belongs to the environment that decorated it:
 
 ```python
 def make_report(environment):
-    @environment.PyAction()
+    @environment.PyBuilder()
     def report(sources, targets, title):
         from pathlib import Path
 
@@ -2632,11 +2634,11 @@ checked = make_report(strict)(
 )
 ```
 
-`build_prefix` is what keeps the two `report.txt` apart, and it gives each environment its own copy of the generated module, `build/pyact/report.py` and `build/strict/pyact/report.py`, with identical bytes. Two targets may share a name only when their environments are named and different, which is why both environments have a name here. See `examples/75_multi_env` for the multi-environment idiom itself.
+`build_prefix` is what keeps the two `report.txt` apart, and it gives each environment its own copy of the generated module, `build/pybuilder/report.py` and `build/strict/pybuilder/report.py`, with identical bytes. Two targets may share a name only when their environments are named and different, which is why both environments have a name here. See `examples/75_multi_env` for the multi-environment idiom itself.
 
 The closure ban and this shape fit each other: the body sits inside `make_report`, where `environment` is in scope, so everything it needs comes through keywords of the call.
 
-**A pipeline.** An action's `Target` goes into another builder's `source=` like any other, which is how a chain gets its order:
+**A pipeline.** A builder's `Target` goes into another builder's `source=` like any other, which is how a chain gets its order:
 
 ```python
 text = fetch(target=project.build_dir / f"{name}.txt", name=f"{name}-text",
@@ -2646,7 +2648,7 @@ source = embed(target=project.build_dir / f"{name}.c", name=f"{name}-source",
 project.Default(project.Program(name, env, sources=[source]))
 ```
 
-`examples/91_python_action_pipeline` is that, with two actions each called twice: one downloads a JSON document and writes a field of it, one turns those bytes into a C program, and `project.Program` compiles and links the result. Two actions, four edges, two generated modules.
+`examples/91_python_builder_pipeline` is that, with two builders each called twice: one downloads a JSON document and writes a field of it, one turns those bytes into a C program, and `project.Program` compiles and links the result. Two builders, four edges, two generated modules.
 
 **A warm interpreter.** Starting Python costs more than a small function does. `worker=PythonWorker()` runs the edge in an interpreter that is already up:
 
@@ -2656,7 +2658,7 @@ from pcons.workers.python import PythonWorker
 worker = PythonWorker()
 
 
-@env.PyAction(worker=worker)
+@env.PyBuilder(worker=worker)
 def report(sources, targets):
     ...
 

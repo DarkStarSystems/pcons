@@ -1,14 +1,14 @@
-# Test configuration for the python-action example
+# Test configuration for the python-builder example
 
 [test]
-description = "Run a Python function as a build step: env.PyAction turns it into a builder, and each call makes one edge"
+description = "Run a Python function as a build step: env.PyBuilder turns it into a builder, and each call makes one edge"
 
 expected_outputs = [
     "build/report.txt",
     "build/report2.txt",
     "build/strict/report.txt",
-    "build/pyact/report.py",
-    "build/strict/pyact/report.py",
+    "build/pybuilder/report.py",
+    "build/strict/pybuilder/report.py",
 ]
 
 [verify]

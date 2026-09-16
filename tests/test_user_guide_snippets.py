@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Build every code snippet of the guide's PyAction section.
+"""Build every code snippet of the guide's PyBuilder section.
 
 Phase 1 of this feature shipped a snippet claiming two environments worked
 "with no extra work" when the second was in fact refused. Nothing read the
@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 GUIDE = Path(__file__).resolve().parent.parent / "docs" / "user-guide.md"
-SECTION_START = "### Python Functions as Build Steps: env.PyAction()"
+SECTION_START = "### Python Functions as Build Steps: env.PyBuilder()"
 SECTION_END = "### Post-Build Commands"
 
 COMMON = """from pcons import Project
@@ -39,7 +39,7 @@ src = project.root_dir / "src"
 
 REPORT_ACTION = """
 
-@env.PyAction()
+@env.PyBuilder()
 def report(sources, targets, title):
     from pathlib import Path
 
@@ -52,7 +52,7 @@ def report(sources, targets, title):
 
 PIPELINE_ACTIONS = """
 
-@env.PyAction()
+@env.PyBuilder()
 def fetch(sources, targets, url, field):
     import json
     from pathlib import Path
@@ -71,7 +71,7 @@ def fetch(sources, targets, url, field):
     Path(targets[0]).write_bytes(payload.encode("utf-8"))
 
 
-@env.PyAction()
+@env.PyBuilder()
 def embed(sources, targets, symbol):
     from pathlib import Path
 
@@ -90,7 +90,7 @@ url = "https://www.lipsum.com/feed/json?amount=2&what=paras&start=yes"
 
 
 def snippets() -> list[str]:
-    """Every fenced python block of the PyAction section, in order."""
+    """Every fenced python block of the PyBuilder section, in order."""
     text = GUIDE.read_text(encoding="utf-8")
     body = text[text.index(SECTION_START) : text.index(SECTION_END)]
     return re.findall(r"```python\n(.*?)```", body, re.S)

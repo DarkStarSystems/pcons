@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Run a Python function as a build step.
 
-``env.PyAction`` turns a function written here into a builder, the way
+``env.PyBuilder`` turns a function written here into a builder, the way
 ``env.Program`` is a builder. Calling it makes one build edge, and calling it
 again makes another, so one function serves as many edges as the build needs.
 
@@ -34,12 +34,12 @@ Two targets may share a name only when their environments are named and
 different, which is why both environments here have a name.
 
 A second environment is served by a plain Python helper that decorates once
-per environment. An action is bound to the environment that decorated it.
+per environment. A builder is bound to the environment that decorated it.
 """
 
 from pcons import Project
 
-project = Project("python_action")
+project = Project("python_builder")
 host = project.Environment(name="host")
 strict = project.Environment(name="strict")
 strict.build_prefix = "strict"
@@ -49,7 +49,7 @@ src = project.root_dir / "src"
 def make_report(environment):
     """One decoration per environment, which is the pcons idiom."""
 
-    @environment.PyAction()
+    @environment.PyBuilder()
     def report(sources, targets, title):
         from pathlib import Path
 

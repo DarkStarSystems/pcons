@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Tests for the generate-time half of PyAction, pcons.tools.pyaction."""
+"""Tests for the generate-time half of PyBuilder, pcons.tools.pybuilder."""
 
 from __future__ import annotations
 
@@ -17,11 +17,11 @@ from typing import Any
 import pytest
 
 from pcons.core.project import Project
-from pcons.tools.pyaction import (
+from pcons.tools.pybuilder import (
     MODULE_PREFIX,
-    PyAction,
-    PyActionError,
-    ValidatedAction,
+    PyBuilder,
+    PyBuilderError,
+    ValidatedFunction,
     _claim,
     _reserved_names,
     check_arguments,
@@ -30,7 +30,7 @@ from pcons.tools.pyaction import (
     function_source,
     validate,
 )
-from pcons.util.pyaction import PROTOCOL_VERSION, run
+from pcons.util.pybuilder import PROTOCOL_VERSION, run
 from pcons.util.source_location import SourceLocation
 
 SCRIPT_GLOBAL = "visible from the build script only"
@@ -132,10 +132,10 @@ def emit_both(
     tests below that only ask what landed in the build directory want all
     three.
     """
-    action = validate(fn, project=project)
-    payload = check_arguments(action, kwargs=kwargs)
+    function = validate(fn, project=project)
+    payload = check_arguments(function, kwargs=kwargs)
     return (
-        emit_module(action, project=project, env=env),
+        emit_module(function, project=project, env=env),
         emit_args(project=project, env=env, name=name, payload=payload),
     )
 
@@ -254,46 +254,46 @@ class TestFunctionSource:
         assert 'return "from a factory"' in source
 
     def test_a_coroutine_is_refused(self) -> None:
-        with pytest.raises(PyActionError, match="coroutine"):
+        with pytest.raises(PyBuilderError, match="coroutine"):
             function_source(coroutine)
 
     def test_a_function_with_no_readable_source_is_refused(self) -> None:
         namespace: dict[str, Any] = {}
         exec("def render(sources, targets):\n    return 1\n", namespace)  # noqa: S102
 
-        with pytest.raises(PyActionError, match="written out in a build script"):
+        with pytest.raises(PyBuilderError, match="written out in a build script"):
             function_source(namespace["render"])
 
 
 class TestRejections:
     def test_a_lambda(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyActionError, match="lambda"):
+        with pytest.raises(PyBuilderError, match="lambda"):
             run_emit(project, env, lambda sources, targets: None)
 
     def test_a_closure_names_its_free_variables(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyActionError, match="reads env from"):
+        with pytest.raises(PyBuilderError, match="reads env from"):
             run_emit(project, env, closing_over(env))
 
     def test_a_builtin(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyActionError, match="written in a build script"):
+        with pytest.raises(PyBuilderError, match="written in a build script"):
             run_emit(project, env, len)
 
     def test_a_partial(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyActionError, match="functools.partial"):
+        with pytest.raises(PyBuilderError, match="functools.partial"):
             run_emit(project, env, functools.partial(writes_sources, []))
 
     def test_a_method(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyActionError, match="class body"):
+        with pytest.raises(PyBuilderError, match="class body"):
             run_emit(project, env, Holder.method)
 
     def test_a_bound_method(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyActionError, match="written in a build script"):
+        with pytest.raises(PyBuilderError, match="written in a build script"):
             run_emit(project, env, Holder().method)
 
     def test_a_body_reading_a_script_global(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyActionError, match="SCRIPT_GLOBAL"):
+        with pytest.raises(PyBuilderError, match="SCRIPT_GLOBAL"):
             run_emit(project, env, uses_a_script_global)
 
     def test_an_attribute_name_is_not_mistaken_for_a_global(
@@ -318,23 +318,23 @@ class TestRejections:
     def test_a_coroutine_reaches_the_error_through_emit(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyActionError, match="coroutine"):
+        with pytest.raises(PyBuilderError, match="coroutine"):
             run_emit(project, env, coroutine)
 
     def test_a_refused_function_does_not_claim_its_module(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyActionError, match="coroutine"):
+        with pytest.raises(PyBuilderError, match="coroutine"):
             run_emit(project, env, coroutine)
 
         module_rel, _ = run_emit(project, env, writes_sources)
 
-        assert module_rel == Path("build/pyact/writes_sources.py")
+        assert module_rel == Path("build/pybuilder/writes_sources.py")
 
     def test_a_default_reading_a_script_global(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyActionError, match="SCRIPT_GLOBAL"):
+        with pytest.raises(PyBuilderError, match="SCRIPT_GLOBAL"):
             run_emit(project, env, defaults_from_the_script)
 
     def test_an_annotation_reading_a_script_global_is_fine(
@@ -349,13 +349,13 @@ class TestRejections:
         assert hasattr(load(tmp_path / module_rel, "gen_annotated"), "annotated")
 
     def test_a_body_reading_dunder_file(self, project: Project, env: Any) -> None:
-        with pytest.raises(PyActionError, match="names the generated module"):
+        with pytest.raises(PyBuilderError, match="names the generated module"):
             run_emit(project, env, uses_dunder_file)
 
     def test_an_unpicklable_kwarg_names_the_key(
         self, project: Project, env: Any
     ) -> None:
-        with pytest.raises(PyActionError, match="cannot pickle argument handle"):
+        with pytest.raises(PyBuilderError, match="cannot pickle argument handle"):
             run_emit(
                 project,
                 env,
@@ -370,8 +370,8 @@ class TestEmit:
     ) -> None:
         module_rel, args_rel = run_emit(project, env, writes_sources)
 
-        assert module_rel == Path("build/pyact/writes_sources.py")
-        assert args_rel == Path("build/pyact/report.args.pkl")
+        assert module_rel == Path("build/pybuilder/writes_sources.py")
+        assert args_rel == Path("build/pybuilder/report.args.pkl")
         assert (tmp_path / module_rel).is_file()
         assert (tmp_path / args_rel).is_file()
 
@@ -382,7 +382,9 @@ class TestEmit:
         text = (tmp_path / module_rel).read_text(encoding="utf-8")
 
         assert text.startswith("# SPDX-License-Identifier: MIT\n")
-        assert text.splitlines()[1].endswith("from test_pyaction_emit.py. Do not edit.")
+        assert text.splitlines()[1].endswith(
+            "from test_pybuilder_emit.py. Do not edit."
+        )
         assert "from __future__ import annotations" in text
         assert "def writes_sources(sources, targets):" in text
         assert "@" not in text
@@ -419,7 +421,7 @@ class TestEmit:
             tmp_path,
             "caller",
             """
-            from pcons.tools.pyaction import emit_module, validate
+            from pcons.tools.pybuilder import emit_module, validate
 
 
             def render(sources, targets):
@@ -427,8 +429,8 @@ class TestEmit:
 
 
             def emit_it(project, env):
-                action = validate(render, project=project)
-                return emit_module(action, project=project, env=env)
+                function = validate(render, project=project)
+                return emit_module(function, project=project, env=env)
             """,
         )
 
@@ -465,8 +467,8 @@ class TestEmit:
     ) -> None:
         module_rel, args_rel = run_emit(project, env, writes_sources, name="a/b.txt")
 
-        assert args_rel == Path("build/pyact/a_b_txt.args.pkl")
-        assert module_rel == Path("build/pyact/writes_sources.py")
+        assert args_rel == Path("build/pybuilder/a_b_txt.args.pkl")
+        assert module_rel == Path("build/pybuilder/writes_sources.py")
         assert (tmp_path / args_rel).is_file()
 
     def test_a_sub_project_writes_under_its_own_slice(
@@ -478,7 +480,7 @@ class TestEmit:
             child_env = child.Environment()
             module_rel, _ = run_emit(child, child_env, writes_sources)
 
-        assert module_rel == Path("build/sub/pyact/writes_sources.py")
+        assert module_rel == Path("build/sub/pybuilder/writes_sources.py")
         assert (tmp_path / module_rel).is_file()
 
     def test_two_subdirectories_may_share_one_environment(
@@ -493,8 +495,8 @@ class TestEmit:
         with project._enter_subdir("b"):
             second, _ = run_emit(project, env, writes_sources)
 
-        assert first == Path("build/a/pyact/writes_sources.py")
-        assert second == Path("build/b/pyact/writes_sources.py")
+        assert first == Path("build/a/pybuilder/writes_sources.py")
+        assert second == Path("build/b/pybuilder/writes_sources.py")
 
     def test_a_build_prefix_moves_both_files(
         self, project: Project, tmp_path: Path
@@ -504,23 +506,23 @@ class TestEmit:
 
         module_rel, args_rel = run_emit(project, env, writes_sources)
 
-        assert module_rel == Path("build/host/pyact/writes_sources.py")
-        assert args_rel == Path("build/host/pyact/report.args.pkl")
+        assert module_rel == Path("build/host/pybuilder/writes_sources.py")
+        assert args_rel == Path("build/host/pybuilder/report.args.pkl")
 
 
 class TestDuplicates:
     def test_a_second_decoration_of_one_function_is_refused(
         self, project: Project, env: Any
     ) -> None:
-        """Two decorations are two actions, and a module has one owner."""
+        """Two decorations are two functions, and a module has one owner."""
         run_emit(project, env, writes_sources)
 
-        with pytest.raises(PyActionError) as caught:
+        with pytest.raises(PyBuilderError) as caught:
             run_emit(project, env, writes_sources)
 
         message = str(caught.value)
-        assert "would overwrite build/pyact/writes_sources.py" in message
-        assert "Decorate the function once and call the action twice." in message
+        assert "would overwrite build/pybuilder/writes_sources.py" in message
+        assert "Decorate the function once and call the builder twice." in message
 
     def test_two_functions_of_one_name_are_refused_naming_both(
         self, project: Project, env: Any, tmp_path: Path
@@ -543,23 +545,23 @@ class TestDuplicates:
         )
         run_emit(project, env, first.render, name="a")
 
-        with pytest.raises(PyActionError) as caught:
+        with pytest.raises(PyBuilderError) as caught:
             run_emit(project, env, second.render, name="b")
 
         message = str(caught.value)
-        assert "would overwrite build/pyact/render.py" in message
-        assert "test_pyaction_emit.py:" in message.split("already written by")[1]
+        assert "would overwrite build/pybuilder/render.py" in message
+        assert "test_pybuilder_emit.py:" in message.split("already written by")[1]
         assert "Rename one of the functions." in message
         assert "name=" not in message
 
     def test_a_second_edge_of_one_name_collides_on_the_pickle(
         self, project: Project, env: Any
     ) -> None:
-        action = validate(writes_sources, project=project)
-        payload = check_arguments(action, kwargs={})
+        function = validate(writes_sources, project=project)
+        payload = check_arguments(function, kwargs={})
         emit_args(project=project, env=env, name="report", payload=payload)
 
-        with pytest.raises(PyActionError, match=r"report\.args\.pkl"):
+        with pytest.raises(PyBuilderError, match=r"report\.args\.pkl"):
             emit_args(project=project, env=env, name="report", payload=payload)
 
     def test_the_same_name_in_two_environments_is_fine(
@@ -580,7 +582,7 @@ class TestDuplicates:
 
         run_emit(project, env, writes_sources)
 
-        with pytest.raises(PyActionError, match="would overwrite"):
+        with pytest.raises(PyBuilderError, match="would overwrite"):
             run_emit(project, other, writes_sources)
 
     def test_each_project_starts_with_a_clean_registry(self, tmp_path: Path) -> None:
@@ -598,20 +600,20 @@ class TestOneModuleManyEdges:
     def test_two_edges_of_one_function_share_one_module(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        action = validate(takes_arguments, project=project)
+        function = validate(takes_arguments, project=project)
 
-        module_rel = emit_module(action, project=project, env=env)
+        module_rel = emit_module(function, project=project, env=env)
         first = emit_args(
             project=project,
             env=env,
             name="one",
-            payload=check_arguments(action, kwargs={"n": 1}),
+            payload=check_arguments(function, kwargs={"n": 1}),
         )
         second = emit_args(
             project=project,
             env=env,
             name="two",
-            payload=check_arguments(action, kwargs={"n": 2}),
+            payload=check_arguments(function, kwargs={"n": 2}),
         )
 
         assert first != second
@@ -621,13 +623,15 @@ class TestOneModuleManyEdges:
             "two.args.pkl",
         ]
 
-    def test_the_module_holds_the_action_text(
+    def test_the_module_holds_the_function_text(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        action = validate(writes_sources, project=project)
-        module_rel = emit_module(action, project=project, env=env)
+        function = validate(writes_sources, project=project)
+        module_rel = emit_module(function, project=project, env=env)
 
-        assert (tmp_path / module_rel).read_text(encoding="utf-8") == action.module_text
+        assert (tmp_path / module_rel).read_text(
+            encoding="utf-8"
+        ) == function.module_text
 
     def test_a_second_emit_for_one_environment_does_not_write(
         self, project: Project, env: Any, tmp_path: Path
@@ -637,11 +641,11 @@ class TestOneModuleManyEdges:
         Corrupting the file is the only way to tell the two apart: identical
         bytes would be skipped either way.
         """
-        action = validate(writes_sources, project=project)
-        module_rel = emit_module(action, project=project, env=env)
+        function = validate(writes_sources, project=project)
+        module_rel = emit_module(function, project=project, env=env)
         (tmp_path / module_rel).write_text("not what emit wrote", encoding="utf-8")
 
-        again = emit_module(action, project=project, env=env)
+        again = emit_module(function, project=project, env=env)
 
         assert again == module_rel
         assert (tmp_path / module_rel).read_text(encoding="utf-8") == (
@@ -653,11 +657,11 @@ class TestOneModuleManyEdges:
     ) -> None:
         """What the owner is for: one file, two edges, no refusal."""
         twin = project.Environment(name="twin")
-        action = validate(writes_sources, project=project)
+        function = validate(writes_sources, project=project)
 
-        first = emit_module(action, project=project, env=env)
+        first = emit_module(function, project=project, env=env)
         (tmp_path / first).write_text("not what emit wrote", encoding="utf-8")
-        second = emit_module(action, project=project, env=twin)
+        second = emit_module(function, project=project, env=twin)
 
         assert first == second
         assert (tmp_path / first).read_text(encoding="utf-8") == "not what emit wrote"
@@ -668,25 +672,25 @@ class TestNothingIsWrittenUntilEverythingIsChecked:
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
         """The arguments are settled before the module reaches the disk."""
-        action = validate(takes_arguments, project=project)
+        function = validate(takes_arguments, project=project)
 
-        with pytest.raises(PyActionError, match="cannot pickle"):
-            check_arguments(action, kwargs={"handle": lambda: None})
+        with pytest.raises(PyBuilderError, match="cannot pickle"):
+            check_arguments(function, kwargs={"handle": lambda: None})
 
-        assert not (tmp_path / "build" / "pyact").exists()
+        assert not (tmp_path / "build" / "pybuilder").exists()
 
-        module_rel = emit_module(action, project=project, env=env)
+        module_rel = emit_module(function, project=project, env=env)
 
         assert (tmp_path / module_rel).is_file()
 
 
-class TestValidatedActionIdentity:
-    def test_two_validations_of_one_def_are_two_actions(
+class TestValidatedFunctionIdentity:
+    def test_two_validations_of_one_def_are_two_functions(
         self, project: Project, tmp_path: Path
     ) -> None:
-        """The factory idiom, which a generated __eq__ would call one action."""
+        """The factory idiom, which a generated __eq__ would call one function."""
 
-        def decorate() -> ValidatedAction:
+        def decorate() -> ValidatedFunction:
             def render(sources, targets):
                 return 1
 
@@ -709,7 +713,7 @@ class TestReservedNames:
     """
 
     def test_it_is_exactly_what_the_call_spends_on_the_edge(self) -> None:
-        call = inspect.signature(PyAction.__call__).parameters
+        call = inspect.signature(PyBuilder.__call__).parameters
 
         assert _reserved_names() == {
             name
@@ -731,21 +735,21 @@ class TestClaimRegistry:
     def _at(self, lineno: int) -> SourceLocation:
         return SourceLocation("pcons-build.py", lineno, "build")
 
-    def _action(self, project: Project) -> ValidatedAction:
+    def _function(self, project: Project) -> ValidatedFunction:
         return validate(writes_sources, project=project)
 
-    def _other_action(self, project: Project) -> ValidatedAction:
-        """A second action whose module text differs from ``_action``'s."""
+    def _other_function(self, project: Project) -> ValidatedFunction:
+        """A second function whose module text differs from ``_function``'s."""
         return validate(annotated, project=project)
 
     def test_a_first_claim_says_to_write(self, project: Project, env: Any) -> None:
         claimed = _claim(
             project,
             env,
-            Path("build/pyact/x.py"),
+            Path("build/pybuilder/x.py"),
             "x",
             self._at(1),
-            owner=self._action(project),
+            owner=self._function(project),
         )
 
         assert claimed is True
@@ -753,8 +757,8 @@ class TestClaimRegistry:
     def test_the_same_owner_again_says_not_to_write(
         self, project: Project, env: Any
     ) -> None:
-        owner = self._action(project)
-        path = Path("build/pyact/x.py")
+        owner = self._function(project)
+        path = Path("build/pybuilder/x.py")
         _claim(project, env, path, "x", self._at(1), owner=owner)
 
         assert _claim(project, env, path, "x", self._at(2), owner=owner) is False
@@ -762,60 +766,65 @@ class TestClaimRegistry:
     def test_another_function_on_one_path_says_to_rename(
         self, project: Project, env: Any
     ) -> None:
-        path = Path("build/pyact/x.py")
-        _claim(project, env, path, "x", self._at(1), owner=self._action(project))
+        path = Path("build/pybuilder/x.py")
+        _claim(project, env, path, "x", self._at(1), owner=self._function(project))
 
-        with pytest.raises(PyActionError, match="Rename one of the functions"):
+        with pytest.raises(PyBuilderError, match="Rename one of the functions"):
             _claim(
-                project, env, path, "x", self._at(2), owner=self._other_action(project)
+                project,
+                env,
+                path,
+                "x",
+                self._at(2),
+                owner=self._other_function(project),
             )
 
-    def test_the_same_function_twice_says_to_call_the_action_twice(
+    def test_the_same_function_twice_says_to_call_the_builder_twice(
         self, project: Project, env: Any
     ) -> None:
         """Two decorations of one function, which the module text tells apart."""
-        path = Path("build/pyact/x.py")
-        _claim(project, env, path, "x", self._at(1), owner=self._action(project))
+        path = Path("build/pybuilder/x.py")
+        _claim(project, env, path, "x", self._at(1), owner=self._function(project))
 
-        with pytest.raises(PyActionError) as caught:
-            _claim(project, env, path, "x", self._at(2), owner=self._action(project))
+        with pytest.raises(PyBuilderError) as caught:
+            _claim(project, env, path, "x", self._at(2), owner=self._function(project))
 
         message = str(caught.value)
-        assert "Decorate the function once and call the action twice." in message
+        assert "Decorate the function once and call the builder twice." in message
         assert "Rename" not in message
 
     def test_no_owner_on_a_taken_path_is_refused(
         self, project: Project, env: Any
     ) -> None:
         """A pickle's path is exclusive, even against the module's owner."""
-        path = Path("build/pyact/x.args.pkl")
-        owner = self._action(project)
+        path = Path("build/pybuilder/x.args.pkl")
+        owner = self._function(project)
         _claim(project, env, path, "x", self._at(1), owner=owner)
 
-        with pytest.raises(PyActionError) as caught:
+        with pytest.raises(PyBuilderError) as caught:
             _claim(project, env, path, "x", self._at(2), owner=None)
 
         message = str(caught.value)
-        assert "PyAction edge 'x' would overwrite" in message
+        assert "PyBuilder edge 'x' would overwrite" in message
         assert 'Name one of the edges, name="something-else".' in message
 
     def test_a_second_claim_with_no_owner_at_all_is_refused(
         self, project: Project, env: Any
     ) -> None:
-        path = Path("build/pyact/x.args.pkl")
+        path = Path("build/pybuilder/x.args.pkl")
         _claim(project, env, path, "x", self._at(1), owner=None)
 
         with pytest.raises(
-            PyActionError, match=r'Name one of the edges, name="something-else"'
+            PyBuilderError, match=r'Name one of the edges, name="something-else"'
         ):
             _claim(project, env, path, "x", self._at(2), owner=None)
 
     def test_a_shared_owner_across_environments_still_shares(
         self, project: Project, env: Any
     ) -> None:
-        owner = self._action(project)
+        owner = self._function(project)
         twin = project.Environment(name="twin")
-        path = Path("build/pyact/x.py")
+        path = Path("build/pybuilder/x.py")
         _claim(project, env, path, "x", self._at(1), owner=owner)
 
         assert _claim(project, twin, path, "x", self._at(2), owner=owner) is False
@@ -825,11 +834,11 @@ class TestClaimRegistry:
     ) -> None:
         """One def in a factory: there is no second function to rename."""
         twin = project.Environment(name="twin")
-        path = Path("build/pyact/x.py")
-        _claim(project, env, path, "x", self._at(1), owner=self._action(project))
+        path = Path("build/pybuilder/x.py")
+        _claim(project, env, path, "x", self._at(1), owner=self._function(project))
 
-        with pytest.raises(PyActionError) as caught:
-            _claim(project, twin, path, "x", self._at(2), owner=self._action(project))
+        with pytest.raises(PyBuilderError) as caught:
+            _claim(project, twin, path, "x", self._at(2), owner=self._function(project))
 
         message = str(caught.value)
         assert "Give one environment its own build_prefix." in message
@@ -840,12 +849,17 @@ class TestClaimRegistry:
         self, project: Project, env: Any
     ) -> None:
         twin = project.Environment(name="twin")
-        path = Path("build/pyact/x.py")
-        _claim(project, env, path, "x", self._at(1), owner=self._action(project))
+        path = Path("build/pybuilder/x.py")
+        _claim(project, env, path, "x", self._at(1), owner=self._function(project))
 
-        with pytest.raises(PyActionError) as caught:
+        with pytest.raises(PyBuilderError) as caught:
             _claim(
-                project, twin, path, "x", self._at(2), owner=self._other_action(project)
+                project,
+                twin,
+                path,
+                "x",
+                self._at(2),
+                owner=self._other_function(project),
             )
 
         message = str(caught.value)
