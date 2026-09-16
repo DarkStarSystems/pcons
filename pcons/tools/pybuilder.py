@@ -10,10 +10,12 @@ A function typed in a build script cannot be pickled. The script runs under
 which stores a function by module and qualname, has nothing to store. The body
 reaches build time as a real file instead. :func:`validate` reads the
 function once, at decoration. :func:`check_arguments` reads one call's
-arguments. :func:`emit_module` writes the function's own source to a
-generated module, once per path it lands on, and :func:`emit_args` writes one
-edge's arguments to a sidecar pickle beside it. Both hand back the
-node-canonical path the build edge names.
+arguments. :func:`emit_module` claims the path of a generated module holding
+the function's own source, once per path it lands on, and :func:`emit_args`
+claims the path of one edge's argument pickle beside it. Both hand back the
+node-canonical path the build edge names. Neither writes: the call hands the
+bytes to the edge, and the edge writes them when the build is resolved, so a
+script that only describes a build leaves no file behind.
 
 The generated module holds the function and nothing else, so a body that uses
 a name the build script imported would fail at build time with ``NameError``.
@@ -73,8 +75,8 @@ class ValidatedFunction:
     """A function that can be carried to build time, and the module for it.
 
     What :func:`validate` settles depends on the function alone, so it is
-    settled once even when many edges run the same function. What
-    :func:`emit_module` and :func:`emit_args` write depends on the
+    settled once even when many edges run the same function. Where
+    :func:`emit_module` and :func:`emit_args` put their files depends on the
     environment and on the edge, so they run per call.
 
     ``eq=False`` on purpose: the claim registry tells one function's module
@@ -371,12 +373,12 @@ def _reject_edge_supplied_keywords(
 
 def emit_module(
     function: ValidatedFunction, *, project: Project, env: Environment
-) -> Path:
-    """Write the generated module for *env*, once per path it lands on.
+) -> tuple[Path, bytes | None]:
+    """Claim the generated module's path for *env*, once per path it lands on.
 
     The same function reaching one path again is one file two edges read, so
-    the second claim succeeds and skips the write. A different function on
-    that path is two functions of one name, which is an error.
+    the second claim succeeds and has nothing to write. A different function
+    on that path is two functions of one name, which is an error.
 
     Args:
         function: What :func:`validate` returned.
@@ -385,12 +387,14 @@ def emit_module(
 
     Returns:
         The module's path, relative to the build directory and anchored the
-        way a node path is. Neither a disk path nor what ``env.Command``
-        takes as a source: write to ``root / path``, and hand the builder
-        ``project.node(path)``, or a subdirectory's offset is applied twice.
+        way a node path is, and the bytes to write there, or None when this
+        function already claimed that path. The path is neither a disk path
+        nor what ``env.Command`` takes as a source: write to ``root / path``,
+        and hand the builder ``project.node(path)``, or a subdirectory's
+        offset is applied twice.
 
     Raises:
-        PyBuilderError: If another builder already wrote that file.
+        PyBuilderError: If another builder already claimed that file.
     """
     module_rel = _gen_dir(env) / f"{function.module_stem}.py"
     claimed = _claim(
@@ -401,12 +405,9 @@ def emit_module(
         function.at,
         owner=function,
     )
-    if claimed:
-        _write_if_changed(
-            project.top_path_resolver.project_root / module_rel,
-            function.module_text.encode("utf-8"),
-        )
-    return module_rel
+    if not claimed:
+        return module_rel, None
+    return module_rel, function.module_text.encode("utf-8")
 
 
 def check_arguments(function: ValidatedFunction, *, kwargs: Mapping[str, Any]) -> bytes:
@@ -449,13 +450,12 @@ def check_arguments(function: ValidatedFunction, *, kwargs: Mapping[str, Any]) -
     )
 
 
-def emit_args(
-    *, project: Project, env: Environment, name: str, target: object, payload: bytes
-) -> Path:
-    """Write one edge's argument pickle.
+def emit_args(*, project: Project, env: Environment, name: str, target: object) -> Path:
+    """Claim the path of one edge's argument pickle.
 
     One edge is one pickle, so this path is exclusive: nothing may share it,
-    not even the function that claimed the module beside it.
+    not even the function that claimed the module beside it. What goes there
+    is what :func:`check_arguments` returned.
 
     Args:
         project: Any project of the tree; the claim registry hangs off its top.
@@ -464,7 +464,6 @@ def emit_args(
             fallback file stem when the target's own path cannot be used.
         target: The call's ``target=``, the pickle's file name follows its
             first element's build-relative path.
-        payload: What :func:`check_arguments` returned.
 
     Returns:
         The pickle's path, anchored the way :func:`emit_module` returns one.
@@ -476,7 +475,6 @@ def emit_args(
         _gen_dir(env) / f"{_pickle_relpath(env, target, name).as_posix()}.args.pkl"
     )
     _claim(project, env, args_rel, name, get_caller_location(), owner=None)
-    _write_if_changed(project.top_path_resolver.project_root / args_rel, payload)
     return args_rel
 
 
@@ -862,9 +860,9 @@ def _origin(project: Project, at: SourceLocation) -> str:
     The file only, never the line: a line number would change whenever a line
     is inserted above the decoration, rewriting a module whose function did
     not change and re-running the edge that reads it, which is the one thing
-    ``_write_if_changed`` exists to avoid. Relative to the project root where
-    possible and the bare file name otherwise, so the generated bytes say the
-    same thing in every checkout.
+    writing only changed bytes exists to avoid. Relative to the project root
+    where possible and the bare file name otherwise, so the generated bytes say
+    the same thing in every checkout.
     """
     path = Path(at.filename)
     try:
@@ -1071,18 +1069,6 @@ def _unpicklable(kwargs: dict[str, Any]) -> list[str]:
     return bad
 
 
-def _write_if_changed(path: Path, content: bytes) -> None:
-    """Write a generate-time file only when its bytes changed.
-
-    Keeps the file's modification time stable across regenerations, so the
-    build edges reading it do not re-run for a build description that says the
-    same thing.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists() or path.read_bytes() != content:
-        path.write_bytes(content)
-
-
 def _runner_path() -> str:
     """The build-time runner's absolute path, as a command token.
 
@@ -1154,9 +1140,10 @@ class PyBuilder:
         more = report(target="more.txt", source=[c], title="more")
 
     One decoration is one generated module however many edges read it, and
-    each call writes its own argument pickle. The module belongs to the
-    :class:`ValidatedFunction` inside, which is what claims its path, so this
-    object is never itself in the claim registry.
+    each call has its own argument pickle. Both are written when the build is
+    resolved, never by the call. The module belongs to the
+    :class:`ValidatedFunction` inside, which is what claims its path, so
+    this object is never itself in the claim registry.
     """
 
     __slots__ = ("_env", "_function", "_how", "_project")
@@ -1225,16 +1212,18 @@ class PyBuilder:
         """
         edge_name = name or _derive_name(target)
         payload = check_arguments(self._function, kwargs=kwargs)
-        module_rel = emit_module(self._function, project=self._project, env=self._env)
-        args_rel = emit_args(
-            project=self._project,
-            env=self._env,
-            name=edge_name,
-            target=target,
-            payload=payload,
+        module_rel, module_bytes = emit_module(
+            self._function, project=self._project, env=self._env
         )
+        args_rel = emit_args(
+            project=self._project, env=self._env, name=edge_name, target=target
+        )
+        root = self._project.top_path_resolver.project_root
+        writes = [(root / args_rel, payload)]
+        if module_bytes is not None:
+            writes.insert(0, (root / module_rel, module_bytes))
         interpreter = (self._how.python or sys.executable).replace("\\", "/")
-        return self._env.Command(
+        made = self._env.Command(
             target=target,
             source=source,
             name=edge_name,
@@ -1251,6 +1240,8 @@ class PyBuilder:
             depends=depends,
             **self._how.command_kwargs(),
         )
+        made._builder_data["writes"] = writes
+        return made
 
 
 def py_builder(

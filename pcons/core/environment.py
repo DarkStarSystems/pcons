@@ -1894,11 +1894,11 @@ class Environment(_EnvironmentStubs):
 
             project.Default(counts, more)
 
-        The function does not run now. Its source is written once to a
-        generated module under the environment's build directory, each call
-        writes its own argument pickle beside it, and each edge runs the
-        module at build time with *targets* and *sources* as the build tool
-        spells them.
+        The function does not run now. Its source goes once to a generated
+        module under the environment's build directory, each call's arguments
+        go to a pickle beside it, and each edge runs the module at build time
+        with *targets* and *sources* as the build tool spells them. Both files
+        are written when pcons resolves the build, never by the call.
 
         The arguments here say how the function runs, which is a property of
         the body and the same for every edge. The call says what to build.

@@ -6,8 +6,8 @@
 again makes another, so one function serves as many edges as the build needs.
 
 The function does not run while the build is described. pcons writes its
-source once to a generated module under the build directory, each call writes
-its own arguments to a pickle beside it, and each call emits an edge that runs
+source once to a generated module under the build directory, and each call's
+arguments to a pickle beside it, at resolve. Each call emits an edge running
 the module under ninja. So the work happens when ninja decides it is needed,
 in parallel with everything else, and not again until an input changes.
 

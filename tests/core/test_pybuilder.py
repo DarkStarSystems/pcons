@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -17,9 +19,10 @@ from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
-from pcons.tools.pybuilder import PyBuilder
+from pcons.tools.pybuilder import PyBuilder, PyBuilderError
 from pcons.workers.python import PythonWorker
 from pcons.workers.python_server import script_argv
+from tests.support import REPO_ROOT, subprocess_env
 
 RUNNER = Path("pcons/util/pybuilder.py")
 
@@ -557,3 +560,117 @@ class TestMultipleEnvironments:
         assert first.name == second.name == "report"
         assert node_tokens(first)[1] == "build/pybuilder/one/report.txt.args.pkl"
         assert node_tokens(second)[1] == "build/pybuilder/two/report.txt.args.pkl"
+
+
+class TestFilesAppearAtResolve:
+    """A build description writes nothing until it is resolved."""
+
+    def test_running_an_example_by_hand_writes_nothing(self, tmp_path: Path) -> None:
+        """``python pcons-build.py`` describes the build and exits."""
+        example = tmp_path / "example"
+        shutil.copytree(
+            REPO_ROOT / "examples" / "90_python_builder",
+            example,
+            ignore=shutil.ignore_patterns(
+                "build", "compile_commands.json", "__pycache__"
+            ),
+        )
+
+        result = subprocess.run(
+            [sys.executable, "pcons-build.py"],
+            cwd=example,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=subprocess_env(),
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "this build script was run directly" in result.stderr
+        assert not (example / "build").exists()
+
+    def test_the_call_writes_nothing_and_resolve_writes_both(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyBuilder()
+        def report(targets, sources, title):
+            return title
+
+        made = report(target="report.txt", source=["a.txt"], title="counts")
+
+        assert not (tmp_path / "build").exists()
+
+        project.resolve()
+        module, args = (tmp_path / token for token in node_tokens(made))
+
+        assert module.read_text(encoding="utf-8").endswith(
+            "def report(targets, sources, title):\n    return title\n"
+        )
+        assert args.is_file()
+
+    def test_a_second_run_over_the_same_description_keeps_both_mtimes(
+        self, tmp_path: Path
+    ) -> None:
+        def describe() -> list[Path]:
+            project = make_project(tmp_path)
+            env = project.Environment()
+
+            @env.PyBuilder()
+            def report(targets, sources):
+                return 1
+
+            made = report(target="report.txt", source=["a.txt"])
+            project.resolve()
+            return [tmp_path / token for token in node_tokens(made)]
+
+        written = describe()
+        for path in written:
+            os.utime(path, (0, 0))
+
+        Project._clear_tree()
+        again = describe()
+
+        assert again == written
+        assert [path.stat().st_mtime for path in written] == [0, 0]
+
+    def test_resolving_twice_keeps_both_mtimes(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        made = one_source(project, env)
+        written = [tmp_path / token for token in node_tokens(made)]
+        for path in written:
+            os.utime(path, (0, 0))
+
+        project.resolve()
+
+        assert [path.stat().st_mtime for path in written] == [0, 0]
+
+    def test_an_edge_sharing_a_module_still_writes_its_own_pickle(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        first = report(target="one.txt", source=["a.txt"])
+        second = report(target="two.txt", source=["a.txt"])
+        project.resolve()
+
+        assert node_tokens(first)[0] == node_tokens(second)[0]
+        assert all(
+            (tmp_path / token).is_file()
+            for token in (*node_tokens(first), *node_tokens(second))
+        )
+
+    def test_a_refused_call_leaves_nothing_to_write(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyBuilder()
+        def report(targets, sources, handle):
+            return handle
+
+        with pytest.raises(PyBuilderError, match="cannot pickle"):
+            report(target="report.txt", source=["a.txt"], handle=lambda: None)
+        project.resolve()
+
+        assert not (tmp_path / "build" / "pybuilder").exists()

@@ -939,7 +939,7 @@ class TestEveryPyBuilderRemedyWorks:
 
     def test_two_functions_of_one_name_are_renamed(self, project_env, tmp_path):
         """ "Rename one of the functions"."""
-        _, env = project_env
+        project, env = project_env
         for sub in ("one", "two"):
             (tmp_path / sub).mkdir(parents=True, exist_ok=True)
         first = build_script_function(
@@ -960,13 +960,14 @@ class TestEveryPyBuilderRemedyWorks:
 
         env.PyBuilder()(first)(target="a.txt")
         env.PyBuilder()(second)(target="b.txt")
+        project.resolve()
 
         assert (tmp_path / "build/pybuilder/render.py").is_file()
         assert (tmp_path / "build/pybuilder/render_more.py").is_file()
 
     def test_one_decoration_called_twice(self, project_env, tmp_path):
         """ "Decorate the function once and call the builder twice"."""
-        _, env = project_env
+        project, env = project_env
 
         @env.PyBuilder()
         def render(targets, sources):
@@ -974,6 +975,7 @@ class TestEveryPyBuilderRemedyWorks:
 
         render(target="a.txt")
         render(target="b.txt")
+        project.resolve()
 
         generated = sorted(
             q.name
@@ -985,7 +987,7 @@ class TestEveryPyBuilderRemedyWorks:
 
     def test_one_of_the_edges_is_named(self, project_env, tmp_path):
         """'Name one of the edges, name="something-else"'."""
-        _, env = project_env
+        project, env = project_env
 
         @env.PyBuilder()
         def render(targets, sources):
@@ -993,6 +995,7 @@ class TestEveryPyBuilderRemedyWorks:
 
         render(target="report.txt")
         second = render(target="sub/report.txt", name="sub-report")
+        project.resolve()
 
         assert second.name == "sub-report"
         assert (tmp_path / "build/pybuilder/sub/report.txt.args.pkl").is_file()
@@ -1013,6 +1016,7 @@ class TestEveryPyBuilderRemedyWorks:
 
         decorate(env)(target="report.txt")
         decorate(other)(target="report.txt")
+        project.resolve()
 
         assert (tmp_path / "build/pybuilder/render.py").is_file()
         assert (tmp_path / "build/other/pybuilder/render.py").is_file()

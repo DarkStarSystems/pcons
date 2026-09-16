@@ -2570,7 +2570,7 @@ project.Default(first, second)
 
 Underneath, a `PyBuilder` edge is an ordinary command edge: it takes `restat=` and `worker=` the way `env.Command()` does, and `pcons explain` shows it the same way, as a `(command)` edge with its command line, sources, environment and call site.
 
-The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, each call writes its own arguments to a pickle beside it, named after the target it builds, `build/pybuilder/report.txt.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
+The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, writes each call's arguments to a pickle beside it, named after the target it builds, `build/pybuilder/report.txt.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step. Both files are written when pcons resolves the build, not by the call, so a script that only describes the build writes nothing.
 
 The function is called as `fn(targets, sources, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
 
