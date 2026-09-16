@@ -2566,7 +2566,7 @@ second = report(
 project.Default(first, second)
 ```
 
-`report` is a builder; `first` and `second` are the `Target`s its calls returned. The whole of `examples/86_python_action` is that, plus a second environment.
+`report` is a builder; `first` and `second` are the `Target`s its calls returned. The whole of `examples/90_python_action` is that, plus a second environment.
 
 The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pyact/report.py`, each call writes its own arguments to a pickle beside it, `build/pyact/report.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
 
@@ -2591,7 +2591,7 @@ two = report(
 )
 ```
 
-`name=` is also what `ninja tmp-report` then means. `examples/87_python_action_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem.
+`name=` is also what `ninja tmp-report` then means. `examples/91_python_action_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem.
 
 **Reserved parameter names.** `target`, `source`, `name` and `depends` are refused as parameters of the function, because the call spends them on the edge. Rename them; the error says which ones and what the call does with them.
 
@@ -2646,7 +2646,7 @@ source = embed(target=project.build_dir / f"{name}.c", name=f"{name}-source",
 project.Default(project.Program(name, env, sources=[source]))
 ```
 
-`examples/87_python_action_pipeline` is that, with two actions each called twice: one downloads a JSON document and writes a field of it, one turns those bytes into a C program, and `project.Program` compiles and links the result. Two actions, four edges, two generated modules.
+`examples/91_python_action_pipeline` is that, with two actions each called twice: one downloads a JSON document and writes a field of it, one turns those bytes into a C program, and `project.Program` compiles and links the result. Two actions, four edges, two generated modules.
 
 **A warm interpreter.** Starting Python costs more than a small function does. `worker=PythonWorker()` runs the edge in an interpreter that is already up:
 
