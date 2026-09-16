@@ -23,6 +23,10 @@ host = sorted(
     q.name for q in Path("build/pybuilder").iterdir() if q.suffix in {".py", ".pkl"}
 )
 assert host == ["report.py", "report.txt.args.pkl", "report2.txt.args.pkl"], host
+assert [q.name for q in Path("build/pybuilder/pcons-runner").iterdir()] == [
+    "pcons-runner.py"
+], "the runner's directory holds something besides the runner"
+assert not Path("build/strict/pybuilder/pcons-runner").exists()
 
 strict = sorted(
     q.name

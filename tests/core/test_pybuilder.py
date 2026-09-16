@@ -24,7 +24,7 @@ from pcons.workers.python import PythonWorker
 from pcons.workers.python_server import script_argv
 from tests.support import REPO_ROOT, subprocess_env
 
-RUNNER = Path("pcons/util/pybuilder.py")
+RUNNER = "build/pybuilder/pcons-runner/pcons-runner.py"
 
 
 def make_project(tmp_path: Path) -> Project:
@@ -137,6 +137,7 @@ class TestDecoration:
 
         assert [t.name for t in made] == ["r1", "r2", "r3"]
         assert sorted(q.name for q in (tmp_path / "build" / "pybuilder").iterdir()) == [
+            "pcons-runner",
             "r1.txt.args.pkl",
             "r2.txt.args.pkl",
             "r3.txt.args.pkl",
@@ -155,6 +156,7 @@ class TestDecoration:
 
         assert made.name == "out"
         assert node_tokens(made) == [
+            RUNNER,
             "build/pybuilder/whatever.py",
             "build/pybuilder/out.txt.args.pkl",
         ]
@@ -184,7 +186,8 @@ class TestCommandShape:
         command = tokens(one_source(project, env))
 
         assert command[0] == sys.executable.replace("\\", "/")
-        assert command[1].endswith(RUNNER.as_posix())
+        assert isinstance(command[1], PathToken)
+        assert Path(command[1].path).as_posix() == RUNNER
         assert "-m" not in command
 
     def test_the_generated_files_are_node_tokens(
@@ -194,6 +197,7 @@ class TestCommandShape:
         command = tokens(report)
 
         assert node_tokens(report) == [
+            RUNNER,
             "build/pybuilder/report.py",
             "build/pybuilder/report.txt.args.pkl",
         ]
@@ -208,6 +212,7 @@ class TestCommandShape:
         report = one_source(project, env)
 
         assert implicit_deps(report) == [
+            RUNNER,
             "build/pybuilder/report.py",
             "build/pybuilder/report.txt.args.pkl",
         ]
@@ -277,7 +282,7 @@ class TestGeneratedNinja:
         assert "pybuilder/report.py" in text
         assert "build/pybuilder/report.py" not in text
         assert "$topdir/build/pybuilder" not in text
-        assert "pybuilder.py" in text
+        assert " pybuilder/pcons-runner/pcons-runner.py pybuilder/report.py " in text
 
     def test_an_out_of_tree_build_directory_needs_no_absolute_path(
         self, tmp_path: Path
@@ -324,6 +329,7 @@ class TestGeneratedNinja:
         text = ninja_text(project, tmp_path)
 
         assert node_tokens(made) == [
+            RUNNER,
             "build/sub/pybuilder/report.py",
             "build/sub/pybuilder/report.txt.args.pkl",
         ]
@@ -356,8 +362,10 @@ class TestGeneratedNinja:
         build = tmp_path / "build"
         there = Path(os.path.relpath(elsewhere, build)).as_posix()
         back = Path(os.path.relpath(build, elsewhere)).as_posix()
+        runner = Path(os.path.relpath(tmp_path / RUNNER, elsewhere)).as_posix()
         assert f"{cd} {there} &&" in text
         assert f"&& {cd} {back}" in text
+        assert f" {runner} " in text
 
     def test_write_if_different_wraps_the_edge(
         self, project: Project, env: Any, tmp_path: Path
@@ -445,8 +453,13 @@ class TestWorker:
     ) -> None:
         """``script_argv`` refuses ``-m``, so this is what makes worker= work."""
         report = one_source(project, env, worker=PythonWorker())
-        argv = [token for token in tokens(report) if isinstance(token, str)]
+        argv = [
+            Path(token.path).as_posix() if isinstance(token, PathToken) else token
+            for token in tokens(report)
+            if isinstance(token, (str, PathToken))
+        ]
 
+        assert argv[1] == RUNNER
         assert script_argv(argv) == argv[1:]
 
     def test_the_worker_launcher_reaches_the_edge(
@@ -482,10 +495,12 @@ class TestTheCallDecidesTheSlice:
         project.resolve()
 
         assert node_tokens(outside) == [
+            RUNNER,
             "build/pybuilder/report.py",
             "build/pybuilder/outside.txt.args.pkl",
         ]
         assert node_tokens(inside) == [
+            RUNNER,
             "build/sub/pybuilder/report.py",
             "build/sub/pybuilder/inside.txt.args.pkl",
         ]
@@ -524,10 +539,16 @@ class TestMultipleEnvironments:
         text = ninja_text(project, tmp_path)
 
         assert [t.name for t in made] == ["report", "report"]
-        assert node_tokens(made[0])[0] == "build/host/pybuilder/report.py"
-        assert node_tokens(made[1])[0] == "build/strict/pybuilder/report.py"
-        assert node_tokens(made[0])[1] == "build/host/pybuilder/report.txt.args.pkl"
-        assert node_tokens(made[1])[1] == "build/strict/pybuilder/report.txt.args.pkl"
+        assert node_tokens(made[0]) == [
+            RUNNER,
+            "build/host/pybuilder/report.py",
+            "build/host/pybuilder/report.txt.args.pkl",
+        ]
+        assert node_tokens(made[1]) == [
+            RUNNER,
+            "build/strict/pybuilder/report.py",
+            "build/strict/pybuilder/report.txt.args.pkl",
+        ]
         assert (tmp_path / "build/host/pybuilder/report.py").is_file()
         assert (tmp_path / "build/strict/pybuilder/report.py").is_file()
         assert "host/report.txt" in text
@@ -558,8 +579,8 @@ class TestMultipleEnvironments:
         project.resolve()
 
         assert first.name == second.name == "report"
-        assert node_tokens(first)[1] == "build/pybuilder/one/report.txt.args.pkl"
-        assert node_tokens(second)[1] == "build/pybuilder/two/report.txt.args.pkl"
+        assert node_tokens(first)[2] == "build/pybuilder/one/report.txt.args.pkl"
+        assert node_tokens(second)[2] == "build/pybuilder/two/report.txt.args.pkl"
 
 
 class TestFilesAppearAtResolve:
@@ -601,12 +622,13 @@ class TestFilesAppearAtResolve:
         assert not (tmp_path / "build").exists()
 
         project.resolve()
-        module, args = (tmp_path / token for token in node_tokens(made))
+        runner, module, args = (tmp_path / token for token in node_tokens(made))
 
         assert module.read_text(encoding="utf-8").endswith(
             "def report(targets, sources, title):\n    return title\n"
         )
         assert args.is_file()
+        assert runner.is_file()
 
     def test_a_second_run_over_the_same_description_keeps_both_mtimes(
         self, tmp_path: Path
@@ -631,7 +653,7 @@ class TestFilesAppearAtResolve:
         again = describe()
 
         assert again == written
-        assert [path.stat().st_mtime for path in written] == [0, 0]
+        assert [path.stat().st_mtime for path in written] == [0, 0, 0]
 
     def test_resolving_twice_keeps_both_mtimes(
         self, project: Project, env: Any, tmp_path: Path
@@ -643,7 +665,7 @@ class TestFilesAppearAtResolve:
 
         project.resolve()
 
-        assert [path.stat().st_mtime for path in written] == [0, 0]
+        assert [path.stat().st_mtime for path in written] == [0, 0, 0]
 
     def test_an_edge_sharing_a_module_still_writes_its_own_pickle(
         self, project: Project, env: Any, tmp_path: Path
@@ -656,7 +678,7 @@ class TestFilesAppearAtResolve:
         second = report(target="two.txt", source=["a.txt"])
         project.resolve()
 
-        assert node_tokens(first)[0] == node_tokens(second)[0]
+        assert node_tokens(first)[:2] == node_tokens(second)[:2]
         assert all(
             (tmp_path / token).is_file()
             for token in (*node_tokens(first), *node_tokens(second))

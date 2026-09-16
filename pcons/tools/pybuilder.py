@@ -57,6 +57,8 @@ if TYPE_CHECKING:
 
 GEN_DIR = "pybuilder"
 MODULE_PREFIX = "pcons_pybuilder_"
+RUNNER_DIR = "pcons-runner"
+RUNNER_NAME = "pcons-runner.py"
 
 _SAFE_GLOBALS = frozenset({"__name__", "__doc__", "__builtins__"})
 
@@ -1069,8 +1071,18 @@ def _unpicklable(kwargs: dict[str, Any]) -> list[str]:
     return bad
 
 
-def _runner_path() -> str:
-    """The build-time runner's absolute path, as a command token.
+def _runner_rel(project: Project) -> Path:
+    """Where the runner's copy goes, anchored the way a node path is.
+
+    One copy per build directory, whatever environment or subdirectory the
+    edge belongs to, because every edge of one build runs the same runner.
+
+    The copy has a directory to itself. Running it puts that directory first
+    on ``sys.path``, and a generated module is named after its function, so
+    a function called ``pickle`` beside the runner would shadow the standard
+    module for the runner and for every body's imports. A generated module
+    lands directly in its environment's generated directory, never in a
+    subdirectory of it, and ``pcons-runner`` is not a module stem.
 
     A path, never ``-m pcons.util.pybuilder``: the ``-m`` form executes
     ``pcons/__init__.py`` first, importing the generators, toolchains and
@@ -1078,7 +1090,13 @@ def _runner_path() -> str:
     and ``pcons.workers.python_server.script_argv`` hands back any argv whose
     first argument starts with ``-``, which would make ``worker=`` a no-op.
     """
-    return str(Path(runner.__file__)).replace("\\", "/")
+    return project.top_path_resolver.build_dir / GEN_DIR / RUNNER_DIR / RUNNER_NAME
+
+
+@functools.cache
+def _runner_bytes() -> bytes:
+    """The runner's source, which the build directory gets a copy of."""
+    return Path(runner.__file__).read_bytes()
 
 
 def _as_list(value: object) -> list[Any]:
@@ -1218,10 +1236,11 @@ class PyBuilder:
         args_rel = emit_args(
             project=self._project, env=self._env, name=edge_name, target=target
         )
+        runner_rel = _runner_rel(self._project)
         root = self._project.top_path_resolver.project_root
-        writes = [(root / args_rel, payload)]
+        writes = [(root / runner_rel, _runner_bytes()), (root / args_rel, payload)]
         if module_bytes is not None:
-            writes.insert(0, (root / module_rel, module_bytes))
+            writes.insert(1, (root / module_rel, module_bytes))
         interpreter = (self._how.python or sys.executable).replace("\\", "/")
         made = self._env.Command(
             target=target,
@@ -1229,7 +1248,7 @@ class PyBuilder:
             name=edge_name,
             command=[
                 interpreter,
-                _runner_path(),
+                self._project.node(runner_rel),
                 self._project.node(module_rel),
                 self._project.node(args_rel),
                 "--n-targets",

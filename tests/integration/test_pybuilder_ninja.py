@@ -8,8 +8,11 @@ Everything else asserts against strings.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +21,12 @@ import pytest
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
+from pcons.workers.python import PythonWorker
 
 needs_ninja = pytest.mark.skipif(
     shutil.which("ninja") is None, reason="ninja not installed"
 )
+posix_only = pytest.mark.skipif(os.name == "nt", reason="workers need AF_UNIX")
 
 
 def generate(project: Project) -> None:
@@ -200,3 +205,102 @@ def test_a_subdirectory_builds_its_own_edge(tmp_path: Path) -> None:
     assert (tmp_path / "build" / "sub" / "report.txt").read_text(
         encoding="utf-8"
     ) == "from the subdirectory\n"
+
+
+def shadowing_project(tmp_path: Path, **how: Any) -> None:
+    """Two functions named after standard modules, one importing the other's name.
+
+    Each writes a generated module into ``build/pybuilder``, ``pickle.py`` and
+    ``json.py``, which the runner itself and the body's own import would pick
+    up if the runner ran from that directory.
+    """
+    project = Project("e2e", root_dir=tmp_path)
+    env: Any = project.Environment()
+
+    @env.PyBuilder(**how)
+    def pickle(targets, sources):
+        from pathlib import Path
+
+        Path(targets[0]).write_text("ran", encoding="utf-8")
+
+    @env.PyBuilder(**how)
+    def json(targets, sources):
+        import json as imported
+        from pathlib import Path
+
+        Path(targets[0]).write_text(imported.dumps([1]), encoding="utf-8")
+
+    pickle(target="pickled.txt")
+    json(target="dumped.txt")
+    generate(project)
+
+
+@needs_ninja
+def test_a_function_named_like_a_standard_module_does_not_shadow_it(
+    tmp_path: Path,
+) -> None:
+    shadowing_project(tmp_path)
+
+    build(tmp_path)
+
+    assert (tmp_path / "build" / "pickled.txt").read_text(encoding="utf-8") == "ran"
+    assert (tmp_path / "build" / "dumped.txt").read_text(encoding="utf-8") == "[1]"
+
+
+@needs_ninja
+@posix_only
+def test_a_worker_runs_the_runner_copy_without_shadowing(tmp_path: Path) -> None:
+    """The worker chdirs to the build directory and puts the script's own
+    directory on ``sys.path``, the two things the copy depends on."""
+    shadowing_project(tmp_path, worker=PythonWorker(idle_timeout=5))
+
+    build(tmp_path)
+
+    assert (tmp_path / "build" / "pickled.txt").read_text(encoding="utf-8") == "ran"
+    assert (tmp_path / "build" / "dumped.txt").read_text(encoding="utf-8") == "[1]"
+
+
+@needs_ninja
+def test_touching_the_runner_copy_reruns_every_pybuilder_edge_and_nothing_else(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "a.txt").write_text("first\n", encoding="utf-8")
+    project = Project("e2e", root_dir=tmp_path)
+    env: Any = project.Environment()
+    host = project.Environment(name="host")
+    host.build_prefix = "host"
+
+    def make(environment: Any) -> Any:
+        @environment.PyBuilder()
+        def report(targets, sources):
+            from pathlib import Path
+
+            Path(targets[0]).write_text("report", encoding="utf-8")
+
+        return report
+
+    make(env)(target="one.txt", source=["a.txt"])
+    make(host)(target="two.txt", source=["a.txt"])
+    env.Command(
+        target="copy.txt",
+        source=["a.txt"],
+        command=[
+            sys.executable,
+            "-c",
+            "import shutil, sys; shutil.copyfile(sys.argv[1], sys.argv[2])",
+            "$SOURCE",
+            "$TARGET",
+        ],
+    )
+    generate(project)
+    build(tmp_path)
+
+    later = time.time() + 10
+    runner = tmp_path / "build" / "pybuilder" / "pcons-runner" / "pcons-runner.py"
+    os.utime(runner, (later, later))
+    rerun = build(tmp_path)
+
+    assert "one.txt" in rerun
+    assert "two.txt" in rerun
+    assert "copy.txt" not in rerun
+    assert not (tmp_path / "build" / "host" / "pybuilder" / "pcons-runner").exists()

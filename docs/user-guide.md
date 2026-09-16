@@ -2570,7 +2570,7 @@ project.Default(first, second)
 
 Underneath, a `PyBuilder` edge is an ordinary command edge: it takes `restat=` and `worker=` the way `env.Command()` does, and `pcons explain` shows it the same way, as a `(command)` edge with its command line, sources, environment and call site.
 
-The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, writes each call's arguments to a pickle beside it, named after the target it builds, `build/pybuilder/report.txt.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step. Both files are written when pcons resolves the build, not by the call, so a script that only describes the build writes nothing.
+The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, writes each call's arguments to a pickle beside it, named after the target it builds, `build/pybuilder/report.txt.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step. Both files are written when pcons resolves the build, not by the call, so a script that only describes the build writes nothing. The runner that loads them is copied once per build directory, to `build/pybuilder/pcons-runner/pcons-runner.py`, a directory of its own, so `build.ninja` names no file inside the pcons installation.
 
 The function is called as `fn(targets, sources, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
 
@@ -2605,7 +2605,7 @@ two = report(
 
 A lambda, a `functools.partial`, a method and a builtin are all refused: only a plain `def` written out in a build script has source to extract. So is a signature the build-time call could not satisfy, such as one whose first two parameters are keyword-only.
 
-**Rebuilds.** The generated module and the pickle are inputs of the edge, and both are written only when their bytes change. Edit the function body and every edge that reads it re-runs. Change one of a call's arguments and only that edge re-runs. Edit anything else in the build script, a comment or a line above the decoration, and pcons regenerates the build files but no edge re-runs, because nothing any of them depends on moved.
+**Rebuilds.** The generated module, the pickle and the runner copy are inputs of the edge, and all three are written only when their bytes change. Regenerating with a pcons whose runner changed re-runs every PyBuilder edge. Edit the function body and every edge that reads it re-runs. Change one of a call's arguments and only that edge re-runs. Edit anything else in the build script, a comment or a line above the decoration, and pcons regenerates the build files but no edge re-runs, because nothing any of them depends on moved.
 
 **Several environments** are served by a plain Python helper that decorates once per environment. A builder belongs to the environment that decorated it:
 

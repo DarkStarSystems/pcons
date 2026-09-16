@@ -2,10 +2,12 @@
 """Build-time runner for ``env.PyBuilder`` edges.
 
 pcons writes the decorated function's source to a generated module and its
-keyword arguments to a pickle beside it, then emits a build edge shaped like::
+keyword arguments to a pickle beside it, copies this file to
+``pybuilder/pcons-runner/pcons-runner.py`` in the build directory, then emits a
+build edge shaped like::
 
-    python <pcons>/util/pybuilder.py <module.py> <args.pkl> --n-targets N
-        <target>... <source>...
+    python pybuilder/pcons-runner/pcons-runner.py <module.py> <args.pkl>
+        --n-targets N <target>... <source>...
 
 The function name is not on the command line, it travels in the pickle, so the
 generated module and its arguments have one source of truth and one file to
@@ -37,7 +39,7 @@ from typing import Any
 PROTOCOL_VERSION = 1
 
 USAGE = (
-    "Usage: python pybuilder.py <module.py> <args.pkl> "
+    "Usage: python pcons-runner.py <module.py> <args.pkl> "
     "--n-targets N <target>... <source>..."
 )
 

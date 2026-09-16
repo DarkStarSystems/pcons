@@ -640,7 +640,7 @@ class TestEveryPyBuilderRemedyWorks:
         """Make the edge, then run its function the way the runner will."""
         made = builder(**call)
         project.resolve()
-        module, args = (
+        _, module, args = (
             tmp_path / Path(token.path)
             for token in made.output_nodes[0]._build_info["command"]
             if isinstance(token, PathToken)
