@@ -4396,6 +4396,77 @@ class TestSourceDirMismatch:
 
         assert BuildCache(build_dir).get("source_dir") == str(src_b.parent)
 
+    # Under the CLI, the build directory's origin decides: an exported
+    # PCONS_BUILD_DIR pointing at another project's build is refused, a
+    # spelled -B is the user's choice (#190).
+
+    def _two_projects(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """Project a, generated into a/build; the cwd left in project b."""
+        from pcons.core.cache import BuildCache
+
+        self._script(tmp_path / "a", "from pcons import Project\nProject('a')\n")
+        self._script(tmp_path / "b", "from pcons import Project\nProject('b')\n")
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        monkeypatch.chdir(tmp_path / "a")
+        assert _invoke("generate").exit_code == 0
+        a_build = tmp_path / "a" / "build"
+        assert BuildCache(a_build).get("source_dir") == str(tmp_path / "a")
+        monkeypatch.chdir(tmp_path / "b")
+        return a_build
+
+    def test_an_exported_build_dir_of_another_project_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.core.cache import BuildCache
+
+        a_build = self._two_projects(tmp_path, monkeypatch)
+        monkeypatch.setenv("PCONS_BUILD_DIR", str(a_build))
+
+        result = _invoke("generate")
+
+        assert result.exit_code == 1
+        assert "holds the build of the project at" in result.stderr
+        assert str(tmp_path / "a") in result.stderr
+        assert "-B" in result.stderr
+        assert BuildCache(a_build).get("source_dir") == str(tmp_path / "a")
+        assert "for project: a" in (a_build / "build.ninja").read_text()
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            pytest.param(["generate", "-B", "{a_build}"], id="after-the-name"),
+            pytest.param(["-B", "{a_build}", "generate"], id="before-the-name"),
+        ],
+    )
+    def test_a_spelled_build_dir_still_builds_there(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        """-B is explicit, so it keeps the old behaviour, warning included.
+        The environment is set too, so the test proves -B outranks it."""
+        from pcons.core.cache import BuildCache
+
+        a_build = self._two_projects(tmp_path, monkeypatch)
+        monkeypatch.setenv("PCONS_BUILD_DIR", str(a_build))
+
+        result = _invoke(*[arg.format(a_build=a_build) for arg in argv])
+
+        assert result.exit_code == 0
+        assert "starting fresh" in result.stderr
+        assert BuildCache(a_build).get("source_dir") == str(tmp_path / "b")
+
+    def test_an_exported_build_dir_of_this_project_is_fine(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        a_build = self._two_projects(tmp_path, monkeypatch)
+        monkeypatch.chdir(tmp_path / "a")
+        monkeypatch.setenv("PCONS_BUILD_DIR", str(a_build))
+
+        result = _invoke("generate")
+
+        assert result.exit_code == 0
+        assert "holds the build" not in result.stderr
+
 
 class TestEnvOverridesCache:
     """An exported PCONS_* env var overrides the persisted cache (but not a CLI
