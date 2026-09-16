@@ -124,6 +124,7 @@ def emit_both(
     project: Project,
     env: Any,
     name: str,
+    target: object = None,
     kwargs: Mapping[str, Any],
 ) -> tuple[Path, Path]:
     """The three calls one decoration makes, in order.
@@ -136,7 +137,9 @@ def emit_both(
     payload = check_arguments(function, kwargs=kwargs)
     return (
         emit_module(function, project=project, env=env),
-        emit_args(project=project, env=env, name=name, payload=payload),
+        emit_args(
+            project=project, env=env, name=name, target=target or name, payload=payload
+        ),
     )
 
 
@@ -145,6 +148,7 @@ def run_emit(
     env: Any,
     fn: Any,
     name: str = "report",
+    target: object = None,
     kwargs: dict[str, Any] | None = None,
 ) -> tuple[Path, Path]:
     """Every emit in this file goes through here, on one line.
@@ -152,8 +156,14 @@ def run_emit(
     ``validate`` records the caller's location in the generated module's
     header, so calls from two different lines would differ in content for
     that reason alone and no mtime test could say anything.
+
+    *target* defaults to *name* itself, which keeps every call that only
+    cares about the edge's name working the way it did before the pickle
+    started following the target's own path.
     """
-    return emit_both(fn, project=project, env=env, name=name, kwargs=kwargs or {})
+    return emit_both(
+        fn, project=project, env=env, name=name, target=target, kwargs=kwargs or {}
+    )
 
 
 def load(path: Path, name: str) -> ModuleType:
@@ -462,12 +472,33 @@ class TestEmit:
 
         assert target.read_text() == "a"
 
-    def test_a_name_with_a_slash_stays_inside_the_generated_directory(
+    def test_a_target_in_a_subdirectory_nests_the_pickle(
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
-        module_rel, args_rel = run_emit(project, env, writes_sources, name="a/b.txt")
+        module_rel, args_rel = run_emit(
+            project, env, writes_sources, target="out/report.txt"
+        )
 
-        assert args_rel == Path("build/pybuilder/a_b_txt.args.pkl")
+        assert args_rel == Path("build/pybuilder/out/report.txt.args.pkl")
+        assert module_rel == Path("build/pybuilder/writes_sources.py")
+        assert (tmp_path / args_rel).is_file()
+
+    def test_a_target_outside_the_build_directory_falls_back_to_the_name(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """The pickle stays inside the generated directory either way.
+
+        An external target's own node path is absolute, and cannot be
+        expressed relative to the gen dir, so the fallback is the sanitized
+        edge name, today's behaviour, rather than reasoning further about
+        where the pickle should land.
+        """
+        outside = str(tmp_path.parent / "outside.txt")
+        module_rel, args_rel = run_emit(
+            project, env, writes_sources, name="a/b", target=outside
+        )
+
+        assert args_rel == Path("build/pybuilder/a_b.args.pkl")
         assert module_rel == Path("build/pybuilder/writes_sources.py")
         assert (tmp_path / args_rel).is_file()
 
@@ -559,10 +590,18 @@ class TestDuplicates:
     ) -> None:
         function = validate(writes_sources, project=project)
         payload = check_arguments(function, kwargs={})
-        emit_args(project=project, env=env, name="report", payload=payload)
+        emit_args(
+            project=project, env=env, name="report", target="report", payload=payload
+        )
 
         with pytest.raises(PyBuilderError, match=r"report\.args\.pkl"):
-            emit_args(project=project, env=env, name="report", payload=payload)
+            emit_args(
+                project=project,
+                env=env,
+                name="report",
+                target="report",
+                payload=payload,
+            )
 
     def test_the_same_name_in_two_environments_is_fine(
         self, project: Project, env: Any
@@ -607,12 +646,14 @@ class TestOneModuleManyEdges:
             project=project,
             env=env,
             name="one",
+            target="one",
             payload=check_arguments(function, kwargs={"n": 1}),
         )
         second = emit_args(
             project=project,
             env=env,
             name="two",
+            target="two",
             payload=check_arguments(function, kwargs={"n": 2}),
         )
 

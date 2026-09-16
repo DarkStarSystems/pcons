@@ -162,8 +162,8 @@ def test_one_function_makes_two_edges_from_one_module(tmp_path: Path) -> None:
 
     generated = sorted(q.name for q in (tmp_path / "build" / "pybuilder").iterdir())
     assert [q for q in generated if q.endswith((".py", ".pkl"))] == [
-        "both.args.pkl",
-        "just_a.args.pkl",
+        "both.txt.args.pkl",
+        "just_a.txt.args.pkl",
         "report.py",
     ]
     assert (tmp_path / "build" / "both.txt").read_text(

@@ -134,13 +134,13 @@ class TestDecoration:
 
         assert [t.name for t in made] == ["r1", "r2", "r3"]
         assert sorted(q.name for q in (tmp_path / "build" / "pybuilder").iterdir()) == [
-            "r1.args.pkl",
-            "r2.args.pkl",
-            "r3.args.pkl",
+            "r1.txt.args.pkl",
+            "r2.txt.args.pkl",
+            "r3.txt.args.pkl",
             "report.py",
         ]
 
-    def test_the_module_is_named_after_the_function_and_the_pickle_after_the_edge(
+    def test_the_module_is_named_after_the_function_and_the_pickle_after_the_target(
         self, project: Project, env: Any
     ) -> None:
         @env.PyBuilder()
@@ -153,7 +153,7 @@ class TestDecoration:
         assert made.name == "out"
         assert node_tokens(made) == [
             "build/pybuilder/whatever.py",
-            "build/pybuilder/out.args.pkl",
+            "build/pybuilder/out.txt.args.pkl",
         ]
 
     def test_an_explicit_name_wins(self, project: Project, env: Any) -> None:
@@ -192,7 +192,7 @@ class TestCommandShape:
 
         assert node_tokens(report) == [
             "build/pybuilder/report.py",
-            "build/pybuilder/report.args.pkl",
+            "build/pybuilder/report.txt.args.pkl",
         ]
         assert command[4:6] == ["--n-targets", "1"]
         assert command[6] == TargetPath()
@@ -206,7 +206,7 @@ class TestCommandShape:
 
         assert implicit_deps(report) == [
             "build/pybuilder/report.py",
-            "build/pybuilder/report.args.pkl",
+            "build/pybuilder/report.txt.args.pkl",
         ]
 
     def test_the_sources_are_the_scripts_own(self, project: Project, env: Any) -> None:
@@ -322,7 +322,7 @@ class TestGeneratedNinja:
 
         assert node_tokens(made) == [
             "build/sub/pybuilder/report.py",
-            "build/sub/pybuilder/report.args.pkl",
+            "build/sub/pybuilder/report.txt.args.pkl",
         ]
         assert "sub/pybuilder/report.py" in text
         assert "sub/build" not in text
@@ -480,11 +480,11 @@ class TestTheCallDecidesTheSlice:
 
         assert node_tokens(outside) == [
             "build/pybuilder/report.py",
-            "build/pybuilder/outside.args.pkl",
+            "build/pybuilder/outside.txt.args.pkl",
         ]
         assert node_tokens(inside) == [
             "build/sub/pybuilder/report.py",
-            "build/sub/pybuilder/inside.args.pkl",
+            "build/sub/pybuilder/inside.txt.args.pkl",
         ]
         top = tmp_path / "build/pybuilder/report.py"
         under = tmp_path / "build/sub/pybuilder/report.py"
@@ -523,7 +523,37 @@ class TestMultipleEnvironments:
         assert [t.name for t in made] == ["report", "report"]
         assert node_tokens(made[0])[0] == "build/host/pybuilder/report.py"
         assert node_tokens(made[1])[0] == "build/strict/pybuilder/report.py"
+        assert node_tokens(made[0])[1] == "build/host/pybuilder/report.txt.args.pkl"
+        assert node_tokens(made[1])[1] == "build/strict/pybuilder/report.txt.args.pkl"
         assert (tmp_path / "build/host/pybuilder/report.py").is_file()
         assert (tmp_path / "build/strict/pybuilder/report.py").is_file()
         assert "host/report.txt" in text
         assert "strict/report.txt" in text
+
+    def test_two_named_environments_sharing_a_build_directory_write_distinct_pickles(
+        self, project: Project
+    ) -> None:
+        """Neither environment has a build_prefix, so both share one gen
+        dir, and both edges derive the same name, 'report', which
+        ``env.Command`` allows since the environments are named and
+        different. Before the pickle followed the target, both edges
+        wanted ``build/pybuilder/report.args.pkl`` and the second call
+        raised."""
+        one = project.Environment(name="one")
+        two = project.Environment(name="two")
+
+        @one.PyBuilder()
+        def render_one(targets, sources):
+            return 1
+
+        @two.PyBuilder()
+        def render_two(targets, sources):
+            return 1
+
+        first = render_one(target="one/report.txt", source=["a.txt"])
+        second = render_two(target="two/report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert first.name == second.name == "report"
+        assert node_tokens(first)[1] == "build/pybuilder/one/report.txt.args.pkl"
+        assert node_tokens(second)[1] == "build/pybuilder/two/report.txt.args.pkl"

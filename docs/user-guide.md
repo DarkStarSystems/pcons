@@ -2570,7 +2570,7 @@ project.Default(first, second)
 
 Underneath, a `PyBuilder` edge is an ordinary command edge: it takes `restat=` and `worker=` the way `env.Command()` does, and `pcons explain` shows it the same way, as a `(command)` edge with its command line, sources, environment and call site.
 
-The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, each call writes its own arguments to a pickle beside it, `build/pybuilder/report.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
+The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, each call writes its own arguments to a pickle beside it, named after the target it builds, `build/pybuilder/report.txt.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
 
 The function is called as `fn(targets, sources, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
 
@@ -2584,7 +2584,7 @@ The function is called as `fn(targets, sources, **kwargs)`. Both path lists are 
 
 `depfile=` and `deps_style=` are deliberately absent: a function that discovers its own dependencies has to write a make-style depfile by hand, which is a separate subject. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run; see the `env.Command()` section above.
 
-**Edge names.** An edge is named after its first target's stem, and its argument pickle is named after the edge. So two calls of one builder whose targets share a stem — `out/report.txt` and `tmp/report.txt`, or `lorem.txt` and `lorem.c` in a chain — both want `build/pybuilder/report.args.pkl`, and pcons refuses the second one. Give one of them `name=`:
+**Edge names.** An edge is named after its first target's stem, the same rule `env.Command()` uses, and pcons refuses a second target in one environment with the same stem: `out/report.txt` and `tmp/report.txt` both want the edge name `report`, and so do `lorem.txt` and `lorem.c` in a chain. Give one of them `name=`:
 
 ```python
 one = report(target="out/report.txt", source=[src / "a.txt"], title="one")
@@ -2593,7 +2593,7 @@ two = report(
 )
 ```
 
-`name=` is also what `ninja tmp-report` then means. `examples/91_python_builder_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem.
+`name=` is also what `ninja tmp-report` then means. `examples/91_python_builder_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem. The argument pickle plays no part in this: it is named after the target's own build-relative path, `build/pybuilder/out/report.txt.args.pkl` and `build/pybuilder/tmp/report.txt.args.pkl` here, so it never collides on its own.
 
 **Reserved parameter names.** `target`, `source`, `name` and `depends` are refused as parameters of the function, because the call spends them on the edge. Rename them; the error says which ones and what the call does with them.
 

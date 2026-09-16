@@ -446,7 +446,9 @@ def check_arguments(function: ValidatedFunction, *, kwargs: Mapping[str, Any]) -
     )
 
 
-def emit_args(*, project: Project, env: Environment, name: str, payload: bytes) -> Path:
+def emit_args(
+    *, project: Project, env: Environment, name: str, target: object, payload: bytes
+) -> Path:
     """Write one edge's argument pickle.
 
     One edge is one pickle, so this path is exclusive: nothing may share it,
@@ -455,7 +457,10 @@ def emit_args(*, project: Project, env: Environment, name: str, payload: bytes) 
     Args:
         project: Any project of the tree; the claim registry hangs off its top.
         env: The environment whose build directory holds the pickle.
-        name: The edge's name, which the pickle is named after.
+        name: The edge's name, used in a collision message and as the
+            fallback file stem when the target's own path cannot be used.
+        target: The call's ``target=``, the pickle's file name follows its
+            first element's build-relative path.
         payload: What :func:`check_arguments` returned.
 
     Returns:
@@ -464,7 +469,9 @@ def emit_args(*, project: Project, env: Environment, name: str, payload: bytes) 
     Raises:
         PyBuilderError: If another edge already claimed that file.
     """
-    args_rel = _gen_dir(env) / f"{_sanitized(name)}.args.pkl"
+    args_rel = (
+        _gen_dir(env) / f"{_pickle_relpath(env, target, name).as_posix()}.args.pkl"
+    )
     _claim(project, env, args_rel, name, get_caller_location(), owner=None)
     _write_if_changed(project.top_path_resolver.project_root / args_rel, payload)
     return args_rel
@@ -473,6 +480,32 @@ def emit_args(*, project: Project, env: Environment, name: str, payload: bytes) 
 def _gen_dir(env: Environment) -> Path:
     """Where both generated files go, anchored the way a node path is."""
     return anchor_target_paths(env, [Path(GEN_DIR)])[0]
+
+
+def _pickle_relpath(env: Environment, target: object, name: str) -> Path:
+    """The pickle's path relative to the gen dir, from the first target.
+
+    Anchored the same way the target's own node path is, so two named
+    environments sharing one build directory land on different pickles even
+    when their targets share a name, and a target in a subdirectory keeps it,
+    ``out/report.txt`` landing at ``pybuilder/out/report.txt.args.pkl``.
+
+    Falls back to the sanitized edge name, today's behaviour, when the
+    target's anchored path cannot be expressed relative to the gen dir's
+    parent: an absolute target outside the environment's own build
+    directory, or one that climbs out of it with ``..``. Both are rare and
+    already unusual targets; the fallback keeps the pickle inside the gen
+    dir rather than reasoning further about where it should land.
+    """
+    first = target if isinstance(target, (str, Path)) else _as_list(target)[0]
+    anchored = anchor_target_paths(env, [first])[0]
+    try:
+        relative = anchored.relative_to(_gen_dir(env).parent)
+    except ValueError:
+        relative = None
+    if relative is None or ".." in relative.parts:
+        return Path(_sanitized(name))
+    return relative
 
 
 def _describe(fn: Callable[..., object]) -> str:
@@ -1107,8 +1140,10 @@ class PyBuilder:
             target: Output file or files, as ``env.Command`` takes them.
             source: Input files, or None. They arrive as the function's
                 *sources*, in the order written.
-            name: Edge name for ``ninja <name>``, and the argument pickle's
-                file name. Defaults to the first target's stem.
+            name: Edge name for ``ninja <name>``. Defaults to the first
+                target's stem, the same rule ``env.Command`` uses. Does not
+                affect the argument pickle, which is named after the first
+                target's own build-relative path.
             depends: Extra rebuild triggers that are not sources.
             **kwargs: The function's own arguments. Each must be picklable,
                 and together they must fit its signature.
@@ -1126,7 +1161,11 @@ class PyBuilder:
         payload = check_arguments(self._function, kwargs=kwargs)
         module_rel = emit_module(self._function, project=self._project, env=self._env)
         args_rel = emit_args(
-            project=self._project, env=self._env, name=edge_name, payload=payload
+            project=self._project,
+            env=self._env,
+            name=edge_name,
+            target=target,
+            payload=payload,
         )
         interpreter = (self._how.python or sys.executable).replace("\\", "/")
         return self._env.Command(

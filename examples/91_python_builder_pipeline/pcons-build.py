@@ -13,9 +13,10 @@ the point of a builder: two edges, one generated module, one argument pickle
 per edge. The arguments differ, the body does not.
 
 Why every call passes ``name=``: an edge is named after its first target's
-stem, and the pickle is named after the edge. Here ``lorem.txt`` and
-``lorem.c`` share the stem ``lorem``, and so does the program, so three edges
-of one chain would want one pickle. ``name=`` parts them, and it is also what
+stem, the same rule ``env.Command`` uses, which refuses two targets in one
+environment sharing a name. Here ``lorem.txt`` and ``lorem.c`` share the stem
+``lorem``, and so does the program, so three edges of one chain would
+collide on the edge name ``lorem``. ``name=`` parts them, and it is also what
 ``ninja lorem-text`` then means.
 
 Why a byte array rather than a C string literal: the fetched document is

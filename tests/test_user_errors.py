@@ -980,7 +980,7 @@ class TestEveryPyBuilderRemedyWorks:
             if q.suffix in (".py", ".pkl")
         )
 
-        assert generated == ["a.args.pkl", "b.args.pkl", "render.py"]
+        assert generated == ["a.txt.args.pkl", "b.txt.args.pkl", "render.py"]
 
     def test_one_of_the_edges_is_named(self, project_env, tmp_path):
         """'Name one of the edges, name="something-else"'."""
@@ -994,7 +994,7 @@ class TestEveryPyBuilderRemedyWorks:
         second = render(target="sub/report.txt", name="sub-report")
 
         assert second.name == "sub-report"
-        assert (tmp_path / "build/pybuilder/sub_report.args.pkl").is_file()
+        assert (tmp_path / "build/pybuilder/sub/report.txt.args.pkl").is_file()
 
     def test_one_environment_gets_a_build_prefix(self, project_env, tmp_path):
         """ "Give one environment its own build_prefix"."""
@@ -1253,22 +1253,23 @@ class TestPyBuilderErrors:
         )
         assert message.count("render(target=") == 1
 
-    def test_two_edges_deriving_one_name_name_both_and_say_name(self, project_env):
-        """The pickle is per edge, so two edges of one name collide on it."""
+    def test_two_edges_to_one_target_collide_on_the_pickle(self, project_env):
+        """The pickle follows the target, so two edges to one target collide
+        on it even when they are named apart."""
         _, env = project_env
 
         @env.PyBuilder()
         def render(targets, sources):
             return 1
 
-        render(target="report.txt")
+        render(target="report.txt", name="one")
 
         with pytest.raises(PconsError) as caught:
-            render(target="sub/report.txt")
+            render(target="report.txt", name="two")
 
         message = str(caught.value)
-        assert "PyBuilder edge 'report' would overwrite" in message
-        assert "build/pybuilder/report.args.pkl" in message
+        assert "PyBuilder edge 'two' would overwrite" in message
+        assert "build/pybuilder/report.txt.args.pkl" in message
         assert "already written by the edge at " in message
         assert "test_user_errors.py:" in message.split("already written by")[1]
         assert 'Name one of the edges, name="something-else".' in message

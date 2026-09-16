@@ -22,14 +22,14 @@ assert len(set(EXPECTED.values())) == 3, "the three reports are not all differen
 host = sorted(
     q.name for q in Path("build/pybuilder").iterdir() if q.suffix in {".py", ".pkl"}
 )
-assert host == ["report.args.pkl", "report.py", "report2.args.pkl"], host
+assert host == ["report.py", "report.txt.args.pkl", "report2.txt.args.pkl"], host
 
 strict = sorted(
     q.name
     for q in Path("build/strict/pybuilder").iterdir()
     if q.suffix in {".py", ".pkl"}
 )
-assert strict == ["report.args.pkl", "report.py"], strict
+assert strict == ["report.py", "report.txt.args.pkl"], strict
 
 assert (
     Path("build/pybuilder/report.py").read_bytes()
