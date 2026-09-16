@@ -1884,7 +1884,7 @@ class Environment(_EnvironmentStubs):
         calling it makes an edge::
 
             @env.PyBuilder()
-            def report(sources, targets, title):
+            def report(targets, sources, title):
                 from pathlib import Path
 
                 Path(targets[0]).write_text(title + Path(sources[0]).read_text())
@@ -1897,7 +1897,7 @@ class Environment(_EnvironmentStubs):
         The function does not run now. Its source is written once to a
         generated module under the environment's build directory, each call
         writes its own argument pickle beside it, and each edge runs the
-        module at build time with *sources* and *targets* as the build tool
+        module at build time with *targets* and *sources* as the build tool
         spells them.
 
         The arguments here say how the function runs, which is a property of

@@ -59,7 +59,7 @@ env = project.Environment(toolchain="c")
 
 
 @env.PyBuilder()
-def fetch(sources, targets, url, field):
+def fetch(targets, sources, url, field):
     import json
     from pathlib import Path
     from urllib.request import Request, urlopen
@@ -81,7 +81,7 @@ def fetch(sources, targets, url, field):
 
 
 @env.PyBuilder()
-def embed(sources, targets, symbol):
+def embed(targets, sources, symbol):
     from pathlib import Path
 
     data = Path(sources[0]).read_bytes()

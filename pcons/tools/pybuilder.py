@@ -233,7 +233,7 @@ def _reject_reserved_parameters(
         f"{'parameter names' if plural else 'a parameter name'}, and the call "
         f"spends {'those names' if plural else 'that name'} on the edge "
         f"itself. Rename {'them' if plural else 'it'} in the def and at the "
-        f"call: the function receives sources and targets as its first two "
+        f"call: the function receives targets and sources as its first two "
         f"arguments, and everything else as a keyword of the call.",
         at,
     )
@@ -244,7 +244,7 @@ def _reject_uncallable_signature(
 ) -> None:
     """Refuse a signature the build-time call could never satisfy.
 
-    The runner calls ``fn(sources, targets, **kwargs)``. Two shapes make that
+    The runner calls ``fn(targets, sources, **kwargs)``. Two shapes make that
     impossible however the call is written, and both are properties of the
     ``def``, so they are refused where the ``def`` is rather than at the first
     call. Left to ``inspect``, each is reported in the words of the probe
@@ -263,13 +263,13 @@ def _reject_uncallable_signature(
     ]
     if len(slots) < 2 and inspect.Parameter.VAR_POSITIONAL not in kinds:
         raise PyBuilderError(
-            f"PyBuilder {function.__name__}{signature} cannot receive sources "
-            f"and targets: it has "
+            f"PyBuilder {function.__name__}{signature} cannot receive targets "
+            f"and sources: it has "
             f"{'only one parameter' if len(slots) == 1 else 'no parameters'} "
             f"that can be filled positionally. At build time it is called as "
-            f"{function.__name__}(sources, targets, **kwargs), so write the "
+            f"{function.__name__}(targets, sources, **kwargs), so write the "
             f"first two as plain parameters: "
-            f"def {function.__name__}(sources, targets, ...).",
+            f"def {function.__name__}(targets, sources, ...).",
             at,
         )
     late = [p.name for p in parameters[2:] if p.kind is p.POSITIONAL_ONLY]
@@ -278,9 +278,9 @@ def _reject_uncallable_signature(
         raise PyBuilderError(
             f"PyBuilder {function.__name__}{signature} cannot be given "
             f"{_and_list(late)}: {'they are' if plural else 'it is'} "
-            f"positional-only, and everything past sources and targets "
+            f"positional-only, and everything past targets and sources "
             f"arrives as a keyword of the call. Move the / up so it follows "
-            f"targets: def {function.__name__}(sources, targets, /, "
+            f"sources: def {function.__name__}(targets, sources, /, "
             f"{', '.join(late)}).",
             at,
         )
@@ -291,7 +291,7 @@ def _bind_arguments(
 ) -> None:
     """Refuse a call the build-time call would refuse.
 
-    The runner calls ``fn(sources, targets, **kwargs)``, so binding two
+    The runner calls ``fn(targets, sources, **kwargs)``, so binding two
     placeholders and the keywords models that exactly: what binds here runs
     there, and what does not would have raised ``TypeError`` inside a
     generated module, with a traceback pointing at a file nobody wrote.
@@ -319,7 +319,7 @@ def _bind_arguments(
         raise PyBuilderError(
             f"PyBuilder {function.__name__}{signature} cannot be called with "
             f"{given}: {exc}. At build time it is called as "
-            f"{function.__name__}(sources, targets, **kwargs), so everything "
+            f"{function.__name__}(targets, sources, **kwargs), so everything "
             f"past the first two parameters is a keyword of the call.",
             at,
         ) from exc
@@ -1046,7 +1046,7 @@ class PyBuilder:
     calling it makes an edge, the way calling ``env.Program`` does::
 
         @env.PyBuilder()
-        def report(sources, targets, title):
+        def report(targets, sources, title):
             from pathlib import Path
 
             Path(targets[0]).write_text(title)

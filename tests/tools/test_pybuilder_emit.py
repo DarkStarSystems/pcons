@@ -46,11 +46,11 @@ def keep(*args: object, **kwargs: object):
 
 
 @keep()
-def decorated(sources, targets):
+def decorated(targets, sources):
     return len(sources) + len(targets)
 
 
-def documented(sources, targets):
+def documented(targets, sources):
     """A docstring."""
 
     class Inner:
@@ -64,57 +64,57 @@ def documented(sources, targets):
 
 if True:
 
-    def indented(sources, targets):
+    def indented(targets, sources):
         return "indented"
 
 
 def factory(unused):
     @keep()
-    def inner(sources, targets):
+    def inner(targets, sources):
         return "from a factory"
 
     return inner
 
 
 def closing_over(env):
-    def inner(sources, targets):
+    def inner(targets, sources):
         return env
 
     return inner
 
 
 class Holder:
-    def method(self, sources, targets):
+    def method(self, targets, sources):
         return 1
 
 
-async def coroutine(sources, targets):
+async def coroutine(targets, sources):
     return 1
 
 
-def uses_a_script_global(sources, targets):
+def uses_a_script_global(targets, sources):
     return SCRIPT_GLOBAL
 
 
-def writes_sources(sources, targets):
+def writes_sources(targets, sources):
     with open(targets[0], "w") as out:
         out.write("|".join(sources))
 
 
-def takes_arguments(sources, targets, n=0, handle=None):
+def takes_arguments(targets, sources, n=0, handle=None):
     """A body with arguments, for the tests that pass some."""
     return n, handle
 
 
-def defaults_from_the_script(sources, targets, label=SCRIPT_GLOBAL):
+def defaults_from_the_script(targets, sources, label=SCRIPT_GLOBAL):
     return label
 
 
-def annotated(sources, targets, out: Path | None = None) -> Path | None:
+def annotated(targets, sources, out: Path | None = None) -> Path | None:
     return out
 
 
-def uses_dunder_file(sources, targets):
+def uses_dunder_file(targets, sources):
     return __file__
 
 
@@ -189,18 +189,18 @@ def keep(*args, **kwargs):
     return wrap
 
 
-def plain(sources, targets):
+def plain(targets, sources):
     return 1
 
 
 @keep()
-def once(sources, targets):
+def once(targets, sources):
     return 1
 
 
 @keep()
 @keep("a")
-def twice(sources, targets):
+def twice(targets, sources):
     return 1
 
 
@@ -208,13 +208,13 @@ def twice(sources, targets):
     "a",
     "b",
 )
-def multiline(sources, targets):
+def multiline(targets, sources):
     return 1
 
 
 # A comment above the decoration.
 @keep()
-def commented(sources, targets):
+def commented(targets, sources):
     return 1
 """
 
@@ -259,7 +259,7 @@ class TestFunctionSource:
 
     def test_a_function_with_no_readable_source_is_refused(self) -> None:
         namespace: dict[str, Any] = {}
-        exec("def render(sources, targets):\n    return 1\n", namespace)  # noqa: S102
+        exec("def render(targets, sources):\n    return 1\n", namespace)  # noqa: S102
 
         with pytest.raises(PyBuilderError, match="written out in a build script"):
             function_source(namespace["render"])
@@ -268,7 +268,7 @@ class TestFunctionSource:
 class TestRejections:
     def test_a_lambda(self, project: Project, env: Any) -> None:
         with pytest.raises(PyBuilderError, match="lambda"):
-            run_emit(project, env, lambda sources, targets: None)
+            run_emit(project, env, lambda targets, sources: None)
 
     def test_a_closure_names_its_free_variables(
         self, project: Project, env: Any
@@ -306,7 +306,7 @@ class TestRejections:
             load = "a name this module also defines"
 
 
-            def render(sources, targets):
+            def render(targets, sources):
                 with open(targets[0], "w") as out:
                     out.load = 1
                     out.write("ok")
@@ -386,7 +386,7 @@ class TestEmit:
             "from test_pybuilder_emit.py. Do not edit."
         )
         assert "from __future__ import annotations" in text
-        assert "def writes_sources(sources, targets):" in text
+        assert "def writes_sources(targets, sources):" in text
         assert "@" not in text
 
     def test_the_origin_carries_no_line_number(
@@ -424,7 +424,7 @@ class TestEmit:
             from pcons.tools.pybuilder import emit_module, validate
 
 
-            def render(sources, targets):
+            def render(targets, sources):
                 return 1
 
 
@@ -531,7 +531,7 @@ class TestDuplicates:
             tmp_path,
             "first_render",
             """
-            def render(sources, targets):
+            def render(targets, sources):
                 return 1
             """,
         )
@@ -539,7 +539,7 @@ class TestDuplicates:
             tmp_path,
             "second_render",
             """
-            def render(sources, targets):
+            def render(targets, sources):
                 return 2
             """,
         )
@@ -691,7 +691,7 @@ class TestValidatedFunctionIdentity:
         """The factory idiom, which a generated __eq__ would call one function."""
 
         def decorate() -> ValidatedFunction:
-            def render(sources, targets):
+            def render(targets, sources):
                 return 1
 
             return validate(render, project=project)
@@ -902,7 +902,7 @@ class TestWriteIfChanged:
             tmp_path,
             "body_one",
             """
-            def render(sources, targets, n):
+            def render(targets, sources, n):
                 return 1
             """,
         )
@@ -910,7 +910,7 @@ class TestWriteIfChanged:
             tmp_path,
             "body_two",
             """
-            def render(sources, targets, n):
+            def render(targets, sources, n):
                 return 2
             """,
         )

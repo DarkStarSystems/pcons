@@ -139,7 +139,7 @@ def run(
     payload = _load_payload(args_path)
     module = _load_module(module_path, payload["module"])
     function = getattr(module, payload["function"])
-    function(sources, targets, **payload["kwargs"])
+    function(targets, sources, **payload["kwargs"])
 
 
 def main(argv: list[str] | None = None) -> int:

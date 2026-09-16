@@ -88,7 +88,7 @@ def one_source(project: Project, env: Any, **how: Any) -> Target:
     """One edge with one target and one source, resolved."""
 
     @env.PyBuilder(**how)
-    def report(sources, targets):
+    def report(targets, sources):
         from pathlib import Path
 
         Path(targets[0]).write_text(Path(sources[0]).read_text())
@@ -103,7 +103,7 @@ class TestDecoration:
         self, project: Project, env: Any
     ) -> None:
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         assert isinstance(report, PyBuilder)
@@ -111,7 +111,7 @@ class TestDecoration:
 
     def test_the_builder_names_its_function(self, project: Project, env: Any) -> None:
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         assert repr(report) == "<PyBuilder report>"
@@ -126,7 +126,7 @@ class TestDecoration:
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
         @env.PyBuilder()
-        def report(sources, targets, n):
+        def report(targets, sources, n):
             return n
 
         made = [report(target=f"r{n}.txt", source=["a.txt"], n=n) for n in (1, 2, 3)]
@@ -144,7 +144,7 @@ class TestDecoration:
         self, project: Project, env: Any
     ) -> None:
         @env.PyBuilder()
-        def whatever(sources, targets):
+        def whatever(targets, sources):
             return 1
 
         made = whatever(target="out.txt", source=["a.txt"])
@@ -158,7 +158,7 @@ class TestDecoration:
 
     def test_an_explicit_name_wins(self, project: Project, env: Any) -> None:
         @env.PyBuilder()
-        def whatever(sources, targets):
+        def whatever(targets, sources):
             return 1
 
         made = whatever(target="out.txt", name="render", source=["a.txt"])
@@ -169,7 +169,7 @@ class TestDecoration:
         self, project: Project, env: Any
     ) -> None:
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         with pytest.raises(TypeError):
@@ -211,7 +211,7 @@ class TestCommandShape:
 
     def test_the_sources_are_the_scripts_own(self, project: Project, env: Any) -> None:
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         made = report(target="report.txt", source=["b.txt", "a.txt"])
@@ -223,7 +223,7 @@ class TestCommandShape:
         self, project: Project, env: Any
     ) -> None:
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         made = report(target="report.txt")
@@ -234,7 +234,7 @@ class TestCommandShape:
 
     def test_two_targets_are_counted(self, project: Project, env: Any) -> None:
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         made = report(target=["one.txt", "two.txt"], source=["a.txt"])
@@ -250,7 +250,7 @@ class TestCommandShape:
         )
 
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         made = report(target="report.txt", source=[first])
@@ -312,7 +312,7 @@ class TestGeneratedNinja:
             env = child.Environment()
 
             @env.PyBuilder()
-            def report(sources, targets):
+            def report(targets, sources):
                 return 1
 
             made = report(target="report.txt", source=["a.txt"])
@@ -373,7 +373,7 @@ class TestGeneratedNinja:
         """``depends`` is a call option: it says what this edge waits on."""
 
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         made = report(target="report.txt", source=["a.txt"], depends=["b.txt"])
@@ -389,7 +389,7 @@ class TestDecorationOptionsReachEveryEdge:
         self, project: Project, env: Any, tmp_path: Path
     ) -> None:
         @env.PyBuilder(restat=True, worker=PythonWorker())
-        def report(sources, targets, n):
+        def report(targets, sources, n):
             return n
 
         report(target="one.txt", source=["a.txt"], n=1)
@@ -404,7 +404,7 @@ class TestDecorationOptionsReachEveryEdge:
         self, project: Project, env: Any
     ) -> None:
         @env.PyBuilder(python="/usr/bin/python3")
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         made = [report(target=f"r{n}.txt", source=["a.txt"]) for n in (1, 2)]
@@ -427,7 +427,7 @@ class TestArgumentsFitTheSignature:
         """A function that declares **kwargs really does take every keyword."""
 
         @env.PyBuilder()
-        def report(sources, targets, **rest):
+        def report(targets, sources, **rest):
             return rest
 
         made = report(target="out.txt", source=["a.txt"], whatever=1, anything=2)
@@ -469,7 +469,7 @@ class TestTheCallDecidesTheSlice:
         (tmp_path / "sub" / "a.txt").write_text("sub\n", encoding="utf-8")
 
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             return 1
 
         outside = report(target="outside.txt", source=["a.txt"])
@@ -504,7 +504,7 @@ class TestMultipleEnvironments:
 
         def make_report(env: Any, title: str) -> Target:
             @env.PyBuilder()
-            def report(sources, targets, title):
+            def report(targets, sources, title):
                 from pathlib import Path
 
                 Path(targets[0]).write_text(title, encoding="utf-8")

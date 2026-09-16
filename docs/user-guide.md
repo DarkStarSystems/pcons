@@ -2542,7 +2542,7 @@ the link then depends on.
 
 ```python
 @env.PyBuilder()
-def report(sources, targets, title):
+def report(targets, sources, title):
     from pathlib import Path
 
     lines = [title]
@@ -2572,7 +2572,7 @@ Underneath, a `PyBuilder` edge is an ordinary command edge: it takes `restat=` a
 
 The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, each call writes its own arguments to a pickle beside it, `build/pybuilder/report.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
 
-The function is called as `fn(sources, targets, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
+The function is called as `fn(targets, sources, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
 
 **The decoration says how the function runs, the call says what to build.** No option sits at both levels, so two edges that must run differently are two decorations.
 
@@ -2612,7 +2612,7 @@ A lambda, a `functools.partial`, a method and a builtin are all refused: only a 
 ```python
 def make_report(environment):
     @environment.PyBuilder()
-    def report(sources, targets, title):
+    def report(targets, sources, title):
         from pathlib import Path
 
         lines = [title]
@@ -2659,7 +2659,7 @@ worker = PythonWorker()
 
 
 @env.PyBuilder(worker=worker)
-def report(sources, targets):
+def report(targets, sources):
     ...
 
 

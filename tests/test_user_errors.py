@@ -653,7 +653,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, n):
+        def render(targets, sources, n):
             from pathlib import Path
 
             Path(targets[0]).write_text(str(n), encoding="utf-8")
@@ -667,7 +667,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, value):
+        def render(targets, sources, value):
             from pathlib import Path
 
             Path(targets[0]).write_text(str(value), encoding="utf-8")
@@ -681,7 +681,7 @@ class TestEveryPyBuilderRemedyWorks:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             return 1
 
         assert render(target="out.txt").name == "out"
@@ -691,7 +691,7 @@ class TestEveryPyBuilderRemedyWorks:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             return 1
 
         assert render(target="out.txt").name == "out"
@@ -701,7 +701,7 @@ class TestEveryPyBuilderRemedyWorks:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             return 1
 
         assert render(target="out.txt").name == "out"
@@ -713,7 +713,7 @@ class TestEveryPyBuilderRemedyWorks:
 
         def make():
             @env.PyBuilder()
-            def render(sources, targets, title):
+            def render(targets, sources, title):
                 from pathlib import Path
 
                 Path(targets[0]).write_text(title, encoding="utf-8")
@@ -729,7 +729,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             from pathlib import Path
 
             Path(targets[0]).write_text(Path(sources[0]).name, encoding="utf-8")
@@ -743,7 +743,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             import json
             from pathlib import Path
 
@@ -760,7 +760,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, label):
+        def render(targets, sources, label):
             from pathlib import Path
 
             Path(targets[0]).write_text(label, encoding="utf-8")
@@ -776,7 +776,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, SRC_DIR):  # noqa: N803
+        def render(targets, sources, SRC_DIR):  # noqa: N803
             from pathlib import Path
 
             Path(targets[0]).write_text(SRC_DIR, encoding="utf-8")
@@ -794,7 +794,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             from pathlib import Path
 
             def helper(value):
@@ -811,7 +811,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, here):
+        def render(targets, sources, here):
             from pathlib import Path
 
             Path(targets[0]).write_text(Path(here).name, encoding="utf-8")
@@ -831,7 +831,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, input_file):
+        def render(targets, sources, input_file):
             from pathlib import Path
 
             Path(targets[0]).write_text(input_file, encoding="utf-8")
@@ -847,7 +847,7 @@ class TestEveryPyBuilderRemedyWorks:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, title):
+        def render(targets, sources, title):
             return title
 
         assert render(target="out.txt", title="typed from the message").name == "out"
@@ -862,7 +862,7 @@ class TestEveryPyBuilderRemedyWorks:
         )
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             return sources
 
         edge = render(target="out.txt", source=[made])
@@ -875,7 +875,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             return sources
 
         edge = render(target="out.txt", source=[project.node("src/main.c")])
@@ -888,7 +888,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, env_name):
+        def render(targets, sources, env_name):
             from pathlib import Path
 
             Path(targets[0]).write_text(env_name, encoding="utf-8")
@@ -905,7 +905,7 @@ class TestEveryPyBuilderRemedyWorks:
         env.cc.flags = ["-O2"]
 
         @env.PyBuilder()
-        def render(sources, targets, flags):
+        def render(targets, sources, flags):
             from pathlib import Path
 
             Path(targets[0]).write_text(" ".join(flags), encoding="utf-8")
@@ -921,7 +921,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, path):
+        def render(targets, sources, path):
             from pathlib import Path
 
             Path(targets[0]).write_text(Path(path).read_text(encoding="utf-8"))
@@ -944,14 +944,14 @@ class TestEveryPyBuilderRemedyWorks:
         first = build_script_function(
             tmp_path / "one",
             """
-            def render(sources, targets):
+            def render(targets, sources):
                 return 1
             """,
         )
         second = build_script_function(
             tmp_path / "two",
             """
-            def render_more(sources, targets):
+            def render_more(targets, sources):
                 return 2
             """,
             name="render_more",
@@ -968,7 +968,7 @@ class TestEveryPyBuilderRemedyWorks:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             return 1
 
         render(target="a.txt")
@@ -987,7 +987,7 @@ class TestEveryPyBuilderRemedyWorks:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             return 1
 
         render(target="report.txt")
@@ -1005,7 +1005,7 @@ class TestEveryPyBuilderRemedyWorks:
 
         def decorate(environment):
             @environment.PyBuilder()
-            def render(sources, targets):
+            def render(targets, sources):
                 return 1
 
             return render
@@ -1017,21 +1017,21 @@ class TestEveryPyBuilderRemedyWorks:
         assert (tmp_path / "build/other/pybuilder/render.py").is_file()
 
     def test_the_first_two_parameters_become_positional(self, project_env):
-        """ "write the first two as plain parameters: def f(sources, targets, ...)"."""
+        """ "write the first two as plain parameters: def f(targets, sources, ...)"."""
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, title):
+        def render(targets, sources, title):
             return title
 
         assert render(target="out.txt", title="t").name == "out"
 
-    def test_the_slash_moves_up_to_follow_targets(self, project_env, tmp_path):
-        """ "Move the / up so it follows targets: def f(sources, targets, /, title)"."""
+    def test_the_slash_moves_up_to_follow_sources(self, project_env, tmp_path):
+        """ "Move the / up so it follows sources: def f(targets, sources, /, title)"."""
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, /, title):
+        def render(targets, sources, /, title):
             from pathlib import Path
 
             Path(targets[0]).write_text(title, encoding="utf-8")
@@ -1047,7 +1047,7 @@ class TestEveryPyBuilderRemedyWorks:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, title):
+        def render(targets, sources, title):
             return title
 
         edge = render(target="out.txt", source=["src/main.c"], title="t")
@@ -1069,7 +1069,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         with pytest.raises(PconsError) as caught:
-            env.PyBuilder()(lambda sources, targets: None)
+            env.PyBuilder()(lambda targets, sources: None)
 
         message = str(caught.value)
         assert "PyBuilder was given a lambda." in message
@@ -1082,7 +1082,7 @@ class TestPyBuilderErrors:
 
         def make():
             @env.PyBuilder()
-            def render(sources, targets):
+            def render(targets, sources):
                 return title
 
             return render
@@ -1105,7 +1105,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(sources, targets):
+            def render(targets, sources):
                 return Path(targets[0])
 
         message = str(caught.value)
@@ -1118,7 +1118,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(sources, targets, n=PYBUILDER_DEFAULT):
+            def render(targets, sources, n=PYBUILDER_DEFAULT):
                 return n
 
         message = str(caught.value)
@@ -1139,7 +1139,7 @@ class TestPyBuilderErrors:
         )
 
         @env.PyBuilder()
-        def render(sources, targets, t):
+        def render(targets, sources, t):
             return t
 
         with pytest.raises(PconsError) as caught:
@@ -1161,7 +1161,7 @@ class TestPyBuilderErrors:
         )
 
         @env.PyBuilder()
-        def render(sources, targets, inputs):
+        def render(targets, sources, inputs):
             return inputs
 
         with pytest.raises(PconsError) as caught:
@@ -1173,7 +1173,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, e):
+        def render(targets, sources, e):
             return e
 
         with pytest.raises(PconsError) as caught:
@@ -1190,7 +1190,7 @@ class TestPyBuilderErrors:
         handle = (tmp_path / "src" / "main.c").open()
 
         @env.PyBuilder()
-        def render(sources, targets, f):
+        def render(targets, sources, f):
             return f
 
         with pytest.raises(PconsError) as caught:
@@ -1206,7 +1206,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, f, g):
+        def render(targets, sources, f, g):
             return f, g
 
         with pytest.raises(PconsError) as caught:
@@ -1219,7 +1219,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, title):
+        def render(targets, sources, title):
             return title
 
         with pytest.raises(PconsError) as caught:
@@ -1237,7 +1237,7 @@ class TestPyBuilderErrors:
             VERSION = "1.0"
 
 
-            def render(sources, targets):
+            def render(targets, sources):
                 return SRC_DIR + VERSION
             """,
         )
@@ -1258,7 +1258,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets):
+        def render(targets, sources):
             return 1
 
         render(target="report.txt")
@@ -1279,7 +1279,7 @@ class TestPyBuilderErrors:
 
         def decorate():
             @env.PyBuilder()
-            def render(sources, targets):
+            def render(targets, sources):
                 return 1
 
             return render
@@ -1299,23 +1299,23 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, title):
+        def render(targets, sources, title):
             return title
 
         with pytest.raises(PconsError) as caught:
             render(target="out.txt", titel="typo")
 
         message = str(caught.value)
-        assert "render(sources, targets, title) cannot be called with" in message
+        assert "render(targets, sources, title) cannot be called with" in message
         assert "titel: missing a required argument: 'title'" in message
-        assert "render(sources, targets, **kwargs)" in message
+        assert "render(targets, sources, **kwargs)" in message
         assert caught.value.location.lineno > 0
 
     def test_a_missing_argument_is_refused_at_the_call(self, project_env):
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, title):
+        def render(targets, sources, title):
             return title
 
         with pytest.raises(PconsError, match="missing a required argument: 'title'"):
@@ -1327,7 +1327,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(sources, targets, source):
+            def render(targets, sources, source):
                 return source
 
         message = str(caught.value)
@@ -1341,7 +1341,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(sources, targets, depends, target):
+            def render(targets, sources, depends, target):
                 return depends, target
 
         message = str(caught.value)
@@ -1356,13 +1356,13 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(*, sources, targets, title):
+            def render(*, targets, sources, title):
                 return title
 
         message = str(caught.value)
-        assert "cannot receive sources and targets" in message
+        assert "cannot receive targets and sources" in message
         assert "no parameters that can be filled positionally" in message
-        assert "def render(sources, targets, ...)." in message
+        assert "def render(targets, sources, ...)." in message
         assert "positional arguments" not in message
 
     def test_one_positional_slot_is_still_one_too_few(self, project_env):
@@ -1371,7 +1371,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(sources, *, targets):
+            def render(targets, *, sources):
                 return 1
 
         assert "only one parameter that can be filled positionally" in str(caught.value)
@@ -1384,13 +1384,13 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(sources, targets, title, /):
+            def render(targets, sources, title, /):
                 return title
 
         message = str(caught.value)
         assert "cannot be given title: it is positional-only" in message
-        assert "everything past sources and targets arrives as a keyword" in message
-        assert "def render(sources, targets, /, title)." in message
+        assert "everything past targets and sources arrives as a keyword" in message
+        assert "def render(targets, sources, /, title)." in message
 
     def test_two_positional_only_parameters_are_named_together(self, project_env):
         _, env = project_env
@@ -1398,19 +1398,19 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(sources, targets, title, count, /):
+            def render(targets, sources, title, count, /):
                 return title, count
 
         message = str(caught.value)
         assert "cannot be given title and count: they are positional-only" in message
-        assert "def render(sources, targets, /, title, count)." in message
+        assert "def render(targets, sources, /, title, count)." in message
 
-    def test_a_slash_after_targets_is_accepted(self, project_env):
-        """The good shape: only parameters past targets must take keywords."""
+    def test_a_slash_after_sources_is_accepted(self, project_env):
+        """The good shape: only parameters past sources must take keywords."""
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, /, title):
+        def render(targets, sources, /, title):
             return title
 
         assert render(target="out.txt", title="t").name == "out"
@@ -1420,7 +1420,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, title):
+        def render(targets, sources, title):
             return title
 
         with pytest.raises(PconsError) as caught:
@@ -1436,7 +1436,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, title):
+        def render(targets, sources, title):
             return title
 
         with pytest.raises(PconsError) as caught:
@@ -1459,7 +1459,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, env):
+        def render(targets, sources, env):
             return env
 
         made = render(target="out.txt", env="production")
@@ -1474,14 +1474,14 @@ class TestPyBuilderErrors:
         first = build_script_function(
             tmp_path / "one",
             """
-            def render(sources, targets):
+            def render(targets, sources):
                 return 1
             """,
         )
         second = build_script_function(
             tmp_path / "two",
             """
-            def render(sources, targets):
+            def render(targets, sources):
                 return 2
             """,
         )
@@ -1502,7 +1502,7 @@ class TestPyBuilderErrors:
     def test_a_partial_says_to_pass_the_function(self, project_env):
         _, env = project_env
 
-        def render(sources, targets, n):
+        def render(targets, sources, n):
             return n
 
         with pytest.raises(PconsError) as caught:
@@ -1516,7 +1516,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         class Holder:
-            def render(self, sources, targets):
+            def render(self, targets, sources):
                 return 1
 
         with pytest.raises(PconsError) as caught:
@@ -1533,7 +1533,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         class Holder:
-            def render(self, sources, targets):
+            def render(self, targets, sources):
                 return 1
 
         with pytest.raises(PconsError, match="move the def out of the class"):
@@ -1545,7 +1545,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError, match="Write it as a plain def"):
 
             @env.PyBuilder()
-            async def render(sources, targets):
+            async def render(targets, sources):
                 return 1
 
     def test_dunder_file_says_what_it_would_name(self, project_env):
@@ -1554,7 +1554,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
 
             @env.PyBuilder()
-            def render(sources, targets):
+            def render(targets, sources):
                 return __file__
 
         message = str(caught.value)
@@ -1569,7 +1569,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         with pytest.raises(PconsError) as caught:
-            env.PyBuilder()(lambda sources, targets: None)
+            env.PyBuilder()(lambda targets, sources: None)
 
         location = caught.value.location
         assert location is not None
@@ -1589,7 +1589,7 @@ class TestPyBuilderErrors:
                 return value
 
 
-            def render(sources, targets):
+            def render(targets, sources):
                 return helper(1)
             """,
         )
@@ -1614,7 +1614,7 @@ class TestPyBuilderErrors:
             from os.path import join
 
 
-            def render(sources, targets):
+            def render(targets, sources):
                 return join("a", "b")
             """,
         )
@@ -1635,7 +1635,7 @@ class TestPyBuilderErrors:
             import json
 
 
-            def render(sources, targets):
+            def render(targets, sources):
                 return json.dumps({})
             """,
         )
@@ -1648,7 +1648,7 @@ class TestPyBuilderErrors:
         _, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, cc):
+        def render(targets, sources, cc):
             return cc
 
         with pytest.raises(PconsError) as caught:
@@ -1667,7 +1667,7 @@ class TestPyBuilderErrors:
         )
 
         @env.PyBuilder()
-        def render(sources, targets, m):
+        def render(targets, sources, m):
             return m
 
         with pytest.raises(PconsError) as caught:
@@ -1684,7 +1684,7 @@ class TestPyBuilderErrors:
         )
 
         @env.PyBuilder()
-        def render(sources, targets, s):
+        def render(targets, sources, s):
             return s
 
         with pytest.raises(PconsError) as caught:
@@ -1697,7 +1697,7 @@ class TestPyBuilderErrors:
         project, env = project_env
 
         @env.PyBuilder()
-        def render(sources, targets, n):
+        def render(targets, sources, n):
             return n
 
         with pytest.raises(PconsError) as caught:
@@ -1722,7 +1722,7 @@ class TestPyBuilderErrors:
         looping["t"] = made
 
         @env.PyBuilder()
-        def render(sources, targets, loop):
+        def render(targets, sources, loop):
             return loop
 
         with pytest.raises(PconsError, match="is the target 'made'"):
@@ -1731,7 +1731,7 @@ class TestPyBuilderErrors:
     def test_a_renamed_lambda_says_its_source_is_not_a_def(self, project_env):
         """Reaches the ast fallback: __name__ says def, the source says lambda."""
         _, env = project_env
-        renamed = lambda sources, targets: None  # noqa: E731
+        renamed = lambda targets, sources: None  # noqa: E731
         renamed.__name__ = "renamed"
 
         with pytest.raises(PconsError) as caught:

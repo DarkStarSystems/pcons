@@ -40,7 +40,7 @@ src = project.root_dir / "src"
 REPORT_ACTION = """
 
 @env.PyBuilder()
-def report(sources, targets, title):
+def report(targets, sources, title):
     from pathlib import Path
 
     lines = [title]
@@ -53,7 +53,7 @@ def report(sources, targets, title):
 PIPELINE_ACTIONS = """
 
 @env.PyBuilder()
-def fetch(sources, targets, url, field):
+def fetch(targets, sources, url, field):
     import json
     from pathlib import Path
     from urllib.request import Request, urlopen
@@ -72,7 +72,7 @@ def fetch(sources, targets, url, field):
 
 
 @env.PyBuilder()
-def embed(sources, targets, symbol):
+def embed(targets, sources, symbol):
     from pathlib import Path
 
     data = Path(sources[0]).read_bytes()

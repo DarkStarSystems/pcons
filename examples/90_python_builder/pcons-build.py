@@ -21,7 +21,7 @@ Three rules follow from the function travelling alone:
 3. The decorated name is a builder, and the call returns the ``Target`` that
    ``project.Default`` takes.
 
-The function is called as ``fn(sources, targets, **kwargs)``, with the paths
+The function is called as ``fn(targets, sources, **kwargs)``, with the paths
 spelled as the build tool sees them.
 
 The edge's name defaults to the first target's stem, and the argument pickle
@@ -50,7 +50,7 @@ def make_report(environment):
     """One decoration per environment, which is the pcons idiom."""
 
     @environment.PyBuilder()
-    def report(sources, targets, title):
+    def report(targets, sources, title):
         from pathlib import Path
 
         lines = [title]

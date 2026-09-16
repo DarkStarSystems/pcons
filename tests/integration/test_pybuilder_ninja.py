@@ -51,7 +51,7 @@ def sources_project(tmp_path: Path, title: str) -> Project:
     env: Any = project.Environment()
 
     @env.PyBuilder()
-    def report(sources, targets, title):
+    def report(targets, sources, title):
         from pathlib import Path
 
         body = "".join(Path(name).read_text(encoding="utf-8") for name in sources)
@@ -118,7 +118,7 @@ def test_two_targets_and_no_sources(tmp_path: Path) -> None:
     env: Any = project.Environment()
 
     @env.PyBuilder()
-    def split(sources, targets, n):
+    def split(targets, sources, n):
         from pathlib import Path
 
         for index, name in enumerate(targets):
@@ -149,7 +149,7 @@ def test_one_function_makes_two_edges_from_one_module(tmp_path: Path) -> None:
     env: Any = project.Environment()
 
     @env.PyBuilder()
-    def report(sources, targets, title):
+    def report(targets, sources, title):
         from pathlib import Path
 
         body = "".join(Path(name).read_text(encoding="utf-8") for name in sources)
@@ -185,7 +185,7 @@ def test_a_subdirectory_builds_its_own_edge(tmp_path: Path) -> None:
         env: Any = child.Environment()
 
         @env.PyBuilder()
-        def report(sources, targets):
+        def report(targets, sources):
             from pathlib import Path
 
             Path(targets[0]).write_text(

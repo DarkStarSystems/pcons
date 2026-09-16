@@ -18,19 +18,27 @@ from pcons.util.pybuilder import PROTOCOL_VERSION, USAGE, main, run
 RUNNER = pybuilder.__file__
 
 WRITE_SOURCES = """
-def render(sources, targets):
+def render(targets, sources):
     with open(targets[0], "w") as out:
         out.write("|".join(sources))
 """
 
+COPY_SOURCE_CONTENT = """
+def render(targets, sources):
+    with open(sources[0]) as handle:
+        content = handle.read()
+    with open(targets[0], "w") as out:
+        out.write(content)
+"""
+
 WITH_KWARGS = """
-def render(sources, targets, n, label):
+def render(targets, sources, n, label):
     with open(targets[0], "w") as out:
         out.write(f"{label}:{n}:{len(sources)}")
 """
 
 NO_PATHS = """
-def render(sources, targets, out_path):
+def render(targets, sources, out_path):
     with open(out_path, "w") as out:
         out.write(f"{sources}{targets}")
 """
@@ -40,7 +48,7 @@ class Boom(Exception):
     pass
 
 
-def render(sources, targets):
+def render(targets, sources):
     raise Boom("the function failed")
 """
 
@@ -48,7 +56,7 @@ RAISES_ON_IMPORT = """
 raise RuntimeError("the module failed to import")
 
 
-def render(sources, targets):
+def render(targets, sources):
     return 1
 """
 
@@ -65,7 +73,7 @@ class Point:
 BLOB = pickle.dumps(Point(3))
 
 
-def render(sources, targets):
+def render(targets, sources):
     with open(targets[0], "wb") as out:
         out.write(BLOB)
 """
@@ -114,13 +122,25 @@ def build(
 class TestRun:
     """The runner calls the recorded function."""
 
-    def test_sources_and_targets_reach_the_function(self, tmp_path: Path) -> None:
+    def test_targets_and_sources_reach_the_function(self, tmp_path: Path) -> None:
         module, args = build(tmp_path, "plain", WRITE_SOURCES)
         target = tmp_path / "out.txt"
 
         run(module, args, [str(target)], ["a.txt", "b.txt"])
 
         assert target.read_text() == "a.txt|b.txt"
+
+    def test_the_target_receives_the_sources_content(self, tmp_path: Path) -> None:
+        """Proves the direction: the source's bytes land in the target, and
+        not, if the two were swapped, the other way round."""
+        source = tmp_path / "in.txt"
+        source.write_text("payload", encoding="utf-8")
+        module, args = build(tmp_path, "roundtrip", COPY_SOURCE_CONTENT)
+        target = tmp_path / "out.txt"
+
+        run(module, args, [str(target)], [str(source)])
+
+        assert target.read_text() == "payload"
 
     def test_kwargs_reach_the_function(self, tmp_path: Path) -> None:
         module, args = build(
