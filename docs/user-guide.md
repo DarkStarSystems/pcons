@@ -2574,6 +2574,10 @@ The function does not run while the build is described. pcons writes its source 
 
 The function is called as `fn(targets, sources, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written. Its return value is reserved and must be `None`.
 
+**What the function sees.** `targets`, `sources`, and the call's own keywords, and nothing else. No context object, no implicit handle on the build script, the environment or the project: the closure ban and the script-global ban below are exactly what keeps a function from reaching past its own parameters. A file the function opens without naming it in `source=` is not a declared input of the edge.
+
+**When the keywords are fixed.** At the call, while the build is described, not at resolve and not at build time. So the call can pass anything the script already has by then: a plain value, `env.cc.cmd`, or an already-expanded `env.subst_list("$cc.flags")`. It cannot pass a `Target` or a `Node`: both are refused as keywords, for the reason given below. Put it in `source=` instead, and the function receives its output paths in `sources`. A pcons value is refused too, because unpickling it at build time would import pcons: `list(env.cc.flags)` or `env.subst_list("$cc.flags")` works, `env.cc.flags` itself does not.
+
 **The decoration says how the function runs, the call says what to build.** No option sits at both levels, so two edges that must run differently are two decorations.
 
 | on `env.PyBuilder()` | on the call |
@@ -2582,7 +2586,9 @@ The function is called as `fn(targets, sources, **kwargs)`. Both path lists are 
 | `cwd=`, `launcher=`, `env_vars=` | `name=`, `depends=` |
 | `restat=`, `write_if_different=` | the function's own arguments, as plain keywords |
 
-`depfile=` and `deps_style=` are deliberately absent: a function that discovers its own dependencies has to write a make-style depfile by hand, which is a separate subject. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run; see the `env.Command()` section above.
+`depfile=` and `deps_style=` are not supported. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
+
+**Discovered outputs.** `target=` is fixed at the call, so one call cannot declare an output whose name or count only another edge's result decides. [Staged Generation](#staged-generation-targets-discovered-mid-build) still gets there, no new mechanism needed: a first call whose only declared target is a small manifest, and a second call, made from inside a `project.when_generated()` block once ninja has built that manifest and re-run pcons, whose targets come from what it says. `examples/57_staged_generation` is the worked example. It uses `env.Command()` for both calls, and a `PyBuilder()` call plays the same role there.
 
 **Edge names.** An edge is named after its first target's stem, the same rule `env.Command()` uses, and pcons refuses a second target in one environment with the same stem: `out/report.txt` and `tmp/report.txt` both want the edge name `report`, and so do `lorem.txt` and `lorem.c` in a chain. Give one of them `name=`:
 
