@@ -137,11 +137,18 @@ def run(
 
     Raises:
         AttributeError: If the module holds no function of the recorded name.
+        TypeError: If the function returns anything other than ``None``.
     """
     payload = _load_payload(args_path)
     module = _load_module(module_path, payload["module"])
     function = getattr(module, payload["function"])
-    function(targets, sources, **payload["kwargs"])
+    result = function(targets, sources, **payload["kwargs"])
+    if result is not None:
+        raise TypeError(
+            f"{payload['function']}() returned {type(result).__name__}. A "
+            f"PyBuilder function must return None: its return value is "
+            f"reserved."
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

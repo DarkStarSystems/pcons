@@ -60,6 +60,26 @@ def render(targets, sources):
     return 1
 """
 
+RETURNS_NONE = """
+def render(targets, sources):
+    return None
+"""
+
+RETURNS_ZERO = """
+def render(targets, sources):
+    return 0
+"""
+
+RETURNS_EMPTY_LIST = """
+def render(targets, sources):
+    return []
+"""
+
+RETURNS_EMPTY_DICT = """
+def render(targets, sources):
+    return {}
+"""
+
 DATACLASS = """
 import pickle
 from dataclasses import dataclass
@@ -184,6 +204,32 @@ class TestRun:
         module, args = build(tmp_path, "boom", RAISES)
 
         with pytest.raises(Exception, match="the function failed"):
+            run(module, args, [], [])
+
+    def test_a_function_returning_none_passes(self, tmp_path: Path) -> None:
+        module, args = build(tmp_path, "returnsnone", RETURNS_NONE)
+
+        run(module, args, [], [])
+
+    def test_a_function_returning_zero_fails(self, tmp_path: Path) -> None:
+        """0 is falsy: a lenient `if result:` check would wave it through."""
+        module, args = build(tmp_path, "returnszero", RETURNS_ZERO)
+
+        with pytest.raises(TypeError, match=r"render\(\) returned int"):
+            run(module, args, [], [])
+
+    def test_a_function_returning_an_empty_list_fails(self, tmp_path: Path) -> None:
+        """[] is falsy too: a lenient `if result:` check would wave it through."""
+        module, args = build(tmp_path, "returnslist", RETURNS_EMPTY_LIST)
+
+        with pytest.raises(TypeError, match=r"render\(\) returned list"):
+            run(module, args, [], [])
+
+    def test_a_function_returning_an_empty_dict_fails(self, tmp_path: Path) -> None:
+        """{} is falsy too: a lenient `if result:` check would wave it through."""
+        module, args = build(tmp_path, "returnsdict", RETURNS_EMPTY_DICT)
+
+        with pytest.raises(TypeError, match=r"render\(\) returned dict"):
             run(module, args, [], [])
 
     def test_a_module_that_fails_to_import_leaves_nothing_behind(

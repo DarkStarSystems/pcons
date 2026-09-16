@@ -2572,7 +2572,7 @@ Underneath, a `PyBuilder` edge is an ordinary command edge: it takes `restat=` a
 
 The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, writes each call's arguments to a pickle beside it, named after the target it builds, `build/pybuilder/report.txt.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step. Both files are written when pcons resolves the build, not by the call, so a script that only describes the build writes nothing. The runner that loads them is copied once per build directory, to `build/pybuilder/pcons-runner/pcons-runner.py`, a directory of its own, so `build.ninja` names no file inside the pcons installation.
 
-The function is called as `fn(targets, sources, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
+The function is called as `fn(targets, sources, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written. Its return value is reserved and must be `None`.
 
 **The decoration says how the function runs, the call says what to build.** No option sits at both levels, so two edges that must run differently are two decorations.
 
