@@ -64,6 +64,19 @@ alone; a bare `pcons` builds them all.
 | `-j N`, `--jobs N` | Parallel build jobs |
 | `--ninja PROG` | Ninja-compatible runner to invoke, e.g. `n2`. Defaults to `$NINJA`, then `ninja` |
 | `--watch` | Build, then rebuild whenever a watched file changes; Ctrl-C to stop. See [Watching for changes](user-guide.md#watching-for-changes) |
+| `--no-converge-check` | Skip the check that the build converged (below) |
+
+After a successful ninja build, pcons asks ninja whether it still has work to
+do, and warns if so. A command that never creates the output it declares (or
+declares it at one path and writes it at another) reruns on every build and
+says nothing; a second `pcons` would do the same work again. The check is a
+dry run, a few milliseconds even on a large tree:
+
+```
+WARNING: the build did not converge: ninja still has work to do right after a
+successful build ... Ninja explains:
+WARNING:     output declared.txt doesn't exist
+```
 
 ### `pcons clean`
 

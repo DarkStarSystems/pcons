@@ -1056,13 +1056,24 @@ def build_options(f: F) -> F:
     """Options that affect how the build is run, not how it is generated."""
     # n2 is a ninja-compatible runner (Rust rewrite of Ninja) with more advanced
     # rebuild tracking.
-    return click.option(
+    f = click.option(
         "--ninja",
         metavar="PROG",
         shell_complete=_complete_runner,
         help=(
             "Ninja-compatible runner to invoke (e.g., 'n2'). "
             "Defaults to the NINJA env var, then 'ninja'."
+        ),
+    )(f)
+    return click.option(
+        "--no-converge-check",
+        "converge_check",
+        is_flag=True,
+        flag_value=False,
+        default=True,
+        help=(
+            "Skip the check, after a successful ninja build, that ninja has "
+            "no work left to do"
         ),
     )(f)
 

@@ -1228,7 +1228,6 @@ def _watch(
     *,
     build: Callable[[], tuple[int, list[Path]]],
     script: Path | None,
-    targets: list[str] | None = None,
     ninja: str | None = None,
 ) -> int:
     """Run *build*, then run it again whenever a watched file changes.
@@ -1269,10 +1268,6 @@ def _watch(
             if mtime != manifest_mtimes.get(build_dir):
                 manifest_mtimes[build_dir] = mtime
                 outputs[build_dir] = ninja_outputs(build_dir, ninja)
-
-        if code == 0:
-            for build_dir in settled_dirs:
-                _warn_unconverged(unconverged_reasons(build_dir, targets, ninja))
         return code
 
     try:
@@ -1333,16 +1328,26 @@ def _run_build_tool(
     verbose: bool = False,
     ninja: str | None = None,
     variant: str | None = None,
+    converge_check: bool = True,
 ) -> int:
-    """Run whichever build tool matches the files already in *build_dir*."""
+    """Run whichever build tool matches the files already in *build_dir*.
+
+    After a successful ninja build, *converge_check* asks ninja whether it
+    still has work to do and warns if so: a command that never creates the
+    output it declares reruns on every build and says nothing. One dry run
+    costs a few milliseconds even on a large tree.
+    """
     ninja_file = build_dir / "build.ninja"
     makefile = build_dir / "Makefile"
     xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
 
     if ninja_file.exists():
-        return run_ninja(
+        code = run_ninja(
             build_dir, targets=targets, jobs=jobs, verbose=verbose, runner=ninja
         )
+        if code == 0 and converge_check:
+            _warn_unconverged(unconverged_reasons(build_dir, targets, ninja))
+        return code
     elif makefile.exists():
         return run_make(build_dir, targets=targets, jobs=jobs, verbose=verbose)
     elif xcodeproj_files:
@@ -1584,6 +1589,7 @@ def _build(
     ninja: str | None = None,
     variant: str | None = None,
     force_regenerate: bool = False,
+    converge_check: bool = True,
 ) -> tuple[int, list[Path]]:
     """Run one build, regenerating first if the build files are stale.
 
@@ -1631,6 +1637,7 @@ def _build(
             verbose=verbose,
             ninja=ninja,
             variant=variant,
+            converge_check=converge_check,
         ), [build_dir]
 
     plan = _route_targets(projects, targets)
@@ -1648,6 +1655,7 @@ def _build(
             verbose=verbose,
             ninja=ninja,
             variant=variant,
+            converge_check=converge_check,
         )
         if code != 0:
             return code, built
@@ -2522,6 +2530,7 @@ def cli_build(
     ninja: str | None,
     watch: bool,
     jobs: int | None,
+    converge_check: bool,
     extra: tuple[str, ...],
     **declared_but_unused: object,
 ) -> None:
@@ -2564,6 +2573,7 @@ def cli_build(
             ninja=ninja,
             variant=variant,
             force_regenerate=force,
+            converge_check=converge_check,
         )
 
     if watch:
@@ -2571,7 +2581,6 @@ def cli_build(
             _watch(
                 build=build_once,
                 script=_resolve_build_script(script),
-                targets=targets,
                 ninja=ninja,
             )
         )
@@ -3301,6 +3310,7 @@ def cli_default(
     ninja: str | None,
     watch: bool,
     jobs: int | None,
+    converge_check: bool,
     extra: tuple[str, ...],
     **declared_but_unused: object,
 ) -> None:
@@ -3350,6 +3360,7 @@ def cli_default(
             ninja=ninja,
             variant=variant,
             force_regenerate=force,
+            converge_check=converge_check,
         )
 
     # _build generates on its own when the build files are stale, which is the
@@ -3359,7 +3370,6 @@ def cli_default(
             _watch(
                 build=build_once,
                 script=_resolve_build_script(script),
-                targets=targets,
                 ninja=ninja,
             )
         )
@@ -3382,6 +3392,7 @@ def cli_default(
             verbose=verbose,
             ninja=ninja,
             variant=variant,
+            converge_check=converge_check,
         )[0]
     )
 
