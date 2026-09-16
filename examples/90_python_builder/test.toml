@@ -42,3 +42,8 @@ expect_no_rebuild = ["report.txt", "report2.txt", "strict*report.txt"]
 description = "A comment does not re-run the function, a changed body re-runs all three edges"
 run = "uv run python rebuild_check.py"
 expect_stdout = "rebuild ok"
+
+[skip]
+# The example declares one target name in two environments, which ninja allows
+# and the Xcode generator refuses: it identifies a target by its name.
+generators = ["xcode"]

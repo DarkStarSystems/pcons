@@ -48,3 +48,8 @@ expect_no_rebuild = ["lorem.txt", "motto.txt", "lorem.c", "motto.c", "awkward.c"
 description = "An embed edit re-runs both embeds and no fetch; a URL edit re-runs one chain"
 run = "uv run python rebuild_check.py"
 expect_stdout = "rebuild ok"
+
+[skip]
+# The xcode generator has no build phase for a source generator, so it never
+# writes the generated .c files the programs compile. Same reason as 13_subdirs.
+generators = ["xcode"]
