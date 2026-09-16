@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from pcons.configure.platform import get_platform
 from pcons.core.project import Project
 from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target
@@ -48,7 +50,11 @@ def source_paths(target: Target) -> list[str]:
 
 def node_tokens(target: Target) -> list[str]:
     """The command's node tokens, which Command records as project paths."""
-    return [token.path for token in tokens(target) if isinstance(token, PathToken)]
+    return [
+        Path(token.path).as_posix()
+        for token in tokens(target)
+        if isinstance(token, PathToken)
+    ]
 
 
 def implicit_deps(target: Target) -> list[str]:
@@ -57,10 +63,15 @@ def implicit_deps(target: Target) -> list[str]:
 
 
 def ninja_text(project: Project, tmp_path: Path) -> str:
-    """Generate and read build.ninja."""
+    """Generate and read build.ninja, with every path spelled one way.
+
+    These tests ask which files an edge names, never how the generator spells
+    a separator, and on Windows it writes backslashes.
+    """
     NinjaGenerator().generate(project)
     BaseGenerator._generate_pending(project)
-    return (tmp_path / "build" / "build.ninja").read_text(encoding="utf-8")
+    text = (tmp_path / "build" / "build.ninja").read_text(encoding="utf-8")
+    return text.replace("\\", "/")
 
 
 @pytest.fixture
@@ -280,10 +291,11 @@ class TestGeneratedNinja:
         NinjaGenerator().generate(project)
         BaseGenerator._generate_pending(project)
         text = (build_dir / "build.ninja").read_text(encoding="utf-8")
+        spelled = text.replace("\\", "/")
 
-        assert "pybuilder/report.py" in text
-        assert str(build_dir) not in text
-        assert "$topdir/pybuilder" not in text
+        assert "pybuilder/report.py" in spelled
+        assert build_dir.as_posix() not in spelled
+        assert "$topdir/pybuilder" not in spelled
 
     def test_a_subdirectory_names_its_module_once(
         self, project: Project, tmp_path: Path
@@ -337,8 +349,12 @@ class TestGeneratedNinja:
         one_source(project, env, cwd=elsewhere)
         text = ninja_text(project, tmp_path)
 
-        assert "cd ../w &&" in text
-        assert "&& cd ../build" in text
+        cd = "cd /d" if get_platform().is_windows else "cd"
+        build = tmp_path / "build"
+        there = Path(os.path.relpath(elsewhere, build)).as_posix()
+        back = Path(os.path.relpath(build, elsewhere)).as_posix()
+        assert f"{cd} {there} &&" in text
+        assert f"&& {cd} {back}" in text
 
     def test_write_if_different_wraps_the_edge(
         self, project: Project, env: Any, tmp_path: Path

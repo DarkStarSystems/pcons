@@ -876,7 +876,7 @@ def _describe_description_object(value: object) -> tuple[str, str] | None:
         )
     if isinstance(value, Node):
         return (
-            f"the build graph's file {value.name!r}",
+            f"the build graph's file {Path(value.name).as_posix()!r}",
             "List it in source= instead, and the function receives its path "
             "in sources.",
         )
