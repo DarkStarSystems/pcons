@@ -27,6 +27,7 @@ import ast
 import dis
 import functools
 import inspect
+import io
 import pickle
 import re
 import sys
@@ -427,13 +428,15 @@ def check_arguments(function: ValidatedFunction, *, kwargs: Mapping[str, Any]) -
 
     Raises:
         PyBuilderError: If the arguments do not fit the function's signature,
-            if one of them holds a piece of the build description, or if one
+            if one of them holds a piece of the build description, if one of
+            them would import pcons when unpickled at build time, or if one
             of them cannot be pickled.
     """
     at = get_caller_location()
     name = function.function.__name__
     _bind_arguments(function.function, kwargs, at)
     _reject_description_objects(kwargs, name, at)
+    _reject_pcons_references(kwargs, name, at)
     return _payload_bytes(
         {
             "version": runner.PROTOCOL_VERSION,
@@ -965,6 +968,69 @@ def _reject_description_objects(
 
     for key, value in kwargs.items():
         walk(value, f"argument {key}")
+
+
+class _PconsReferenceFinder(pickle.Pickler):
+    """A pickler that records the first pcons object it would write.
+
+    ``reducer_override`` runs for every object pickle does not special-case
+    as a built-in scalar or container, which includes a class or a function
+    written by reference: those never reach ``__reduce_ex__``, so a scan of
+    the finished opcodes would have to name them from the memo instead.
+    Recording here, one object at a time, also keeps the argument that held
+    it, which the opcodes alone do not carry.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.found: str | None = None
+
+    def reducer_override(self, obj: object) -> Any:
+        if self.found is None:
+            by_reference = isinstance(obj, (type, types.FunctionType))
+            module = obj.__module__ if by_reference else type(obj).__module__
+            if module is not None and (
+                module == "pcons" or module.startswith("pcons.")
+            ):
+                kind = "function" if isinstance(obj, types.FunctionType) else "class"
+                label = f"{kind} {obj.__name__}" if by_reference else type(obj).__name__
+                self.found = label
+        return NotImplemented
+
+
+def _pcons_reference(value: object) -> str | None:
+    """What *value* pickles as, if pickling it would reach into pcons."""
+    finder = _PconsReferenceFinder(io.BytesIO())
+    try:
+        finder.dump(value)
+    except Exception:  # noqa: BLE001
+        pass
+    return finder.found
+
+
+def _reject_pcons_references(
+    kwargs: Mapping[str, Any], name: str, at: SourceLocation
+) -> None:
+    """Refuse a kwarg whose pickle would import pcons at build time.
+
+    A pcons value pickles without complaining, so it would otherwise reach
+    the runner as a payload that imports ``pcons`` to unpickle, which the
+    runner is not meant to do.
+
+    Raises:
+        PyBuilderError: Naming the argument and what it holds.
+    """
+    for key, value in kwargs.items():
+        found = _pcons_reference(value)
+        if found is None:
+            continue
+        raise PyBuilderError(
+            f"PyBuilder {name}(): argument {key} holds a pcons {found}, and "
+            f"unpickling it at build time would import pcons. Pass "
+            f"list(...) to copy the values out, or env.subst_list(...) to "
+            f"substitute and list them.",
+            at,
+        )
 
 
 def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> bytes:

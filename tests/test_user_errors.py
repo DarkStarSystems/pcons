@@ -25,6 +25,7 @@ from pcons.core.errors import (
     MissingVariableError,
     PconsError,
 )
+from pcons.core.flags import FlagList
 from pcons.core.invocation import RUN_NAME
 from pcons.core.project import Project
 from pcons.core.subst import PathToken
@@ -1055,6 +1056,44 @@ class TestEveryPyBuilderRemedyWorks:
 
         assert self.edge_sources(edge) == ["src/main.c"]
 
+    def test_a_pcons_value_becomes_a_plain_list(self, project_env, tmp_path):
+        """ "Pass list(...) to copy the values out"."""
+        project, env = project_env
+        env.cc.flags.append("-O2")
+
+        @env.PyBuilder()
+        def render(targets, sources, flags):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(" ".join(flags), encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", flags=list(env.cc.flags)
+        )
+
+        assert out.read_text(encoding="utf-8") == "-O2"
+
+    def test_a_pcons_value_becomes_a_substituted_list(self, project_env, tmp_path):
+        """ "env.subst_list(...) to substitute and list them"."""
+        project, env = project_env
+        env.cc.flags.append("-O2")
+
+        @env.PyBuilder()
+        def render(targets, sources, flags):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(" ".join(flags), encoding="utf-8")
+
+        _, out = self.run_edge(
+            project,
+            render,
+            tmp_path,
+            target="out.txt",
+            flags=env.subst_list("$cc.flags"),
+        )
+
+        assert out.read_text(encoding="utf-8") == "-O2"
+
 
 class TestPyBuilderErrors:
     """What env.PyBuilder() says when a function cannot travel to build time.
@@ -1658,6 +1697,100 @@ class TestPyBuilderErrors:
         message = str(caught.value)
         assert "argument cc is the 'cc' tool namespace" in message
         assert "env.cc.flags rather than env.cc" in message
+
+    def test_a_pcons_instance_in_kwargs_names_the_argument_and_type(self, project_env):
+        """ "argument flags holds a pcons FlagList", unpickling it would import pcons."""
+        _, env = project_env
+        env.cc.flags.append("-O2")
+
+        @env.PyBuilder()
+        def render(targets, sources, flags):
+            return flags
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", flags=env.cc.flags)
+
+        message = str(caught.value)
+        assert "argument flags holds a pcons FlagList" in message
+        assert "unpickling it at build time would import pcons" in message
+        assert "list(...)" in message
+        assert "env.subst_list(...)" in message
+
+    def test_a_pcons_class_passed_by_reference_is_refused(self, project_env):
+        """A class, not an instance: reducer_override still sees it."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, cls):
+            return cls
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", cls=FlagList)
+
+        assert "argument cls holds a pcons class FlagList" in str(caught.value)
+
+    def test_a_pcons_function_passed_by_reference_is_refused(self, project_env):
+        """A function, not a call: reducer_override still sees it."""
+        _, env = project_env
+        from pcons.tools.pybuilder import validate as pcons_validate
+
+        @env.PyBuilder()
+        def render(targets, sources, fn):
+            return fn
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", fn=pcons_validate)
+
+        assert "argument fn holds a pcons function validate" in str(caught.value)
+
+    def test_plain_values_are_not_mistaken_for_pcons(self, project_env):
+        """A list, a dict of strings, and a Path all pass unchallenged."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, items, mapping, where):
+            return items, mapping, where
+
+        made = render(
+            target="out.txt",
+            items=[1, "two", 3.0],
+            mapping={"a": "b", "c": "d"},
+            where=Path("x/y"),
+        )
+
+        assert made.name == "out"
+
+    def test_a_dataclass_from_the_script_itself_is_not_flagged_as_pcons(
+        self, project_env, tmp_path
+    ):
+        """The build script's own module is __pcons__, never "pcons": no false positive.
+
+        A class the script itself defines cannot be pickled either way, since
+        __pcons__ is never importable, but the message stays the ordinary
+        "cannot pickle" one, not the new pcons-reference refusal.
+        """
+        _, env = project_env
+        source = """
+            from dataclasses import dataclass
+
+
+            @dataclass
+            class Local:
+                n: int
+
+
+            def render(targets, sources, local):
+                return local
+        """
+        render = env.PyBuilder()(build_script_function(tmp_path, source))
+        local_cls = build_script_function(tmp_path, source, name="Local")
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", local=local_cls(3))
+
+        message = str(caught.value)
+        assert "cannot pickle argument local" in message
+        assert "holds a pcons" not in message
 
     def test_a_target_used_as_a_dict_key_is_found(self, project_env):
         _, env = project_env
