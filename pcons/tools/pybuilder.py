@@ -402,7 +402,7 @@ def emit_module(
     )
     if claimed:
         _write_if_changed(
-            project._path_resolver.project_root / module_rel,
+            project.top_path_resolver.project_root / module_rel,
             function.module_text.encode("utf-8"),
         )
     return module_rel
@@ -466,7 +466,7 @@ def emit_args(*, project: Project, env: Environment, name: str, payload: bytes) 
     """
     args_rel = _gen_dir(env) / f"{_sanitized(name)}.args.pkl"
     _claim(project, env, args_rel, name, get_caller_location(), owner=None)
-    _write_if_changed(project._path_resolver.project_root / args_rel, payload)
+    _write_if_changed(project.top_path_resolver.project_root / args_rel, payload)
     return args_rel
 
 
@@ -832,7 +832,7 @@ def _origin(project: Project, at: SourceLocation) -> str:
     """
     path = Path(at.filename)
     try:
-        return path.relative_to(project._path_resolver.project_root).as_posix()
+        return path.relative_to(project.top_path_resolver.project_root).as_posix()
     except ValueError:
         return path.name
 
