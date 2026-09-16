@@ -48,6 +48,9 @@ expect_no_rebuild = ["lorem.txt", "motto.txt", "lorem.c", "motto.c", "awkward.c"
 description = "An embed edit re-runs both embeds and no fetch; a URL edit re-runs one chain"
 run = "uv run python rebuild_check.py"
 expect_stdout = "rebuild ok"
+# The URL edit re-fetches, so this step waits on somebody else's machine like
+# the first build does, and the 30 second default is not enough under CI load.
+timeout = 300
 
 [skip]
 # The xcode generator has no build phase for a source generator, so it never
