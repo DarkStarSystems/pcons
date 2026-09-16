@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Pytest configuration and shared fixtures."""
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,31 @@ from tests.support import NO_ANDROID_NDK, find_android_ndk
 settings.register_profile("dev", max_examples=50, deadline=None, derandomize=True)
 settings.register_profile("nightly", max_examples=2000, deadline=None, print_blob=True)
 settings.load_profile("dev")
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Let the subprocesses a test starts measure their own coverage.
+
+    Tests run the real entry points as separate processes, and pytest-cov
+    measures only its own. coverage.py starts in any process that has
+    ``COVERAGE_PROCESS_START`` set, which nothing else here sets, and it
+    resolves a relative source path and data file against the cwd of the
+    process reading them, which for a build edge is the build directory.
+    Both are anchored here instead, at the one place that knows the root.
+    """
+    try:
+        import coverage
+    except ImportError:
+        return
+
+    if coverage.Coverage.current() is None:
+        return
+
+    os.environ["PCONS_COVERAGE_ROOT"] = str(_REPO_ROOT)
+    os.environ["COVERAGE_PROCESS_START"] = str(_REPO_ROOT / "pyproject.toml")
+    os.environ.setdefault("COVERAGE_FILE", str(_REPO_ROOT / ".coverage"))
 
 
 @pytest.fixture

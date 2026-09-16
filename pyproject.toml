@@ -154,10 +154,13 @@ ignore = [
 known-first-party = ["pcons"]
 
 [tool.coverage.run]
-source = ["pcons"]
+source = ["${PCONS_COVERAGE_ROOT-.}/pcons"]
 branch = true
 # Tests run the real entry points as subprocesses (python pcons-build.py,
-# python -m pcons). Each writes its own data file, which pytest-cov combines.
+# python -m pcons, and the script a PyBuilder edge runs). Each writes its own
+# data file, which pytest-cov combines. A subprocess runs with its cwd inside
+# the build directory, where a relative source path matches nothing, so
+# tests/conftest.py exports PCONS_COVERAGE_ROOT to anchor it.
 parallel = true
 omit = [
     # Generated TYPE_CHECKING-only stub mixins. Their class bodies live
