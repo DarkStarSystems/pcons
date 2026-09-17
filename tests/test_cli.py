@@ -4148,9 +4148,11 @@ project.Alias("all", hello)
         assert result.exit_code == 0
         assert "Aliases:" in result.stdout
         assert "all" in result.stdout
-        assert "Targets:" in result.stdout
+        # A Command names nothing, so it is listed by what it builds.
+        assert "Targets with no name" in result.stdout
         assert "[command]" in result.stdout
         assert "hello.txt" in result.stdout
+        assert "(hello)" in result.stdout
 
 
 class TestIntegration:
@@ -7602,6 +7604,38 @@ class TestEnvQualifiedFailures:
         assert lookup("fresh@mcu") == ["fresh.a"]
         assert lookup("stale@mcu") is None
         _drop_open_caches()
+
+
+class TestAnonymousTargetsAreNotRecorded:
+    """`name@env` is a spelling a user types, so only names are recorded.
+
+    The mapping is persisted and read back by later builds and by shell
+    completion. Two anonymous targets wearing one label would key one entry,
+    and the second would quietly replace the first.
+    """
+
+    def _project(self, tmp_path, gcc_toolchain):
+        from pcons.core.project import Project
+
+        (tmp_path / "in.txt").write_text("x")
+        project = Project("p", root_dir=tmp_path)
+        env = project.Environment(toolchain=gcc_toolchain, name="mcu")
+        env.Command(
+            target="out.h", source="in.txt", command=["cp", "$SOURCE", "$TARGET"]
+        )
+        env.Command(
+            target="out.c", source="in.txt", command=["cp", "$SOURCE", "$TARGET"]
+        )
+        project.Install("lib", ["in.txt"], env=env)
+        project.resolve()
+        return project
+
+    def test_a_label_gets_no_spelling(self, tmp_path, gcc_toolchain) -> None:
+        from pcons.cli import _env_target_paths
+
+        project = self._project(tmp_path, gcc_toolchain)
+
+        assert _env_target_paths(project) == {}
 
 
 class TestMergedEnvTargets:

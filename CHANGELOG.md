@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A target's name is either a name you chose or a label pcons derived, and
+  only the first has to be unique. `Program`, `StaticLibrary`, `CargoBuild`
+  and the other builders you name keep the rule exactly as it was.
+  `Command`, `PyBuilder`, `Install`, `InstallAs`, `InstallDir`,
+  `OverlayDir`, `Tarfile`, `Zipfile`, `Test` and the Qt deploy, lupdate and
+  APK edges derive a label instead: two of them may wear one label, and none
+  answers to `get_target()`, `link()` or `Default()`. So a command writing
+  `foo.h` and one writing `foo.c` no longer collide, installs into one
+  directory are no longer renamed `install_lib_1`, and `name=` on those
+  builders sets the label and nothing else. Use `project.Alias()` for a name
+  to build by, and keep the `Target` the call returned for everything else.
+
+- `pcons info --targets` now lists targets with no name by what they build,
+  rather than showing a derived label as if it were something to type.
+  `pcons explain <label>` shows every target wearing the label.
+
 - Every successful ninja build now checks that it converged, not only one
   under `--watch`: pcons asks ninja whether it still has work to do and
   warns if so, naming the outputs. A command that never writes the output

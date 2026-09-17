@@ -379,6 +379,11 @@ def _env_target_paths(project: Project) -> dict[str, list[str]]:
     ``common@mcu`` on the command line has to be translated before it is
     handed over. Recorded here for the runs that build without regenerating,
     which have no project objects to ask.
+
+    Named targets only: a ``name@env`` spelling is one a user can type, and
+    an anonymous target's label is not (see ``Target.anonymous``). Two of
+    them wearing one label would key one entry and the second would quietly
+    replace the first.
     """
     from pcons.core.node import FileNode
 
@@ -386,7 +391,7 @@ def _env_target_paths(project: Project) -> dict[str, list[str]]:
     spellings: dict[str, list[str]] = {}
     for target in project.targets:
         env = target.env
-        if env is None or not env.name:
+        if env is None or not env.name or target.anonymous:
             continue
         paths = [
             resolver.make_execution_relative(node.path)
@@ -1881,7 +1886,6 @@ def _info_targets(
             print(line)
         print()
 
-    by_type: dict[str, list[tuple[str, str]]] = {}
     type_order = [
         "program",
         "shared_library",
@@ -1892,46 +1896,59 @@ def _info_targets(
         "archive",
         "installer",
     ]
+    named: dict[str, list[tuple[str, str]]] = {}
+    anonymous: dict[str, list[tuple[str, str]]] = {}
 
     for project in top_levels:
         for target in project.targets:
-            ttype = target.target_type
-            type_name = ttype if ttype else "other"
-            outputs = ""
-            if target.output_nodes:
-                paths = []
-                for n in target.output_nodes:
-                    if isinstance(n, FileNode):
-                        try:
-                            paths.append(str(n.path.relative_to(project.build_dir)))
-                        except ValueError:
-                            paths.append(str(n.path))
-                if paths:
-                    outputs = ", ".join(paths)
-            shown = target.qualified_name if qualify else target.name
-            entry = (shown, outputs)
-            by_type.setdefault(type_name, []).append(entry)
-
-    def print_entries(label: str, entries: list[tuple[str, str]]) -> None:
-        print(f"  [{label}]")
-        for name, outputs in entries:
-            if outputs:
-                print(f"    {name:30s} -> {outputs}")
+            type_name = target.target_type or "other"
+            paths = [
+                _build_relative(n.path, project.build_dir)
+                for n in target.output_nodes
+                if isinstance(n, FileNode)
+            ]
+            outputs = ", ".join(paths)
+            if target.anonymous:
+                # Its name is a label, so the output path is what identifies
+                # it; the label follows, for reading a report by.
+                label = f"({target.name})"
+                shown = outputs or label
+                anonymous.setdefault(type_name, []).append(
+                    (shown, label if outputs else "")
+                )
             else:
-                print(f"    {name}")
+                shown = target.qualified_name if qualify else target.name
+                named.setdefault(type_name, []).append((shown, outputs))
+
+    def print_group(by_type: dict[str, list[tuple[str, str]]], arrow: str) -> None:
+        for type_name in [*type_order, *by_type]:
+            entries = by_type.pop(type_name, None)
+            if not entries:
+                continue
+            print(f"  [{type_name}]")
+            for left, right in entries:
+                print(f"    {left:30s} {arrow} {right}" if right else f"    {left}")
+            print()
+
+    if named:
+        print("Targets, by name:")
+        print_group(named, "->")
+    if anonymous:
+        print("Targets with no name, listed by what they build:")
+        print("  Build one by naming that path, or give it an alias.")
+        print("  The name in parentheses is the label reports show it under.")
         print()
-
-    print("Targets:")
-    for ttype in type_order:
-        entries = by_type.pop(ttype, None)
-        if entries:
-            print_entries(ttype, entries)
-
-    # Any remaining types not in our order
-    for type_name, entries in by_type.items():
-        print_entries(type_name, entries)
+        print_group(anonymous, " ")
 
     return 0
+
+
+def _build_relative(path: Path, build_dir: Path) -> str:
+    """A node path as the build directory sees it, or whole if it sits outside."""
+    try:
+        return str(path.relative_to(build_dir))
+    except ValueError:
+        return str(path)
 
 
 def _targets_written_as(project: Project, name: str) -> list[Target]:
