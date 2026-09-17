@@ -27,6 +27,7 @@ that is the builder's declaration.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -133,16 +134,20 @@ class BuildTiers:
         # tell: a single-directory project has no use for a blank column.
         subdirs = {id(d): _subdir_text(d.target) for d in decisions}
         subdir_width = max(len(s) for s in subdirs.values())
-        name_width = max(len(d.target.name) for d in decisions)
+        shown = _listing_texts(decisions)
+        name_width = max(len(s) for s in shown.values())
         reason_width = max(len(d.reason) for d in decisions)
         lines = ["build tiers:"]
         for tier in BUILD_TIERS:
-            members = sorted((d for d in decisions if d.tier == tier), key=_listing_key)
+            members = sorted(
+                (d for d in decisions if d.tier == tier),
+                key=lambda d: _listing_key(d, shown[id(d)]),
+            )
             if not members:
                 continue
             lines.append(f"  {tier}:")
             for d in members:
-                line = f"    {d.target.name:<{name_width}}  "
+                line = f"    {shown[id(d)]:<{name_width}}  "
                 if subdir_width:
                     line += f"{subdirs[id(d)]:<{subdir_width}}  "
                 line += f"{d.reason:<{reason_width}}"
@@ -166,12 +171,47 @@ def _subdir_text(target: Target) -> str:
     return target._subdir.as_posix() if target._subdir.parts else ""
 
 
-def _listing_key(decision: TierDecision) -> tuple[tuple[str, ...], str, str]:
-    """Sort key for the report: subdirectory, then name (case-insensitive,
-    with the exact name breaking ties so the order is stable)."""
-    target = decision.target
-    subdir = tuple(part.casefold() for part in target._subdir.parts)
-    return (subdir, target.name.casefold(), target.name)
+def _first_output_text(target: Target) -> str | None:
+    """*target*'s first output, as the build directory sees it."""
+    for node in target.output_nodes:
+        path = getattr(node, "path", None)
+        if path is None:
+            continue
+        try:
+            return str(path.relative_to(target.build_dir))
+        except ValueError:
+            return str(path)
+    return None
+
+
+def _listing_texts(decisions: list[TierDecision]) -> dict[int, str]:
+    """How the report names each target, keyed by decision.
+
+    A name is what a reader would look for, so it is what the report
+    shows. An anonymous target wears a label its builder derived, and two
+    of them may wear one label: only then does the report fall back to
+    what each builds, which is the one thing that tells them apart and is
+    also how ``pcons info --targets`` lists them.
+    """
+    labels = {id(d): d.target.name for d in decisions}
+    seen = Counter(labels.values())
+    for d in decisions:
+        if not d.target.anonymous or seen[labels[id(d)]] == 1:
+            continue
+        built = _first_output_text(d.target)
+        if built is not None:
+            labels[id(d)] = built
+    return labels
+
+
+def _listing_key(
+    decision: TierDecision, shown: str
+) -> tuple[tuple[str, ...], str, str]:
+    """Sort key for the report: subdirectory, then the text shown
+    (case-insensitive, with the exact text breaking ties so the order is
+    stable)."""
+    subdir = tuple(part.casefold() for part in decision.target._subdir.parts)
+    return (subdir, shown.casefold(), shown)
 
 
 def decide_build_tiers(project: Project) -> BuildTiers:
