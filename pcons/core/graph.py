@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
 
 
-def _refuse_duplicate_names(targets: list[Target]) -> None:
+def refuse_duplicate_names(targets: list[Target]) -> None:
     """Refuse two named targets answering to one qualified name.
 
     A project refuses a duplicate as it is registered, but two sibling
@@ -139,7 +139,7 @@ def topological_sort_targets(targets: list[Target]) -> list[Target]:
     if not targets:
         return []
 
-    _refuse_duplicate_names(targets)
+    refuse_duplicate_names(targets)
     components = strongly_connected_components(targets, lambda t: t.dependencies)
     unit_of: dict[Target, int] = {}
     for number, members in enumerate(components):
@@ -194,7 +194,7 @@ def detect_cycles_in_targets(targets: list[Target]) -> list[list[str]]:
     Raises:
         DuplicateTargetError: If two targets share a qualified name.
     """
-    _refuse_duplicate_names(targets)
+    refuse_duplicate_names(targets)
     cycles: list[list[Target]] = []
 
     # Colors: 0=white (unvisited), 1=gray (in progress), 2=black (done)

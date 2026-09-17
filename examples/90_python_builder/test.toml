@@ -52,6 +52,6 @@ expect_stdout = "rebuild ok"
 timeout = 300
 
 [skip]
-# The example declares one target name in two environments, which ninja allows
-# and the Xcode generator refuses: it identifies a target by its name.
+# Every target here is a command edge, which the Xcode generator has no
+# target model for: it would write a project that builds nothing.
 generators = ["xcode"]

@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than showing a derived label as if it were something to type.
   `pcons explain <label>` shows every target wearing the label.
 
+- The Xcode generator no longer refuses a project whose targets share a
+  name. Xcode addresses a target by name, so the generator now gives each
+  one a name of its own: the target's own name where it is free, otherwise
+  `name@env` or the output's file name. Two commands both labelled `config`,
+  or one library built in two environments, now generate. Two targets you
+  named answering to one qualified name are still refused.
+
 - Every successful ninja build now checks that it converged, not only one
   under `--watch`: pcons asks ninja whether it still has work to do and
   warns if so, naming the outputs. A command that never writes the output
