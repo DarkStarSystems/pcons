@@ -394,24 +394,30 @@ class TestTarget:
         assert "c" in langs
         assert "cxx" in langs
 
-    def test_equality_by_name(self, test_project):  # noqa: F811
+    def test_a_target_equals_only_itself(self, test_project):  # noqa: F811
+        """Two targets are the same target only when they are one object.
+
+        A name is a label, and two objects wearing one label are still two
+        things to build. Comparing by name would collapse them wherever the
+        graph keeps a set of targets.
+        """
         t1 = Target("mylib")
         t1.name = "fake"
         t2 = Target("mylib")
-        t1.name = "mylib"  # Reset to original name for equality
-        t3 = Target("other")
+        t1.name = "mylib"
 
-        assert t1 == t2
-        assert t1 != t3
+        assert t1 == t1
+        assert t1 != t2
+        assert t1 != Target("other")
 
     def test_hashable(self, test_project):  # noqa: F811
         t1 = Target("mylib")
         t1.name = "fake"
         t2 = Target("mylib")
-        t1.name = "mylib"  # Reset to original name for hashing
+        t1.name = "mylib"
 
-        targets = {t1, t2}
-        assert len(targets) == 1  # Same name = same target
+        assert len({t1, t2}) == 2
+        assert len({t1, t1}) == 1
 
     def test_target_without_project(self):
         """Test that Target can be created without an active project."""

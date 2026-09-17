@@ -1388,14 +1388,6 @@ class Target:
         deps = ", ".join(d.qualified_name for d in self.dependencies)
         return f"Target({self.qualified_name!r}, deps=[{deps}])"
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Target):
-            return NotImplemented
-        return self.qualified_name == other.qualified_name
-
-    def __hash__(self) -> int:
-        return hash(self.qualified_name)
-
 
 class ImportedTarget(Target):
     """A target representing an external dependency.
