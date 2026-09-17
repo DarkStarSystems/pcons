@@ -143,6 +143,8 @@ def test_a_snippet_builds(body: str, tmp_path: Path) -> None:
     (tmp_path / "src").mkdir()
     for letter, words in (("a", 4), ("b", 7), ("c", 6), ("d", 5)):
         (tmp_path / "src" / f"{letter}.txt").write_text(" ".join(["w"] * words) + "\n")
+    if "wordcount.py" in body:
+        (tmp_path / "wordcount.py").write_text("def count(text):\n    return 0\n")
     (tmp_path / "pcons-build.py").write_text(preamble(body) + "\n" + body)
 
     generate = subprocess.run(

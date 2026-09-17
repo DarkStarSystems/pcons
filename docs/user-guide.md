@@ -2578,13 +2578,14 @@ The function is called as `fn(targets, sources, **kwargs)`. Both path lists are 
 
 **When the keywords are fixed.** At the call, while the build is described, not at resolve and not at build time. So the call can pass anything the script already has by then: a plain value, `env.cc.cmd`, or an already-expanded `env.subst_list("$cc.flags")`. It cannot pass a `Target` or a `Node`: both are refused as keywords, for the reason given below. Put it in `source=` instead, and the function receives its output paths in `sources`. A pcons value is refused too, because unpickling it at build time would import pcons: `list(env.cc.flags)` or `env.subst_list("$cc.flags")` works, `env.cc.flags` itself does not.
 
-**The decoration says how the function runs, the call says what to build.** No option sits at both levels, so two edges that must run differently are two decorations.
+**The decoration says how the function runs, the call says what to build.** No option sits at both levels, except `depends=`: on the decoration it is a dependency of every edge the builder makes, on the call it is a dependency of that edge alone. Two edges that must otherwise run differently are two decorations.
 
 | on `env.PyBuilder()` | on the call |
 |---|---|
 | `python=`, `worker=` | `target=`, `source=` |
-| `cwd=`, `launcher=`, `env_vars=` | `name=`, `depends=` |
+| `cwd=`, `launcher=`, `env_vars=` | `name=` |
 | `restat=`, `write_if_different=` | the function's own arguments, as plain keywords |
+| `depends=` | `depends=` |
 
 `depfile=` and `deps_style=` are not supported. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
 
@@ -2605,11 +2606,36 @@ two = report(
 
 **Three rules follow from the function travelling alone.**
 
-1. *It imports what it needs inside its own body.* The generated module holds the function and nothing else, so a name this script imported does not exist there. pcons refuses a body that reads one, naming it, rather than letting the build fail later with `NameError`. The function runs with the `sys.path` its script had when it was decorated, so it imports what the script itself could, a module beside the script included. `python=` names another interpreter instead, and the function then runs with that interpreter's own path. Editing such a module does not re-run the edge on its own: list it in `depends=` to make it one.
+1. *It imports what it needs inside its own body.* The generated module holds the function and nothing else, so a name this script imported does not exist there. pcons refuses a body that reads one, naming it, rather than letting the build fail later with `NameError`. The function runs with the `sys.path` its script had when it was decorated, so it imports what the script itself could, a module beside the script included. `python=` names another interpreter instead, and the function then runs with that interpreter's own path. Editing such a module does not re-run the edge on its own: it is a dependency of the function, not of one call, so it belongs on the decoration or on `.depends()`, both below, rather than repeated in every call's own `depends=`.
 2. *It reads nothing from around it.* A function that closes over a variable of an enclosing function is refused for the same reason. Take the value as a parameter and pass it at the call, where it travels in the pickle, so every value there must be picklable. Some that pickle are refused anyway: a target, a node, an environment, a project and a tool namespace all belong to the build description, which does not exist when the function runs. A target goes in `source=`, and the function receives its output paths in `sources`; from an environment, read the values you want here and pass those, `env.cc.flags` rather than `env.cc`.
 3. *The call returns the `Target`.* `first` above is a target, like everything else a pcons builder returns. It goes to `project.Default()`, to `project.Install()`, or into another target's `source=`.
 
 A lambda, a `functools.partial`, a method and a builtin are all refused: only a plain `def` written out in a build script has source to extract. So is a signature the build-time call could not satisfy, such as one whose first two parameters are keyword-only.
+
+**A dependency of the function.** A module the body imports is a dependency of the function, not of one call: declare it once, on the decoration, and every edge the builder makes waits on it.
+
+```python
+@env.PyBuilder(depends=[project.root_dir / "wordcount.py"])
+def report(targets, sources, title):
+    ...
+
+
+report(target="report.txt", source=[src / "a.txt"], title="word counts")
+```
+
+The same list grows later, with `.depends()` on the builder `env.PyBuilder()` returns, and reaches an edge already made:
+
+```python
+@env.PyBuilder()
+def report(targets, sources, title):
+    ...
+
+
+made = report(target="report.txt", source=[src / "a.txt"], title="word counts")
+report.depends(project.root_dir / "wordcount.py")
+```
+
+Both reach every edge the builder makes, whichever comes first in the script. The call's own `depends=` still exists, for a dependency of that one edge alone.
 
 **Rebuilds.** The generated module, the pickle and the runner copy are inputs of the edge, and all three are written only when their bytes change. Regenerating with a pcons whose runner changed re-runs every PyBuilder edge. Edit the function body and every edge that reads it re-runs. Change one of a call's arguments and only that edge re-runs. Edit anything else in the build script, a comment or a line above the decoration, and pcons regenerates the build files but no edge re-runs, because nothing any of them depends on moved.
 

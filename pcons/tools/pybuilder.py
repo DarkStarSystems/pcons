@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from pcons.core.environment import Environment
+    from pcons.core.node import Node
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.util.source_location import SourceLocation
@@ -1150,7 +1151,9 @@ class _HowToRun:
     """How the function runs, which every edge of one builder shares.
 
     These describe the body rather than any one edge, so they sit on the
-    decoration. What to build sits on the call, and no option sits on both.
+    decoration. What to build sits on the call, and no option sits on both,
+    except ``depends``: the decoration's is a dependency of every edge the
+    builder makes, the call's is a dependency of that edge alone.
     """
 
     python: str | None = None
@@ -1160,6 +1163,7 @@ class _HowToRun:
     launcher: Sequence[str] | None = None
     env_vars: Mapping[str, str] | None = None
     worker: Any = None
+    depends: str | Path | Sequence[str | Path] | None = None
 
     def command_kwargs(self) -> dict[str, Any]:
         """The part of this that ``env.Command`` takes verbatim."""
@@ -1195,7 +1199,15 @@ class PyBuilder:
     this object is never itself in the claim registry.
     """
 
-    __slots__ = ("_env", "_function", "_how", "_project", "_sys_path")
+    __slots__ = (
+        "_depends",
+        "_env",
+        "_function",
+        "_how",
+        "_made",
+        "_project",
+        "_sys_path",
+    )
 
     def __init__(
         self,
@@ -1209,6 +1221,10 @@ class PyBuilder:
         self._how = how
         self._project = env._project
         self._sys_path = sys_path
+        self._depends: list[Target | Node | Path | str] = (
+            [] if how.depends is None else list(_as_list(how.depends))
+        )
+        self._made: list[Target] = []
 
     def __repr__(self) -> str:
         return f"<PyBuilder {self._function.function.__name__}>"
@@ -1217,6 +1233,29 @@ class PyBuilder:
     def function(self) -> types.FunctionType:
         """The function the build script wrote."""
         return self._function.function
+
+    def depends(self, *items: Target | Node | Path | str) -> PyBuilder:
+        """Add *items* as a dependency of every edge this builder makes.
+
+        Applies to every edge already made, and to every edge made
+        afterward, so it does not matter whether a call or a ``.depends()``
+        comes first in the script.
+
+        Args:
+            items: Targets, or files as Node, Path or str, taken the way
+                :meth:`Target.depends` takes them.
+
+        Returns:
+            self, for chaining.
+
+        Raises:
+            RuntimeError: If an edge this builder already made has been
+                resolved. Same message :meth:`Target.depends` gives.
+        """
+        self._depends.extend(items)
+        for made in self._made:
+            made.depends(*items)
+        return self
 
     def __call__(
         self,
@@ -1251,7 +1290,9 @@ class PyBuilder:
                 target's stem, the same rule ``env.Command`` uses. Does not
                 affect the argument pickle, which is named after the first
                 target's own build-relative path.
-            depends: Extra rebuild triggers that are not sources.
+            depends: Extra rebuild triggers that are not sources, for this
+                edge alone. Added to whatever the decoration's own
+                ``depends=`` and :meth:`depends` gave the builder.
             **kwargs: The function's own arguments. Each must be picklable,
                 and together they must fit its signature.
 
@@ -1297,6 +1338,8 @@ class PyBuilder:
             depends=depends,
             **self._how.command_kwargs(),
         )
+        made.depends(*self._depends)
+        self._made.append(made)
         made._builder_data["writes"] = writes
         return made
 
@@ -1311,6 +1354,7 @@ def py_builder(
     launcher: Sequence[str] | None = None,
     env_vars: Mapping[str, str] | None = None,
     worker: Any = None,
+    depends: str | Path | Sequence[str | Path] | None = None,
 ) -> Callable[[Callable[..., object]], PyBuilder]:
     """The decorator ``Environment.PyBuilder`` returns.
 
@@ -1327,6 +1371,9 @@ def py_builder(
         launcher: See ``env.Command``.
         env_vars: See ``env.Command``.
         worker: See ``env.Command``.
+        depends: Dependency of every edge the builder makes, on top of
+            whatever a call's own ``depends=`` adds. See
+            :meth:`PyBuilder.depends`.
 
     Returns:
         A decorator that returns the ``PyBuilder`` the build script calls.
@@ -1339,6 +1386,7 @@ def py_builder(
         launcher=launcher,
         env_vars=env_vars,
         worker=worker,
+        depends=depends,
     )
 
     def decorate(fn: Callable[..., object]) -> PyBuilder:

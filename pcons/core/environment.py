@@ -1877,6 +1877,7 @@ class Environment(_EnvironmentStubs):
         launcher: Sequence[str] | None = None,
         env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
+        depends: str | Path | Sequence[str | Path] | None = None,
     ) -> Callable[[Callable[..., object]], pybuilder.PyBuilder]:
         """Turn a Python function of this build script into a builder.
 
@@ -1902,8 +1903,10 @@ class Environment(_EnvironmentStubs):
 
         The arguments here say how the function runs, which is a property of
         the body and the same for every edge. The call says what to build.
-        No option appears at both, so two edges that must run differently are
-        two decorations, which is honest about being two ways of running.
+        No option appears at both, except ``depends=``: the decoration's is a
+        dependency of every edge the builder makes, the call's of that edge
+        alone. Two edges that must otherwise run differently are two
+        decorations, which is honest about being two ways of running.
 
         Only the function's own source travels, so the body may use nothing
         from around it: no name the build script imported or defined, no
@@ -1936,6 +1939,10 @@ class Environment(_EnvironmentStubs):
             worker: See :meth:`Command`. A :class:`pcons.workers.PythonWorker`
                     keeps an interpreter warm, which is most of the cost of a
                     small function.
+            depends: Dependency of every edge the builder makes, on top of
+                    whatever a call's own ``depends=`` adds. Equivalent to
+                    calling ``.depends()`` on the builder this returns. See
+                    :meth:`Command`.
 
         Returns:
             A decorator that returns the builder the script calls.
@@ -1951,6 +1958,7 @@ class Environment(_EnvironmentStubs):
             launcher=launcher,
             env_vars=env_vars,
             worker=worker,
+            depends=depends,
         )
 
     def __str__(self) -> str:

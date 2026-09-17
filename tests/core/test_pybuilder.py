@@ -430,6 +430,113 @@ class TestDecorationOptionsReachEveryEdge:
 
         assert [tokens(t)[0] for t in made] == ["/usr/bin/python3"] * 2
 
+    def test_decoration_depends_reaches_every_edge(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyBuilder(depends=["b.txt"])
+        def report(targets, sources):
+            return 1
+
+        report(target="one.txt", source=["a.txt"])
+        report(target="two.txt", source=["a.txt"])
+        project.resolve()
+        text = ninja_text(project, tmp_path)
+
+        assert text.count("b.txt") == 2
+
+
+class TestBuilderDepends:
+    """``PyBuilder.depends()``: a builder-level dependency added after decoration."""
+
+    def test_before_any_call_reaches_the_edge(self, project: Project, env: Any) -> None:
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        report.depends("b.txt")
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert "b.txt" in implicit_deps(made)
+
+    def test_after_two_calls_reaches_both(self, project: Project, env: Any) -> None:
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        first = report(target="one.txt", source=["a.txt"])
+        second = report(target="two.txt", source=["a.txt"])
+        report.depends("b.txt")
+        project.resolve()
+
+        assert "b.txt" in implicit_deps(first)
+        assert "b.txt" in implicit_deps(second)
+
+    def test_call_depends_adds_to_the_builders(
+        self, project: Project, env: Any
+    ) -> None:
+        @env.PyBuilder(depends=["b.txt"])
+        def report(targets, sources):
+            return 1
+
+        report.depends("c.txt")
+        made = report(target="report.txt", source=["a.txt"], depends=["d.txt"])
+        project.resolve()
+
+        deps = implicit_deps(made)
+        assert "b.txt" in deps
+        assert "c.txt" in deps
+        assert "d.txt" in deps
+
+    def test_returns_the_builder_for_chaining(self, project: Project, env: Any) -> None:
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        assert report.depends("b.txt") is report
+
+    def test_after_resolve_raises(self, project: Project, env: Any) -> None:
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        with pytest.raises(RuntimeError):
+            report.depends("b.txt")
+
+    def test_a_relative_string_in_a_subdirectory_resolves_like_command_depends(
+        self, tmp_path: Path
+    ) -> None:
+        """A builder-level item goes through ``Target.depends``, the same as
+        a call's, so a relative string reads the same directory either way.
+        """
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "a.txt").write_text("first\n", encoding="utf-8")
+        (tmp_path / "sub" / "b.txt").write_text("second\n", encoding="utf-8")
+        project = Project("wordcount", root_dir=tmp_path)
+        with project._enter_subdir("sub"):
+            child = Project("child", root_dir=tmp_path / "sub")
+            sub_env: Any = child.Environment()
+
+            @sub_env.PyBuilder(depends=["b.txt"])
+            def report(targets, sources):
+                return 1
+
+            py_made = report(target="report.txt", source=["a.txt"])
+            cmd_made = sub_env.Command(
+                target="command.txt",
+                source=["a.txt"],
+                command="true",
+                depends=["b.txt"],
+            )
+
+        project.resolve()
+
+        assert "sub/b.txt" in implicit_deps(py_made)
+        assert implicit_deps(cmd_made) == ["sub/b.txt"]
+
 
 class TestArgumentsFitTheSignature:
     def test_a_function_with_no_arguments_takes_none(
