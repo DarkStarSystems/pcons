@@ -10,6 +10,9 @@ These serve as both regression tests for existing good errors and a
 roadmap for future error handling improvements.
 """
 
+import functools
+import inspect
+import textwrap
 import warnings
 from pathlib import Path
 
@@ -22,7 +25,11 @@ from pcons.core.errors import (
     MissingVariableError,
     PconsError,
 )
+from pcons.core.flags import FlagList
+from pcons.core.invocation import RUN_NAME
 from pcons.core.project import Project
+from pcons.core.subst import PathToken
+from pcons.util.pybuilder import run
 
 
 @pytest.fixture
@@ -592,3 +599,1282 @@ class TestBuilderEdgeCases:
         # This should work -- Install resolves Target to output_nodes
         install = project.Install("dist", [app])
         assert install is not None
+
+
+PYBUILDER_DEFAULT = "a value the build script computed"
+
+
+def build_script_function(tmp_path, source, name="render"):
+    """Define a function the way a build script does, under ``__pcons__``.
+
+    The module name is half of what PyBuilder's messages reason about: a
+    helper defined here has nowhere to be imported from, and a test module,
+    which is importable, cannot stand in for that.
+    """
+    path = tmp_path / "pcons-build.py"
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    namespace = {"__name__": RUN_NAME, "__file__": str(path)}
+    exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)  # noqa: S102
+    return namespace[name]
+
+
+SCRIPT_VALUE = "a value the build script computed"
+
+
+class TestEveryPyBuilderRemedyWorks:
+    """Every remedy above, typed out and run.
+
+    A remedy nobody has followed is a remedy nobody has checked. Each test
+    here types the sentence the matching refusal prints and asserts the
+    result is a real edge. Where the remedy moves a value across the
+    configure/build boundary, the function is then run through the build-time
+    runner, so the value is proven to arrive rather than merely to configure.
+    """
+
+    def edge_sources(self, target):
+        """The edge's own sources, as node paths."""
+        info = target.output_nodes[0]._build_info
+        return [node.path.as_posix() for node in info["sources"]]
+
+    def run_edge(self, project, builder, tmp_path, **call):
+        """Make the edge, then run its function the way the runner will."""
+        made = builder(**call)
+        project.resolve()
+        _, module, args = (
+            tmp_path / Path(token.path)
+            for token in made.output_nodes[0]._build_info["command"]
+            if isinstance(token, PathToken)
+        )
+        out = tmp_path / "written.txt"
+        run(str(module), str(args), [str(out)], [str(tmp_path / "src" / "main.c")])
+        return made, out
+
+    def test_a_partial_becomes_an_argument_of_the_call(self, project_env, tmp_path):
+        """ "give its bound arguments to the call: builder(target=..., bound=value)"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, n):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(str(n), encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt", n=1)
+
+        assert out.read_text(encoding="utf-8") == "1"
+
+    def test_a_builtin_becomes_a_def_taking_what_it_needs(self, project_env, tmp_path):
+        """ "Write a def beside the other targets and pass what it needs at the call"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, value):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(str(value), encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt", value=3)
+
+        assert out.read_text(encoding="utf-8") == "3"
+
+    def test_a_lambda_becomes_a_def(self, project_env):
+        """ "write it as a def"."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            return 1
+
+        assert render(target="out.txt").name == "out"
+
+    def test_a_method_moves_out_of_the_class(self, project_env):
+        """ "move the def out of the class"."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            return 1
+
+        assert render(target="out.txt").name == "out"
+
+    def test_a_coroutine_becomes_a_plain_def(self, project_env):
+        """ "Write it as a plain def"."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            return 1
+
+        assert render(target="out.txt").name == "out"
+
+    def test_a_closure_becomes_a_parameter(self, project_env, tmp_path):
+        """ "Take it as a parameter and pass it at the call: f(target=..., title=...)"."""
+        project, env = project_env
+        title = "from the enclosing scope"
+
+        def make():
+            @env.PyBuilder()
+            def render(targets, sources, title):
+                from pathlib import Path
+
+                Path(targets[0]).write_text(title, encoding="utf-8")
+
+            return render
+
+        _, out = self.run_edge(project, make(), tmp_path, target="out.txt", title=title)
+
+        assert out.read_text(encoding="utf-8") == title
+
+    def test_an_import_moves_into_the_body(self, project_env, tmp_path):
+        """ "Import Path inside the function body, the way this script imports it"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(Path(sources[0]).name, encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt")
+
+        assert out.read_text(encoding="utf-8") == "main.c"
+
+    def test_a_module_import_moves_into_the_body(self, project_env, tmp_path):
+        """'Write "import json" at the top of the function body'."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            import json
+            from pathlib import Path
+
+            Path(targets[0]).write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt")
+
+        assert out.read_text(encoding="utf-8") == '{"ok": true}'
+
+    def test_a_default_becomes_a_parameter_passed_at_the_call(
+        self, project_env, tmp_path
+    ):
+        """ "write the parameter without a default and pass it at the call"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, label):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(label, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", label=SCRIPT_VALUE
+        )
+
+        assert out.read_text(encoding="utf-8") == SCRIPT_VALUE
+
+    def test_a_script_value_becomes_a_parameter(self, project_env, tmp_path):
+        """ "Take SRC_DIR as a parameter and pass it at the call"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, SRC_DIR):  # noqa: N803
+            from pathlib import Path
+
+            Path(targets[0]).write_text(SRC_DIR, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", SRC_DIR="src"
+        )
+
+        assert out.read_text(encoding="utf-8") == "src"
+
+    def test_a_script_local_helper_is_written_out_in_the_body(
+        self, project_env, tmp_path
+    ):
+        """ "write out what it does inside the function body"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            from pathlib import Path
+
+            def helper(value):
+                return value.upper()
+
+            Path(targets[0]).write_text(helper("ok"), encoding="utf-8")
+
+        _, out = self.run_edge(project, render, tmp_path, target="out.txt")
+
+        assert out.read_text(encoding="utf-8") == "OK"
+
+    def test_dunder_file_becomes_a_path_passed_at_the_call(self, project_env, tmp_path):
+        """'Take the path it means as a parameter: f(target=..., here=...)'."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, here):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(Path(here).name, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project,
+            render,
+            tmp_path,
+            target="out.txt",
+            here=str(project.root_dir / "build.py"),
+        )
+
+        assert out.read_text(encoding="utf-8") == "build.py"
+
+    def test_a_reserved_parameter_is_renamed(self, project_env, tmp_path):
+        """ "Rename it in the def and at the call"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, input_file):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(input_file, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", input_file="renamed"
+        )
+
+        assert out.read_text(encoding="utf-8") == "renamed"
+
+    def test_the_signature_the_message_printed_is_callable(self, project_env):
+        """The bind message prints the signature; typing it works."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, title):
+            return title
+
+        assert render(target="out.txt", title="typed from the message").name == "out"
+
+    def test_a_target_moves_to_source(self, project_env):
+        """ "List it in source= instead, and the function receives its output paths"."""
+        project, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            return sources
+
+        edge = render(target="out.txt", source=[made])
+        project.resolve()
+
+        assert self.edge_sources(edge) == ["build/made.txt"]
+
+    def test_a_node_moves_to_source(self, project_env):
+        """The same remedy, for a node."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            return sources
+
+        edge = render(target="out.txt", source=[project.node("src/main.c")])
+        project.resolve()
+
+        assert self.edge_sources(edge) == ["src/main.c"]
+
+    def test_the_environment_becomes_a_value_read_here(self, project_env, tmp_path):
+        """ "Read what the function needs from it here, and pass that"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, env_name):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(env_name, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", env_name=str(env.name)
+        )
+
+        assert out.read_text(encoding="utf-8") == str(env.name)
+
+    def test_a_tool_namespace_becomes_its_values(self, project_env, tmp_path):
+        """ "env.cc.flags rather than env.cc"."""
+        project, env = project_env
+        env.cc.flags = ["-O2"]
+
+        @env.PyBuilder()
+        def render(targets, sources, flags):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(" ".join(flags), encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", flags=list(env.cc.flags)
+        )
+
+        assert out.read_text(encoding="utf-8") == "-O2"
+
+    def test_an_unpicklable_argument_becomes_a_path(self, project_env, tmp_path):
+        """ "Pass what describes it instead, a path or a string"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, path):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(Path(path).read_text(encoding="utf-8"))
+
+        _, out = self.run_edge(
+            project,
+            render,
+            tmp_path,
+            target="out.txt",
+            path=str(tmp_path / "src" / "main.c"),
+        )
+
+        assert out.read_text(encoding="utf-8").startswith("int main()")
+
+    def test_two_functions_of_one_name_are_renamed(self, project_env, tmp_path):
+        """ "Rename one of the functions"."""
+        project, env = project_env
+        for sub in ("one", "two"):
+            (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+        first = build_script_function(
+            tmp_path / "one",
+            """
+            def render(targets, sources):
+                return 1
+            """,
+        )
+        second = build_script_function(
+            tmp_path / "two",
+            """
+            def render_more(targets, sources):
+                return 2
+            """,
+            name="render_more",
+        )
+
+        env.PyBuilder()(first)(target="a.txt")
+        env.PyBuilder()(second)(target="b.txt")
+        project.resolve()
+
+        assert (tmp_path / "build/pybuilder/render.py").is_file()
+        assert (tmp_path / "build/pybuilder/render_more.py").is_file()
+
+    def test_one_decoration_called_twice(self, project_env, tmp_path):
+        """ "Decorate the function once and call the builder twice"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            return 1
+
+        render(target="a.txt")
+        render(target="b.txt")
+        project.resolve()
+
+        generated = sorted(
+            q.name
+            for q in (tmp_path / "build" / "pybuilder").iterdir()
+            if q.suffix in (".py", ".pkl")
+        )
+
+        assert generated == ["a.txt.args.pkl", "b.txt.args.pkl", "render.py"]
+
+    def test_one_of_the_edges_is_named(self, project_env, tmp_path):
+        """'Name one of the edges, name="something-else"'."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            return 1
+
+        render(target="report.txt")
+        second = render(target="sub/report.txt", name="sub-report")
+        project.resolve()
+
+        assert second.name == "sub-report"
+        assert (tmp_path / "build/pybuilder/sub/report.txt.args.pkl").is_file()
+
+    def test_one_environment_gets_a_build_prefix(self, project_env, tmp_path):
+        """ "Give one environment its own build_prefix"."""
+        project, _ = project_env
+        env = project.Environment(name="host")
+        other = project.Environment(name="other")
+        other.build_prefix = "other"
+
+        def decorate(environment):
+            @environment.PyBuilder()
+            def render(targets, sources):
+                return 1
+
+            return render
+
+        decorate(env)(target="report.txt")
+        decorate(other)(target="report.txt")
+        project.resolve()
+
+        assert (tmp_path / "build/pybuilder/render.py").is_file()
+        assert (tmp_path / "build/other/pybuilder/render.py").is_file()
+
+    def test_the_first_two_parameters_become_positional(self, project_env):
+        """ "write the first two as plain parameters: def f(targets, sources, ...)"."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, title):
+            return title
+
+        assert render(target="out.txt", title="t").name == "out"
+
+    def test_the_slash_moves_up_to_follow_sources(self, project_env, tmp_path):
+        """ "Move the / up so it follows sources: def f(targets, sources, /, title)"."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, /, title):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(title, encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", title="after the slash"
+        )
+
+        assert out.read_text(encoding="utf-8") == "after the slash"
+
+    def test_sources_at_the_call_becomes_source(self, project_env):
+        """ "The edge's own files are spelled source="."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, title):
+            return title
+
+        edge = render(target="out.txt", source=["src/main.c"], title="t")
+        project.resolve()
+
+        assert self.edge_sources(edge) == ["src/main.c"]
+
+    def test_a_pcons_value_becomes_a_plain_list(self, project_env, tmp_path):
+        """ "Pass list(...) to copy the values out"."""
+        project, env = project_env
+        env.cc.flags.append("-O2")
+
+        @env.PyBuilder()
+        def render(targets, sources, flags):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(" ".join(flags), encoding="utf-8")
+
+        _, out = self.run_edge(
+            project, render, tmp_path, target="out.txt", flags=list(env.cc.flags)
+        )
+
+        assert out.read_text(encoding="utf-8") == "-O2"
+
+    def test_a_pcons_value_becomes_a_substituted_list(self, project_env, tmp_path):
+        """ "env.subst_list(...) to substitute and list them"."""
+        project, env = project_env
+        env.cc.flags.append("-O2")
+
+        @env.PyBuilder()
+        def render(targets, sources, flags):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(" ".join(flags), encoding="utf-8")
+
+        _, out = self.run_edge(
+            project,
+            render,
+            tmp_path,
+            target="out.txt",
+            flags=env.subst_list("$cc.flags"),
+        )
+
+        assert out.read_text(encoding="utf-8") == "-O2"
+
+
+class TestPyBuilderErrors:
+    """What env.PyBuilder() says when a function cannot travel to build time.
+
+    Every message is read here as the user reads it, whole, because the
+    feature's failures are all configure-time refusals whose only job is to
+    say what to type instead.
+    """
+
+    def test_a_lambda_says_to_write_a_def(self, project_env):
+        """No name is invented for it: '<lambda>' twice in one sentence."""
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(lambda targets, sources: None)
+
+        message = str(caught.value)
+        assert "PyBuilder was given a lambda." in message
+        assert "write it as a def" in message
+        assert "<lambda>" not in message
+
+    def test_a_closure_names_the_variable_and_spells_the_call(self, project_env):
+        _, env = project_env
+        title = "report"
+
+        def make():
+            @env.PyBuilder()
+            def render(targets, sources):
+                return title
+
+            return render
+
+        with pytest.raises(PconsError) as caught:
+            make()
+
+        message = str(caught.value)
+        assert message.startswith(str(caught.value.location) + ": ")
+        assert (
+            "PyBuilder render() reads title from the function it is nested in"
+            in message
+        )
+        assert "Take it as a parameter and pass it at the call: " in message
+        assert "render(target=..., title=...)." in message
+
+    def test_a_global_says_to_move_the_import_into_the_body(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(targets, sources):
+                return Path(targets[0])
+
+        message = str(caught.value)
+        assert "PyBuilder render() uses Path from the build script" in message
+        assert "Import Path inside the function body, the way this script" in message
+
+    def test_a_default_says_to_drop_it_and_pass_it_at_the_call(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(targets, sources, n=PYBUILDER_DEFAULT):
+                return n
+
+        message = str(caught.value)
+        assert "PYBUILDER_DEFAULT is a parameter's default value" in message
+        assert "so write the parameter without a default." in message
+        assert (
+            "Take PYBUILDER_DEFAULT as a parameter and pass it at the call, "
+            "render(target=..., PYBUILDER_DEFAULT=PYBUILDER_DEFAULT)." in message
+        )
+
+    def test_a_target_in_kwargs_points_at_source(self, project_env):
+        """The first mistake: passing a target the way it reads naturally."""
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyBuilder()
+        def render(targets, sources, t):
+            return t
+
+        with pytest.raises(PconsError) as caught:
+            call_line = inspect.currentframe().f_lineno + 1
+            render(target="out.txt", t=made)
+
+        message = str(caught.value)
+        assert "argument t is the target 'made'" in message
+        assert "the build description does not exist when the function runs" in message
+        assert "List it in source= instead" in message
+        assert caught.value.location.lineno == call_line
+
+    def test_a_target_nested_in_kwargs_is_found_and_located(self, project_env):
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyBuilder()
+        def render(targets, sources, inputs):
+            return inputs
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", inputs={"first": [made]})
+
+        assert "argument inputs['first'][0] is the target 'made'" in str(caught.value)
+
+    def test_the_environment_in_kwargs_says_to_read_it_here(self, project_env):
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, e):
+            return e
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", e=env)
+
+        message = str(caught.value)
+        assert "argument e is the environment itself" in message
+        assert "Read what the function needs from it here" in message
+
+    def test_an_unpicklable_kwarg_names_the_key_and_the_way_out(
+        self, project_env, tmp_path
+    ):
+        _, env = project_env
+        handle = (tmp_path / "src" / "main.c").open()
+
+        @env.PyBuilder()
+        def render(targets, sources, f):
+            return f
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", f=handle)
+
+        handle.close()
+        message = str(caught.value)
+        assert "cannot pickle argument f" in message
+        assert "Pass what describes it instead, a path or a string" in message
+
+    def test_two_unpicklable_arguments_are_joined_with_and(self, project_env):
+        """A two-name list reads "f and g", never "f, g"."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, f, g):
+            return f, g
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", f=lambda: None, g=lambda: None)
+
+        assert "cannot pickle arguments f and g:" in str(caught.value)
+
+    def test_two_wrong_keywords_are_joined_with_and(self, project_env):
+        """The same list helper, at the other site that once lost it."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, title):
+            return title
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", extra=1, title="t")
+
+        assert "cannot be called with extra and title:" in str(caught.value)
+
+    def test_two_script_globals_give_one_call_to_type(self, project_env, tmp_path):
+        """One concrete thing to type, not the same thing twice."""
+        _, env = project_env
+        render = build_script_function(
+            tmp_path,
+            """
+            SRC_DIR = "src"
+            VERSION = "1.0"
+
+
+            def render(targets, sources):
+                return SRC_DIR + VERSION
+            """,
+        )
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(render)(target="out.txt")
+
+        message = str(caught.value)
+        assert "uses SRC_DIR and VERSION from the build script" in message
+        assert (
+            "Take SRC_DIR and VERSION as parameters and pass them at the call, "
+            "render(target=..., SRC_DIR=SRC_DIR, VERSION=VERSION)." in message
+        )
+        assert message.count("render(target=") == 1
+
+    def test_two_edges_to_one_target_collide_on_the_pickle(self, project_env):
+        """The pickle follows the target, so two edges to one target collide
+        on it even when they are named apart."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources):
+            return 1
+
+        render(target="report.txt", name="one")
+
+        with pytest.raises(PconsError) as caught:
+            render(target="report.txt", name="two")
+
+        message = str(caught.value)
+        assert "PyBuilder edge 'two' would overwrite" in message
+        assert "build/pybuilder/report.txt.args.pkl" in message
+        assert "already written by the edge at " in message
+        assert "test_user_errors.py:" in message.split("already written by")[1]
+        assert 'Name one of the edges, name="something-else".' in message
+
+    def test_one_function_decorated_twice_says_to_call_it_twice(self, project_env):
+        """The reshape's own mistake: two decorations where one would do."""
+        _, env = project_env
+
+        def decorate():
+            @env.PyBuilder()
+            def render(targets, sources):
+                return 1
+
+            return render
+
+        decorate()(target="a.txt")
+
+        with pytest.raises(PconsError) as caught:
+            decorate()(target="b.txt")
+
+        message = str(caught.value)
+        assert "would overwrite build/pybuilder/render.py" in message
+        assert "Decorate the function once and call the builder twice." in message
+        assert "Rename" not in message
+
+    def test_a_wrong_keyword_is_refused_at_the_call(self, project_env):
+        """A build-time TypeError inside a generated module, moved forward."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, title):
+            return title
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", titel="typo")
+
+        message = str(caught.value)
+        assert "render(targets, sources, title) cannot be called with" in message
+        assert "titel: missing a required argument: 'title'" in message
+        assert "render(targets, sources, **kwargs)" in message
+        assert caught.value.location.lineno > 0
+
+    def test_a_missing_argument_is_refused_at_the_call(self, project_env):
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, title):
+            return title
+
+        with pytest.raises(PconsError, match="missing a required argument: 'title'"):
+            render(target="out.txt")
+
+    def test_a_reserved_parameter_name_is_refused_at_the_def(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(targets, sources, source):
+                return source
+
+        message = str(caught.value)
+        assert "PyBuilder render() has source as a parameter name" in message
+        assert "the call spends that name on the edge itself" in message
+        assert "Rename it in the def and at the call" in message
+
+    def test_several_reserved_names_are_named_together(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(targets, sources, depends, target):
+                return depends, target
+
+        message = str(caught.value)
+        assert "PyBuilder render() has depends and target as parameter names" in message
+        assert "the call spends those names on the edge itself" in message
+        assert "Rename them in the def and at the call" in message
+
+    def test_keyword_only_first_parameters_name_the_cause(self, project_env):
+        """bind would say "too many positional arguments", which is our probe."""
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(*, targets, sources, title):
+                return title
+
+        message = str(caught.value)
+        assert "cannot receive targets and sources" in message
+        assert "no parameters that can be filled positionally" in message
+        assert "def render(targets, sources, ...)." in message
+        assert "positional arguments" not in message
+
+    def test_one_positional_slot_is_still_one_too_few(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(targets, *, sources):
+                return 1
+
+        assert "only one parameter that can be filled positionally" in str(caught.value)
+
+    def test_a_positional_only_parameter_names_the_cause(self, project_env):
+        """bind calls it "a required positional-only argument", to somebody
+        who just typed that keyword."""
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(targets, sources, title, /):
+                return title
+
+        message = str(caught.value)
+        assert "cannot be given title: it is positional-only" in message
+        assert "everything past targets and sources arrives as a keyword" in message
+        assert "def render(targets, sources, /, title)." in message
+
+    def test_two_positional_only_parameters_are_named_together(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(targets, sources, title, count, /):
+                return title, count
+
+        message = str(caught.value)
+        assert "cannot be given title and count: they are positional-only" in message
+        assert "def render(targets, sources, /, title, count)." in message
+
+    def test_a_slash_after_sources_is_accepted(self, project_env):
+        """The good shape: only parameters past sources must take keywords."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, /, title):
+            return title
+
+        assert render(target="out.txt", title="t").name == "out"
+
+    def test_sources_as_a_call_keyword_points_at_source(self, project_env):
+        """bind would say "multiple values for argument 'sources'"."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, title):
+            return title
+
+        with pytest.raises(PconsError) as caught:
+            render(target="o.txt", sources=["a.txt"], title="t")
+
+        message = str(caught.value)
+        assert "already receives sources from the edge" in message
+        assert "the call cannot pass it as well" in message
+        assert "The edge's own files are spelled source=" in message
+        assert "multiple values" not in message
+
+    def test_targets_as_a_call_keyword_points_at_target(self, project_env):
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, title):
+            return title
+
+        with pytest.raises(PconsError) as caught:
+            render(target="o.txt", targets=["a.txt"], title="t")
+
+        assert "The edge's own files are spelled target=" in str(caught.value)
+
+    def test_a_var_keyword_body_may_still_take_a_sources_argument(self, project_env):
+        """Only the function's own first two parameters are refused."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(first, second, **rest):
+            return rest
+
+        assert render(target="o.txt", sources="a literal argument").name == "o"
+
+    def test_a_parameter_named_env_is_fine(self, project_env):
+        """env is not reserved: the call has no env= to collide with."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, env):
+            return env
+
+        made = render(target="out.txt", env="production")
+
+        assert made.name == "out"
+
+    def test_two_functions_of_one_name_say_to_rename_one(self, project_env, tmp_path):
+        """The module is named after the function, so name= cannot part these."""
+        _, env = project_env
+        for sub in ("one", "two"):
+            (tmp_path / sub).mkdir(parents=True, exist_ok=True)
+        first = build_script_function(
+            tmp_path / "one",
+            """
+            def render(targets, sources):
+                return 1
+            """,
+        )
+        second = build_script_function(
+            tmp_path / "two",
+            """
+            def render(targets, sources):
+                return 2
+            """,
+        )
+        env.PyBuilder()(first)(target="a.txt")
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(second)(target="b.txt")
+
+        message = str(caught.value)
+        assert "PyBuilder render() would overwrite " in message
+        assert (
+            "build/pybuilder/render.py, already written by the PyBuilder at " in message
+        )
+        assert "Rename one of the functions." in message
+        assert "name=" not in message
+        assert "in environment" not in message
+
+    def test_a_partial_says_to_pass_the_function(self, project_env):
+        _, env = project_env
+
+        def render(targets, sources, n):
+            return n
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(functools.partial(render, n=1))
+
+        message = str(caught.value)
+        assert "PyBuilder was given a functools.partial." in message
+        assert "builder(target=..., bound=value)." in message
+
+    def test_a_bound_method_says_to_write_a_def(self, project_env):
+        _, env = project_env
+
+        class Holder:
+            def render(self, targets, sources):
+                return 1
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(Holder().render)
+
+        message = str(caught.value)
+        assert message.split(": ", 1)[1].startswith(
+            "PyBuilder needs a function written in a build script, not "
+        )
+        assert "Write a def beside the other targets and pass what it needs " in message
+        assert "at the call: builder(target=..., value=...)." in message
+
+    def test_a_method_says_to_move_it_out_of_the_class(self, project_env):
+        _, env = project_env
+
+        class Holder:
+            def render(self, targets, sources):
+                return 1
+
+        with pytest.raises(PconsError, match="move the def out of the class"):
+            env.PyBuilder()(Holder.render)
+
+    def test_a_coroutine_says_to_write_a_plain_def(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError, match="Write it as a plain def"):
+
+            @env.PyBuilder()
+            async def render(targets, sources):
+                return 1
+
+    def test_dunder_file_says_what_it_would_name(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyBuilder()
+            def render(targets, sources):
+                return __file__
+
+        message = str(caught.value)
+        assert "names the generated module rather than this script" in message
+        assert (
+            "Take the path it means as a parameter and pass it at the call" in message
+        )
+        assert 'render(target=..., here=project.root_dir / "...").' in message
+
+    def test_every_refusal_names_the_build_script_and_line(self, project_env):
+        """The location is half the message: the user has the script open."""
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(lambda targets, sources: None)
+
+        location = caught.value.location
+        assert location is not None
+        assert location.filename.endswith("test_user_errors.py")
+        assert location.lineno > 0
+        assert str(caught.value).startswith(f"{location}: ")
+
+    def test_a_script_local_helper_is_not_offered_an_import(
+        self, project_env, tmp_path
+    ):
+        """__pcons__ is not importable, so no import can reach a helper."""
+        _, env = project_env
+        render = build_script_function(
+            tmp_path,
+            """
+            def helper(value):
+                return value
+
+
+            def render(targets, sources):
+                return helper(1)
+            """,
+        )
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(render)
+
+        message = str(caught.value)
+        assert "PyBuilder render() uses helper from the build script" in message
+        assert "helper lives only in this build script" in message
+        assert "write out what it does inside the function body" in message
+        assert "import" not in message.split("nothing defines that name there.")[1][:40]
+
+    def test_an_import_is_named_by_the_script_not_by_the_implementation(
+        self, project_env, tmp_path
+    ):
+        """os.path.join is posixpath.join here and ntpath.join on Windows."""
+        _, env = project_env
+        render = build_script_function(
+            tmp_path,
+            """
+            from os.path import join
+
+
+            def render(targets, sources):
+                return join("a", "b")
+            """,
+        )
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(render)
+
+        message = str(caught.value)
+        assert "Import join inside the function body, the way this script" in message
+        assert "posixpath" not in message
+        assert "ntpath" not in message
+
+    def test_a_module_still_gets_its_import_line(self, project_env, tmp_path):
+        _, env = project_env
+        render = build_script_function(
+            tmp_path,
+            """
+            import json
+
+
+            def render(targets, sources):
+                return json.dumps({})
+            """,
+        )
+
+        with pytest.raises(PconsError, match='Write "import json"'):
+            env.PyBuilder()(render)
+
+    def test_a_tool_namespace_in_kwargs_points_at_its_values(self, project_env):
+        """env.cc pickles, and drags the environment behind it."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, cc):
+            return cc
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", cc=env.cc)
+
+        message = str(caught.value)
+        assert "argument cc is the 'cc' tool namespace" in message
+        assert "env.cc.flags rather than env.cc" in message
+
+    def test_a_pcons_instance_in_kwargs_names_the_argument_and_type(self, project_env):
+        """ "argument flags holds a pcons FlagList", unpickling it would import pcons."""
+        _, env = project_env
+        env.cc.flags.append("-O2")
+
+        @env.PyBuilder()
+        def render(targets, sources, flags):
+            return flags
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", flags=env.cc.flags)
+
+        message = str(caught.value)
+        assert "argument flags holds a pcons FlagList" in message
+        assert "unpickling it at build time would import pcons" in message
+        assert "list(...)" in message
+        assert "env.subst_list(...)" in message
+
+    def test_a_pcons_class_passed_by_reference_is_refused(self, project_env):
+        """A class, not an instance: reducer_override still sees it."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, cls):
+            return cls
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", cls=FlagList)
+
+        assert "argument cls holds a pcons class FlagList" in str(caught.value)
+
+    def test_a_pcons_function_passed_by_reference_is_refused(self, project_env):
+        """A function, not a call: reducer_override still sees it."""
+        _, env = project_env
+        from pcons.tools.pybuilder import validate as pcons_validate
+
+        @env.PyBuilder()
+        def render(targets, sources, fn):
+            return fn
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", fn=pcons_validate)
+
+        assert "argument fn holds a pcons function validate" in str(caught.value)
+
+    def test_plain_values_are_not_mistaken_for_pcons(self, project_env):
+        """A list, a dict of strings, and a Path all pass unchallenged."""
+        _, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, items, mapping, where):
+            return items, mapping, where
+
+        made = render(
+            target="out.txt",
+            items=[1, "two", 3.0],
+            mapping={"a": "b", "c": "d"},
+            where=Path("x/y"),
+        )
+
+        assert made.name == "out"
+
+    def test_a_dataclass_from_the_script_itself_is_not_flagged_as_pcons(
+        self, project_env, tmp_path
+    ):
+        """The build script's own module is __pcons__, never "pcons": no false positive.
+
+        A class the script itself defines cannot be pickled either way, since
+        __pcons__ is never importable, but the message stays the ordinary
+        "cannot pickle" one, not the new pcons-reference refusal.
+        """
+        _, env = project_env
+        source = """
+            from dataclasses import dataclass
+
+
+            @dataclass
+            class Local:
+                n: int
+
+
+            def render(targets, sources, local):
+                return local
+        """
+        render = env.PyBuilder()(build_script_function(tmp_path, source))
+        local_cls = build_script_function(tmp_path, source, name="Local")
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", local=local_cls(3))
+
+        message = str(caught.value)
+        assert "cannot pickle argument local" in message
+        assert "holds a pcons" not in message
+
+    def test_a_target_used_as_a_dict_key_is_found(self, project_env):
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyBuilder()
+        def render(targets, sources, m):
+            return m
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", m={made: 1})
+
+        assert "a key of argument m is the target 'made'" in str(caught.value)
+
+    def test_a_target_in_a_set_is_found_without_an_index(self, project_env):
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyBuilder()
+        def render(targets, sources, s):
+            return s
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", s={made})
+
+        assert "an element of argument s is the target 'made'" in str(caught.value)
+
+    def test_a_node_in_kwargs_points_at_source(self, project_env):
+        """A node is the fifth build-description type, and reads as a path."""
+        project, env = project_env
+
+        @env.PyBuilder()
+        def render(targets, sources, n):
+            return n
+
+        with pytest.raises(PconsError) as caught:
+            render(target="out.txt", n=project.node("src/main.c"))
+
+        message = str(caught.value)
+        assert "argument n is the build graph's file 'src/main.c'" in message
+        assert "List it in source= instead" in message
+
+    def test_a_structure_that_contains_itself_is_refused_not_walked_forever(
+        self, project_env
+    ):
+        """The walk's seen set is what makes this return instead of recursing."""
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+        looping: dict[str, object] = {}
+        looping["self"] = looping
+        looping["t"] = made
+
+        @env.PyBuilder()
+        def render(targets, sources, loop):
+            return loop
+
+        with pytest.raises(PconsError, match="is the target 'made'"):
+            render(target="out.txt", loop=looping)
+
+    def test_a_renamed_lambda_says_its_source_is_not_a_def(self, project_env):
+        """Reaches the ast fallback: __name__ says def, the source says lambda."""
+        _, env = project_env
+        renamed = lambda targets, sources: None  # noqa: E731
+        renamed.__name__ = "renamed"
+
+        with pytest.raises(PconsError) as caught:
+            env.PyBuilder()(renamed)
+
+        message = str(caught.value)
+        assert "is not a def, it reads as Assign" in message
+        assert "write one out in the build script" in message

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import UserList
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from difflib import get_close_matches
 from pathlib import Path
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from pcons.core.node import FileNode, Node
     from pcons.core.preset import Preset, ToolContribution
     from pcons.core.target import Target
+    from pcons.tools import pybuilder
     from pcons.tools.toolchain import Toolchain
 else:
     # At runtime, Environment inherits from `object`; tool namespaces and
@@ -1865,6 +1866,100 @@ class Environment(_EnvironmentStubs):
                 cmd_target.name = name
 
         return cmd_target
+
+    def PyBuilder(
+        self,
+        *,
+        python: str | None = None,
+        restat: bool = False,
+        write_if_different: bool = False,
+        cwd: str | Path | None = None,
+        launcher: Sequence[str] | None = None,
+        env_vars: Mapping[str, str] | None = None,
+        worker: Any = None,
+        depends: str | Path | Sequence[str | Path] | None = None,
+    ) -> Callable[[Callable[..., object]], pybuilder.PyBuilder]:
+        """Turn a Python function of this build script into a builder.
+
+        The decorated name is a builder, the way ``env.Program`` is, and
+        calling it makes an edge::
+
+            @env.PyBuilder()
+            def report(targets, sources, title):
+                from pathlib import Path
+
+                Path(targets[0]).write_text(title + Path(sources[0]).read_text())
+
+            counts = report(target="counts.txt", source=["a.txt"], title="Counts")
+            more = report(target="more.txt", source=["b.txt"], title="More")
+
+            project.Default(counts, more)
+
+        The function does not run now. Its source goes once to a generated
+        module under the environment's build directory, each call's arguments
+        go to a pickle beside it, and each edge runs the module at build time
+        with *targets* and *sources* as the build tool spells them. Both files
+        are written when pcons resolves the build, never by the call.
+
+        The arguments here say how the function runs, which is a property of
+        the body and the same for every edge. The call says what to build.
+        No option appears at both, except ``depends=``: the decoration's is a
+        dependency of every edge the builder makes, the call's of that edge
+        alone. Two edges that must otherwise run differently are two
+        decorations, which is honest about being two ways of running.
+
+        Only the function's own source travels, so the body may use nothing
+        from around it: no name the build script imported or defined, no
+        variable of an enclosing function. Import what it needs inside the
+        body and take everything else as a keyword of the call. Anything else
+        is refused at configure time rather than at build time, and so is a
+        keyword the function's signature cannot take.
+
+        ``target``, ``source``, ``name`` and ``depends`` are refused as
+        parameter names: the call spends them on the edge.
+
+        ``depfile`` and ``deps_style`` are deliberately absent: a function
+        that discovers its own dependencies has to write a make-style depfile
+        by hand, which deserves its own example.
+
+        Args:
+            python: The interpreter that runs the function, defaulting to the
+                    one running pcons. A string, never a detected tool: the
+                    day PyBuilder has to *find* an interpreter or ask its
+                    version, that is tool knowledge and this moves to a
+                    python tool. One whose file name does not contain
+                    "python" makes ``worker=`` a no-op, since that is how a
+                    worker recognises a command it can run in itself; the
+                    command then runs directly, correctly but cold.
+            restat: See :meth:`Command`.
+            write_if_different: See :meth:`Command`.
+            cwd: See :meth:`Command`.
+            launcher: See :meth:`Command`.
+            env_vars: See :meth:`Command`.
+            worker: See :meth:`Command`. A :class:`pcons.workers.PythonWorker`
+                    keeps an interpreter warm, which is most of the cost of a
+                    small function.
+            depends: Dependency of every edge the builder makes, on top of
+                    whatever a call's own ``depends=`` adds. Equivalent to
+                    calling ``.depends()`` on the builder this returns. See
+                    :meth:`Command`.
+
+        Returns:
+            A decorator that returns the builder the script calls.
+        """
+        from pcons.tools.pybuilder import py_builder
+
+        return py_builder(
+            self,
+            python=python,
+            restat=restat,
+            write_if_different=write_if_different,
+            cwd=cwd,
+            launcher=launcher,
+            env_vars=env_vars,
+            worker=worker,
+            depends=depends,
+        )
 
     def __str__(self) -> str:
         """User-friendly string representation for debugging."""

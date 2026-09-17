@@ -2536,6 +2536,168 @@ sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
 or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
 the link then depends on.
 
+### Python Functions as Build Steps: env.PyBuilder()
+
+`env.Command()` runs a program. `env.PyBuilder()` turns a Python function you wrote in the build script into a *builder*, the way `env.Program` is a builder. Calling it makes one build edge, and calling it again makes another:
+
+```python
+@env.PyBuilder()
+def report(targets, sources, title):
+    from pathlib import Path
+
+    lines = [title]
+    for name in sources:
+        text = Path(name).read_text(encoding="utf-8")
+        lines.append(f"{Path(name).name}: {len(text.split())}")
+    Path(targets[0]).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+first = report(
+    target=project.build_dir / "report.txt",
+    source=[src / "a.txt", src / "b.txt"],
+    title="word counts",
+)
+second = report(
+    target=project.build_dir / "report2.txt",
+    source=[src / "c.txt", src / "d.txt"],
+    title="word counts, second set",
+)
+
+project.Default(first, second)
+```
+
+`report` is a builder; `first` and `second` are the `Target`s its calls returned. The whole of `examples/90_python_builder` is that, plus a second environment.
+
+Underneath, a `PyBuilder` edge is an ordinary command edge: it takes `restat=` and `worker=` the way `env.Command()` does, and `pcons explain` shows it the same way, as a `(command)` edge with its command line, sources, environment and call site.
+
+The function does not run while the build is described. pcons writes its source **once** to a generated module under the environment's build directory, `build/pybuilder/report.py`, writes each call's arguments to a pickle beside it, named after the target it builds, `build/pybuilder/report.txt.args.pkl`, and each call emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step. Both files are written when pcons resolves the build, not by the call, so a script that only describes the build writes nothing. The runner that loads them is copied once per build directory, to `build/pybuilder/pcons-runner/pcons-runner.py`, a directory of its own, so `build.ninja` names no file inside the pcons installation.
+
+The function is called as `fn(targets, sources, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written. Its return value is reserved and must be `None`.
+
+**What the function sees.** `targets`, `sources`, and the call's own keywords, and nothing else. No context object, no implicit handle on the build script, the environment or the project: the closure ban and the script-global ban below are exactly what keeps a function from reaching past its own parameters. A file the function opens without naming it in `source=` is not a declared input of the edge.
+
+**When the keywords are fixed.** At the call, while the build is described, not at resolve and not at build time. So the call can pass anything the script already has by then: a plain value, `env.cc.cmd`, or an already-expanded `env.subst_list("$cc.flags")`. It cannot pass a `Target` or a `Node`: both are refused as keywords, for the reason given below. Put it in `source=` instead, and the function receives its output paths in `sources`. A pcons value is refused too, because unpickling it at build time would import pcons: `list(env.cc.flags)` or `env.subst_list("$cc.flags")` works, `env.cc.flags` itself does not.
+
+**The decoration says how the function runs, the call says what to build.** No option sits at both levels, except `depends=`: on the decoration it is a dependency of every edge the builder makes, on the call it is a dependency of that edge alone. Two edges that must otherwise run differently are two decorations.
+
+| on `env.PyBuilder()` | on the call |
+|---|---|
+| `python=`, `worker=` | `target=`, `source=` |
+| `cwd=`, `launcher=`, `env_vars=` | `name=` |
+| `restat=`, `write_if_different=` | the function's own arguments, as plain keywords |
+| `depends=` | `depends=` |
+
+`depfile=` and `deps_style=` are not supported. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
+
+**Discovered outputs.** `target=` is fixed at the call, so one call cannot declare an output whose name or count only another edge's result decides. [Staged Generation](#staged-generation-targets-discovered-mid-build) still gets there, no new mechanism needed: a first call whose only declared target is a small manifest, and a second call, made from inside a `project.when_generated()` block once ninja has built that manifest and re-run pcons, whose targets come from what it says. `examples/57_staged_generation` is the worked example. It uses `env.Command()` for both calls, and a `PyBuilder()` call plays the same role there.
+
+**Edge names.** An edge is named after its first target's stem, the same rule `env.Command()` uses, and pcons refuses a second target in one environment with the same stem: `out/report.txt` and `tmp/report.txt` both want the edge name `report`, and so do `lorem.txt` and `lorem.c` in a chain. Give one of them `name=`:
+
+```python
+one = report(target="out/report.txt", source=[src / "a.txt"], title="one")
+two = report(
+    target="tmp/report.txt", name="tmp-report", source=[src / "b.txt"], title="two"
+)
+```
+
+`name=` is also what `ninja tmp-report` then means. `examples/91_python_builder_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem. The argument pickle plays no part in this: it is named after the target's own build-relative path, `build/pybuilder/out/report.txt.args.pkl` and `build/pybuilder/tmp/report.txt.args.pkl` here, so it never collides on its own.
+
+**Reserved parameter names.** `target`, `source`, `name` and `depends` are refused as parameters of the function, because the call spends them on the edge. Rename them; the error says which ones and what the call does with them.
+
+**Three rules follow from the function travelling alone.**
+
+1. *It imports what it needs inside its own body.* The generated module holds the function and nothing else, so a name this script imported does not exist there. pcons refuses a body that reads one, naming it, rather than letting the build fail later with `NameError`. The function runs with the `sys.path` its script had when it was decorated, so it imports what the script itself could, a module beside the script included. `python=` names another interpreter instead, and the function then runs with that interpreter's own path. Editing such a module does not re-run the edge on its own: it is a dependency of the function, not of one call, so it belongs on the decoration or on `.depends()`, both below, rather than repeated in every call's own `depends=`.
+2. *It reads nothing from around it.* A function that closes over a variable of an enclosing function is refused for the same reason. Take the value as a parameter and pass it at the call, where it travels in the pickle, so every value there must be picklable. Some that pickle are refused anyway: a target, a node, an environment, a project and a tool namespace all belong to the build description, which does not exist when the function runs. A target goes in `source=`, and the function receives its output paths in `sources`; from an environment, read the values you want here and pass those, `env.cc.flags` rather than `env.cc`.
+3. *The call returns the `Target`.* `first` above is a target, like everything else a pcons builder returns. It goes to `project.Default()`, to `project.Install()`, or into another target's `source=`.
+
+A lambda, a `functools.partial`, a method and a builtin are all refused: only a plain `def` written out in a build script has source to extract. So is a signature the build-time call could not satisfy, such as one whose first two parameters are keyword-only.
+
+**A dependency of the function.** A module the body imports is a dependency of the function, not of one call: declare it once, on the decoration, and every edge the builder makes waits on it.
+
+```python
+@env.PyBuilder(depends=[project.root_dir / "wordcount.py"])
+def report(targets, sources, title):
+    ...
+
+
+report(target="report.txt", source=[src / "a.txt"], title="word counts")
+```
+
+The same list grows later, with `.depends()` on the builder `env.PyBuilder()` returns, and reaches an edge already made:
+
+```python
+@env.PyBuilder()
+def report(targets, sources, title):
+    ...
+
+
+made = report(target="report.txt", source=[src / "a.txt"], title="word counts")
+report.depends(project.root_dir / "wordcount.py")
+```
+
+Both reach every edge the builder makes, whichever comes first in the script. The call's own `depends=` still exists, for a dependency of that one edge alone.
+
+**Rebuilds.** The generated module, the pickle and the runner copy are inputs of the edge, and all three are written only when their bytes change. Regenerating with a pcons whose runner changed re-runs every PyBuilder edge. Edit the function body and every edge that reads it re-runs. Change one of a call's arguments and only that edge re-runs. Edit anything else in the build script, a comment or a line above the decoration, and pcons regenerates the build files but no edge re-runs, because nothing any of them depends on moved.
+
+**Several environments** are served by a plain Python helper that decorates once per environment. A builder belongs to the environment that decorated it:
+
+```python
+def make_report(environment):
+    @environment.PyBuilder()
+    def report(targets, sources, title):
+        from pathlib import Path
+
+        lines = [title]
+        for name in sources:
+            text = Path(name).read_text(encoding="utf-8")
+            lines.append(f"{Path(name).name}: {len(text.split())}")
+        Path(targets[0]).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    return report
+
+
+host = project.Environment(name="host")
+strict = project.Environment(name="strict")
+strict.build_prefix = "strict"
+
+report = make_report(host)
+checked = make_report(strict)(
+    target="report.txt", source=[src / "a.txt"], title="word counts, strict"
+)
+```
+
+`build_prefix` is what keeps the two `report.txt` apart, and it gives each environment its own copy of the generated module, `build/pybuilder/report.py` and `build/strict/pybuilder/report.py`, with identical bytes. Two targets may share a name only when their environments are named and different, which is why both environments have a name here. See `examples/75_multi_env` for the multi-environment idiom itself.
+
+The closure ban and this shape fit each other: the body sits inside `make_report`, where `environment` is in scope, so everything it needs comes through keywords of the call.
+
+**A pipeline.** A builder's `Target` goes into another builder's `source=` like any other, which is how a chain gets its order:
+
+```python
+text = fetch(target=project.build_dir / f"{name}.txt", name=f"{name}-text",
+             url=url, field="feed.lipsum")
+source = embed(target=project.build_dir / f"{name}.c", name=f"{name}-source",
+               source=[text], symbol=name)
+project.Default(project.Program(name, env, sources=[source]))
+```
+
+`examples/91_python_builder_pipeline` is that, with two builders each called twice: one downloads a JSON document and writes a field of it, one turns those bytes into a C program, and `project.Program` compiles and links the result. Two builders, four edges, two generated modules.
+
+**A warm interpreter.** Starting Python costs more than a small function does. `worker=PythonWorker()` runs the edge in an interpreter that is already up:
+
+```python
+from pcons.workers.python import PythonWorker
+
+worker = PythonWorker()
+
+
+@env.PyBuilder(worker=worker)
+def report(targets, sources):
+    ...
+
+
+report(target="report.txt", source=[src / "a.txt"])
+```
+
 ### Post-Build Commands
 
 Add commands that run after a target is built using `target.post_build()`:

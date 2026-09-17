@@ -94,7 +94,15 @@ def write_text_if_changed(path: Path, text: str) -> None:
     -- these files are small (a dyndep, a modmap, an exports document), and a
     file replaced out-of-band is then rewritten like any other difference.
     """
-    data = text.encode("utf-8")
+    write_bytes_if_changed(path, text.encode("utf-8"))
+
+
+def write_bytes_if_changed(path: Path, data: bytes) -> None:
+    """Write *data* to *path* only when its content differs.
+
+    The bytes form of :func:`write_text_if_changed`, for a file that is not
+    text.
+    """
     try:
         if path.read_bytes() == data:
             return

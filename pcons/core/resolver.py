@@ -116,6 +116,12 @@ class CommandNodeFactory(PendingSourceFactory):
     so this factory has two jobs on the build_info those nodes carry:
     ``resolve`` turns whatever the command line names into paths, and
     ``resolve_pending`` wires up sources given as Targets.
+
+    Before either, ``resolve`` writes the files the command reads that the
+    build description itself decides, listed in ``_builder_data["writes"]``
+    as ``(absolute path, bytes)`` pairs by whatever made the command. They
+    are written here rather than when the command is declared, so a script
+    that only describes a build, and never resolves it, writes nothing.
     """
 
     def resolve(
@@ -137,8 +143,11 @@ class CommandNodeFactory(PendingSourceFactory):
         which keeps the tool out of ``$SOURCES`` and leaves the caller's
         indices meaning what they meant.
         """
+        from pcons.core.collate import write_bytes_if_changed
         from pcons.core.target import Target as TargetClass
 
+        for path, content in target._builder_data.get("writes", ()):
+            write_bytes_if_changed(path, content)
         if not target.output_nodes:
             return
         build_info = target.output_nodes[0]._build_info or {}
