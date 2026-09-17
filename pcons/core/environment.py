@@ -1858,17 +1858,6 @@ class Environment(_EnvironmentStubs):
             else:
                 cmd_target.depends(*depends)
 
-        # Register target with project if available
-        if self._project is not None:
-            # Handle duplicate target names by appending a suffix
-            base_name = name
-            counter = 1
-            while name in self._project._targets:
-                name = f"{base_name}_{counter}"
-                counter += 1
-            if name != base_name:
-                cmd_target.name = name
-
         return cmd_target
 
     def PyBuilder(

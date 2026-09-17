@@ -8,7 +8,6 @@ Users can customize the copy commands via the tool namespace
 
 from __future__ import annotations
 
-import logging
 import re
 import sys
 from collections.abc import Sequence
@@ -24,8 +23,6 @@ from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target
 from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
-
-logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -114,21 +111,22 @@ def _is_rooted(dest: Path) -> bool:
 
 
 #: Characters that would be confusing or illegal in a target name. Dots are
-#: kept: today's names already carry them (install_icon.png).
+#: kept: today's labels already carry them (install_icon.png).
 _UNSAFE_IN_NAME = re.compile(r"[^A-Za-z0-9._+-]")
 
 
 def _dest_suffix(project: Project, dest: Path) -> str:
-    """Flatten a destination path into a target-name suffix.
+    """Flatten a destination path into a target-label suffix.
 
-    Naming an install target after the destination's *basename* alone makes
-    every bundle collide with every other — 279 plugins each installing into
-    ``<name>.bundle/Contents/MacOS`` produce one ``install_MacOS`` and 278
-    renames. The whole path makes the name unique by construction.
+    The label reaches a reader, in ``pcons info --targets`` and every
+    diagnostic, so it says which install this is. The destination's
+    *basename* alone does not: 279 plugins each installing into
+    ``<name>.bundle/Contents/MacOS`` would all read ``install_MacOS``. The
+    whole path tells them apart.
 
-    Canonicalized (root-relative when under the project root) so the name
+    Canonicalized (root-relative when under the project root) so the label
     doesn't embed an absolute path, and computed *before* the install prefix
-    is applied, so PCONS_INSTALL_PREFIX can't leak into target names and make
+    is applied, so PCONS_INSTALL_PREFIX can't leak into it and make
     build.ninja vary between runs.
     """
     canonical = project.top_path_resolver.canonicalize(dest)
@@ -137,39 +135,9 @@ def _dest_suffix(project: Project, dest: Path) -> str:
 
 
 def _install_target_name(project: Project, dest: Path, prefix: str) -> str:
-    """``<prefix><flattened dest>``, or just *prefix* for the "." destination.
-
-    The degenerate case keeps its historical name rather than becoming a bare
-    "install", which would collide with the conventional
-    ``project.Alias("install", ...)``.
-    """
+    """``<prefix>_<flattened dest>``, or just *prefix* for the "." destination."""
     suffix = _dest_suffix(project, dest)
     return f"{prefix}_{suffix}" if suffix else prefix
-
-
-def _deduplicate_target_name(
-    project: Project, base_name: str, *, named_by_caller: bool = False
-) -> str:
-    """Generate a unique target name, appending a numeric suffix if needed.
-
-    Installing several things into one directory is ordinary — a config
-    directory exists to be filled from many places — and the auto-generated
-    name derives from the destination alone, so those collide by design.
-    That is benign and silent. A repeated explicit ``name=`` is a real
-    mistake, and only that one is worth saying out loud.
-    """
-    target_name = base_name
-    counter = 1
-    while project.get_target(target_name, False) is not None:
-        target_name = f"{base_name}_{counter}"
-        counter += 1
-    if target_name != base_name and named_by_caller:
-        logger.warning(
-            "Install target renamed from '%s' to '%s' to avoid conflict",
-            base_name,
-            target_name,
-        )
-    return target_name
 
 
 def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path:
@@ -221,6 +189,9 @@ def _make_install_target(
     defined_at: SourceLocation,
 ) -> Target:
     """Create an interface Target carrying install builder metadata.
+
+    The target is anonymous: its name is a label read off the destination
+    (or the call's ``name=``), so several installs may wear one.
 
     *env*, when the caller named one, is the environment the destination is
     anchored under and the copy command comes from. It is set after
@@ -716,7 +687,9 @@ class InstallBuilder:
                 project's build directory, which is what a plain
                 ``project.Install("lib", ...)`` wants; name an environment
                 when the destination has to follow its ``build_prefix``.
-            name: Optional name for the install target.
+            name: Optional label for this target, shown by
+                ``pcons info --targets``. Not a name to build by:
+                use ``project.Alias()`` for that.
             no_prefix: If True, do not prepend the install prefix to the destination.
             mode: Permissions for the installed copy, e.g. ``0o755``. The copy
                 otherwise carries the source's, which is usually right — this
@@ -727,11 +700,7 @@ class InstallBuilder:
             A Target representing the install operation.
         """
         dest_dir = Path(dest_dir)
-        target_name = _deduplicate_target_name(
-            project,
-            name or _install_target_name(project, dest_dir, "install"),
-            named_by_caller=name is not None,
-        )
+        target_name = name or _install_target_name(project, dest_dir, "install")
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
         return _make_install_target(
@@ -781,7 +750,9 @@ class InstallAsBuilder:
                 project's build directory, which is what a plain
                 ``project.Install("lib", ...)`` wants; name an environment
                 when the destination has to follow its ``build_prefix``.
-            name: Optional name for the install target.
+            name: Optional label for this target, shown by
+                ``pcons info --targets``. Not a name to build by:
+                use ``project.Alias()`` for that.
             no_prefix: If True, do not prepend the install prefix to the destination.
             mode: Permissions for the installed copy, e.g. ``0o755``. The copy
                 otherwise carries the source's, which is usually right — this
@@ -804,13 +775,9 @@ class InstallAsBuilder:
             )
 
         dest = Path(dest)
-        target_name = _deduplicate_target_name(
-            # InstallAs names a *file*, so the whole path goes into the name:
-            # two files installed into one directory must not collide.
-            project,
-            name or _install_target_name(project, dest, "install"),
-            named_by_caller=name is not None,
-        )
+        # InstallAs names a *file*, so the whole path goes into the label:
+        # two files installed into one directory read differently.
+        target_name = name or _install_target_name(project, dest, "install")
         dest = _apply_install_prefix(project, dest, no_prefix)
 
         return _make_install_target(
@@ -862,18 +829,16 @@ class InstallDirBuilder:
                 project's build directory, which is what a plain
                 ``project.Install("lib", ...)`` wants; name an environment
                 when the destination has to follow its ``build_prefix``.
-            name: Optional name for the install target.
+            name: Optional label for this target, shown by
+                ``pcons info --targets``. Not a name to build by:
+                use ``project.Alias()`` for that.
             no_prefix: If True, do not prepend the install prefix to the destination.
 
         Returns:
             A Target representing the install operation.
         """
         dest_dir = Path(dest_dir)
-        target_name = _deduplicate_target_name(
-            project,
-            name or _install_target_name(project, dest_dir, "install_dir"),
-            named_by_caller=name is not None,
-        )
+        target_name = name or _install_target_name(project, dest_dir, "install_dir")
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
         return _make_install_target(
@@ -968,7 +933,9 @@ class OverlayDirBuilder:
                 directory.
             sources: Source tree roots, in increasing precedence: the last
                 one wins a path the others also hold.
-            name: Optional name for the target.
+            name: Optional label for this target, shown by
+                ``pcons info --targets``. Not a name to build by:
+                use ``project.Alias()`` for that.
             exclude: Glob patterns dropped from every source tree, matched
                 against paths relative to each source root. A pattern
                 matching nothing is not an error: source trees legitimately
@@ -978,11 +945,7 @@ class OverlayDirBuilder:
             A Target whose one output is the stamp of the staged tree.
         """
         dest_dir = Path(dest_dir)
-        target_name = _deduplicate_target_name(
-            project,
-            name or _install_target_name(project, dest_dir, "overlay"),
-            named_by_caller=name is not None,
-        )
+        target_name = name or _install_target_name(project, dest_dir, "overlay")
         anchored = anchor_target_paths(env, [dest_dir], target_name=target_name)[0]
 
         target = _make_install_target(

@@ -34,32 +34,21 @@ if TYPE_CHECKING:
     from pcons.util.source_location import SourceLocation
 
 
-# Characters that Target name validation accepts. We map anything else
-# to "_" so that user-friendly test names (Catch2 sentences, doctest
-# scenarios with spaces, gtest names with colons) don't crash the build.
-# The user-visible name on the spec is left intact — only the *internal*
-# Ninja-target name is sanitized.
+# Characters a Target name accepts. A test name is written for a person to
+# read — a Catch2 sentence, a doctest scenario with spaces, a gtest name with
+# colons — so anything else maps to "_". The name the user gave lives on the
+# spec and reaches tests.json; this is the label on the internal target.
 _TARGET_NAME_BAD_CHARS = re.compile(r"[^\w./+-]")
 
 
-def _make_internal_target_name(project: Project, user_name: str) -> str:
-    """Compute a unique, Ninja-safe target name for a test.
+def _test_target_label(user_name: str) -> str:
+    """The label for a test's internal target: ``test_<sanitized name>``.
 
-    Steps:
-      1. Replace every char outside ``[\\w./+-]`` with ``_`` so names like
-         ``"server connects"`` or ``"NetSuite::ssl"`` become valid.
-      2. Prefix with ``test_`` so ``project.Test("hello", ...)`` doesn't
-         collide with ``project.Program("hello", ...)`` — the common case.
-      3. Suffix with a counter if needed so duplicates don't crash.
+    ``test_`` distinguishes it from the program it runs, which usually
+    carries the same name. Two tests of one name wear one label, which is
+    what an anonymous target is for (see ``Target.anonymous``).
     """
-    sanitized = _TARGET_NAME_BAD_CHARS.sub("_", user_name)
-    base_name = f"test_{sanitized}"
-    target_name = base_name
-    counter = 1
-    while project.has_target(target_name):
-        target_name = f"{base_name}_{counter}"
-        counter += 1
-    return target_name
+    return f"test_{_TARGET_NAME_BAD_CHARS.sub('_', user_name)}"
 
 
 class TestNodeFactory:
@@ -179,8 +168,8 @@ class TestBuilder:
         Args:
             project: The project to add the target to.
             name: Test name. Shown by the runner, used for ``-R`` filters.
-                Need not be unique with other target names — internally
-                the test target is named ``test_<name>``.
+                It collides with nothing: the internal target wears
+                ``test_<name>`` as a label, and labels may repeat.
             program: The thing to run. A Target (typically from
                 ``project.Program``), a path, or a string command name.
             args: Arguments passed after the program.
@@ -223,7 +212,7 @@ class TestBuilder:
                 "Use 'gtest', 'doctest', or 'catch2' — or None to disable."
             )
 
-        target_name = _make_internal_target_name(project, name)
+        target_name = _test_target_label(name)
         target = Target(
             target_name,
             target_type="test",

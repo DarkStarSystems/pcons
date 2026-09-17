@@ -122,7 +122,7 @@ class QtDeployBuilder:
             target=stamp,
             source=[app],
             command=command,
-            name=f"{name}-cmd",
+            name=name,
         )
         project.Alias(name, target)
         if name != "deploy":
