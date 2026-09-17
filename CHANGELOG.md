@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than showing a derived label as if it were something to type.
   `pcons explain <label>` shows every target wearing the label.
 
+- `pcons_metadata.json` is at schema version 4. Every target now carries an
+  `id`, unique within the file and the same on every run of an unchanged
+  build, and `dependencies` lists ids rather than names: two dependencies
+  wearing one derived label used to collapse into a single entry, silently.
+  `name` and `qualified_name` stay as display text, documented as not
+  unique, and a new `anonymous` boolean says which of the two a target's
+  name is.
+
 - The Xcode generator no longer refuses a project whose targets share a
   name. Xcode addresses a target by name, so the generator now gives each
   one a name of its own: the target's own name where it is free, otherwise

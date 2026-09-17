@@ -35,7 +35,7 @@ class TestMetadataGenerator:
         BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "pcons_metadata.json").read_text())
-        assert content["schema_version"] == 3
+        assert content["schema_version"] == 4
         assert content["projects"][0]["name"] == "test"
 
     def test_includes_targets_dependencies_and_aliases(self, tmp_path):
@@ -81,7 +81,7 @@ class TestMetadataGenerator:
         assert normalize_path(by_name["mylib"]["outputs"][0]) == "build/libmylib.a"
 
         assert by_name["app"]["type"] == "program"
-        assert by_name["app"]["dependencies"] == ["mylib"]
+        assert by_name["app"]["dependencies"] == ["test::mylib"]
         assert by_name["app"]["is_default"] is True
         assert normalize_path(by_name["app"]["sources"][0]) == "src/main.c"
         assert normalize_path(by_name["app"]["outputs"][0]) == "build/app"
@@ -227,3 +227,70 @@ class TestMetadataGenerator:
         assert ts["defined_at"] != ""
         # Non-test targets have no `test` key
         assert "test" not in by_name["test_bin"]
+
+
+class TestTargetIds:
+    """A target is addressed by `id`; `name` is display text, not unique."""
+
+    def _anonymous(self, label, output):
+        target = Target(label, target_type="command", anonymous=True)
+        target.output_nodes.append(FileNode(output))
+        return target
+
+    def _generate(self, tmp_path, project):
+        gen = MetadataGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
+        return content["projects"][0]["targets"]
+
+    def test_one_label_two_ids(self, tmp_path):
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        self._anonymous("config", "build/config.h")
+        self._anonymous("config", "build/config.c")
+
+        targets = self._generate(tmp_path, project)
+
+        assert [t["name"] for t in targets] == ["config", "config"]
+        assert [t["id"] for t in targets] == ["demo::config#1", "demo::config#2"]
+        assert all(t["anonymous"] for t in targets)
+
+    def test_a_named_target_is_addressed_by_its_qualified_name(self, tmp_path):
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        Target("app", target_type="program")
+
+        (entry,) = self._generate(tmp_path, project)
+
+        assert entry["id"] == "demo::app"
+        assert entry["anonymous"] is False
+
+    def test_two_dependencies_of_one_label_stay_two(self, tmp_path):
+        """The bug this replaced: a set of names folded them into one."""
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        first = self._anonymous("config", "build/config.h")
+        second = self._anonymous("config", "build/config.c")
+        app = Target("app", target_type="program")
+        app.depends(first, second)
+
+        by_id = {t["id"]: t for t in self._generate(tmp_path, project)}
+
+        assert by_id["demo::app"]["dependencies"] == [
+            "demo::config#1",
+            "demo::config#2",
+        ]
+
+    def test_a_dependency_in_another_project_is_addressed_too(self, tmp_path):
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        with project._enter_subdir("sub"):
+            child = Project("child", root_dir=tmp_path / "sub")
+            lib = Target("mylib", target_type="static_library", project=child)
+        app = Target("app", target_type="program", project=project)
+        app.depends(lib)
+
+        gen = MetadataGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
+        by_id = {t["id"]: t for p in content["projects"] for t in p["targets"]}
+
+        assert by_id["demo::app"]["dependencies"] == ["child::mylib"]

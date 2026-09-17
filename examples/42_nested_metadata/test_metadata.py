@@ -53,15 +53,18 @@ for name, names in own.items():
     if got != sorted(names):
         errors.append(f"{name} targets are {got}, expected {sorted(names)}")
 
-# 4. No target appears in more than one project entry.
+# 4. No target appears twice: `id` addresses a target, and is unique across
+#    the whole file (`name` and `qualified_name` are display text).
 seen: dict[str, str] = {}
 for p in data["projects"]:
     for t in p["targets"]:
-        q = t["qualified_name"]
-        if q in seen:
-            errors.append(f"Duplicate target {q} in {seen[q]!r} and {p['name']!r}")
+        target_id = t["id"]
+        if target_id in seen:
+            errors.append(
+                f"Duplicate target {target_id} in {seen[target_id]!r} and {p['name']!r}"
+            )
         else:
-            seen[q] = p["name"]
+            seen[target_id] = p["name"]
 
 if errors:
     print("FAIL:", file=sys.stderr)
