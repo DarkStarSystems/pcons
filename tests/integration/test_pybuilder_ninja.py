@@ -8,12 +8,16 @@ Everything else asserts against strings.
 
 from __future__ import annotations
 
+import importlib.util
 import os
+import pickle
 import shutil
 import subprocess
 import sys
+import textwrap
 import time
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -22,6 +26,7 @@ from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
 from pcons.workers.python import PythonWorker
+from tests.support import EXE_SUFFIX, subprocess_env
 
 needs_ninja = pytest.mark.skipif(
     shutil.which("ninja") is None, reason="ninja not installed"
@@ -46,6 +51,85 @@ def build(tmp_path: Path) -> str:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     return result.stdout
+
+
+def write_script(tmp_path: Path, name: str, text: str) -> ModuleType:
+    """Write *text* to a real file and import it, so its ``__file__`` is real.
+
+    A build script run by pcons gets its own directory inserted on
+    ``sys.path`` before it runs, ``pcons/cli.py``. This writes the same
+    thing here so the decoration inside *text* captures a directory that
+    really holds the module it decorates.
+    """
+    path = tmp_path / f"{name}.py"
+    path.write_text(textwrap.dedent(text), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SCRIPT_WITH_HELPER = """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+
+def make_report(env, **how):
+    @env.PyBuilder(**how)
+    def report(targets, sources):
+        import pybuilder_helper
+        from pathlib import Path
+
+        Path(targets[0]).write_text(pybuilder_helper.value(), encoding="utf-8")
+
+    return report
+"""
+
+
+def helper_script_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **how: Any
+) -> Project:
+    """A project whose PyBuilder edge imports a module beside its own script."""
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    (tmp_path / "pybuilder_helper.py").write_text(
+        "def value():\n    return 'from beside the script'\n", encoding="utf-8"
+    )
+    script = write_script(tmp_path, "helper_script", SCRIPT_WITH_HELPER)
+    project = Project("e2e", root_dir=tmp_path)
+    env: Any = project.Environment()
+    script.make_report(env, **how)(target="report.txt")
+    generate(project)
+    return project
+
+
+@needs_ninja
+def test_a_module_beside_the_script_imports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    helper_script_project(tmp_path, monkeypatch)
+
+    build(tmp_path)
+
+    assert (tmp_path / "build" / "report.txt").read_text(
+        encoding="utf-8"
+    ) == "from beside the script"
+
+
+@needs_ninja
+@posix_only
+def test_a_module_beside_the_script_imports_under_the_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    helper_script_project(tmp_path, monkeypatch, worker=PythonWorker(idle_timeout=5))
+
+    build(tmp_path)
+
+    assert (tmp_path / "build" / "report.txt").read_text(
+        encoding="utf-8"
+    ) == "from beside the script"
 
 
 def sources_project(tmp_path: Path, title: str) -> Project:
@@ -304,3 +388,98 @@ def test_touching_the_runner_copy_reruns_every_pybuilder_edge_and_nothing_else(
     assert "two.txt" in rerun
     assert "copy.txt" not in rerun
     assert not (tmp_path / "build" / "host" / "pybuilder" / "pcons-runner").exists()
+
+
+LAUNCHER_PROBE_SCRIPT = """
+from pcons import Project
+
+project = Project("launcher_probe")
+env = project.Environment()
+
+
+@env.PyBuilder()
+def probe(targets, sources):
+    from pathlib import Path
+
+    Path(targets[0]).write_text("ok", encoding="utf-8")
+
+
+probe(target="probe.txt")
+"""
+
+
+def _console_script() -> Path | None:
+    """Where the ``pcons`` console script would live beside this interpreter.
+
+    None in an environment that never materialized entry-point scripts, in
+    which case the tests that need it are skipped rather than guessing a
+    location.
+    """
+    candidate = Path(sys.executable).parent / f"pcons{EXE_SUFFIX}"
+    return candidate if candidate.is_file() else None
+
+
+needs_console_script = pytest.mark.skipif(
+    _console_script() is None,
+    reason="no pcons console script beside this interpreter",
+)
+
+
+def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=subprocess_env(),
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result
+
+
+def _probe_sys_path(build_dir: Path) -> list[str] | None:
+    payload = pickle.loads(
+        (build_dir / "pybuilder" / "probe.txt.args.pkl").read_bytes()
+    )
+    return payload["path"]
+
+
+class TestTheLauncherEntry:
+    """The captured ``sys.path`` does not depend on how pcons was launched."""
+
+    def _write(self, tmp_path: Path) -> Path:
+        script = tmp_path / "pcons-build.py"
+        script.write_text(LAUNCHER_PROBE_SCRIPT, encoding="utf-8")
+        return script
+
+    @needs_console_script
+    def test_m_pcons_and_the_console_script_capture_the_same_path(
+        self, tmp_path: Path
+    ) -> None:
+        self._write(tmp_path)
+
+        _run([sys.executable, "-m", "pcons", "generate", "-B", "build_m"], tmp_path)
+        _run([str(_console_script()), "generate", "-B", "build_console"], tmp_path)
+
+        assert _probe_sys_path(tmp_path / "build_m") == _probe_sys_path(
+            tmp_path / "build_console"
+        )
+
+    @needs_ninja
+    @needs_console_script
+    def test_a_console_script_generate_survives_ninjas_own_regenerate(
+        self, tmp_path: Path
+    ) -> None:
+        script = self._write(tmp_path)
+
+        _run([str(_console_script()), "generate"], tmp_path)
+        build_dir = tmp_path / "build"
+        build(tmp_path)
+        first_path = _probe_sys_path(build_dir)
+
+        script.touch()
+        rebuild = build(tmp_path)
+
+        assert "probe" not in rebuild
+        assert _probe_sys_path(build_dir) == first_path

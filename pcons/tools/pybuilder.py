@@ -30,6 +30,7 @@ import dis
 import functools
 import inspect
 import io
+import os
 import pickle
 import re
 import sys
@@ -43,7 +44,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.builder import anchor_target_paths
 from pcons.core.errors import PconsError
-from pcons.core.invocation import RUN_NAME
+from pcons.core.invocation import RUN_NAME, launcher_entry
 from pcons.util import pybuilder as runner
 from pcons.util.source_location import get_caller_location
 
@@ -412,7 +413,12 @@ def emit_module(
     return module_rel, function.module_text.encode("utf-8")
 
 
-def check_arguments(function: ValidatedFunction, *, kwargs: Mapping[str, Any]) -> bytes:
+def check_arguments(
+    function: ValidatedFunction,
+    *,
+    kwargs: Mapping[str, Any],
+    sys_path: list[str] | None,
+) -> bytes:
     """Everything about one call's arguments, settled before anything is written.
 
     Nothing reaches the build directory until this has returned, so a refused
@@ -425,6 +431,9 @@ def check_arguments(function: ValidatedFunction, *, kwargs: Mapping[str, Any]) -
     Args:
         function: What :func:`validate` returned.
         kwargs: Keyword arguments for the build-time call.
+        sys_path: ``sys.path`` as the decorating script had it, captured by
+            :func:`py_builder`'s decorator, or None when ``python=`` names
+            another interpreter whose own path applies instead.
 
     Returns:
         The sidecar pickle's bytes, ready for :func:`emit_args`.
@@ -446,6 +455,7 @@ def check_arguments(function: ValidatedFunction, *, kwargs: Mapping[str, Any]) -
             "module": f"{MODULE_PREFIX}{function.module_stem}",
             "function": name,
             "kwargs": dict(kwargs),
+            "path": sys_path,
         },
         name,
         at,
@@ -1071,6 +1081,27 @@ def _unpicklable(kwargs: dict[str, Any]) -> list[str]:
     return bad
 
 
+def _captured_sys_path() -> list[str]:
+    """``sys.path`` as the decorating script has it right now, one entry each.
+
+    Order and duplicates kept, except the launcher entry: the first entry
+    equal to :func:`pcons.core.invocation.launcher_entry`, an artifact of
+    how this process happened to be started rather than something the
+    script itself put on its path, is left out. Each remaining entry is
+    made absolute immediately: a relative or empty entry names the build
+    script's own directory or current directory, which is not the edge's
+    once the runner takes over.
+    """
+    entries = [os.path.abspath(entry) for entry in sys.path]
+    launcher = launcher_entry()
+    if launcher is not None:
+        for index, entry in enumerate(entries):
+            if entry == launcher:
+                del entries[index]
+                break
+    return [Path(entry).as_posix() for entry in entries]
+
+
 def _runner_rel(project: Project) -> Path:
     """Where the runner's copy goes, anchored the way a node path is.
 
@@ -1164,15 +1195,20 @@ class PyBuilder:
     this object is never itself in the claim registry.
     """
 
-    __slots__ = ("_env", "_function", "_how", "_project")
+    __slots__ = ("_env", "_function", "_how", "_project", "_sys_path")
 
     def __init__(
-        self, function: ValidatedFunction, env: Environment, how: _HowToRun
+        self,
+        function: ValidatedFunction,
+        env: Environment,
+        how: _HowToRun,
+        sys_path: list[str] | None,
     ) -> None:
         self._function = function
         self._env = env
         self._how = how
         self._project = env._project
+        self._sys_path = sys_path
 
     def __repr__(self) -> str:
         return f"<PyBuilder {self._function.function.__name__}>"
@@ -1229,7 +1265,9 @@ class PyBuilder:
                 builder's.
         """
         edge_name = name or _derive_name(target)
-        payload = check_arguments(self._function, kwargs=kwargs)
+        payload = check_arguments(
+            self._function, kwargs=kwargs, sys_path=self._sys_path
+        )
         module_rel, module_bytes = emit_module(
             self._function, project=self._project, env=self._env
         )
@@ -1304,6 +1342,7 @@ def py_builder(
     )
 
     def decorate(fn: Callable[..., object]) -> PyBuilder:
-        return PyBuilder(validate(fn, project=env._project), env, how)
+        sys_path = None if how.python else _captured_sys_path()
+        return PyBuilder(validate(fn, project=env._project), env, how, sys_path)
 
     return decorate

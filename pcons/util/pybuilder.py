@@ -2,7 +2,8 @@
 """Build-time runner for ``env.PyBuilder`` edges.
 
 pcons writes the decorated function's source to a generated module and its
-keyword arguments to a pickle beside it, copies this file to
+keyword arguments to a pickle beside it, along with the ``sys.path`` the
+build script had when it decorated the function, copies this file to
 ``pybuilder/pcons-runner/pcons-runner.py`` in the build directory, then emits a
 build edge shaped like::
 
@@ -66,8 +67,8 @@ def _load_payload(args_path: str) -> dict[str, Any]:
         args_path: Path to the ``.args.pkl`` file pcons generated.
 
     Returns:
-        The payload mapping, with at least ``module``, ``function`` and
-        ``kwargs``.
+        The payload mapping, with at least ``module``, ``function``,
+        ``kwargs`` and ``path``.
 
     Raises:
         ValueError: If the file is not a payload this runner understands.
@@ -85,7 +86,7 @@ def _load_payload(args_path: str) -> dict[str, Any]:
             f"was written for pybuilder protocol {version!r}, but this pcons "
             f"speaks {PROTOCOL_VERSION}",
         )
-    missing = sorted({"module", "function", "kwargs"} - set(payload))
+    missing = sorted({"module", "function", "kwargs", "path"} - set(payload))
     if missing:
         raise _stale(args_path, f"is missing {', '.join(missing)}")
     return payload
@@ -126,6 +127,11 @@ def run(
 ) -> None:
     """Load the generated module and call the recorded function.
 
+    Before loading, ``sys.path`` is replaced wholesale with the payload's
+    ``path``, when it is not None, so the function imports what its build
+    script could import, and nothing that only happens to be on this
+    process's own path.
+
     Any exception the function raises propagates untouched, so the traceback
     points at the generated file and the build tool sees a failure.
 
@@ -140,6 +146,8 @@ def run(
         TypeError: If the function returns anything other than ``None``.
     """
     payload = _load_payload(args_path)
+    if payload["path"] is not None:
+        sys.path[:] = payload["path"]
     module = _load_module(module_path, payload["module"])
     function = getattr(module, payload["function"])
     result = function(targets, sources, **payload["kwargs"])

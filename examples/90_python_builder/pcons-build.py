@@ -15,7 +15,8 @@ Three rules follow from the function travelling alone:
 
 1. It imports what it needs inside its own body. The generated module holds
    the function and nothing else, so a name this script imported does not
-   exist there.
+   exist there. A module beside this script, ``wordcount.py`` here, imports
+   the same way, and is not a dependency until ``depends=`` says so.
 2. It reads nothing from around it. A value from the build script is taken as
    a parameter and passed at the call, where it travels in the pickle.
 3. The decorated name is a builder, and the call returns the ``Target`` that
@@ -53,31 +54,37 @@ def make_report(environment):
     def report(targets, sources, title):
         from pathlib import Path
 
+        from wordcount import count
+
         lines = [title]
         for name in sources:
             text = Path(name).read_text(encoding="utf-8")
-            lines.append(f"{Path(name).name}: {len(text.split())}")
+            lines.append(f"{Path(name).name}: {count(text)}")
         Path(targets[0]).write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     return report
 
 
 report = make_report(host)
+wordcount_module = project.root_dir / "wordcount.py"
 
 first = report(
     target=project.build_dir / "report.txt",
     source=[src / "a.txt", src / "b.txt"],
     title="word counts",
+    depends=[wordcount_module],
 )
 second = report(
     target=project.build_dir / "report2.txt",
     source=[src / "c.txt", src / "d.txt"],
     title="word counts, second set",
+    depends=[wordcount_module],
 )
 checked = make_report(strict)(
     target="report.txt",
     source=[src / "a.txt"],
     title="word counts, strict",
+    depends=[wordcount_module],
 )
 
 project.Default(first, second, checked)

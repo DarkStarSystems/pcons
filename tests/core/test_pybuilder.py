@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import pickle
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
+from pcons.tools import pybuilder as pybuilder_module
 from pcons.tools.pybuilder import PyBuilder, PyBuilderError
 from pcons.workers.python import PythonWorker
 from pcons.workers.python_server import script_argv
@@ -63,6 +65,11 @@ def node_tokens(target: Target) -> list[str]:
 def implicit_deps(target: Target) -> list[str]:
     """The edge's implicit dependencies, as node paths."""
     return [Path(node.name).as_posix() for node in target.output_nodes[0].implicit_deps]
+
+
+def payload_of(target: Target, tmp_path: Path) -> dict[str, Any]:
+    """Unpickle the sidecar argument pickle a resolved edge wrote."""
+    return pickle.loads((tmp_path / node_tokens(target)[2]).read_bytes())
 
 
 def ninja_text(project: Project, tmp_path: Path) -> str:
@@ -696,3 +703,166 @@ class TestFilesAppearAtResolve:
         project.resolve()
 
         assert not (tmp_path / "build" / "pybuilder").exists()
+
+
+class TestSysPath:
+    """The pickle carries the ``sys.path`` the decorating script had."""
+
+    def test_an_entry_present_before_decoration_is_stored(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        before = tmp_path / "before"
+        sys.path.append(str(before))
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert before.as_posix() in payload_of(made, tmp_path)["path"]
+
+    def test_an_entry_appended_after_decoration_is_not_stored(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(sys, "path", list(sys.path))
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        after = tmp_path / "after"
+        sys.path.append(str(after))
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert after.as_posix() not in payload_of(made, tmp_path)["path"]
+
+    def test_order_and_duplicates_survive(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        marker = tmp_path / "marker"
+        monkeypatch.setattr(sys, "path", [str(marker), str(marker), "."])
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["path"] == [
+            marker.as_posix(),
+            marker.as_posix(),
+            Path.cwd().as_posix(),
+        ]
+
+    def test_every_entry_is_absolute(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(sys, "path", list(sys.path))
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert all(
+            Path(entry).is_absolute() for entry in payload_of(made, tmp_path)["path"]
+        )
+
+    def test_an_explicit_interpreter_stores_no_path(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyBuilder(python=sys.executable)
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["path"] is None
+
+    def test_the_launcher_entry_is_left_out(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        launcher = tmp_path / "launcher"
+        monkeypatch.setattr(sys, "path", [str(launcher), str(tmp_path)])
+        monkeypatch.setattr(
+            pybuilder_module, "launcher_entry", lambda: launcher.as_posix()
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["path"] == [tmp_path.as_posix()]
+
+    def test_a_duplicate_of_the_launcher_entry_later_stays(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        launcher = tmp_path / "launcher"
+        monkeypatch.setattr(sys, "path", [str(launcher), str(launcher)])
+        monkeypatch.setattr(
+            pybuilder_module, "launcher_entry", lambda: launcher.as_posix()
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["path"] == [launcher.as_posix()]
+
+    def test_no_recorded_launcher_leaves_every_entry(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        marker = tmp_path / "marker"
+        monkeypatch.setattr(sys, "path", [str(marker)])
+        monkeypatch.setattr(pybuilder_module, "launcher_entry", lambda: None)
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["path"] == [marker.as_posix()]

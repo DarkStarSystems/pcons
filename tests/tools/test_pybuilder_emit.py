@@ -127,6 +127,7 @@ def emit_both(
     name: str,
     target: object = None,
     kwargs: Mapping[str, Any],
+    sys_path: list[str] | None = None,
 ) -> tuple[Path, Path]:
     """The three calls one decoration makes, in order, then the writes.
 
@@ -134,9 +135,12 @@ def emit_both(
     tests below that only ask what landed in the build directory want all
     three. The writes are the ones resolving the edge performs, done here
     directly so these tests need no edge.
+
+    *sys_path* defaults to None: these tests are not about what a real
+    decoration would capture, only ``env.PyBuilder()`` itself does that.
     """
     function = validate(fn, project=project)
-    payload = check_arguments(function, kwargs=kwargs)
+    payload = check_arguments(function, kwargs=kwargs, sys_path=sys_path)
     module_rel, module_bytes = emit_module(function, project=project, env=env)
     args_rel = emit_args(project=project, env=env, name=name, target=target or name)
     root = project.top_path_resolver.project_root
@@ -463,6 +467,7 @@ class TestEmit:
             "module": f"{MODULE_PREFIX}takes_arguments",
             "function": "takes_arguments",
             "kwargs": {"n": 3},
+            "path": None,
         }
 
     def test_what_it_writes_is_what_the_runner_runs(
@@ -685,7 +690,7 @@ class TestNothingIsWrittenUntilEverythingIsChecked:
         function = validate(takes_arguments, project=project)
 
         with pytest.raises(PyBuilderError, match="cannot pickle"):
-            check_arguments(function, kwargs={"handle": lambda: None})
+            check_arguments(function, kwargs={"handle": lambda: None}, sys_path=None)
 
         assert not (tmp_path / "build" / "pybuilder").exists()
 

@@ -162,8 +162,48 @@ def program_name(path: Path) -> str:
         return str(path)
 
 
+_launcher_entry: str | None = None
+_launcher_entry_recorded = False
+
+
+def record_launcher_entry() -> None:
+    """Record ``sys.path[0]`` as the process's own launcher left it, once.
+
+    Python puts one entry at ``sys.path[0]`` before any of our code runs:
+    the cwd for ``-m``, the script's own directory for a console script or
+    ``python pcons-build.py``, ``""`` for ``-c``. Nothing under
+    ``sys.flags.safe_path``, which leaves ``sys.path`` without one.
+
+    Called once by every entry point that can go on to decorate a PyBuilder
+    function -- the CLI's ``main()``, which the self-running build script
+    path of ``docs/cli.md`` also calls -- before anything else has a chance
+    to touch ``sys.path``. A later call is a no-op: what matters is how the
+    process itself was launched, not wherever ``sys.path[0]`` happens to
+    point by the time a nested run gets here.
+    """
+    global _launcher_entry, _launcher_entry_recorded
+    if _launcher_entry_recorded:
+        return
+    _launcher_entry_recorded = True
+    if not sys.flags.safe_path:
+        _launcher_entry = os.path.abspath(sys.path[0])
+
+
+def launcher_entry() -> str | None:
+    """The recorded launcher entry, absolute, or None if none was recorded.
+
+    Never cleared by :func:`clear`: it is a fact about how this process was
+    launched, not about one run's build variables.
+    """
+    return _launcher_entry
+
+
 def clear() -> None:
-    """Forget the recorded invocation (between CLI runs, and in tests)."""
+    """Forget the recorded invocation (between CLI runs, and in tests).
+
+    The launcher entry recorded by :func:`record_launcher_entry` survives
+    this: see :func:`launcher_entry`.
+    """
     global _current, _inference_suppressed
     _current = None
     _inference_suppressed = False

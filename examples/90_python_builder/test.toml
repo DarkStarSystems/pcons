@@ -33,6 +33,11 @@ expect_rebuild = ["report2.txt"]
 expect_no_rebuild = ["strict*report.txt"]
 
 [[rebuild]]
+description = "wordcount.py changed: depends= reruns all three reports"
+touch = "wordcount.py"
+expect_rebuild = ["report.txt", "report2.txt", "strict*report.txt"]
+
+[[rebuild]]
 description = "The build script changed but the function did not: regenerating alone does not re-run any edge"
 touch = "pcons-build.py"
 expect_rebuild = ["build.ninja"]

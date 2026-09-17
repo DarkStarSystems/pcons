@@ -3399,6 +3399,9 @@ def cli_default(
 
 def main(argv: list[str] | None = None) -> int:
     """Main entry point for the pcons CLI."""
+    import pcons.core.invocation
+
+    pcons.core.invocation.record_launcher_entry()
     return run_cli(cli, prog_name="pcons", argv=argv)
 
 

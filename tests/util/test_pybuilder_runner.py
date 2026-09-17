@@ -60,6 +60,22 @@ def render(targets, sources):
     return 1
 """
 
+SHOWS_SYS_PATH = """
+def render(targets, sources):
+    import sys
+
+    with open(targets[0], "w") as out:
+        out.write(":".join(sys.path))
+"""
+
+IMPORTS_A_STORED_MODULE = """
+def render(targets, sources):
+    import pybuilder_syspath_probe
+
+    with open(targets[0], "w") as out:
+        out.write(pybuilder_syspath_probe.value())
+"""
+
 RETURNS_NONE = """
 def render(targets, sources):
     return None
@@ -112,14 +128,21 @@ def write_args(
     function: str = "render",
     kwargs: dict[str, Any] | None = None,
     version: int = PROTOCOL_VERSION,
+    sys_path: list[str] | None = None,
 ) -> Path:
-    """Write a sidecar payload pickle and return its path."""
+    """Write a sidecar payload pickle and return its path.
+
+    *sys_path* defaults to None, which leaves the process's own ``sys.path``
+    alone, the same as every test written before the runner started
+    replacing it.
+    """
     path = tmp_path / f"{name}.args.pkl"
     payload = {
         "version": version,
         "module": name,
         "function": function,
         "kwargs": kwargs or {},
+        "path": sys_path,
     }
     path.write_bytes(pickle.dumps(payload))
     return path
@@ -132,10 +155,11 @@ def build(
     function: str = "render",
     kwargs: dict[str, Any] | None = None,
     version: int = PROTOCOL_VERSION,
+    sys_path: list[str] | None = None,
 ) -> tuple[str, str]:
     """Write module and payload, returning the two paths the runner takes."""
     module = write_module(tmp_path, name, body)
-    args = write_args(tmp_path, name, function, kwargs, version)
+    args = write_args(tmp_path, name, function, kwargs, version, sys_path)
     return str(module), str(args)
 
 
@@ -258,14 +282,33 @@ class TestRun:
         with pytest.raises(ValueError, match="not a pybuilder payload"):
             run(module, str(args), [], [])
 
-    def test_a_payload_missing_a_key_names_the_fix(self, tmp_path: Path) -> None:
+    def test_a_payload_missing_several_keys_names_them_all(
+        self, tmp_path: Path
+    ) -> None:
         module = str(write_module(tmp_path, "partial", WRITE_SOURCES))
         args = tmp_path / "partial.args.pkl"
         args.write_bytes(
             pickle.dumps({"version": PROTOCOL_VERSION, "module": "partial"})
         )
 
-        with pytest.raises(ValueError, match="missing function, kwargs"):
+        with pytest.raises(ValueError, match="missing function, kwargs, path"):
+            run(module, str(args), [], [])
+
+    def test_a_payload_missing_only_path_names_it(self, tmp_path: Path) -> None:
+        module = str(write_module(tmp_path, "nopath", WRITE_SOURCES))
+        args = tmp_path / "nopath.args.pkl"
+        args.write_bytes(
+            pickle.dumps(
+                {
+                    "version": PROTOCOL_VERSION,
+                    "module": "nopath",
+                    "function": "render",
+                    "kwargs": {},
+                }
+            )
+        )
+
+        with pytest.raises(ValueError, match="missing path"):
             run(module, str(args), [], [])
 
     def test_an_unloadable_module_path_is_an_import_error(self, tmp_path: Path) -> None:
@@ -275,6 +318,55 @@ class TestRun:
 
         with pytest.raises(ImportError, match="text.txt"):
             run(str(not_python), str(args), [], [])
+
+
+class TestSysPath:
+    """The payload's ``path`` replaces ``sys.path`` wholesale before the body runs."""
+
+    def test_the_function_sees_exactly_the_stored_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        marker = (tmp_path / "marker").as_posix()
+        module, args = build(tmp_path, "shows", SHOWS_SYS_PATH, sys_path=[marker])
+        target = tmp_path / "out.txt"
+
+        run(module, args, [str(target)], [])
+
+        assert target.read_text() == marker
+
+    def test_a_module_on_the_stored_path_imports(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "pybuilder_syspath_probe.py").write_text(
+            "def value():\n    return 'reached'\n", encoding="utf-8"
+        )
+        module, args = build(
+            tmp_path,
+            "importer",
+            IMPORTS_A_STORED_MODULE,
+            sys_path=[elsewhere.as_posix()],
+        )
+        target = tmp_path / "out.txt"
+
+        run(module, args, [str(target)], [])
+
+        assert target.read_text() == "reached"
+
+    def test_none_leaves_sys_path_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        before = list(sys.path)
+        module, args = build(tmp_path, "unchanged", WRITE_SOURCES)
+        target = tmp_path / "out.txt"
+
+        run(module, args, [str(target)], ["a.txt"])
+
+        assert sys.path == before
 
 
 class TestMain:
