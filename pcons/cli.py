@@ -366,6 +366,8 @@ def _buildable_names(project: Project) -> list[str]:
     resolver = project.top_path_resolver
     names = {"all", *project.tree_aliases}
     for target in project.targets:
+        if target.target_type == "command":
+            names.add(target.name)
         for node in target.output_nodes:
             if isinstance(node, FileNode):
                 names.add(resolver.make_execution_relative(node.path))

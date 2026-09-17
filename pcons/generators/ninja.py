@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
+from pcons.core.errors import PconsError
 from pcons.core.node import AliasNode, FileNode, Node
 from pcons.core.paths import PathResolver
 from pcons.core.subst import NodeVar
@@ -100,6 +101,7 @@ class NinjaGenerator(BaseGenerator):
             self._write_builds(f, project)
             self._write_regen(f, project, ninja_file)
             self._write_aliases(f, project)
+            self._write_command_names(f, project)
             self._write_tests(f, project)
             self._write_defaults(f, project)
 
@@ -954,6 +956,63 @@ class NinjaGenerator(BaseGenerator):
                     members.append(self._output_ref(t))
             if members:
                 f.write(f"build {name}: phony {' '.join(members)}\n")
+        f.write("\n")
+
+    def _command_name_phonies(self, project: Project) -> list[tuple[str, list[str]]]:
+        """Phony names for ``env.Command(..., name=)`` that ninja would not know.
+
+        ``pcons info --targets`` lists the Command target name, and the
+        docstring promises ``ninja <name>``. Aliases already get phonies;
+        command names did not, so ``pcons build out-cmd`` failed. Skip the
+        extra phony when *name* is already an output path. Refuse a name
+        that collides with an alias or another target's file.
+        """
+        alias_names = set(project.tree_aliases)
+        output_owners: dict[str, str] = {}
+        for target in project.targets:
+            for node in target.output_nodes:
+                if isinstance(node, FileNode):
+                    output_owners.setdefault(self._output_ref(node), target.name)
+
+        phonies: list[tuple[str, list[str]]] = []
+        seen: set[str] = set()
+        for target in project.targets:
+            if target.target_type != "command":
+                continue
+            members = [
+                self._output_ref(node)
+                for node in target.output_nodes
+                if isinstance(node, FileNode)
+            ]
+            if not members or target.name in members:
+                continue
+            if target.name in alias_names or target.name == "all":
+                raise PconsError(
+                    f"Command name {target.name!r} clashes with an alias; "
+                    f"pick a different name= or use project.Alias().",
+                    location=target.defined_at,
+                )
+            owner = output_owners.get(target.name)
+            if owner is not None and owner != target.name:
+                raise PconsError(
+                    f"Command name {target.name!r} clashes with a file "
+                    f"produced by target {owner!r}.",
+                    location=target.defined_at,
+                )
+            if target.name in seen:
+                continue
+            seen.add(target.name)
+            phonies.append((target.name, members))
+        return phonies
+
+    def _write_command_names(self, f: TextIO, project: Project) -> None:
+        """Write phony rules so ``ninja <command-name>`` builds that command."""
+        phonies = self._command_name_phonies(project)
+        if not phonies:
+            return
+        f.write("# Command names\n")
+        for name, members in phonies:
+            f.write(f"build {name}: phony {' '.join(members)}\n")
         f.write("\n")
 
     def _write_tests(self, f: TextIO, project: Project) -> None:

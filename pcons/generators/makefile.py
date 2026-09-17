@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
+from pcons.core.errors import PconsError
 from pcons.core.node import AliasNode, FileNode, Node
 from pcons.core.paths import PathResolver
 from pcons.generators.generator import BaseGenerator, apply_context_overrides
@@ -71,6 +72,7 @@ class MakefileGenerator(BaseGenerator):
             self._write_build_rules(f, project)
             self._write_regen(f, project, makefile_path)
             self._write_aliases(f, project)
+            self._write_command_names(f, project)
             self._write_tests(f, project)
             self._write_default_target(f, project)
             self._write_depfile_includes(f)
@@ -96,6 +98,7 @@ class MakefileGenerator(BaseGenerator):
     def _write_phony_declaration(self, f: TextIO, project: Project) -> None:
         """Write .PHONY declaration for all phony targets."""
         phony_targets = ["all", "clean", *project.tree_aliases]
+        phony_targets.extend(name for name, _ in self._command_name_phonies(project))
         if any(t.target_type == "test" for t in project.targets):
             phony_targets.extend(["test", "test-build"])
         f.write("# Phony targets\n")
@@ -558,6 +561,62 @@ class MakefileGenerator(BaseGenerator):
                     members.append(self._node_path(t))
             if members:
                 f.write(f"{name}: {' '.join(members)}\n")
+        f.write("\n")
+
+    def _command_name_phonies(self, project: Project) -> list[tuple[str, list[str]]]:
+        """Phony names for ``env.Command(..., name=)`` that make would not know.
+
+        Same contract as the ninja generator: the Command target name is
+        listed by ``pcons info --targets`` and is meant for ``make <name>``.
+        Skip the extra phony when *name* is already an output path. Refuse
+        a name that collides with an alias or another target's file.
+        """
+        alias_names = set(project.tree_aliases)
+        output_owners: dict[str, str] = {}
+        for target in project.targets:
+            for node in target.output_nodes:
+                if isinstance(node, FileNode):
+                    output_owners.setdefault(self._node_path(node), target.name)
+
+        phonies: list[tuple[str, list[str]]] = []
+        seen: set[str] = set()
+        for target in project.targets:
+            if target.target_type != "command":
+                continue
+            members = [
+                self._node_path(node)
+                for node in target.output_nodes
+                if isinstance(node, FileNode)
+            ]
+            if not members or target.name in members:
+                continue
+            if target.name in alias_names or target.name in {"all", "clean"}:
+                raise PconsError(
+                    f"Command name {target.name!r} clashes with an alias; "
+                    f"pick a different name= or use project.Alias().",
+                    location=target.defined_at,
+                )
+            owner = output_owners.get(target.name)
+            if owner is not None and owner != target.name:
+                raise PconsError(
+                    f"Command name {target.name!r} clashes with a file "
+                    f"produced by target {owner!r}.",
+                    location=target.defined_at,
+                )
+            if target.name in seen:
+                continue
+            seen.add(target.name)
+            phonies.append((target.name, members))
+        return phonies
+
+    def _write_command_names(self, f: TextIO, project: Project) -> None:
+        """Write phony rules so ``make <command-name>`` builds that command."""
+        phonies = self._command_name_phonies(project)
+        if not phonies:
+            return
+        f.write("# Command names\n")
+        for name, members in phonies:
+            f.write(f"{name}: {' '.join(members)}\n")
         f.write("\n")
 
     def _write_tests(self, f: TextIO, project: Project) -> None:

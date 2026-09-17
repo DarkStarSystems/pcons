@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from pcons.core.builder import CommandBuilder
+from pcons.core.errors import PconsError
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
@@ -285,6 +286,88 @@ class TestNinjaAliases:
         b = project.Alias("b", a)
         with pytest.raises(ValueError, match="cycle"):
             project.Alias("a", b)
+
+
+class TestNinjaCommandNames:
+    def test_named_command_is_a_ninja_target(self, tmp_path):
+        project = Project("nm", root_dir=tmp_path, build_dir=".")
+        env = project.Environment()
+        env.Command(
+            target="out.txt",
+            source=[],
+            command="echo hi > $TARGET",
+            name="out-cmd",
+        )
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build.ninja").read_text()
+        line = next(
+            row for row in content.splitlines() if row.startswith("build out-cmd:")
+        )
+        assert line.startswith("build out-cmd: phony")
+        assert "out.txt" in line.split()
+
+    def test_default_stem_name_is_a_ninja_target(self, tmp_path):
+        project = Project("nm", root_dir=tmp_path, build_dir=".")
+        env = project.Environment()
+        env.Command(target="out.txt", source=[], command="echo hi > $TARGET")
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build.ninja").read_text()
+        line = next(row for row in content.splitlines() if row.startswith("build out:"))
+        assert line.startswith("build out: phony")
+        assert "out.txt" in line.split()
+
+    def test_name_matching_output_path_is_not_duplicated(self, tmp_path):
+        project = Project("nm", root_dir=tmp_path, build_dir=".")
+        env = project.Environment()
+        env.Command(
+            target="out.txt",
+            source=[],
+            command="echo hi > $TARGET",
+            name="out.txt",
+        )
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build.ninja").read_text()
+        assert "build out.txt: phony" not in content
+
+    def test_name_clashing_with_alias_raises(self, tmp_path):
+        project = Project("nm", root_dir=tmp_path, build_dir=".")
+        env = project.Environment()
+        other = env.Command(target="other.txt", source=[], command="echo hi > $TARGET")
+        project.Alias("out-cmd", other)
+        env.Command(
+            target="out.txt",
+            source=[],
+            command="echo hi > $TARGET",
+            name="out-cmd",
+        )
+        project.resolve()
+        with pytest.raises(PconsError, match="alias"):
+            NinjaGenerator().generate(project)
+            BaseGenerator._generate_pending(project)
+
+    def test_name_clashing_with_file_raises(self, tmp_path):
+        project = Project("nm", root_dir=tmp_path, build_dir=".")
+        env = project.Environment()
+        env.Command(target="named.txt", source=[], command="echo hi > $TARGET")
+        env.Command(
+            target="out.txt",
+            source=[],
+            command="echo hi > $TARGET",
+            name="named.txt",
+        )
+        project.resolve()
+        with pytest.raises(PconsError, match="file"):
+            NinjaGenerator().generate(project)
+            BaseGenerator._generate_pending(project)
 
 
 class TestNinjaDefaults:

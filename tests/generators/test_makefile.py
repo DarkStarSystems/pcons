@@ -242,6 +242,44 @@ class TestMakefileAliases:
         assert "inner" in outer_line.split()
 
 
+class TestMakefileCommandNames:
+    def test_named_command_is_a_make_target(self, tmp_path):
+        project = Project("nm", root_dir=tmp_path, build_dir=".")
+        env = project.Environment()
+        env.Command(
+            target="out.txt",
+            source=[],
+            command="echo hi > $TARGET",
+            name="out-cmd",
+        )
+        project.resolve()
+        MakefileGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "Makefile").read_text()
+        line = next(row for row in content.splitlines() if row.startswith("out-cmd:"))
+        assert "out.txt" in line.split()
+        assert ".PHONY:" in content
+        phony = next(row for row in content.splitlines() if row.startswith(".PHONY:"))
+        assert "out-cmd" in phony.split()
+
+    def test_name_clashing_with_alias_raises(self, tmp_path):
+        project = Project("nm", root_dir=tmp_path, build_dir=".")
+        env = project.Environment()
+        other = env.Command(target="other.txt", source=[], command="echo hi > $TARGET")
+        project.Alias("out-cmd", other)
+        env.Command(
+            target="out.txt",
+            source=[],
+            command="echo hi > $TARGET",
+            name="out-cmd",
+        )
+        project.resolve()
+        with pytest.raises(PconsError, match="alias"):
+            MakefileGenerator().generate(project)
+            BaseGenerator._generate_pending(project)
+
+
 class TestMakefileDefaultTarget:
     def test_writes_default_goal(self, tmp_path):
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
