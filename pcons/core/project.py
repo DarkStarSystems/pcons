@@ -843,10 +843,15 @@ class Project(_ProjectBuilders):
     def _add_target(self, target: Target) -> None:
         """Register a target; called only by Target.__init__.
 
+        An anonymous target carries a label, not a name (see
+        :attr:`Target.anonymous`), so nothing looks it up and nothing is
+        checked: two installs into one directory, or two commands writing
+        ``foo.h`` and ``foo.c``, are two ordinary builds.
+
         Raises:
             PconsError: If the project tree has already been resolved.
-            ValueError: If a target of that name is already registered and the
-                two cannot be told apart by their environments.
+            ValueError: If a named target of that name is already registered
+                and the two cannot be told apart by their environments.
         """
         if self._resolved or self.top._resolved:
             raise PconsError(
@@ -856,9 +861,10 @@ class Project(_ProjectBuilders):
                 f"target before project.resolve(); a script that leaves "
                 f"resolution to generation needs no call at all."
             )
-        for existing in self._targets:
-            if existing.name == target.name:
-                _refuse_duplicate(existing, target)
+        if not target.anonymous:
+            for existing in self._targets:
+                if existing.name == target.name and not existing.anonymous:
+                    _refuse_duplicate(existing, target)
         self._targets.append(target)
 
     @overload
@@ -878,6 +884,11 @@ class Project(_ProjectBuilders):
 
         The full spelling is ``"project::target@env"``: ``::`` selects the
         project, ``@`` the environment, and either may be left out.
+
+        Only a named target answers: an anonymous one wears a label its
+        builder derived, which says nothing about which target is meant (see
+        :attr:`Target.anonymous`). Hold on to the ``Target`` such a call
+        returns, or give it an alias.
 
         Args:
             name: The target name, qualified or not.
@@ -901,7 +912,9 @@ class Project(_ProjectBuilders):
 
         project, target_name, env_name = split_target_spec(name)
         if project is None or project == self.name:
-            matches = [t for t in self._targets if t.name == target_name]
+            matches = [
+                t for t in self._targets if t.name == target_name and not t.anonymous
+            ]
             if env_name is not None:
                 in_env = [
                     t for t in matches if t.env is not None and t.env.name == env_name
@@ -931,7 +944,10 @@ class Project(_ProjectBuilders):
                 return matches[0]
             if project is not None:
                 if raise_if_missing:
-                    raise KeyError(f"Target '{name}' not found")
+                    raise KeyError(
+                        f"Target '{name}' not found"
+                        f"{self._anonymous_label_hint(target_name)}"
+                    )
                 return None
 
         if recursive:
@@ -947,15 +963,36 @@ class Project(_ProjectBuilders):
                 return targets_found[0]
 
         if raise_if_missing:
-            raise KeyError(f"Target '{name}' not found")
+            raise KeyError(
+                f"Target '{name}' not found{self._anonymous_label_hint(target_name)}"
+            )
         return None
+
+    def _anonymous_label_hint(self, name: str) -> str:
+        """Why a lookup missed, when some anonymous target wears *name*.
+
+        A derived label is not a name: several targets may wear one, and the
+        builder chose it, so looking one up would be asking pcons to pick.
+        Say that rather than "not found", which reads as a typo.
+        """
+        for project in self._iter_tree():
+            for target in project._targets:
+                if target.anonymous and target.name == name:
+                    builder = target._builder_name or "the builder"
+                    return (
+                        f". {builder} derived that label for a target rather "
+                        f"than taking a name, so nothing looks it up. Keep "
+                        f"the Target the call returned, or give it a name to "
+                        f"build by: project.Alias('{name}', ...)"
+                    )
+        return ""
 
     def get_targets(self, *names: str) -> list[Target]:
         """Get targets by name, raising KeyError if any is missing or ambiguous."""
         return [self.get_target(name) for name in names]
 
     def has_target(self, name: str, recursive: bool = True) -> bool:
-        """Whether some target already answers to *name*.
+        """Whether some named target already answers to *name*.
 
         A name matching targets in several environments counts as taken:
         several targets answer to it, which is what the caller is asking. Use
@@ -1226,7 +1263,8 @@ class Project(_ProjectBuilders):
             f"Default(): '{name}' is not a known alias or target in "
             f"project '{self.name}'. Tried aliases "
             f"{sorted(self.tree_aliases)!r} and targets "
-            f"{sorted(t.name for t in self.targets)!r}."
+            f"{sorted(t.name for t in self.targets if not t.anonymous)!r}."
+            f"{self._anonymous_label_hint(name)}"
         )
 
     @property

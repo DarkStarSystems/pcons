@@ -289,12 +289,18 @@ class TestTheCommand:
         )
 
 
+def _labelled(project, label: str) -> list:
+    """Targets wearing *label*. The staging install is anonymous, so its
+    label is read off the targets rather than looked up by name."""
+    return [t for t in project.targets if t.name == label]
+
+
 class TestStaging:
     def test_it_is_made_when_it_is_not_given(self, app_project, deployable) -> None:
         env = android_env()
         _apk(app_project, env, _app(app_project, env))
 
-        assert app_project.get_target("myapp-apk-lib", False) is not None
+        assert _labelled(app_project, "myapp-apk-lib")
 
     def test_one_made_by_hand_is_used_as_it_is(self, app_project, deployable) -> None:
         env = android_env()
@@ -303,7 +309,7 @@ class TestStaging:
 
         _apk(app_project, env, app, staged=staged)
 
-        assert app_project.get_target("myapp-apk-lib_1", False) is None
+        assert len(_labelled(app_project, "myapp-apk-lib")) == 1
 
 
 class TestAPackageDeclaredInASubdirectory:

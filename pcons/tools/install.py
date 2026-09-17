@@ -231,6 +231,7 @@ def _make_install_target(
         target_type="interface",
         defined_at=defined_at,
         project=project,
+        anonymous=True,
     )
     if env is not None:
         builder_data["env"] = env

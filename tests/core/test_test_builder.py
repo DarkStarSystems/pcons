@@ -74,14 +74,14 @@ class TestBuilderTargetCreation:
         assert partial["serial"] is True
         assert partial["disabled"] is True
 
-    def test_name_collision_is_disambiguated(self, project):
-        """Two tests with the same name produce two unique target names."""
+    def test_two_tests_of_one_name_are_two_runs(self, project):
+        """The internal target's name is a label, so two may wear it."""
         proj, _env, prog = project
         a = proj.Test("dup", prog)
         b = proj.Test("dup", prog)
-        assert a.name != b.name
-        # User-visible spec name should match what the user supplied,
-        # disambiguation happens only at the internal target-name level.
+        assert a.name == b.name == "test_dup"
+        assert a is not b
+        # The user-visible name, which reaches tests.json, is the one given.
         assert a._builder_data["spec_partial"]["name"] == "dup"
         assert b._builder_data["spec_partial"]["name"] == "dup"
 

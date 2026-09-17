@@ -229,6 +229,7 @@ class TestBuilder:
             target_type="test",
             defined_at=defined_at or get_caller_location(),
             project=project,
+            anonymous=True,
         )
         target._builder_name = "Test"
 

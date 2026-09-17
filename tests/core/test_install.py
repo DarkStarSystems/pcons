@@ -175,7 +175,11 @@ class TestInstall:
             assert install.output_nodes[0].role == "install_output"
 
     def test_install_target_registered(self, tmp_path):
-        """Install target is registered with the project."""
+        """Install target is registered with the project.
+
+        By identity, not by name: its name is a label Install derived from
+        the destination, and several installs may wear it.
+        """
         project = Project("test", root_dir=tmp_path)
 
         src_file = tmp_path / "file.txt"
@@ -183,9 +187,9 @@ class TestInstall:
 
         install = project.Install(tmp_path / "dist", [src_file])
 
-        # Target should be findable
-        found = project.get_target(install.name)
-        assert found is install
+        assert install in project.targets
+        assert install.anonymous
+        assert not project.has_target(install.name)
 
     def test_install_node_dependencies(self, tmp_path):
         """Install nodes depend on source files after resolve."""
@@ -984,9 +988,9 @@ class TestInstallMode:
 
 
 class TestInstallTargetNaming:
-    """Installing several things into one directory is ordinary; the
-    auto-generated name derives from the destination alone, so those collide
-    by design. Only a repeated explicit name= is a mistake worth saying."""
+    """An install's name is a label, whether pcons derived it or the call
+    passed one, so installs that share a destination share a label and
+    nothing is renamed."""
 
     def test_many_installs_into_one_directory_are_quiet(
         self, tmp_path, gcc_toolchain, caplog
@@ -997,9 +1001,10 @@ class TestInstallTargetNaming:
             (tmp_path / f"{name}.txt").write_text(name)
             project.Install("config", [f"{name}.txt"])
 
-        assert "renamed" not in caplog.text
+        assert caplog.text == ""
+        assert [t.name for t in project.targets] == ["install_config"] * 5
 
-    def test_a_repeated_explicit_name_still_warns(
+    def test_a_repeated_explicit_name_is_a_repeated_label(
         self, tmp_path, gcc_toolchain, caplog
     ):
         project = Project("q", root_dir=tmp_path, build_dir="build")
@@ -1008,4 +1013,5 @@ class TestInstallTargetNaming:
             (tmp_path / f"{name}.txt").write_text(name)
             project.Install("config", [f"{name}.txt"], name="my_install")
 
-        assert "renamed" in caplog.text
+        assert caplog.text == ""
+        assert [t.name for t in project.targets] == ["my_install", "my_install"]

@@ -900,7 +900,9 @@ class TestRunScriptWithoutGenerating:
 
         project = projects[0]
         assert project._resolved
-        assert project.get_target("hello").output_nodes
+        # The one target the script makes: a Command's name is a label, so
+        # the script's own variable is what identifies it.
+        assert project.targets[0].output_nodes
 
     def test_the_pending_queue_is_emptied_too(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1460,7 +1462,7 @@ def flash(baud):
     # Which build directory the dispatch actually ran against.
     print("build_dir=" + os.environ["PCONS_BUILD_DIR"])
     print("cc=" + pcons.get_var("CC", "none"))
-    print("outputs=" + ",".join(str(n.path) for n in project.get_target("hello").output_nodes))
+    print("outputs=" + ",".join(str(n.path) for n in hello.output_nodes))
 
 
 @project.cli_group()

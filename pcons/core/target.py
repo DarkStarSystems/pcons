@@ -488,6 +488,9 @@ class Target:
         # on targets with thousands of sources.
         "_source_set",
         "_subdir",
+        # Whether the name is a label pcons derived rather than an identity
+        # the script chose. See the `anonymous` property.
+        "_anonymous",
         # Which invocation reaches this target: see pcons/core/tiers.py.
         # The value the builder placed it in, or the script's own choice.
         "_build_tier",
@@ -506,6 +509,7 @@ class Target:
         defined_at: SourceLocation | None = None,
         project: Project | None = None,
         env: Environment | None = None,
+        anonymous: bool = False,
     ) -> None:
         """Create a target. Toolchains define their own target_type strings.
 
@@ -518,9 +522,14 @@ class Target:
         environment are its identity, and the project checks that identity as
         soon as the target is registered, which happens before ``__init__``
         returns.
+
+        ``anonymous`` says the name is a label rather than an identity; see
+        the :attr:`anonymous` property. The builder decides it, once, for
+        every target it makes.
         """
         _validate_target_name(name)
         self.name = name
+        self._anonymous = anonymous
         self.builder = builder
         self._sources: list[Node] = []
         self._source_set: set[Node] = set()
@@ -583,6 +592,25 @@ class Target:
     def project(self) -> Project:
         """Get the project this target belongs to."""
         return self.__project
+
+    @property
+    def anonymous(self) -> bool:
+        """Whether this target's name is a label rather than an identity.
+
+        A named target is one the script named: the name is unique within
+        project and environment, ``get_target()`` finds it, and ``link()``
+        and ``Default()`` accept it. Program, StaticLibrary, CargoBuild and
+        the rest are named.
+
+        An anonymous target is one whose builder derived a label — the stem
+        of the first output file, the flattened install destination. It is a
+        thing to read in ``pcons info --targets``, the tier report and
+        diagnostics, and nothing else: two of them may wear one label, and no
+        lookup answers to it. ``env.Command``, ``Install``, ``Tarfile`` and
+        the rest are anonymous, whether or not the call passed ``name=``.
+        To make such a build typeable, give it an alias.
+        """
+        return self._anonymous
 
     @property
     def qualified_name(self) -> str:

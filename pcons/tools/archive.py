@@ -265,6 +265,7 @@ class TarfileBuilder:
             defined_at=get_caller_location(),
             project=project,
             env=env,
+            anonymous=True,
         )
 
         target._builder_name = "Tarfile"
@@ -328,6 +329,7 @@ class ZipfileBuilder:
             defined_at=get_caller_location(),
             project=project,
             env=env,
+            anonymous=True,
         )
 
         target._builder_name = "Zipfile"

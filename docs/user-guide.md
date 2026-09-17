@@ -862,6 +862,27 @@ ninja libfoo.a      # a static library named foo
 
 A top-level program is the case where the two coincide, which is why `ninja myapp` usually works. Give a target a `build_prefix`, an `output_name`, or a Windows suffix and it stops. Make an alias when you want a name you can rely on typing.
 
+#### Named and anonymous targets
+
+You name some targets and not others, and pcons treats the two differently.
+
+`Program`, `StaticLibrary`, `SharedLibrary`, `ObjectLibrary`, `HeaderOnlyLibrary`, `CargoBuild`, `find_package` and the Qt builders take a name from you. That name is the target's identity: unique within the project and environment, found by `get_target()`, and usable in `link()`, `Default()` and `pcons explain`.
+
+`Command`, `PyBuilder`, `Install`, `InstallAs`, `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile` and `Test` name nothing: pcons derives a label from what the build writes — the stem of the first output file, the flattened install destination. A label is for reading, in `pcons info --targets`, `pcons explain` and error messages. Two of them may be identical, and no lookup answers to one:
+
+```python
+header = env.Command(target="config.h", command="...")   # labelled `config`
+source = env.Command(target="config.c", command="...")   # labelled `config` too
+
+project.get_target("config")   # KeyError: a label is not a name
+```
+
+Passing `name=` to one of those builders sets the label, and that is all it does: it makes a report easier to read, it does not make the target findable. Keep the `Target` the call returned, which is what `Default()`, `depends()` and `Install()` want anyway, and give it an alias when you want to type it:
+
+```python
+project.Alias("config", header)   # now `ninja config` means something
+```
+
 Calling `Alias()` multiple times with the same alias name adds targets to that alias, and you can have Aliases that contain (depend on) other Aliases.
 
 Pcons defines a few aliases automatically: `all` (every target except the manual tier), and when the project has `Test()` targets, `test` (build and run them) and `test-build` (just build them). With the Makefile generator there's also `clean`; ninja has `ninja -t clean` built in. Some helpers add their own, like `lupdate` and `deploy` from the Qt tools. There's no built-in `install` alias; make one with `Alias("install", ...)` as above.
@@ -1789,7 +1810,9 @@ common_host = common_lib(host)  # build/host/lib/libcommon.a
 ```
 
 Two targets may share a name only when both environments are named and the names
-differ. Otherwise the old error stands, and it says so.
+differ. Otherwise the old error stands, and it says so. This is about names: two
+anonymous targets may always share a label (see [Named and anonymous
+targets](#named-and-anonymous-targets)).
 
 #### Naming one of them: `name@env`
 

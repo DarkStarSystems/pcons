@@ -1806,6 +1806,7 @@ class Environment(_EnvironmentStubs):
             target_type="command",
             defined_at=get_caller_location(),
             env=self,
+            anonymous=True,
         )
         cmd_target._builder_name = "Command"
         # A command makes a product, so a plain `ninja` builds it. A script

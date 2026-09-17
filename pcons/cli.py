@@ -1934,6 +1934,19 @@ def _info_targets(
     return 0
 
 
+def _targets_written_as(project: Project, name: str) -> list[Target]:
+    """Every target *name* picks out for a report.
+
+    A named target is one target, the usual case. A label an anonymous
+    builder derived may sit on several targets, and a report is the one place
+    that can show them all rather than pick (see ``Target.anonymous``).
+    """
+    target = project.get_target(name, raise_if_missing=False)
+    if target is not None:
+        return [target]
+    return [t for t in project.targets if t.anonymous and t.name == name]
+
+
 def _explain_targets(
     build_dir: Path,
     script: Path,
@@ -1988,12 +2001,12 @@ def _explain_targets(
             owners = []
             for p in top_levels:
                 try:
-                    target = p.get_target(name, raise_if_missing=False)
+                    found = _targets_written_as(p, name)
                 except KeyError as e:  # duplicate name inside one project
                     logger.error("%s", e)
                     return 1
-                if target is not None:
-                    owners.append((p, target))
+                if found:
+                    owners.append((p, found))
             if not owners:
                 missing.append(name)
             elif len(owners) > 1:
@@ -2005,8 +2018,8 @@ def _explain_targets(
                 )
                 return 1
             else:
-                p, target = owners[0]
-                per_project[id(p)].append(target)
+                p, found = owners[0]
+                per_project[id(p)].extend(found)
         if missing:
             known = sorted({t.name for p in top_levels for t in p.targets})
             logger.error("No such target: %s", ", ".join(missing))
