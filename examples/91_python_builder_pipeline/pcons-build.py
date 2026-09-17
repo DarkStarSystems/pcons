@@ -16,8 +16,8 @@ Why every call passes ``name=``: an edge is named after its first target's
 stem, the same rule ``env.Command`` uses, which refuses two targets in one
 environment sharing a name. Here ``lorem.txt`` and ``lorem.c`` share the stem
 ``lorem``, and so does the program, so three edges of one chain would
-collide on the edge name ``lorem``. ``name=`` parts them, and it is also what
-``ninja lorem-text`` then means.
+collide on the edge name ``lorem``. ``name=`` parts them. It is a label, not
+a name ninja knows: ``project.Alias()`` is what makes an edge typeable.
 
 Why a byte array rather than a C string literal: the fetched document is
 arbitrary bytes. Escaping it into a string literal means handling quotes,

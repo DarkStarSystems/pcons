@@ -236,7 +236,7 @@ class TarfileBuilder:
             sources: Input files, directories, and/or Targets.
             compression: Compression type (None, "gzip", "bz2", "xz").
             base_dir: Base directory for archive paths.
-            name: Optional target name.
+            name: Optional label for this target; not a build-tool name.
 
         Returns:
             ArchiveTarget representing the archive, with settable properties.
@@ -312,7 +312,7 @@ class ZipfileBuilder:
             output: Output archive path.
             sources: Input files, directories, and/or Targets.
             base_dir: Base directory for archive paths.
-            name: Optional target name.
+            name: Optional label for this target; not a build-tool name.
 
         Returns:
             ArchiveTarget representing the archive, with settable properties.

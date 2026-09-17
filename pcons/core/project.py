@@ -1042,7 +1042,12 @@ class Project(_ProjectBuilders):
         self, name: str, *targets: Target | Node | list[Target | Node]
     ) -> AliasNode:
         """Create a named alias for targets, usable as a build target
-        (e.g. 'ninja test'). Accepts Targets, Nodes, or lists of them."""
+        (e.g. ``ninja test``). Accepts Targets, Nodes, or lists of them.
+
+        This is what gives a build a name the build tool knows: a target's
+        own name is a label pcons uses, and only an alias becomes a phony
+        rule the user can type.
+        """
         if name not in self._aliases:
             self._aliases[name] = AliasNode(name, defined_at=get_caller_location())
 

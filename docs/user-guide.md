@@ -779,12 +779,12 @@ built:
 |---|---|
 | `"default"` | plain `pcons`, `ninja` or `make`, with no targets named |
 | `"all"` | `pcons all` / `ninja all` / `make all` |
-| `"manual"` | naming the target(s) only |
+| `"manual"` | naming it only: its output path, or an alias |
 
 Whatever a target's tier, anything it depends on gets built along with
 it, as usual. (So just to be clear, marking a target as `manual` but
 having a program depend on it will still build that target whenever
-the program is built.) And naming any target always builds it, no matter its tier.
+the program is built.) And naming a build's output path, or an alias for it, always builds it, no matter its tier.
 
 Each builder puts its targets in a sensible tier. Programs, libraries,
 `Command`s, LaTeX documents, bundles, and custom builders' outputs are
@@ -792,14 +792,14 @@ Each builder puts its targets in a sensible tier. Programs, libraries,
 overlays, archives and installers are `all`: they operate on the things you
 built, and you don't usually want them running on every build. Test targets,
 Qt's `lupdate` and `QtDeploy` are `manual`: run them by name (`pcons test`,
-`ninja lupdate`). Where a target sits in the source tree makes no difference
+`ninja lupdate`), which works because each declares an alias. Where a target sits in the source tree makes no difference
 to any of this.
 
 To change a target's tier, just set it:
 
 ```python
 zipfile.build_tier = "default"   # add the zip to the default build
-bench.build_tier = "all"         # `ninja all` or `ninja bench`, not every build
+bench.build_tier = "all"         # `ninja all` or `ninja build/bench`, not every build
 lupdate.build_tier = "manual"    # it rewrites sources: only when asked for
 ```
 
@@ -849,13 +849,18 @@ project.Alias("run-test", test_runner)
 #   ninja test       # Build and run tests
 ```
 
-Aliases are Ninja or Makefile phony targets - they don't produce files but depend on other targets. Target names (like `"myapp"` in `project.Program("myapp", env)`) are also usable with ninja or make:
+Aliases are Ninja or Makefile phony targets: they produce no file of their own, they depend on other targets, and their name is one the build tool knows.
+
+A target's own name is not. What the build tool knows for an ordinary target is its output path:
 
 ```bash
-ninja myapp      # Build just the myapp target
-ninja libfoo     # Build just libfoo
-ninja install    # Build the install alias
+ninja install       # the install alias
+ninja myapp         # a program named myapp, whose output happens to be `myapp`
+ninja myapp.exe     # the same program on Windows
+ninja libfoo.a      # a static library named foo
 ```
+
+A top-level program is the case where the two coincide, which is why `ninja myapp` usually works. Give a target a `build_prefix`, an `output_name`, or a Windows suffix and it stops. Make an alias when you want a name you can rely on typing.
 
 Calling `Alias()` multiple times with the same alias name adds targets to that alias, and you can have Aliases that contain (depend on) other Aliases.
 
@@ -2600,7 +2605,7 @@ two = report(
 )
 ```
 
-`name=` is also what `ninja tmp-report` then means. `examples/91_python_builder_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem. The argument pickle plays no part in this: it is named after the target's own build-relative path, `build/pybuilder/out/report.txt.args.pkl` and `build/pybuilder/tmp/report.txt.args.pkl` here, so it never collides on its own.
+`name=` is a label, not something ninja knows; `project.Alias()` is what makes an edge typeable. `examples/91_python_builder_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem. The argument pickle plays no part in this: it is named after the target's own build-relative path, `build/pybuilder/out/report.txt.args.pkl` and `build/pybuilder/tmp/report.txt.args.pkl` here, so it never collides on its own.
 
 **Reserved parameter names.** `target`, `source`, `name` and `depends` are refused as parameters of the function, because the call spends them on the edge. Rename them; the error says which ones and what the call does with them.
 
@@ -3597,7 +3602,7 @@ Both archive builders support:
 - **`output`**: Path to the output archive file
 - **`sources`**: List of files, directories, or Targets to include
 - **`base_dir`**: Base directory for computing archive paths (default: ".")
-- **`name`**: Optional target name for `ninja <name>` (default: derived from output path)
+- **`name`**: Optional label for the target, shown by `pcons info --targets` (default: derived from the output path). To build the archive by name, give it an alias.
 
 ```python
 # Custom base_dir to strip source paths
@@ -3614,7 +3619,7 @@ archive = project.Tarfile(
     env,
     output="dist/docs.tar.gz",
     sources=["docs/"],
-    name="package_docs",  # Run with: ninja package_docs
+    name="package_docs",  # A label; `project.Alias()` makes it buildable
 )
 ```
 
@@ -3884,7 +3889,7 @@ else:
     # Normal install: usual bin/lib conventions.
     dest = install_dir(env, "shared_library")
 
-project.Install(dest, [my_extension], name="install")
+project.Install(dest, [my_extension])
 ```
 
 If your build script ignores `PCONS_BUILD_WHEEL` and installs to `lib/`, the

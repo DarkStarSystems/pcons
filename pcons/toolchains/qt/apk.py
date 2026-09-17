@@ -186,7 +186,7 @@ def android_apk(
                   mode, not a way to stop before Gradle. It writes no
                   package, so the target is a stamp and is not built by
                   default.
-        name: Target name. Default ``<app>-apk``.
+        name: Label for this target. Default ``<app>-apk``.
 
     Returns:
         The command target: the package, or the stamp under ``no_build``.

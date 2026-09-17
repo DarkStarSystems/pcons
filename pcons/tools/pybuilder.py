@@ -1289,7 +1289,9 @@ class PyBuilder:
             target: Output file or files, as ``env.Command`` takes them.
             source: Input files, or None. They arrive as the function's
                 *sources*, in the order written.
-            name: Edge name for ``ninja <name>``. Defaults to the first
+            name: Label for this edge, and the argument pickle's file
+                name. Not something the build tool knows; use
+                ``project.Alias()`` for that. Defaults to the first
                 target's stem, the same rule ``env.Command`` uses. Does not
                 affect the argument pickle, which is named after the first
                 target's own build-relative path.

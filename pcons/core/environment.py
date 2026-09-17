@@ -1566,8 +1566,11 @@ class Environment(_EnvironmentStubs):
                     token that must contain a space goes in the list form,
                     which isn't split on whitespace; one whose quotes really
                     are meant goes in ``Verbatim(...)``.
-            name: Optional target name for `ninja <name>`. Derived from first
-                  target filename if not specified.
+            name: Optional label for this target, shown by ``pcons info
+                  --targets`` and in diagnostics. Derived from the first
+                  target's file stem if not given. The build tool never
+                  learns it: to build this by name, give it an alias with
+                  ``project.Alias()``.
             depends: Extra files that trigger a rebuild when changed, but
                     don't appear in $SOURCE/$SOURCES. These become implicit
                     dependencies (after ``|`` in ninja). Useful for scripts,

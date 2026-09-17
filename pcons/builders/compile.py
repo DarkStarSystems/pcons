@@ -321,7 +321,7 @@ class CommandBuilder:
 
         Args:
             project: The project to add the target to.
-            name: Target name for `ninja <name>`.
+            name: Label for this target; see :meth:`Environment.Command`.
             env: Environment to use.
             target: Output file(s).
             tool: The program that runs the command, written ``$TOOL``.

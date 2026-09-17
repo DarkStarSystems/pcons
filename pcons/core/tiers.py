@@ -6,9 +6,11 @@ reaches it:
 
 - ``"default"``: plain ``ninja``, and everything below it. The products —
   programs, libraries, commands, documents, packs, whatever this build makes.
-- ``"all"``: ``ninja all``, naming the target, and being a dependency. The
+- ``"all"``: ``ninja all``, naming its output or an alias, and being a
+  dependency. The
   steps that operate on products: installs, overlays, archives, installers.
-- ``"manual"``: naming only. Test runs (``ninja test``), and targets that
+- ``"manual"``: naming its output path or an alias, only. Test runs
+  (``ninja test``, an alias), and targets that
   must not run unasked: one that rewrites sources (Qt's lupdate), one too
   slow or too destructive for a
   routine build.
