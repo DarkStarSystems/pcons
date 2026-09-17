@@ -47,6 +47,9 @@ expect_no_rebuild = ["report.txt", "report2.txt", "strict*report.txt"]
 description = "A comment does not re-run the function, a changed body re-runs all three edges"
 run = "uv run python rebuild_check.py"
 expect_stdout = "rebuild ok"
+# Three regenerate-and-build round trips, each starting fresh interpreters.
+# The 30 second default is not enough under CI load.
+timeout = 300
 
 [skip]
 # The example declares one target name in two environments, which ninja allows

@@ -1088,16 +1088,19 @@ def _captured_sys_path() -> list[str]:
     Order and duplicates kept, except the launcher entry: the first entry
     equal to :func:`pcons.core.invocation.launcher_entry`, an artifact of
     how this process happened to be started rather than something the
-    script itself put on its path, is left out. Each remaining entry is
-    made absolute immediately: a relative or empty entry names the build
-    script's own directory or current directory, which is not the edge's
-    once the runner takes over.
+    script itself put on its path, is left out. Compared through
+    ``os.path.normcase``, so a launcher and a capture that spell the same
+    path with a different separator, or in different case on Windows,
+    still match. Each remaining entry is made absolute immediately: a
+    relative or empty entry names the build script's own directory or
+    current directory, which is not the edge's once the runner takes over.
     """
     entries = [os.path.abspath(entry) for entry in sys.path]
     launcher = launcher_entry()
     if launcher is not None:
+        normalized_launcher = os.path.normcase(launcher)
         for index, entry in enumerate(entries):
-            if entry == launcher:
+            if os.path.normcase(entry) == normalized_launcher:
                 del entries[index]
                 break
     return [Path(entry).as_posix() for entry in entries]

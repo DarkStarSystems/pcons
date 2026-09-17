@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import re
 import shutil
 import subprocess
 import sys
@@ -372,7 +373,7 @@ class TestGeneratedNinja:
         runner = Path(os.path.relpath(tmp_path / RUNNER, elsewhere)).as_posix()
         assert f"{cd} {there} &&" in text
         assert f"&& {cd} {back}" in text
-        assert f" {runner} " in text
+        assert re.search(f'[ "]{re.escape(runner)}[ "]', text)
 
     def test_write_if_different_wraps_the_edge(
         self, project: Project, env: Any, tmp_path: Path
@@ -953,6 +954,58 @@ class TestSysPath:
         project.resolve()
 
         assert payload_of(made, tmp_path)["path"] == [launcher.as_posix()]
+
+    def test_a_launcher_entry_spelled_with_the_other_separator_is_left_out(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`sys.path` and the recorded launcher entry may spell the same
+        path with a different separator (POSIX vs. native, on Windows).
+        The other tests here always put the native spelling in `sys.path`
+        and the POSIX one in the mocked `launcher_entry`; this reverses
+        which side spells it which way, so the match stays proven either
+        way round.
+        """
+        launcher = tmp_path / "launcher"
+        monkeypatch.setattr(sys, "path", [launcher.as_posix(), str(tmp_path)])
+        monkeypatch.setattr(pybuilder_module, "launcher_entry", lambda: str(launcher))
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["path"] == [tmp_path.as_posix()]
+
+    @pytest.mark.skipif(
+        sys.platform != "win32", reason="paths are case-insensitive on Windows only"
+    )
+    def test_a_launcher_entry_differing_only_in_case_is_left_out(
+        self,
+        project: Project,
+        env: Any,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        launcher = tmp_path / "launcher"
+        monkeypatch.setattr(sys, "path", [str(launcher), str(tmp_path)])
+        monkeypatch.setattr(
+            pybuilder_module, "launcher_entry", lambda: str(launcher).upper()
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources):
+            return 1
+
+        made = report(target="report.txt", source=["a.txt"])
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["path"] == [tmp_path.as_posix()]
 
     def test_no_recorded_launcher_leaves_every_entry(
         self,
