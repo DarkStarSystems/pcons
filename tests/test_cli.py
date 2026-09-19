@@ -7638,6 +7638,80 @@ class TestAnonymousTargetsAreNotRecorded:
         assert _env_target_paths(project) == {}
 
 
+class TestALabelTypedAsABuildTarget:
+    """A label is the one unknown token pcons can explain, so it does.
+
+    The build tool answers "unknown target", which reads as a typo. Issue
+    #194 is a user hitting exactly that.
+    """
+
+    def _cache(self, tmp_path, *, labels, buildable):
+        from pcons.core.cache import BuildCache
+
+        cache = BuildCache(tmp_path)
+        cache.update({"anonymous_labels": labels, "targets": buildable})
+        cache.save()
+        return tmp_path
+
+    def test_a_label_is_refused_and_its_paths_named(self, tmp_path, caplog) -> None:
+        from pcons.cli import _refuse_label_targets
+
+        build_dir = self._cache(
+            tmp_path, labels={"version": ["gen/version.h"]}, buildable=["all"]
+        )
+
+        with caplog.at_level(logging.ERROR, logger="pcons"):
+            assert _refuse_label_targets(["version"], build_dir) is True
+
+        message = " ".join(r.getMessage() for r in caplog.records)
+        assert "aren't unique" in message
+        assert "gen/version.h" in message
+        assert "Alias" in message
+
+    def test_an_unknown_token_passes_through(self, tmp_path) -> None:
+        """A build tool knows names pcons does not, file paths among them."""
+        from pcons.cli import _refuse_label_targets
+
+        build_dir = self._cache(
+            tmp_path, labels={"version": ["gen/version.h"]}, buildable=["all"]
+        )
+
+        assert _refuse_label_targets(["versionn"], build_dir) is False
+
+    def test_a_label_that_is_also_buildable_passes_through(self, tmp_path) -> None:
+        """A program named `app` builds `app`: the token means the file."""
+        from pcons.cli import _refuse_label_targets
+
+        build_dir = self._cache(
+            tmp_path, labels={"app": ["app.stamp"]}, buildable=["app"]
+        )
+
+        assert _refuse_label_targets(["app"], build_dir) is False
+
+    def test_nothing_recorded_refuses_nothing(self, tmp_path) -> None:
+        from pcons.cli import _refuse_label_targets
+
+        assert _refuse_label_targets(["version"], tmp_path) is False
+
+    def test_the_labels_are_recorded_for_later_runs(
+        self, tmp_path, gcc_toolchain
+    ) -> None:
+        from pcons.cli import _anonymous_label_paths
+        from pcons.core.project import Project
+
+        (tmp_path / "in.txt").write_text("x")
+        project = Project("p", root_dir=tmp_path)
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.Command(
+            target="gen/version.h",
+            source="in.txt",
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+        project.resolve()
+
+        assert _anonymous_label_paths(project) == {"version": ["gen/version.h"]}
+
+
 class TestMergedEnvTargets:
     """Sibling projects share one cache, so a short spelling can be contested."""
 

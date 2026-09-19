@@ -23,7 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `pcons info --targets` now lists targets with no name by what they build,
   rather than showing a derived label as if it were something to type.
-  `pcons explain <label>` shows every target wearing the label.
+  `pcons explain <label>` shows every target wearing the label, and
+  `pcons build <label>` says the label is one, and names the path to build
+  instead, rather than leaving ninja to answer "unknown target". (#194)
 
 - `pcons_metadata.json` is at schema version 4. Every target now carries an
   `id`, unique within the file and the same on every run of an unchanged

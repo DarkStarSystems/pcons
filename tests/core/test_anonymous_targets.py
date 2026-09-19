@@ -93,8 +93,9 @@ class TestLookupsIgnoreLabels:
         with pytest.raises(KeyError) as excinfo:
             project.get_target("foo")
         message = str(excinfo.value)
-        assert "Command derived that label" in message
-        assert "project.Alias('foo', ...)" in message
+        assert "was found as a target's label" in message
+        assert "aren't unique" in message
+        assert "Use the Target the builder returned, or create an Alias." in message
 
     def test_has_target_is_false_for_a_label(self, project):
         env = project.Environment()
@@ -107,7 +108,9 @@ class TestLookupsIgnoreLabels:
         env = project.Environment()
         env.Command(target="foo.h", command="touch $TARGET")
 
-        with pytest.raises(KeyError, match="derived that label"):
+        with pytest.raises(KeyError, match="was found as a target's label"):
+            project.Default("foo")
+        with pytest.raises(KeyError, match="Pass the Target the builder returned"):
             project.Default("foo")
 
     def test_an_alias_is_how_a_command_gets_a_name(self, project, tmp_path):

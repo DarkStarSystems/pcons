@@ -403,6 +403,74 @@ def _env_target_paths(project: Project) -> dict[str, list[str]]:
     return spellings
 
 
+def _anonymous_label_paths(project: Project) -> dict[str, list[str]]:
+    """Output paths per anonymous target label, as the build tool sees them.
+
+    A label is not something the build tool knows, so a user who types one
+    gets "unknown target" from ninja and no idea why (issue #194). Recorded
+    here so a later run, which has no project objects, can say what the
+    label refers to and what to type instead.
+    """
+    from pcons.core.node import FileNode
+
+    resolver = project.top_path_resolver
+    labels: dict[str, list[str]] = {}
+    for target in project.targets:
+        if not target.anonymous:
+            continue
+        paths = [
+            resolver.make_execution_relative(node.path)
+            for node in target.output_nodes
+            if isinstance(node, FileNode)
+        ]
+        if paths:
+            labels.setdefault(target.name, []).extend(paths)
+    return labels
+
+
+def _merged_anonymous_label_paths(projects: list[Project]) -> dict[str, list[str]]:
+    """The same, over sibling projects: one label may reach into several."""
+    merged: dict[str, list[str]] = {}
+    for project in projects:
+        for label, paths in _anonymous_label_paths(project).items():
+            merged.setdefault(label, []).extend(paths)
+    return merged
+
+
+def _refuse_label_targets(targets: list[str] | None, build_dir: Path) -> bool:
+    """Whether a requested target is a label, and say so if it is.
+
+    The build tool would answer "unknown target", which reads as a typo. A
+    label is the one unknown token pcons can explain, so it does, and the
+    build stops rather than handing over a token known to mean nothing.
+    Every other token passes through: a build tool knows names pcons does
+    not, file paths among them.
+    """
+    if not targets:
+        return False
+    cache = _open_cache(build_dir)
+    labels = cache.get("anonymous_labels")
+    labels = labels if isinstance(labels, dict) else {}
+    if not labels:
+        return False
+    buildable = cache.get("targets")
+    buildable = set(buildable) if isinstance(buildable, list) else set()
+    refused = False
+    for token in targets:
+        paths = labels.get(token)
+        if not paths or token in buildable:
+            continue
+        refused = True
+        logger.error(
+            "%r was found as a target's label, but those internal labels "
+            "aren't unique so they can't be relied on. Build it by its path "
+            "(%s), or create an Alias for it.",
+            token,
+            ", ".join(sorted(dict.fromkeys(paths))),
+        )
+    return refused
+
+
 def _merged_env_target_paths(projects: list[Project]) -> dict[str, list[str]]:
     """The same, merged over sibling projects, under both spellings.
 
@@ -437,6 +505,7 @@ def _persist_run_settings(
     targets: list[str] | None = None,
     variants: set[str] | None = None,
     env_targets: dict[str, list[str]] | None = None,
+    anonymous_labels: dict[str, list[str]] | None = None,
 ) -> None:
     """Persist the settings resolved for this run into the build-dir cache.
 
@@ -473,6 +542,8 @@ def _persist_run_settings(
         updates["targets"] = targets
     if env_targets is not None:
         updates["env_targets"] = env_targets
+    if anonymous_labels is not None:
+        updates["anonymous_labels"] = anonymous_labels
     if variants:
         recorded = cache.get("variants")
         recorded = recorded if isinstance(recorded, list) else []
@@ -512,6 +583,7 @@ def _persist_run_settings_to_projects(
             targets=_buildable_names(project),
             variants=variants,
             env_targets=_env_target_paths(project),
+            anonymous_labels=_anonymous_label_paths(project),
         )
         # The declared-command listing too: `pcons -B <this dir> run` reads
         # it from here, and must list the same commands the primary does.
@@ -784,6 +856,9 @@ def run_script(
                         else None,
                         variants=pcons.core.vars._seen_variant_names(),
                         env_targets=_merged_env_target_paths(top_levels)
+                        if wants_generate()
+                        else None,
+                        anonymous_labels=_merged_anonymous_label_paths(top_levels)
                         if wants_generate()
                         else None,
                     )
@@ -1629,6 +1704,9 @@ def _build(
                 return code, [build_dir]
             if not projects:
                 return _no_build_described(), [build_dir]
+
+    if _refuse_label_targets(targets, build_dir):
+        return 1, [build_dir]
 
     if not projects:
         # No regeneration ran: build the requested directory. With sibling
