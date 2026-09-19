@@ -3887,14 +3887,14 @@ env.Command(
 from pcons import Project
 
 project = Project("demo")
-project.InstallDir(".", "assets", name="install-assets")
+project.InstallDir(".", "assets")
 """
         )
         monkeypatch.chdir(tmp_path)
 
         result = _invoke("explain")
         assert result.exit_code == 0
-        assert "install-assets" in result.stdout
+        assert "install_" in result.stdout
         assert "copytree" in result.stdout
 
     def test_target_header_names_its_environment(
@@ -4148,11 +4148,39 @@ project.Alias("all", hello)
         assert result.exit_code == 0
         assert "Aliases:" in result.stdout
         assert "all" in result.stdout
-        # A Command names nothing, so it is listed by what it builds.
-        assert "Targets with no name" in result.stdout
+        # A Command names nothing, so its label is the path it builds, and
+        # the listing says that path once.
+        assert "Anonymous targets" in result.stdout
         assert "[command]" in result.stdout
-        assert "hello.txt" in result.stdout
-        assert "(hello)" in result.stdout
+        assert result.stdout.count("hello.txt") == 2  # the alias, then the target
+
+    def test_info_targets_separates_the_named_ones(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A named target is listed under the name that builds it; an
+        anonymous one under the path that does."""
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        (tmp_path / "pcons-build.py").write_text("""\
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment(toolchain="c")
+project.Program("hello", env, sources=["hello.c"])
+env.Command(target="gen/version.h", source="hello.c", command="cp $SOURCE $TARGET")
+""")
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("info", "--targets")
+
+        assert result.exit_code == 0
+        assert "Named targets (build with `pcons build <name>`):" in result.stdout
+        assert f"hello                          -> hello{EXE_SUFFIX}" in result.stdout
+        assert (
+            "Anonymous targets (build by output path, or give one an alias):"
+            in result.stdout
+        )
+        assert result.stdout.count("gen/version.h") == 1
 
 
 class TestIntegration:
@@ -4633,14 +4661,12 @@ class TestRecordedTargetNames:
         )
         assert self._recorded(build_dir) == ["all", f"hello{EXE_SUFFIX}"]
 
-    def test_an_output_prefix_is_recorded_as_the_build_file_spells_it(
+    def test_an_output_prefix_records_both_spellings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The name a build tool accepts, not `target.name`.
-
-        A target renamed by output_name/output_prefix is spelled one way in the
-        build file and another in the Project, and only the first is typeable.
-        """
+        """A target renamed by output_name/output_prefix is written one way in
+        the build file and another in the Project, and both are typeable:
+        pcons translates its own name, the build tool knows the path."""
         (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
         build_dir = self._generate(
             tmp_path,
@@ -4652,7 +4678,11 @@ class TestRecordedTargetNames:
             "prog.output_name = 'demo'\n"
             "prog.output_prefix = 'debug/'\n",
         )
-        assert self._recorded(build_dir) == ["all", f"debug/demo{EXE_SUFFIX}"]
+        assert self._recorded(build_dir) == [
+            "all",
+            f"debug/demo{EXE_SUFFIX}",
+            "demo_debug",
+        ]
 
     def test_a_run_that_does_not_generate_leaves_the_names_alone(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -7347,8 +7377,9 @@ class TestACommandNameThatIsNotTheFirstArgument:
         assert self._resolved("generate", "FOO=bar") == ("generate", ["FOO=bar"])
 
 
-class TestEnvQualifiedTargets:
-    """`pcons build common@mcu`: pcons translates, the build tool never sees it."""
+class TestTargetNamesBecomePaths:
+    """`pcons build common`, `pcons build common@mcu`: pcons translates the
+    name it knows, and hands the build tool only paths it knows."""
 
     def _project(self, tmp_path, gcc_toolchain):
         from pcons.core.project import Project
@@ -7435,19 +7466,149 @@ class TestEnvQualifiedTargets:
     def test_the_recorded_paths_are_what_a_later_build_uses(
         self, tmp_path, gcc_toolchain
     ) -> None:
-        """A build that regenerates nothing has only the cache to go on."""
-        from pcons.cli import _env_target_paths
+        """A build that regenerates nothing has only the cache to go on.
+
+        The plain `common` is recorded with no paths: two environments build
+        one, so a later run refuses it rather than handing it on.
+        """
+        from pcons.cli import _named_target_paths
 
         project = self._project(tmp_path, gcc_toolchain)
 
-        assert _env_target_paths(project) == {
+        assert _named_target_paths(project) == {
+            "common": [],
             "common@mcu": [self._archive(gcc_toolchain, "mcu/lib", "common")],
             "common@host": [self._archive(gcc_toolchain, "host/lib", "common")],
         }
 
 
-class TestEnvQualifiedFailures:
-    """What `pcons build name@env` does when it cannot answer."""
+class TestAPlainNameIsBuildable:
+    """`pcons build app` translates exactly as `app@host` does (issue #194)."""
+
+    def _project(self, tmp_path, gcc_toolchain, *, env_name="host"):
+        from pcons.core.project import Project
+
+        src = tmp_path / "src"
+        src.mkdir(exist_ok=True)
+        (src / "common.c").write_text("int f(void) { return 1; }\n")
+        project = Project("p", root_dir=tmp_path)
+        env = project.Environment(toolchain=gcc_toolchain, name=env_name)
+        env.archive_directory = "lib"
+        project.StaticLibrary("common", env, sources=["src/common.c"])
+        project.resolve()
+        return project
+
+    def _archive(self, toolchain, base: str) -> str:
+        prefix = toolchain.get_output_prefix("static_library")
+        suffix = toolchain.get_output_suffix("static_library")
+        return f"lib/{prefix}{base}{suffix}"
+
+    def test_a_name_becomes_its_output_path(self, tmp_path, gcc_toolchain) -> None:
+        from pcons.cli import _route_targets
+
+        project = self._project(tmp_path, gcc_toolchain)
+        archive = self._archive(gcc_toolchain, "common")
+
+        assert _route_targets([project], ["common"]) == [(project, [archive])]
+
+    def test_an_unnamed_environment_is_no_obstacle(
+        self, tmp_path, gcc_toolchain
+    ) -> None:
+        """`name@env` needs a named environment; a plain name never did."""
+        from pcons.cli import _route_targets
+
+        project = self._project(tmp_path, gcc_toolchain, env_name=None)
+        archive = self._archive(gcc_toolchain, "common")
+
+        assert _route_targets([project], ["common"]) == [(project, [archive])]
+
+    def test_the_cache_answers_the_plain_name_too(
+        self, tmp_path, gcc_toolchain
+    ) -> None:
+        from pcons.cli import _named_target_paths
+
+        project = self._project(tmp_path, gcc_toolchain)
+        archive = self._archive(gcc_toolchain, "common")
+
+        assert _named_target_paths(project) == {
+            "common": [archive],
+            "common@host": [archive],
+        }
+
+    def test_completion_offers_both_spellings_and_the_path(
+        self, tmp_path, gcc_toolchain
+    ) -> None:
+        from pcons.cli import _buildable_names
+
+        project = self._project(tmp_path, gcc_toolchain)
+
+        assert set(_buildable_names(project)) == {
+            "all",
+            "common",
+            "common@host",
+            self._archive(gcc_toolchain, "common"),
+        }
+
+    def test_an_alias_of_that_name_wins(self, tmp_path, gcc_toolchain) -> None:
+        """An alias is the build tool's own, and pcons must not shadow it."""
+        from pcons.cli import _named_target_paths, _route_targets
+        from pcons.core.project import Project
+
+        project = Project("p", root_dir=tmp_path)
+        env = project.Environment(toolchain=gcc_toolchain, name="host")
+        (tmp_path / "in.txt").write_text("x")
+        command = env.Command(
+            target="out.txt", source="in.txt", command=["cp", "$SOURCE", "$TARGET"]
+        )
+        lib = project.StaticLibrary("docs", env)
+        project.Alias("docs", [command])
+        project.resolve()
+
+        assert _route_targets([project], ["docs"]) == [(project, ["docs"])]
+        assert "docs" not in _named_target_paths(project)
+        assert lib.name == "docs"
+
+    def test_a_name_in_several_environments_stops_the_build(
+        self, tmp_path, gcc_toolchain, caplog
+    ) -> None:
+        """Unlike a missing name, an ambiguous one cannot be a file path."""
+        from pcons.cli import _route_targets
+        from pcons.core.project import Project
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "common.c").write_text("int f(void) { return 1; }\n")
+        project = Project("p", root_dir=tmp_path)
+        for name in ("mcu", "host"):
+            env = project.Environment(toolchain=gcc_toolchain, name=name)
+            env.build_prefix = name
+            project.StaticLibrary("common", env, sources=["src/common.c"])
+        project.resolve()
+
+        with caplog.at_level(logging.ERROR):
+            assert _route_targets([project], ["common"]) is None
+        assert "common@mcu" in caplog.text
+        assert "common@host" in caplog.text
+
+    def test_the_phonies_every_manifest_defines_pass_through(
+        self, tmp_path, gcc_toolchain
+    ) -> None:
+        """A target named `all` must not shadow the generators' own phony."""
+        from pcons.cli import _named_target_paths, _route_targets
+        from pcons.core.project import Project
+
+        project = Project("p", root_dir=tmp_path)
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "src.c").write_text("int f(void) { return 1; }\n")
+        project.StaticLibrary("all", env, sources=["src.c"])
+        project.resolve()
+
+        assert _route_targets([project], ["all"]) == [(project, ["all"])]
+        assert "all" not in _named_target_paths(project)
+
+
+class TestTargetNameFailures:
+    """What `pcons build <name>` does when it cannot answer."""
 
     def test_a_target_with_no_output_is_still_an_error(
         self, tmp_path, gcc_toolchain, caplog
@@ -7487,38 +7648,79 @@ class TestEnvQualifiedFailures:
         assert "produces no output" in caplog.text
 
     def test_the_cache_answers_when_nothing_regenerated(self, tmp_path) -> None:
-        from pcons.cli import _cached_env_lookup
+        from pcons.cli import _cached_target_lookup
         from pcons.core.cache import BuildCache
 
         build_dir = tmp_path / "build"
         build_dir.mkdir()
         BuildCache(build_dir).update(
-            {"env_targets": {"common@mcu": ["mcu/lib/libcommon.a"]}}
+            {
+                "target_paths": {
+                    "common": ["mcu/lib/libcommon.a"],
+                    "common@mcu": ["mcu/lib/libcommon.a"],
+                }
+            }
         )
 
-        lookup = _cached_env_lookup(build_dir)
+        lookup = _cached_target_lookup(build_dir)
+        assert lookup("common") == ["mcu/lib/libcommon.a"]
         assert lookup("common@mcu") == ["mcu/lib/libcommon.a"]
 
-    def test_the_cache_names_what_it_knows(self, tmp_path, caplog) -> None:
-        from pcons.cli import _cached_env_lookup
+    def test_the_cache_refuses_a_name_two_environments_claim(self, tmp_path) -> None:
+        """Recorded with no paths, so the run says which spellings pick one."""
+        from pcons.cli import _cached_target_lookup, _translate_target_tokens
         from pcons.core.cache import BuildCache
 
         build_dir = tmp_path / "build"
         build_dir.mkdir()
         BuildCache(build_dir).update(
-            {"env_targets": {"common@mcu": ["mcu/lib/libcommon.a"]}}
+            {
+                "target_paths": {
+                    "common": [],
+                    "common@mcu": ["mcu/lib/libcommon.a"],
+                    "common@host": ["host/lib/libcommon.a"],
+                    "app": ["host/app"],
+                }
+            }
+        )
+
+        lookup = _cached_target_lookup(build_dir)
+        with pytest.raises(KeyError, match="common@host, common@mcu"):
+            lookup("common")
+        assert _translate_target_tokens(["common"], lookup) is None
+        assert _translate_target_tokens(["app"], lookup) == ["host/app"]
+
+    def test_a_cache_from_an_older_pcons_just_misses(self, tmp_path) -> None:
+        """No recording at all, so every token goes to the build tool as typed."""
+        from pcons.cli import _cached_target_lookup
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        BuildCache(build_dir).update({"targets": ["all", "app"]})
+
+        assert _cached_target_lookup(build_dir)("app") is None
+
+    def test_the_cache_names_what_it_knows(self, tmp_path, caplog) -> None:
+        from pcons.cli import _cached_target_lookup
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        BuildCache(build_dir).update(
+            {"target_paths": {"common@mcu": ["mcu/lib/libcommon.a"]}}
         )
 
         with caplog.at_level(logging.DEBUG):
-            assert _cached_env_lookup(build_dir)("common@arm") is None
+            assert _cached_target_lookup(build_dir)("common@arm") is None
         assert "known: common@mcu" in caplog.text
         assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
 
     def test_a_build_dir_that_recorded_nothing(self, tmp_path, caplog) -> None:
-        from pcons.cli import _cached_env_lookup
+        from pcons.cli import _cached_target_lookup
 
         with caplog.at_level(logging.DEBUG):
-            assert _cached_env_lookup(tmp_path / "nowhere")("app@host") is None
+            assert _cached_target_lookup(tmp_path / "nowhere")("app@host") is None
         assert "known:" not in caplog.text
 
     def test_the_build_hands_the_token_to_the_tool(
@@ -7548,6 +7750,31 @@ class TestEnvQualifiedFailures:
         assert (code, dirs, asked) == (0, [build_dir], [["nope@host"]])
         assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
 
+    def test_a_plain_name_is_translated_from_the_cache(self, tmp_path, monkeypatch):
+        """`pcons build app` with nothing to regenerate still reaches ninja
+        as the path ninja knows."""
+        import pcons.cli as cli_module
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        (build_dir / "build.ninja").write_text("# generated\n")
+        BuildCache(build_dir).update({"target_paths": {"app": ["bin/app"]}})
+        cli_module._drop_open_caches()
+        monkeypatch.setattr(cli_module, "_needs_generation", lambda *a, **kw: False)
+        asked: list[list[str] | None] = []
+        monkeypatch.setattr(
+            cli_module,
+            "_run_build_tool",
+            lambda *a, **kw: (asked.append(kw["targets"]), 0)[1],
+        )
+
+        code, _dirs = cli_module._build(
+            build_dir, regenerate=lambda: (0, []), targets=["app"]
+        )
+
+        assert (code, asked) == (0, [["bin/app"]])
+
     def test_the_cache_is_read_once_for_every_token(self, tmp_path, monkeypatch):
         """Three `name@env` tokens, one parse of `pcons_cache.json`."""
         import pcons.cli as cli_module
@@ -7557,7 +7784,7 @@ class TestEnvQualifiedFailures:
         build_dir.mkdir()
         (build_dir / "build.ninja").write_text("# generated\n")
         BuildCache(build_dir).update(
-            {"env_targets": {"a@mcu": ["a.a"], "b@mcu": ["b.a"], "c@mcu": ["c.a"]}}
+            {"target_paths": {"a@mcu": ["a.a"], "b@mcu": ["b.a"], "c@mcu": ["c.a"]}}
         )
         cli_module._drop_open_caches()
 
@@ -7588,30 +7815,29 @@ class TestEnvQualifiedFailures:
 
     def test_the_lookup_reads_what_the_last_generation_wrote(self, tmp_path) -> None:
         """A generation drops the open caches, so the lookup re-reads the file."""
-        from pcons.cli import _cached_env_lookup, _drop_open_caches, _open_cache
+        from pcons.cli import _cached_target_lookup, _drop_open_caches, _open_cache
         from pcons.core.cache import BuildCache
 
         build_dir = tmp_path / "build"
         build_dir.mkdir()
-        BuildCache(build_dir).update({"env_targets": {"stale@mcu": ["stale.a"]}})
+        BuildCache(build_dir).update({"target_paths": {"stale@mcu": ["stale.a"]}})
         _drop_open_caches()
-        assert _open_cache(build_dir).get("env_targets") == {"stale@mcu": ["stale.a"]}
+        assert _open_cache(build_dir).get("target_paths") == {"stale@mcu": ["stale.a"]}
 
-        BuildCache(build_dir).update({"env_targets": {"fresh@mcu": ["fresh.a"]}})
+        BuildCache(build_dir).update({"target_paths": {"fresh@mcu": ["fresh.a"]}})
         _drop_open_caches()
 
-        lookup = _cached_env_lookup(build_dir)
+        lookup = _cached_target_lookup(build_dir)
         assert lookup("fresh@mcu") == ["fresh.a"]
         assert lookup("stale@mcu") is None
         _drop_open_caches()
 
 
-class TestAnonymousTargetsAreNotRecorded:
-    """`name@env` is a spelling a user types, so only names are recorded.
+class TestAnonymousTargetsAreNotTranslated:
+    """No lookup answers to a label, so pcons has no name to translate.
 
-    The mapping is persisted and read back by later builds and by shell
-    completion. Two anonymous targets wearing one label would key one entry,
-    and the second would quietly replace the first.
+    A label is a thing to read, not to type: two anonymous targets may wear
+    one, and what the build tool knows is the path each builds.
     """
 
     def _project(self, tmp_path, gcc_toolchain):
@@ -7621,7 +7847,9 @@ class TestAnonymousTargetsAreNotRecorded:
         project = Project("p", root_dir=tmp_path)
         env = project.Environment(toolchain=gcc_toolchain, name="mcu")
         env.Command(
-            target="out.h", source="in.txt", command=["cp", "$SOURCE", "$TARGET"]
+            target="gen/version.h",
+            source="in.txt",
+            command=["cp", "$SOURCE", "$TARGET"],
         )
         env.Command(
             target="out.c", source="in.txt", command=["cp", "$SOURCE", "$TARGET"]
@@ -7631,88 +7859,38 @@ class TestAnonymousTargetsAreNotRecorded:
         return project
 
     def test_a_label_gets_no_spelling(self, tmp_path, gcc_toolchain) -> None:
-        from pcons.cli import _env_target_paths
+        from pcons.cli import _named_target_paths
 
         project = self._project(tmp_path, gcc_toolchain)
 
-        assert _env_target_paths(project) == {}
+        assert _named_target_paths(project) == {}
 
-
-class TestALabelTypedAsABuildTarget:
-    """A label is the one unknown token pcons can explain, so it does.
-
-    The build tool answers "unknown target", which reads as a typo. Issue
-    #194 is a user hitting exactly that.
-    """
-
-    def _cache(self, tmp_path, *, labels, buildable):
-        from pcons.core.cache import BuildCache
-
-        cache = BuildCache(tmp_path)
-        cache.update({"anonymous_labels": labels, "targets": buildable})
-        cache.save()
-        return tmp_path
-
-    def test_a_label_is_refused_and_its_paths_named(self, tmp_path, caplog) -> None:
-        from pcons.cli import _refuse_label_targets
-
-        build_dir = self._cache(
-            tmp_path, labels={"version": ["gen/version.h"]}, buildable=["all"]
-        )
-
-        with caplog.at_level(logging.ERROR, logger="pcons"):
-            assert _refuse_label_targets(["version"], build_dir) is True
-
-        message = " ".join(r.getMessage() for r in caplog.records)
-        assert "aren't unique" in message
-        assert "gen/version.h" in message
-        assert "Alias" in message
-
-    def test_an_unknown_token_passes_through(self, tmp_path) -> None:
-        """A build tool knows names pcons does not, file paths among them."""
-        from pcons.cli import _refuse_label_targets
-
-        build_dir = self._cache(
-            tmp_path, labels={"version": ["gen/version.h"]}, buildable=["all"]
-        )
-
-        assert _refuse_label_targets(["versionn"], build_dir) is False
-
-    def test_a_label_that_is_also_buildable_passes_through(self, tmp_path) -> None:
-        """A program named `app` builds `app`: the token means the file."""
-        from pcons.cli import _refuse_label_targets
-
-        build_dir = self._cache(
-            tmp_path, labels={"app": ["app.stamp"]}, buildable=["app"]
-        )
-
-        assert _refuse_label_targets(["app"], build_dir) is False
-
-    def test_nothing_recorded_refuses_nothing(self, tmp_path) -> None:
-        from pcons.cli import _refuse_label_targets
-
-        assert _refuse_label_targets(["version"], tmp_path) is False
-
-    def test_the_labels_are_recorded_for_later_runs(
+    def test_a_label_reaches_the_build_tool_as_typed(
         self, tmp_path, gcc_toolchain
     ) -> None:
-        from pcons.cli import _anonymous_label_paths
-        from pcons.core.project import Project
+        """`install_lib` is a label; ninja is left to say it knows no such
+        target, and the path it does know is one word away."""
+        from pcons.cli import _route_targets
 
-        (tmp_path / "in.txt").write_text("x")
-        project = Project("p", root_dir=tmp_path)
-        env = project.Environment(toolchain=gcc_toolchain)
-        env.Command(
-            target="gen/version.h",
-            source="in.txt",
-            command=["cp", "$SOURCE", "$TARGET"],
-        )
-        project.resolve()
+        project = self._project(tmp_path, gcc_toolchain)
 
-        assert _anonymous_label_paths(project) == {"version": ["gen/version.h"]}
+        assert _route_targets([project], ["install_lib"]) == [
+            (project, ["install_lib"])
+        ]
+
+    def test_a_label_is_not_offered_for_completion(
+        self, tmp_path, gcc_toolchain
+    ) -> None:
+        """The path it builds is offered instead, which is what works."""
+        from pcons.cli import _buildable_names
+
+        project = self._project(tmp_path, gcc_toolchain)
+
+        assert "install_lib" not in _buildable_names(project)
+        assert "gen/version.h" in _buildable_names(project)
 
 
-class TestMergedEnvTargets:
+class TestMergedTargetPaths:
     """Sibling projects share one cache, so a short spelling can be contested."""
 
     def _project(self, name, tmp_path, gcc_toolchain, target_name):
@@ -7729,15 +7907,19 @@ class TestMergedEnvTargets:
         return project
 
     def test_both_spellings_are_recorded(self, tmp_path, gcc_toolchain) -> None:
-        from pcons.cli import _merged_env_target_paths
+        from pcons.cli import _merged_named_target_paths
 
         alpha = self._project("alpha", tmp_path, gcc_toolchain, "a")
         beta = self._project("beta", tmp_path, gcc_toolchain, "b")
 
-        assert set(_merged_env_target_paths([alpha, beta])) == {
+        assert set(_merged_named_target_paths([alpha, beta])) == {
+            "a",
             "a@mcu",
+            "alpha::a",
             "alpha::a@mcu",
+            "b",
             "b@mcu",
+            "beta::b",
             "beta::b@mcu",
         }
 
@@ -7745,25 +7927,37 @@ class TestMergedEnvTargets:
         self, tmp_path, gcc_toolchain
     ) -> None:
         """Nothing to contest, so nothing to qualify."""
-        from pcons.cli import _merged_env_target_paths
+        from pcons.cli import _merged_named_target_paths
 
         alpha = self._project("alpha", tmp_path, gcc_toolchain, "a")
 
-        assert set(_merged_env_target_paths([alpha])) == {"a@mcu"}
+        assert set(_merged_named_target_paths([alpha])) == {"a", "a@mcu"}
 
-    def test_a_contested_short_spelling_is_dropped(
+    def test_a_contested_short_spelling_is_recorded_empty(
         self, tmp_path, gcc_toolchain
     ) -> None:
-        """Two siblings claiming 'common@mcu': only the full spellings survive."""
-        from pcons.cli import _merged_env_target_paths
+        """Two siblings claiming 'common': the full spellings carry the paths,
+        and the short one is kept so a later run can refuse it by name."""
+        from pcons.cli import _cached_target_lookup, _merged_named_target_paths
+        from pcons.core.cache import BuildCache
 
         alpha = self._project("alpha", tmp_path, gcc_toolchain, "common")
         beta = self._project("beta", tmp_path, gcc_toolchain, "common")
 
-        assert set(_merged_env_target_paths([alpha, beta])) == {
+        merged = _merged_named_target_paths([alpha, beta])
+        assert {k for k, v in merged.items() if v} == {
+            "alpha::common",
             "alpha::common@mcu",
+            "beta::common",
             "beta::common@mcu",
         }
+        assert merged["common"] == []
+
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        BuildCache(build_dir).update({"target_paths": merged})
+        with pytest.raises(KeyError, match="alpha::common, alpha::common@mcu"):
+            _cached_target_lookup(build_dir)("common")
 
 
 class TestRouteTargets:
@@ -8002,8 +8196,7 @@ class TestBuildRegeneratesForANewVariable:
         "root = Path(__file__).parent\n"
         "project = Project('v', root_dir=root)\n"
         "env = project.Environment()\n"
-        "env.Command(target='out.txt', command=['echo', get_var('URL', 'default')],\n"
-        "            name='w')\n"
+        "env.Command(target='out.txt', command=['echo', get_var('URL', 'default')])\n"
     )
 
     def _project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

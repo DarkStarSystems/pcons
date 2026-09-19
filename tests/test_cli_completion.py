@@ -758,16 +758,16 @@ class TestTheBuildDirBehindTheNames:
         ctx.params["build_dir"] = tmp_path
         assert _cached_names(ctx, "targets") == []
 
-    def test_no_build_dir_names_no_env_spellings(self) -> None:
-        from pcons._cli_click import _cached_env_spellings
+    def test_no_build_dir_names_no_target_spellings(self) -> None:
+        from pcons._cli_click import _cached_target_spellings
 
         ctx = click.Context(self._without_a_build_dir())
-        assert _cached_env_spellings(ctx) == []
+        assert _cached_target_spellings(ctx) == []
 
-    def test_an_unreadable_cache_names_no_env_spellings(
+    def test_an_unreadable_cache_names_no_target_spellings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from pcons._cli_click import _cached_env_spellings
+        from pcons._cli_click import _cached_target_spellings
 
         def refuse(build_dir: Path) -> None:
             raise OSError("cache unreadable")
@@ -775,4 +775,4 @@ class TestTheBuildDirBehindTheNames:
         monkeypatch.setattr("pcons.core.cache.BuildCache", refuse)
         ctx = click.Context(cli)
         ctx.params["build_dir"] = tmp_path
-        assert _cached_env_spellings(ctx) == []
+        assert _cached_target_spellings(ctx) == []

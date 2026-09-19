@@ -855,11 +855,12 @@ def _cached_names(ctx: click.Context, key: str) -> list[str]:
     return [name for name in names if isinstance(name, str)]
 
 
-def _cached_env_spellings(ctx: click.Context) -> list[str]:
-    """The ``name@env`` spellings the last generate recorded, if any.
+def _cached_target_spellings(ctx: click.Context) -> list[str]:
+    """The target spellings pcons translates, as the last generate recorded them.
 
     Same source and same rule as `_cached_names`: read back, never computed by
-    running the build script.
+    running the build script. Mostly a subset of the recorded names; the
+    ``project::name@env`` spelling of a sibling project's target is here alone.
     """
     from pcons.core.cache import BuildCache
 
@@ -869,7 +870,7 @@ def _cached_env_spellings(ctx: click.Context) -> list[str]:
     if build_dir is None:
         return []
     try:
-        recorded = BuildCache(Path(build_dir)).get("env_targets")
+        recorded = BuildCache(Path(build_dir)).get("target_paths")
     except OSError:
         return []
     if not isinstance(recorded, dict):
@@ -882,10 +883,12 @@ def complete_target(
 ) -> list[CompletionItem]:
     """The target names the last generate left in this build directory's cache.
 
-    Both spellings: what the build tool knows, and the ``name@env`` names pcons
-    translates for it.
+    Every spelling: the paths and aliases the build tool knows, and the target
+    names pcons translates for it.
     """
-    names = [*_cached_names(ctx, "targets"), *_cached_env_spellings(ctx)]
+    names = dict.fromkeys(
+        [*_cached_names(ctx, "targets"), *_cached_target_spellings(ctx)]
+    )
     return [CompletionItem(name) for name in names if name.startswith(incomplete)]
 
 
