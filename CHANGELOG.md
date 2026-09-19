@@ -9,38 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- A target's name is either a name you chose or a label pcons derived, and
-  only the first has to be unique. `Program`, `StaticLibrary`, `CargoBuild`
-  and the other builders you name keep the rule exactly as it was.
-  `Command`, `PyBuilder`, `Install`, `InstallAs`, `InstallDir`,
-  `OverlayDir`, `Tarfile`, `Zipfile`, `Test` and the Qt deploy, lupdate and
-  APK edges derive a label instead: two of them may wear one label, and none
-  answers to `get_target()`, `link()` or `Default()`. So a command writing
-  `foo.h` and one writing `foo.c` no longer collide, installs into one
-  directory are no longer renamed `install_lib_1`, and `name=` on those
-  builders sets the label and nothing else. Use `project.Alias()` for a name
-  to build by, and keep the `Target` the call returned for everything else.
+**Named and anonymous targets** (#194)
 
-- `pcons info --targets` now lists targets with no name by what they build,
-  rather than showing a derived label as if it were something to type.
-  `pcons explain <label>` shows every target wearing the label, and
-  `pcons build <label>` says the label is one, and names the path to build
-  instead, rather than leaving ninja to answer "unknown target". (#194)
+A target is now one of two kinds. The builders you name (`Program`, the
+libraries, `find_package`, the Qt program and library builders)
+are unchanged: the name is the target's identity, and it's what `pcons build`,
+`get_target()` and `Default()` take. Everything else makes an *anonymous*
+target, labelled by what it builds, and a label needn't be unique. That retires
+the uniqueness rule that used to force invented names on scripts.
 
-- `pcons_metadata.json` is at schema version 4. Every target now carries an
-  `id`, unique within the file and the same on every run of an unchanged
-  build, and `dependencies` lists ids rather than names: two dependencies
-  wearing one derived label used to collapse into a single entry, silently.
-  `name` and `qualified_name` stay as display text, documented as not
-  unique, and a new `anonymous` boolean says which of the two a target's
-  name is.
+**Breaking:**
 
-- The Xcode generator no longer refuses a project whose targets share a
-  name. Xcode addresses a target by name, so the generator now gives each
-  one a name of its own: the target's own name where it is free, otherwise
-  `name@env` or the output's file name. Two commands both labelled `config`,
-  or one library built in two environments, now generate. Two targets you
-  named answering to one qualified name are still refused.
+- `name=` is gone from `Command`, `PyBuilder` calls, `Install`, `InstallAs`,
+  `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`, `android_apk()`,
+  `sign_apk()` and `create_universal_binary()`. Delete the argument; if you
+  built by that name, declare it with `project.Alias()` instead.
+- `project.Command(name, env, ...)` no longer takes the leading name. Drop it.
+- Labels are written differently: a command or archive wears its first
+  output's path (`gen/config.h`), an install its destination
+  (`install_lib`), a `Test` the test's own name. Anything reading
+  `target.name` on these sees the new form.
+- `pcons_metadata.json` is at schema 4: every target gains an `id` (unique in
+  the file, stable across runs) and an `anonymous` flag, and `dependencies`
+  lists ids instead of names. IDE plugins that read it must follow.
+- `Target` equality and hashing are object identity, not the qualified name.
+  Two targets sharing a name no longer compare equal or collapse in a set.
+
+**Better:**
+
+- `pcons build <name>` builds a named target wherever it writes: pcons
+  translates the name into output paths before ninja or make sees it.
+  `name@env` and `project::name@env` work too, and a plain name that two
+  environments both build is refused with both qualified names printed.
+- Collisions are gone. A command writing `foo.h` and one writing `foo.c` can
+  coexist, installs into one directory are no longer renamed `install_lib_1`
+  with a warning, and two tests may share a name.
+- `pcons info --targets` lists named and anonymous targets separately, so it
+  no longer offers a label as something you could type. `pcons explain
+  <label>` shows every target wearing it.
+- The Xcode generator no longer refuses a project whose targets share a name;
+  it gives each one a display name of its own.
+
+**Other Changes**
 
 - Every successful ninja build now checks that it converged, not only one
   under `--watch`: pcons asks ninja whether it still has work to do and
