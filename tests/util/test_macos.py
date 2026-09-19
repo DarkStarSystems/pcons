@@ -139,14 +139,13 @@ class TestCreateUniversalBinary:
         # Create universal binary
         result = create_universal_binary(
             test_project,
-            "test_universal",
             inputs=[input1, input2],
             output="build/universal/libtest.a",
         )
 
         # Should return a Target
         assert isinstance(result, Target)
-        assert result.name == "test_universal"
+        assert result.name == "universal/libtest.a"
 
         # Should have build info with lipo tool marked on the target
         assert result._build_info is not None
@@ -163,7 +162,6 @@ class TestCreateUniversalBinary:
         # Create using Path inputs
         result = create_universal_binary(
             test_project,
-            "test_universal",
             inputs=[
                 Path("build/arm64/libtest.a"),
                 "build/x86_64/libtest.a",
@@ -181,7 +179,6 @@ class TestCreateUniversalBinary:
         with pytest.raises(ValueError, match="requires at least one input"):
             create_universal_binary(
                 test_project,
-                "test_universal",
                 inputs=[],
                 output="build/universal/libtest.a",
             )
@@ -208,7 +205,6 @@ class TestCreateUniversalBinary:
 
         result = create_universal_binary(
             test_project,
-            "test_universal",
             inputs=[target1, target2],
             output="build/universal/libtest.a",
         )
@@ -236,7 +232,7 @@ class TestCreateUniversalBinary:
 
         # No project.resolve() here: that is the point.
         universal = create_universal_binary(
-            project, "lib_universal", inputs=libs, output="build/libtest.a"
+            project, inputs=libs, output="build/libtest.a"
         )
         project.Default(universal)
 

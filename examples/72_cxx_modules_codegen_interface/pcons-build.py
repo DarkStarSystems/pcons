@@ -46,7 +46,6 @@ iface = env.Command(
     target=gen_dir / "iface.cppm",
     source=[geniface],
     command=f"{run}${{SOURCES[0]}} $TARGET",
-    name="generate_interface",
 )
 
 genmod = project.StaticLibrary("genmod", env, sources=[iface.output_nodes[0]])

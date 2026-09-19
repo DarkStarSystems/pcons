@@ -131,7 +131,7 @@ class TestDecoration:
         made = one_source(project, env)
 
         assert isinstance(made, Target)
-        assert made.name == "report"
+        assert made.name == "report.txt"
 
     def test_one_decoration_makes_as_many_edges_as_it_is_called(
         self, project: Project, env: Any, tmp_path: Path
@@ -143,7 +143,7 @@ class TestDecoration:
         made = [report(target=f"r{n}.txt", source=["a.txt"], n=n) for n in (1, 2, 3)]
         project.resolve()
 
-        assert [t.name for t in made] == ["r1", "r2", "r3"]
+        assert [t.name for t in made] == ["r1.txt", "r2.txt", "r3.txt"]
         assert sorted(q.name for q in (tmp_path / "build" / "pybuilder").iterdir()) == [
             "pcons-runner",
             "r1.txt.args.pkl",
@@ -162,21 +162,12 @@ class TestDecoration:
         made = whatever(target="out.txt", source=["a.txt"])
         project.resolve()
 
-        assert made.name == "out"
+        assert made.name == "out.txt"
         assert node_tokens(made) == [
             RUNNER,
             "build/pybuilder/whatever.py",
             "build/pybuilder/out.txt.args.pkl",
         ]
-
-    def test_an_explicit_name_wins(self, project: Project, env: Any) -> None:
-        @env.PyBuilder()
-        def whatever(targets, sources):
-            return 1
-
-        made = whatever(target="out.txt", name="render", source=["a.txt"])
-
-        assert made.name == "render"
 
     def test_the_call_takes_no_positional_arguments(
         self, project: Project, env: Any
@@ -545,7 +536,7 @@ class TestArgumentsFitTheSignature:
     ) -> None:
         made = one_source(project, env)
 
-        assert made.name == "report"
+        assert made.name == "report.txt"
 
     def test_a_var_keyword_signature_accepts_anything(
         self, project: Project, env: Any
@@ -559,7 +550,7 @@ class TestArgumentsFitTheSignature:
         made = report(target="out.txt", source=["a.txt"], whatever=1, anything=2)
         project.resolve()
 
-        assert made.name == "out"
+        assert made.name == "out.txt"
 
 
 class TestWorker:
@@ -653,7 +644,7 @@ class TestMultipleEnvironments:
         project.resolve()
         text = ninja_text(project, tmp_path)
 
-        assert [t.name for t in made] == ["report", "report"]
+        assert [t.name for t in made] == ["host/report.txt", "strict/report.txt"]
         assert node_tokens(made[0]) == [
             RUNNER,
             "build/host/pybuilder/report.py",
@@ -673,11 +664,9 @@ class TestMultipleEnvironments:
         self, project: Project
     ) -> None:
         """Neither environment has a build_prefix, so both share one gen
-        dir, and both edges derive the same name, 'report', which
-        ``env.Command`` allows since the environments are named and
-        different. Before the pickle followed the target, both edges
-        wanted ``build/pybuilder/report.args.pkl`` and the second call
-        raised."""
+        dir. The pickle follows the target, so the two edges land on
+        distinct files; before it did, both wanted
+        ``build/pybuilder/report.args.pkl`` and the second call raised."""
         one = project.Environment(name="one")
         two = project.Environment(name="two")
 
@@ -693,7 +682,7 @@ class TestMultipleEnvironments:
         second = render_two(target="two/report.txt", source=["a.txt"])
         project.resolve()
 
-        assert first.name == second.name == "report"
+        assert (first.name, second.name) == ("one/report.txt", "two/report.txt")
         assert node_tokens(first)[2] == "build/pybuilder/one/report.txt.args.pkl"
         assert node_tokens(second)[2] == "build/pybuilder/two/report.txt.args.pkl"
 

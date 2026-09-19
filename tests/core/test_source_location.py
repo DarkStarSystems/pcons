@@ -96,7 +96,6 @@ class TestGetCallerLocation:
         project = Project("demo", root_dir=tmp_path, build_dir="build")
         env = project.Environment()
         target = project.Command(
-            "gen",
             env,
             target=project.build_dir / "out.txt",
             source=None,

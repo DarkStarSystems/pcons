@@ -296,7 +296,6 @@ class CommandBuilder:
     @staticmethod
     def create_target(
         project: Project,
-        name: str,
         env: Environment,
         *,
         target: str | Path | list[str | Path],
@@ -321,7 +320,6 @@ class CommandBuilder:
 
         Args:
             project: The project to add the target to.
-            name: Label for this target; see :meth:`Environment.Command`.
             env: Environment to use.
             target: Output file(s).
             tool: The program that runs the command, written ``$TOOL``.
@@ -345,7 +343,6 @@ class CommandBuilder:
             tool=tool,
             source=source,
             command=command,
-            name=name,
             restat=restat,
             write_if_different=write_if_different,
             cwd=cwd,

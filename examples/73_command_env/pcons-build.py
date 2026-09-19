@@ -28,7 +28,6 @@ show = (
 )
 
 with_var = env.Command(
-    name="with-var",
     target=project.build_dir / "with_var.txt",
     command=[python, "-c", show, "$TARGET"],
     env_vars={"GREETING": "from-env-vars"},
@@ -37,7 +36,6 @@ with_var = env.Command(
 # The same command without env_vars= proves the variable travels with the
 # one edge, not the environment or the build.
 without_var = env.Command(
-    name="without-var",
     target=project.build_dir / "without_var.txt",
     command=[python, "-c", show, "$TARGET"],
 )

@@ -116,7 +116,6 @@ version_h = host_env.Command(
     source=[genver],
     command="$SOURCE $TARGET",
     cwd=project.root_dir,
-    name="version-header",
 )
 
 

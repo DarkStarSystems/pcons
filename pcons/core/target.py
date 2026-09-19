@@ -525,9 +525,11 @@ class Target:
 
         ``anonymous`` says the name is a label rather than an identity; see
         the :attr:`anonymous` property. The builder decides it, once, for
-        every target it makes.
+        every target it makes. A label is only ever read, so the character
+        rule that keeps a name usable in a path does not apply to it.
         """
-        _validate_target_name(name)
+        if not anonymous:
+            _validate_target_name(name)
         self.name = name
         self._anonymous = anonymous
         self.builder = builder
@@ -597,18 +599,22 @@ class Target:
     def anonymous(self) -> bool:
         """Whether this target's name is a label rather than an identity.
 
-        A named target is one the script named: the name is unique within
-        project and environment, ``get_target()`` finds it, and ``link()``
-        and ``Default()`` accept it. Program, StaticLibrary, CargoBuild and
-        the rest are named.
+        A named target is one the script named: Program, StaticLibrary and
+        the other builders that take a name. The name is unique within
+        project and environment, ``get_target()`` answers to it, and so do
+        ``Default()``, ``pcons explain`` and ``pcons build``. It also gives
+        the output its base name and the target its build subdirectory.
 
-        An anonymous target is one whose builder derived a label — the stem
-        of the first output file, the flattened install destination. It is a
-        thing to read in ``pcons info --targets``, the tier report and
-        diagnostics, and nothing else: two of them may wear one label, and no
-        lookup answers to it. ``env.Command``, ``Install``, ``Tarfile`` and
-        the rest are anonymous, whether or not the call passed ``name=``.
-        To make such a build typeable, give it an alias.
+        An anonymous target wears a label its builder derived from what it
+        builds: the first output's path as the build tool writes it, the
+        flattened install destination, a test's own name. A label is only
+        read, in ``pcons info --targets``, the tier report and diagnostics:
+        two targets may wear one, no lookup answers to it, and no builder
+        takes one. ``env.Command``, ``Install``, ``Tarfile`` and the rest are
+        anonymous. To build such a target by a name, give it an alias.
+
+        A builder that derives a path from a target's name must therefore be
+        a named one, as ``Program`` is.
         """
         return self._anonymous
 

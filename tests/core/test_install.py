@@ -39,21 +39,6 @@ class TestInstall:
         assert install.target_type == "interface"
         assert install.name == "install_dist"
 
-    def test_install_custom_name(self, tmp_path):
-        """Install can have a custom name."""
-        project = Project("test", root_dir=tmp_path)
-
-        src_file = tmp_path / "mylib.a"
-        src_file.touch()
-
-        install = project.Install(
-            tmp_path / "dist",
-            [src_file],
-            name="my_install",
-        )
-
-        assert install.name == "my_install"
-
     def test_install_creates_copy_nodes(self, tmp_path):
         """Install creates copy nodes for each source file after resolve."""
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
@@ -364,7 +349,6 @@ class TestInstallWithNinja:
         cmd = env.Command(
             target=project.build_dir / "out.txt",
             command="echo done > $TARGET",
-            name="after",
         )
         cmd.depends(staged)
 
@@ -521,12 +505,8 @@ class TestInstallWithNinja:
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment()
-        a = env.Command(
-            target=project.build_dir / "a.txt", command="echo a > $TARGET", name="a"
-        )
-        b = env.Command(
-            target=project.build_dir / "b.txt", command="echo b > $TARGET", name="b"
-        )
+        a = env.Command(target=project.build_dir / "a.txt", command="echo a > $TARGET")
+        b = env.Command(target=project.build_dir / "b.txt", command="echo b > $TARGET")
         project.Install("dist", [a, b])
 
         project.resolve()
@@ -711,12 +691,10 @@ class TestInstallOrderIndependence:
 
         # Install from intermediate to final (declared first)
         # Note: This references intermediate_install which doesn't exist yet
-        final_install = project.Install(final_dir, [src_file], name="final_install")
+        final_install = project.Install(final_dir, [src_file])
 
         # Install from source to intermediate (declared second)
-        intermediate_install = project.Install(
-            intermediate_dir, [src_file], name="intermediate_install"
-        )
+        intermediate_install = project.Install(intermediate_dir, [src_file])
 
         # Resolve
         project.resolve()
@@ -923,7 +901,6 @@ class TestInstallDirectoryAutoDetection:
             target=str(generated),
             source=[],
             command="touch $TARGET",
-            name="gen_rsrc",
         )
 
         # User code references the same file via project.node() for Install
@@ -988,9 +965,8 @@ class TestInstallMode:
 
 
 class TestInstallTargetNaming:
-    """An install's name is a label, whether pcons derived it or the call
-    passed one, so installs that share a destination share a label and
-    nothing is renamed."""
+    """An install's name is a label read off its destination, so installs
+    that share a destination share a label and nothing is renamed."""
 
     def test_many_installs_into_one_directory_are_quiet(
         self, tmp_path, gcc_toolchain, caplog
@@ -1003,15 +979,3 @@ class TestInstallTargetNaming:
 
         assert caplog.text == ""
         assert [t.name for t in project.targets] == ["install_config"] * 5
-
-    def test_a_repeated_explicit_name_is_a_repeated_label(
-        self, tmp_path, gcc_toolchain, caplog
-    ):
-        project = Project("q", root_dir=tmp_path, build_dir="build")
-        project.Environment(toolchain=gcc_toolchain)
-        for name in "ab":
-            (tmp_path / f"{name}.txt").write_text(name)
-            project.Install("config", [f"{name}.txt"], name="my_install")
-
-        assert caplog.text == ""
-        assert [t.name for t in project.targets] == ["my_install", "my_install"]

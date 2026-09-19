@@ -67,7 +67,6 @@ def pack(env: Any, letter: str, sources: list[str] | None = None) -> Target:
         target=f"packs/{letter}.pack",
         source=sources if sources is not None else [f"{letter}.scene"],
         command=["cp", "${SOURCES[0]}", "$TARGET"],
-        name=f"pack_{letter}",
     )
 
 
@@ -277,7 +276,6 @@ class TestScanEdge:
             target="gen.h",
             source="gen.py",
             command="python $SOURCE $TARGET",
-            name="gen_h",
         )
         a = pack(env, "a")
         a.depends(gen)
@@ -300,7 +298,6 @@ class TestScanEdge:
             target="gen.h",
             source="gen.py",
             command="python $SOURCE $TARGET",
-            name="gen_h",
         )
         a = pack(env, "a")
         a.depends(gen)
@@ -318,28 +315,30 @@ class TestCollateEdge:
     def test_collate_node_path_and_inputs(self, tmp_path, monkeypatch):
         project, _, _, _ = reference_project(tmp_path, monkeypatch)
 
-        collate = project.node(Path("build/scan/scene-refs/t.pack_a.dyndep"))
+        collate = project.node(Path("build/scan/scene-refs/t.packs_a.pack.dyndep"))
 
         assert node_paths(collate.explicit_deps) == [
             "build/packs/a.pack.scaninfo.json",
-            "build/scan/scene-refs/t.pack_a.manifest.json",
+            "build/scan/scene-refs/t.packs_a.pack.manifest.json",
         ]
 
     def test_collate_imports_a_dependency_scope_exports(self, tmp_path, monkeypatch):
         project, _, _, _ = reference_project(tmp_path, monkeypatch)
 
-        collate = project.node(Path("build/scan/scene-refs/t.pack_b.dyndep"))
+        collate = project.node(Path("build/scan/scene-refs/t.packs_b.pack.dyndep"))
 
         assert node_paths(collate.explicit_deps) == [
             "build/packs/b.pack.scaninfo.json",
-            "build/scan/scene-refs/t.pack_b.manifest.json",
-            "build/scan/scene-refs/t.pack_a.exports.json",
+            "build/scan/scene-refs/t.packs_b.pack.manifest.json",
+            "build/scan/scene-refs/t.packs_a.pack.exports.json",
         ]
 
     def test_collate_build_info(self, tmp_path, monkeypatch):
         project, _, _, _ = reference_project(tmp_path, monkeypatch)
 
-        info = project.node(Path("build/scan/scene-refs/t.pack_a.dyndep"))._build_info
+        info = project.node(
+            Path("build/scan/scene-refs/t.packs_a.pack.dyndep")
+        )._build_info
 
         assert info["tool"] == "collate_scene_refs"
         assert info["command_var"] == "collatecmd"
@@ -350,15 +349,15 @@ class TestCollateEdge:
         project, _, _, _ = reference_project(tmp_path, monkeypatch)
 
         outputs = project.node(
-            Path("build/scan/scene-refs/t.pack_a.dyndep")
+            Path("build/scan/scene-refs/t.packs_a.pack.dyndep")
         )._build_info["outputs"]
 
         assert outputs["dyndep"] == {
-            "path": Path("build/scan/scene-refs/t.pack_a.dyndep"),
+            "path": Path("build/scan/scene-refs/t.packs_a.pack.dyndep"),
             "implicit": False,
         }
         assert outputs["exports"] == {
-            "path": Path("build/scan/scene-refs/t.pack_a.exports.json"),
+            "path": Path("build/scan/scene-refs/t.packs_a.pack.exports.json"),
             "implicit": True,
         }
 
@@ -366,7 +365,9 @@ class TestCollateEdge:
         """The manifest path rides a per-edge var so all scopes share one rule."""
         project, _, _, _ = reference_project(tmp_path, monkeypatch)
 
-        info = project.node(Path("build/scan/scene-refs/t.pack_a.dyndep"))._build_info
+        info = project.node(
+            Path("build/scan/scene-refs/t.packs_a.pack.dyndep")
+        )._build_info
 
         assert info["command"][:4] == [
             sys.executable,
@@ -377,43 +378,53 @@ class TestCollateEdge:
         manifest_token = info["command"][4]
         assert isinstance(manifest_token, NodeVar)
         assert manifest_token.name == "SCAN_MANIFEST"
-        assert info["vars"]["SCAN_MANIFEST"] == "scan/scene-refs/t.pack_a.manifest.json"
+        assert (
+            info["vars"]["SCAN_MANIFEST"]
+            == "scan/scene-refs/t.packs_a.pack.manifest.json"
+        )
 
     def test_custom_collate_command_is_used_verbatim(self, tmp_path, monkeypatch):
         project, _, _, _ = reference_project(
             tmp_path, monkeypatch, make_scanner(collate_command=["my-collate", "-q"])
         )
 
-        info = project.node(Path("build/scan/scene-refs/t.pack_a.dyndep"))._build_info
+        info = project.node(
+            Path("build/scan/scene-refs/t.packs_a.pack.dyndep")
+        )._build_info
 
         assert info["command"] == ["my-collate", "-q"]
         # A custom command may reference NodeVar("SCAN_MANIFEST"); the
         # variable is supplied either way.
-        assert info["vars"]["SCAN_MANIFEST"] == "scan/scene-refs/t.pack_a.manifest.json"
+        assert (
+            info["vars"]["SCAN_MANIFEST"]
+            == "scan/scene-refs/t.packs_a.pack.manifest.json"
+        )
 
     def test_exports_node_is_a_secondary_output_of_collate(self, tmp_path, monkeypatch):
         project, _, _, _ = reference_project(tmp_path, monkeypatch)
 
-        collate = project.node(Path("build/scan/scene-refs/t.pack_a.dyndep"))
-        exports = project.node(Path("build/scan/scene-refs/t.pack_a.exports.json"))
+        collate = project.node(Path("build/scan/scene-refs/t.packs_a.pack.dyndep"))
+        exports = project.node(
+            Path("build/scan/scene-refs/t.packs_a.pack.exports.json")
+        )
 
         assert exports._build_info == {"primary_node": collate}
 
     def test_scan_scope_is_recorded_on_the_project(self, tmp_path, monkeypatch):
         project, scanner, a, _ = reference_project(tmp_path, monkeypatch)
 
-        scope = project._scan_scopes[("scene-refs", "t::pack_a")]
+        scope = project._scan_scopes[("scene-refs", "t::packs/a.pack")]
 
         assert scope.scanner is scanner
         assert scope.target is a
-        assert scope.manifest_rel == "scan/scene-refs/t.pack_a.manifest.json"
-        assert scope.dyndep_rel == "scan/scene-refs/t.pack_a.dyndep"
-        assert scope.exports_rel == "scan/scene-refs/t.pack_a.exports.json"
+        assert scope.manifest_rel == "scan/scene-refs/t.packs_a.pack.manifest.json"
+        assert scope.dyndep_rel == "scan/scene-refs/t.packs_a.pack.dyndep"
+        assert scope.exports_rel == "scan/scene-refs/t.packs_a.pack.exports.json"
         assert scope.collate_node is project.node(
-            Path("build/scan/scene-refs/t.pack_a.dyndep")
+            Path("build/scan/scene-refs/t.packs_a.pack.dyndep")
         )
         assert scope.exports_node is project.node(
-            Path("build/scan/scene-refs/t.pack_a.exports.json")
+            Path("build/scan/scene-refs/t.packs_a.pack.exports.json")
         )
         assert scope.governed == [a.output_nodes[0]]
 
@@ -421,8 +432,8 @@ class TestCollateEdge:
         project, _, _, _ = reference_project(tmp_path, monkeypatch)
 
         assert set(project._scan_scopes) == {
-            ("scene-refs", "t::pack_a"),
-            ("scene-refs", "t::pack_b"),
+            ("scene-refs", "t::packs/a.pack"),
+            ("scene-refs", "t::packs/b.pack"),
         }
 
 
@@ -433,10 +444,12 @@ class TestGovernedEdge:
         _, _, a, b = reference_project(tmp_path, monkeypatch)
 
         assert (
-            a.output_nodes[0]._build_info["dyndep"] == "scan/scene-refs/t.pack_a.dyndep"
+            a.output_nodes[0]._build_info["dyndep"]
+            == "scan/scene-refs/t.packs_a.pack.dyndep"
         )
         assert (
-            b.output_nodes[0]._build_info["dyndep"] == "scan/scene-refs/t.pack_b.dyndep"
+            b.output_nodes[0]._build_info["dyndep"]
+            == "scan/scene-refs/t.packs_b.pack.dyndep"
         )
 
     def test_collate_node_is_an_order_only_dep(self, tmp_path, monkeypatch):
@@ -444,7 +457,7 @@ class TestGovernedEdge:
         governed edge — the loaded dyndep's real deps carry propagation."""
         project, _, a, _ = reference_project(tmp_path, monkeypatch)
 
-        collate = project.node(Path("build/scan/scene-refs/t.pack_a.dyndep"))
+        collate = project.node(Path("build/scan/scene-refs/t.packs_a.pack.dyndep"))
 
         assert collate in a.output_nodes[0].order_only_deps
         assert collate not in a.output_nodes[0].implicit_deps
@@ -457,7 +470,6 @@ class TestGovernedEdge:
             target="notes.copy",
             source=["notes.txt"],
             command=["cp", "$SOURCE", "$TARGET"],
-            name="copy_notes",
         )
         make_scanner().attach(scanned)
         project.resolve()
@@ -471,13 +483,13 @@ class TestManifest:
     def test_manifest_header_fields(self, tmp_path, monkeypatch):
         reference_project(tmp_path, monkeypatch)
 
-        manifest = read_manifest(tmp_path, "t.pack_a")
+        manifest = read_manifest(tmp_path, "t.packs_a.pack")
 
         assert manifest["version"] == 1
         assert manifest["scanner"] == "scene-refs"
-        assert manifest["scope"] == "t.pack_a"
-        assert manifest["dyndep"] == "scan/scene-refs/t.pack_a.dyndep"
-        assert manifest["exports_out"] == "scan/scene-refs/t.pack_a.exports.json"
+        assert manifest["scope"] == "t.packs_a.pack"
+        assert manifest["dyndep"] == "scan/scene-refs/t.packs_a.pack.dyndep"
+        assert manifest["exports_out"] == "scan/scene-refs/t.packs_a.pack.exports.json"
         assert manifest["provide_template"] == "packs/{name}.pack"
         assert manifest["on_unresolved"] == "error"
         assert manifest["edge_args"] is None
@@ -485,7 +497,7 @@ class TestManifest:
     def test_manifest_edge(self, tmp_path, monkeypatch):
         reference_project(tmp_path, monkeypatch)
 
-        (edge,) = read_manifest(tmp_path, "t.pack_a")["edges"]
+        (edge,) = read_manifest(tmp_path, "t.packs_a.pack")["edges"]
 
         assert edge["out"] == "packs/a.pack"
         assert edge["info"] == "packs/a.pack.scaninfo.json"
@@ -496,9 +508,9 @@ class TestManifest:
     def test_imports_follow_the_target_dag(self, tmp_path, monkeypatch):
         reference_project(tmp_path, monkeypatch)
 
-        assert read_manifest(tmp_path, "t.pack_a")["imports"] == []
-        assert read_manifest(tmp_path, "t.pack_b")["imports"] == [
-            "scan/scene-refs/t.pack_a.exports.json"
+        assert read_manifest(tmp_path, "t.packs_a.pack")["imports"] == []
+        assert read_manifest(tmp_path, "t.packs_b.pack")["imports"] == [
+            "scan/scene-refs/t.packs_a.pack.exports.json"
         ]
 
     def test_imports_are_transitive(self, tmp_path, monkeypatch):
@@ -511,11 +523,11 @@ class TestManifest:
         scanner.attach(a, b, c)
         project.resolve()
 
-        imports = read_manifest(tmp_path, "t.pack_c")["imports"]
+        imports = read_manifest(tmp_path, "t.packs_c.pack")["imports"]
 
         assert set(imports) == {
-            "scan/scene-refs/t.pack_a.exports.json",
-            "scan/scene-refs/t.pack_b.exports.json",
+            "scan/scene-refs/t.packs_a.pack.exports.json",
+            "scan/scene-refs/t.packs_b.pack.exports.json",
         }
 
     def test_unattached_dependency_contributes_no_import(self, tmp_path, monkeypatch):
@@ -526,7 +538,7 @@ class TestManifest:
         make_scanner().attach(b)
         project.resolve()
 
-        assert read_manifest(tmp_path, "t.pack_b")["imports"] == []
+        assert read_manifest(tmp_path, "t.packs_b.pack")["imports"] == []
 
     def test_one_manifest_per_scope_and_nothing_else(self, tmp_path, monkeypatch):
         """Configure writes the manifests, and only the manifests.
@@ -538,8 +550,8 @@ class TestManifest:
 
         base = tmp_path / "build/scan/scene-refs"
         assert sorted(path.name for path in base.iterdir()) == [
-            "t.pack_a.manifest.json",
-            "t.pack_b.manifest.json",
+            "t.packs_a.pack.manifest.json",
+            "t.packs_b.pack.manifest.json",
         ]
 
 
@@ -564,7 +576,7 @@ class TestEdgeArgs:
         )
 
         outputs = project.node(
-            Path("build/scan/scene-refs/t.pack_a.dyndep")
+            Path("build/scan/scene-refs/t.packs_a.pack.dyndep")
         )._build_info["outputs"]
 
         assert outputs["args_0"] == {
@@ -575,7 +587,7 @@ class TestEdgeArgs:
     def test_manifest_edge_names_the_args_file(self, tmp_path, monkeypatch):
         reference_project(tmp_path, monkeypatch, make_scanner(edge_args=self.ARGS))
 
-        (edge,) = read_manifest(tmp_path, "t.pack_a")["edges"]
+        (edge,) = read_manifest(tmp_path, "t.packs_a.pack")["edges"]
 
         assert edge["args_file"] == "packs/a.pack.refs"
 
@@ -589,7 +601,7 @@ class TestEdgeArgs:
         )
         reference_project(tmp_path, monkeypatch, make_scanner(edge_args=spec))
 
-        edge_args = read_manifest(tmp_path, "t.pack_a")["edge_args"]
+        edge_args = read_manifest(tmp_path, "t.packs_a.pack")["edge_args"]
 
         assert edge_args == {
             "suffix": ".modmap",
@@ -742,7 +754,6 @@ class TestScannerErrors:
             target="notes.copy",
             source=["notes.txt"],
             command=["cp", "$SOURCE", "$TARGET"],
-            name="copy_notes",
         )
         make_scanner().attach(target)
 
@@ -795,13 +806,11 @@ class TestScannerErrors:
             target="gen/c.scene",
             source=["a.scene"],
             command=["cp", "$SOURCE", "$TARGET"],
-            name="gen_c",
         )
         b = env.Command(
             target="packs/b.pack",
             source=[gen, "b.scene"],
             command=["cat", "$SOURCES", ">", "$TARGET"],
-            name="pack_b",
         )
         make_scanner().attach(b)
 
@@ -825,5 +834,5 @@ def test_scan_and_collate_nodes_are_registered_with_the_environment(
     }
 
     assert "build/packs/a.pack.scaninfo.json" in registered
-    assert "build/scan/scene-refs/t.pack_a.dyndep" in registered
-    assert "build/scan/scene-refs/t.pack_a.exports.json" in registered
+    assert "build/scan/scene-refs/t.packs_a.pack.dyndep" in registered
+    assert "build/scan/scene-refs/t.packs_a.pack.exports.json" in registered

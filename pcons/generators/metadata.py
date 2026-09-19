@@ -14,8 +14,7 @@ qualified name. ``dependencies`` is a list of ids, in the order the target
 depends on them. ``anonymous`` says which kind of target this is.
 
 ``name`` and ``qualified_name`` are for display. Neither is unique: two
-anonymous targets wear one label whenever their outputs share a stem, as
-``config.h`` and ``config.c`` both do.
+installs into one directory wear one label, and so do two tests of one name.
 """
 
 from __future__ import annotations

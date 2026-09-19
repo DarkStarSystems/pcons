@@ -75,9 +75,7 @@ class TestAFileNamedInFlagsIsADependency:
         (tmp_path / "a.c").write_text("int a(void) { return 1; }\n")
         project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
-        gen = env.Command(
-            target="flags.rsp", command="echo -DGEN=1 > $TARGET", name="gen"
-        )
+        gen = env.Command(target="flags.rsp", command="echo -DGEN=1 > $TARGET")
         lib = project.StaticLibrary("a", env, sources=["a.c"])
         lib.private.compile_flags.append(
             PathToken(prefix="@", path=str(gen.output_nodes[0].path))
@@ -109,7 +107,7 @@ class TestAFileNamedInFlagsIsADependency:
         (tmp_path / "a.c").write_text("int a(void) { return 1; }\n")
         project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
-        env.Command(target="flags.rsp", command="echo -DGEN=1 > $TARGET", name="gen")
+        env.Command(target="flags.rsp", command="echo -DGEN=1 > $TARGET")
         lib = project.StaticLibrary("a", env, sources=["a.c"])
         lib.private.compile_flags.append(
             PathToken(prefix="@", path="flags.rsp", path_type="build")

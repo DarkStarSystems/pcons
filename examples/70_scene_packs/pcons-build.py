@@ -63,7 +63,6 @@ genscene1 = env.Command(
     source=["src/gen_head.pyfrag", "src/gen1_payload.pyfrag"],
     command=[python, "$SRCDIR/tools/concat.py", "$TARGET", "$SOURCES"],
     depends=["tools/concat.py"],
-    name="genscene1",
     write_if_different=True,
 )
 
@@ -73,7 +72,6 @@ scenes1 = env.Command(
     target=[gen_dir / "generated1.scene", gen_dir / "gen2_payload.pyfrag"],
     source=[bin_dir / "genscene1.py"],
     command=[python, "$SOURCE", "${TARGETS[0]}", "${TARGETS[1]}"],
-    name="run_genscene1",
     write_if_different=True,
 )
 
@@ -84,7 +82,6 @@ genscene2 = env.Command(
     source=["src/gen_head.pyfrag", gen_dir / "gen2_payload.pyfrag"],
     command=[python, "$SRCDIR/tools/concat.py", "$TARGET", "$SOURCES"],
     depends=["tools/concat.py"],
-    name="genscene2",
     write_if_different=True,
 )
 
@@ -92,7 +89,6 @@ scenes2 = env.Command(
     target=gen_dir / "generated2.scene",
     source=[bin_dir / "genscene2.py"],
     command=[python, "$SOURCE", "$TARGET"],
-    name="run_genscene2",
     write_if_different=True,
 )
 
@@ -106,7 +102,6 @@ def pack(name: str, *scenes: str | Path) -> Target:
         source=list(scenes),
         command=[python, "$SRCDIR/tools/pack_scene.py", "$TARGET", "$SOURCES"],
         depends=["tools/pack_scene.py"],
-        name=f"pack_{name}",
     )
 
 

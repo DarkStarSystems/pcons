@@ -167,12 +167,6 @@ class _PackageKey(NamedTuple):
     system: bool
 
 
-#: What to do instead, where a lookup wanted the Target object itself.
-_USE_THE_TARGET = "Use the Target the builder returned, or create an Alias."
-#: The same, where the call would have taken the Target as an argument.
-_PASS_THE_TARGET = "Pass the Target the builder returned, or create an Alias."
-
-
 def _refuse_duplicate(existing: Target, new: Target) -> None:
     """Raise unless *existing* and *new* are told apart by their environments.
 
@@ -950,10 +944,7 @@ class Project(_ProjectBuilders):
                 return matches[0]
             if project is not None:
                 if raise_if_missing:
-                    raise KeyError(
-                        f"Target '{name}' not found."
-                        f"{self._anonymous_label_hint(target_name, advice=_USE_THE_TARGET)}"
-                    )
+                    raise KeyError(f"Target '{name}' not found.")
                 return None
 
         if recursive:
@@ -969,34 +960,8 @@ class Project(_ProjectBuilders):
                 return targets_found[0]
 
         if raise_if_missing:
-            raise KeyError(
-                f"Target '{name}' not found."
-                f"{self._anonymous_label_hint(target_name, advice=_USE_THE_TARGET)}"
-            )
+            raise KeyError(f"Target '{name}' not found.")
         return None
-
-    def _anonymous_label_hint(self, name: str, *, advice: str) -> str:
-        """Why a lookup missed, when some anonymous target wears *name*.
-
-        The reader can see pcons knows what *name* refers to, so the message
-        has to answer why it will not use it: a label is not unique, and
-        looking one up would be asking pcons to pick between the targets
-        wearing it. Without that, "not found" reads as a typo.
-
-        Returns the sentence to append, ending in *advice*, or an empty
-        string when no anonymous target wears *name*. The leading space is
-        here so a caller's own message keeps its full stop.
-        """
-        if not any(
-            target.anonymous and target.name == name
-            for project in self._iter_tree()
-            for target in project._targets
-        ):
-            return ""
-        return (
-            f" '{name}' was found as a target's label, but those internal "
-            f"labels aren't unique so they can't be relied on. {advice}"
-        )
 
     def get_targets(self, *names: str) -> list[Target]:
         """Get targets by name, raising KeyError if any is missing or ambiguous."""
@@ -1275,7 +1240,6 @@ class Project(_ProjectBuilders):
             f"project '{self.name}'. Tried aliases "
             f"{sorted(self.tree_aliases)!r} and targets "
             f"{sorted(t.name for t in self.targets if not t.anonymous)!r}."
-            f"{self._anonymous_label_hint(name, advice=_PASS_THE_TARGET)}"
         )
 
     @property

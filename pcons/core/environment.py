@@ -1449,7 +1449,6 @@ class Environment(_EnvironmentStubs):
         tool: Target | str | Path | None = None,
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
         command: str | Sequence[str | Target | FileNode] = "",
-        name: str | None = None,
         depends: str | Path | Sequence[str | Path] | None = None,
         restat: bool = False,
         write_if_different: bool = False,
@@ -1566,11 +1565,6 @@ class Environment(_EnvironmentStubs):
                     token that must contain a space goes in the list form,
                     which isn't split on whitespace; one whose quotes really
                     are meant goes in ``Verbatim(...)``.
-            name: Optional label for this target, shown by ``pcons info
-                  --targets`` and in diagnostics. Derived from the first
-                  target's file stem if not given. The build tool never
-                  learns it: to build this by name, give it an alias with
-                  ``project.Alias()``.
             depends: Extra files that trigger a rebuild when changed, but
                     don't appear in $SOURCE/$SOURCES. These become implicit
                     dependencies (after ``|`` in ninja). Useful for scripts,
@@ -1684,7 +1678,7 @@ class Environment(_EnvironmentStubs):
             # Can be passed to Install() since it's a Target
             project.Install("dist/", [generated])
         """
-        from pcons.core.builder import GenericCommandBuilder
+        from pcons.core.builder import GenericCommandBuilder, output_label
         from pcons.core.errors import PconsError
         from pcons.core.node import FileNode
         from pcons.core.target import Target as TargetClass
@@ -1719,12 +1713,6 @@ class Environment(_EnvironmentStubs):
                 )
         elif deps_style is None:
             deps_style = "gcc"
-
-        # The builder anchors these; the name only needs the file's stem,
-        # which the prefix doesn't change.
-        if name is None:
-            first = target if isinstance(target, (str, Path)) else list(target)[0]
-            name = Path(first).stem
 
         # Normalize source to list, separating Targets from immediate sources.
         # A Target's outputs don't exist until the resolve phase, so it can't
@@ -1799,10 +1787,13 @@ class Environment(_EnvironmentStubs):
             list(normalized),
             defined_at=get_caller_location(),
         )
+        outputs = [node for node in nodes if isinstance(node, FileNode)]
+        # A command that declares no output has no file to be labelled after.
+        label = output_label(self, outputs[0].path) if outputs else "command"
 
         # Create Target object
         cmd_target = TargetClass(
-            name,
+            label,
             target_type="command",
             defined_at=get_caller_location(),
             env=self,
@@ -1815,10 +1806,9 @@ class Environment(_EnvironmentStubs):
         cmd_target.place_in_tier("default", by="Command")
 
         # Register nodes with the environment and add to target
-        for node in nodes:
-            if isinstance(node, FileNode):
-                self.register_node(node)
-                cmd_target.output_nodes.append(node)
+        for node in outputs:
+            self.register_node(node)
+            cmd_target.output_nodes.append(node)
 
         if write_if_different:
             import sys
@@ -1908,8 +1898,8 @@ class Environment(_EnvironmentStubs):
         is refused at configure time rather than at build time, and so is a
         keyword the function's signature cannot take.
 
-        ``target``, ``source``, ``name`` and ``depends`` are refused as
-        parameter names: the call spends them on the edge.
+        ``target``, ``source`` and ``depends`` are refused as parameter
+        names: the call spends them on the edge.
 
         ``depfile`` and ``deps_style`` are deliberately absent: a function
         that discovers its own dependencies has to write a make-style depfile

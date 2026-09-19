@@ -43,7 +43,6 @@ def test_a_target_becomes_the_path_the_generator_writes_for_it(
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=[gen, "$SOURCE", "$TARGET"],
@@ -65,7 +64,6 @@ def test_a_target_written_as_an_argument_stays_a_plain_path(
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=["strip", gen, "$TARGET"],
@@ -87,7 +85,6 @@ def test_the_target_is_a_dependency_of_the_command(
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=[gen, "$SOURCE", "$TARGET"],
@@ -104,7 +101,6 @@ def test_the_target_stays_out_of_the_sources(tmp_path: Path, gcc_toolchain) -> N
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=[gen, "${SOURCES[0]}", "$TARGET"],
@@ -128,7 +124,6 @@ def test_a_tool_from_another_environment_carries_its_prefix(
     gen = project.Program("gen", host, sources=["gen.c"])
     app = project.Program("app", tgt, sources=["gen.c"])
     tgt.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=[app],
         command=[gen, "$SOURCE", "$TARGET"],
@@ -145,13 +140,11 @@ def test_a_file_node_names_one_output_of_several(tmp_path: Path, gcc_toolchain) 
     project = _project(tmp_path, gcc_toolchain)
     env = project.Environment(toolchain=gcc_toolchain)
     pair = env.Command(
-        name="pair",
         target=[project.build_dir / "a.txt", project.build_dir / "b.txt"],
         source=["in.txt"],
         command=["touch", "$TARGETS"],
     )
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=[pair.output_nodes[1], "$TARGET"],
@@ -167,13 +160,11 @@ def test_a_target_with_several_outputs_says_so(tmp_path: Path, gcc_toolchain) ->
     project = _project(tmp_path, gcc_toolchain)
     env = project.Environment(toolchain=gcc_toolchain)
     pair = env.Command(
-        name="pair",
         target=[project.build_dir / "a.txt", project.build_dir / "b.txt"],
         source=["in.txt"],
         command=["touch", "$TARGETS"],
     )
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=[pair, "$TARGET"],
@@ -188,7 +179,6 @@ def test_a_target_that_builds_nothing_says_so(tmp_path: Path, gcc_toolchain) -> 
     env = project.Environment(toolchain=gcc_toolchain)
     iface = project.HeaderOnlyLibrary("iface")
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=[iface, "$TARGET"],
@@ -203,7 +193,6 @@ def test_make_writes_the_same_path(tmp_path: Path, gcc_toolchain) -> None:
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=[gen, "$SOURCE", "$TARGET"],
@@ -232,13 +221,11 @@ def test_the_main_resolve_loop_reaches_every_command(
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         source=["in.txt"],
         command=[gen, "$SOURCE", "$TARGET"],
     )
     env.Command(
-        name="tooled",
         target=project.build_dir / "tooled.txt",
         tool=gen,
         source=["in.txt"],
@@ -278,7 +265,6 @@ def test_a_command_that_declares_no_output_resolves(
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     outputless = env.Command(
-        name="run",
         target=[],
         source=["in.txt"],
         command=[gen, "$SOURCE"],

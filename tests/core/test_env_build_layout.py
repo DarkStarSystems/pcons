@@ -228,13 +228,11 @@ class TestBuildPrefix:
             target="gen/version.h",
             source="in.txt",
             command=["cp", "$SOURCE", "$TARGET"],
-            name="bare",
         )
         prefixed = env.Command(
             target=project.build_dir / "gen/other.h",
             source="in.txt",
             command=["cp", "$SOURCE", "$TARGET"],
-            name="prefixed",
         )
 
         project.resolve()

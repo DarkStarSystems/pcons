@@ -2,9 +2,9 @@
 """A derived label is not a name: `Target.anonymous` and what follows from it.
 
 The builders a script names targets for — Program, StaticLibrary — keep the
-uniqueness rule. The ones that derive a label from an output path — Command,
-Install, Tarfile, Test — do not, because the label says nothing about which
-target is meant.
+uniqueness rule. The ones that derive a label — Command, Install, Tarfile,
+Test — do not, because the label says nothing about which target is meant,
+and they take no name of their own.
 """
 
 import pytest
@@ -20,16 +20,24 @@ def project(tmp_path):
 
 
 class TestAnonymousLabels:
-    def test_two_commands_may_wear_one_label(self, project):
-        """`foo.h` and `foo.c` share a stem, and that is not a conflict."""
+    def test_a_label_is_the_file_the_command_builds(self, project):
+        """As the build tool writes it, so a reader can match the two."""
+        env = project.Environment()
+        made = env.Command(target="out/foo.h", command="touch $TARGET")
+
+        assert made.name == "out/foo.h"
+        assert made.anonymous
+
+    def test_two_commands_of_one_stem_wear_different_labels(self, project):
+        """`foo.h` and `foo.c` are different files, so they read differently."""
         env = project.Environment()
         header = env.Command(target="foo.h", command="touch $TARGET")
         source = env.Command(target="foo.c", command="touch $TARGET")
 
-        assert header.name == source.name == "foo"
+        assert header.name == "foo.h"
+        assert source.name == "foo.c"
         assert header.anonymous and source.anonymous
-        assert header is not source
-        assert [t.name for t in project.targets] == ["foo", "foo"]
+        assert [t.name for t in project.targets] == ["foo.h", "foo.c"]
 
     def test_both_commands_resolve_and_reach_the_build_file(self, project, tmp_path):
         """Two edges wearing one label are two edges."""
@@ -55,12 +63,13 @@ class TestAnonymousLabels:
 
         assert first.name == second.name == "install_dist"
         assert first is not second
+        assert [t.name for t in project.targets] == ["install_dist", "install_dist"]
 
     def test_a_label_may_repeat_a_name(self, project):
-        """A command writing `app.map` beside the program `app` is fine."""
+        """A command writing the program `app` again is fine."""
         env = project.Environment()
         program = project.Program("app", env, sources=["main.c"])
-        command = env.Command(target="app.map", command="touch $TARGET")
+        command = env.Command(target="app", command="touch $TARGET")
 
         assert command.name == program.name == "app"
         assert project.get_target("app") is program
@@ -90,28 +99,22 @@ class TestLookupsIgnoreLabels:
         env = project.Environment()
         env.Command(target="foo.h", command="touch $TARGET")
 
-        with pytest.raises(KeyError) as excinfo:
-            project.get_target("foo")
-        message = str(excinfo.value)
-        assert "was found as a target's label" in message
-        assert "aren't unique" in message
-        assert "Use the Target the builder returned, or create an Alias." in message
+        with pytest.raises(KeyError, match="Target 'foo.h' not found"):
+            project.get_target("foo.h")
 
     def test_has_target_is_false_for_a_label(self, project):
         env = project.Environment()
         env.Command(target="foo.h", command="touch $TARGET")
 
-        assert not project.has_target("foo")
-        assert project.get_target("foo", raise_if_missing=False) is None
+        assert not project.has_target("foo.h")
+        assert project.get_target("foo.h", raise_if_missing=False) is None
 
     def test_default_by_name_refuses_a_label(self, project):
         env = project.Environment()
         env.Command(target="foo.h", command="touch $TARGET")
 
-        with pytest.raises(KeyError, match="was found as a target's label"):
-            project.Default("foo")
-        with pytest.raises(KeyError, match="Pass the Target the builder returned"):
-            project.Default("foo")
+        with pytest.raises(KeyError, match="is not a known alias or target"):
+            project.Default("foo.h")
 
     def test_an_alias_is_how_a_command_gets_a_name(self, project, tmp_path):
         env = project.Environment()
@@ -156,6 +159,28 @@ def test_two_tests_may_share_a_name(project):
     project.Test("unit", program, args=["--slow"])
 
     assert [t.name for t in project.targets if t.target_type == "test"] == [
-        "test_unit",
-        "test_unit",
+        "unit",
+        "unit",
     ]
+
+
+def test_a_test_name_is_written_for_a_person(project):
+    """A label reaches no path, so a sentence with spaces is a fine test name."""
+    env = project.Environment()
+    program = project.Program("check", env, sources=["main.c"])
+
+    assert project.Test("server connects", program).name == "server connects"
+
+
+class TestAnonymousBuildersTakeNoName:
+    def test_command_refuses_a_name(self, project):
+        env = project.Environment()
+
+        with pytest.raises(TypeError, match="name"):
+            env.Command(target="foo.h", command="touch $TARGET", name="x")
+
+    def test_install_refuses_a_name(self, project, tmp_path):
+        (tmp_path / "a.txt").touch()
+
+        with pytest.raises(TypeError, match="name"):
+            project.Install("dist", [tmp_path / "a.txt"], name="x")

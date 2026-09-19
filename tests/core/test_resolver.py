@@ -237,7 +237,7 @@ class TestResolverHeaderOnlyLibrary:
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
-        gen = env.Command(name="gen", target="gen/gen.h", command="touch $TARGET")
+        gen = env.Command(target="gen/gen.h", command="touch $TARGET")
 
         header_lib = project.HeaderOnlyLibrary("headers")
         header_lib.depends(gen)
@@ -275,7 +275,7 @@ class TestResolverHeaderOnlyLibrary:
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
-        gen = env.Command(name="gen", target="gen/gen.h", command="touch $TARGET")
+        gen = env.Command(target="gen/gen.h", command="touch $TARGET")
 
         tool = project.StaticLibrary("tool", env, sources=[str(lib_src)])
         tool.depends(gen)
@@ -1411,7 +1411,6 @@ class TestSourceTargetsResolveFirst:
         cmd = env.Command(
             target=project.build_dir / "out.txt",
             command="echo done > $TARGET",
-            name="after",
         )
         cmd.depends(staged)
 
@@ -1428,7 +1427,6 @@ class TestSourceTargetsResolveFirst:
         gen = env.Command(
             target=project.build_dir / "gen.txt",
             command="echo gen > $TARGET",
-            name="gen",
         )
         staged = project.InstallDir("stage", self._source_tree(tmp_path))
         staged.depends(gen)
@@ -1448,12 +1446,10 @@ class TestSourceTargetsResolveFirst:
         gen = env.Command(
             target=project.build_dir / "gen.txt",
             command="echo gen > $TARGET",
-            name="gen",
         )
         cmd = env.Command(
             target=project.build_dir / "out.txt",
             command="echo done > $TARGET",
-            name="after",
         )
         cmd.depends(gen)
         project.resolve()
@@ -1483,12 +1479,10 @@ class TestSourceTargetsResolveFirst:
         cmd = env.Command(
             target=project.build_dir / "out.txt",
             command="echo done > $TARGET",
-            name="after",
         )
         gen = env.Command(
             target=project.build_dir / "gen.txt",
             command="echo gen > $TARGET",
-            name="gen",
         )
         installed = project.Install("dist", [gen])
         cmd.depends(installed)
@@ -1515,7 +1509,6 @@ class TestSourceTargetsResolveFirst:
         first = env.Command(
             target=project.build_dir / "x.txt",
             command="echo x > $TARGET",
-            name="x",
         )
         lib = project.StaticLibrary("mylib", env, sources=["lib.c"])
         app = project.Program("app", env, sources=["main.c"])
@@ -1558,7 +1551,6 @@ class TestSourceTargetsResolveFirst:
         gen = env.Command(
             target=project.build_dir / "gen.txt",
             command="echo gen > $TARGET",
-            name="gen",
         )
         staged = project.InstallDir("stage", self._source_tree(tmp_path))
         staged.depends(gen)
@@ -1566,7 +1558,6 @@ class TestSourceTargetsResolveFirst:
         consumer = env.Command(
             target=project.build_dir / "out.txt",
             command="echo done > $TARGET",
-            name="consumer",
         )
         consumer.depends(staged)
 
@@ -1586,7 +1577,6 @@ class TestSourceTargetsResolveFirst:
         gen = env.Command(
             target=project.build_dir / "gen.txt",
             command="echo gen > $TARGET",
-            name="gen",
         )
         odd = Target("odd", project=project)
         odd._builder_name = "NoSuchBuilder"
@@ -1618,7 +1608,6 @@ class TestFileDepOnACommand:
         cmd = env.Command(
             target=project.build_dir / "out.txt",
             command="echo x > $TARGET",
-            name="c",
         )
         cmd.depends(version)
 

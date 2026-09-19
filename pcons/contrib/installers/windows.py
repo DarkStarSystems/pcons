@@ -208,7 +208,6 @@ def create_msix(
                 *(["--display-name", display_name] if display_name else []),
                 *(["--description", description] if description else []),
             ],
-            name=f"manifest_{name}",
         ),
         by="create_msix",
     )
@@ -228,7 +227,6 @@ def create_msix(
                 "--output-dir",
                 str(staging_rel),
             ],
-            name=f"assets_{name}",
         ),
         by="create_msix",
     )
@@ -249,7 +247,6 @@ def create_msix(
             target=project.build_dir / output,
             source=[stage_target, manifest_target, assets_target],
             command=makeappx_cmd,
-            name=f"msix_{name}",
         ),
         by="create_msix",
     )
@@ -292,7 +289,6 @@ def create_msix(
                 target=project.build_dir / signed_output,
                 source=[msix_target],
                 command=sign_cmd,
-                name=f"sign_{name}",
             ),
             by="create_msix",
         )

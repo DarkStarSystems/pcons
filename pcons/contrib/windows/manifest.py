@@ -361,7 +361,6 @@ def create_app_manifest(
             "-c",
             f"import pathlib; pathlib.Path({str(output_path)!r}).write_text({xml_content!r}, encoding='utf-8')",
         ],
-        name=f"manifest_{output_path.stem}",
     )
 
     return target
@@ -469,7 +468,6 @@ def create_assembly_manifest(
             "-c",
             f"import pathlib; pathlib.Path({str(output_path)!r}).write_text({xml_content!r}, encoding='utf-8')",
         ],
-        name=f"assembly_{name.replace('.', '_')}",
     )
 
     return target

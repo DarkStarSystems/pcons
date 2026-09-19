@@ -16,7 +16,6 @@ what makes ``test-build`` work.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,23 +31,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.util.source_location import SourceLocation
-
-
-# Characters a Target name accepts. A test name is written for a person to
-# read — a Catch2 sentence, a doctest scenario with spaces, a gtest name with
-# colons — so anything else maps to "_". The name the user gave lives on the
-# spec and reaches tests.json; this is the label on the internal target.
-_TARGET_NAME_BAD_CHARS = re.compile(r"[^\w./+-]")
-
-
-def _test_target_label(user_name: str) -> str:
-    """The label for a test's internal target: ``test_<sanitized name>``.
-
-    ``test_`` distinguishes it from the program it runs, which usually
-    carries the same name. Two tests of one name wear one label, which is
-    what an anonymous target is for (see ``Target.anonymous``).
-    """
-    return f"test_{_TARGET_NAME_BAD_CHARS.sub('_', user_name)}"
 
 
 class TestNodeFactory:
@@ -168,8 +150,9 @@ class TestBuilder:
         Args:
             project: The project to add the target to.
             name: Test name. Shown by the runner, used for ``-R`` filters.
-                It collides with nothing: the internal target wears
-                ``test_<name>`` as a label, and labels may repeat.
+                It collides with nothing: it is the internal target's
+                label, and labels may repeat. Written for a person to read,
+                so a Catch2 sentence or a gtest name with colons is fine.
             program: The thing to run. A Target (typically from
                 ``project.Program``), a path, or a string command name.
             args: Arguments passed after the program.
@@ -212,9 +195,8 @@ class TestBuilder:
                 "Use 'gtest', 'doctest', or 'catch2' — or None to disable."
             )
 
-        target_name = _test_target_label(name)
         target = Target(
-            target_name,
+            name,
             target_type="test",
             defined_at=defined_at or get_caller_location(),
             project=project,

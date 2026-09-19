@@ -696,7 +696,6 @@ class TestNinjaAwkwardPaths:
             target="out$put.txt",
             source="in$put.txt",
             command="cp $SOURCE $TARGET",
-            name="copy",
         )
         project.resolve()
 
@@ -722,7 +721,6 @@ class TestNinjaAwkwardPaths:
             target="出力é.txt",
             source="入力.txt",
             command="cp $SOURCE $TARGET",
-            name="c",
         )
         project.resolve()
 
@@ -763,7 +761,6 @@ class TestNinjaSrcDir:
             target="output.txt",
             source="input.txt",
             command="python $SRCDIR/scripts/generate.py $SOURCE $TARGET",
-            name="gen",
         )
         project.resolve()
 
@@ -862,7 +859,6 @@ class TestNinjaSrcDir:
             target="output.txt",
             source="input.txt",
             command="tool --config=$SRCDIR/my.cfg $SOURCE $TARGET",
-            name="cfg_tool",
         )
         project.resolve()
 
@@ -884,7 +880,6 @@ class TestNinjaSrcDir:
             target="output.txt",
             source="input.txt",
             command="tool -I$SRCDIR/inc $SOURCE $TARGET",
-            name="inc_tool",
         )
         project.resolve()
 

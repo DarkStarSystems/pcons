@@ -12,13 +12,6 @@ Each function is decorated once and called twice, once per document. That is
 the point of a builder: two edges, one generated module, one argument pickle
 per edge. The arguments differ, the body does not.
 
-Why every call passes ``name=``: an edge is named after its first target's
-stem, the same rule ``env.Command`` uses, which refuses two targets in one
-environment sharing a name. Here ``lorem.txt`` and ``lorem.c`` share the stem
-``lorem``, and so does the program, so three edges of one chain would
-collide on the edge name ``lorem``. ``name=`` parts them. It is a label, not
-a name ninja knows: ``project.Alias()`` is what makes an edge typeable.
-
 Why a byte array rather than a C string literal: the fetched document is
 arbitrary bytes. Escaping it into a string literal means handling quotes,
 backslashes, newlines, trigraphs and anything non-ASCII, a rabbit hole that
@@ -104,13 +97,11 @@ def embed(targets, sources, symbol):
 for name, url in (("lorem", LOREM_URL), ("motto", MOTTO_URL)):
     text = fetch(
         target=project.build_dir / f"{name}.txt",
-        name=f"{name}-text",
         url=url,
         field="feed.lipsum",
     )
     source = embed(
         target=project.build_dir / f"{name}.c",
-        name=f"{name}-source",
         source=[text],
         symbol=name,
     )
@@ -118,7 +109,6 @@ for name, url in (("lorem", LOREM_URL), ("motto", MOTTO_URL)):
 
 local = embed(
     target=project.build_dir / "awkward.c",
-    name="awkward-source",
     source=[project.root_dir / "src" / "awkward.bin"],
     symbol="awkward",
 )

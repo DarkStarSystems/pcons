@@ -138,7 +138,6 @@ subgen = Path(nanobind.package.prefix) / "nanobind" / "stubgen.py"
 assert subgen.is_file(), f"Stub generator not found at {subgen}"
 
 cmd = project.Command(
-    "generate_stubs",
     env,
     target=f"{pcons_hello_ext.name}.pyi",
     command=[sys.executable, str(subgen), "--module", pcons_hello_ext.name],
@@ -159,6 +158,5 @@ else:
 install = project.Install(
     install_destination,
     [pcons_hello_ext, hello_lib, cmd],
-    name="install",
 )
 project.Alias("install", install)

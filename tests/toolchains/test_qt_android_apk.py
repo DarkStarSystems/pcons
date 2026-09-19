@@ -175,7 +175,7 @@ class TestItIsARealBuildEdge:
 
         staged = stage_application_library(app_project, env, app=_app(app_project, env))
 
-        assert staged.name == "myapp-apk-lib"
+        assert staged.name == "install_build_myapp_libs_arm64-v8a_libmyapp_arm64-v8a.so"
 
 
 class TestWhatItRefuses:
@@ -300,7 +300,9 @@ class TestStaging:
         env = android_env()
         _apk(app_project, env, _app(app_project, env))
 
-        assert _labelled(app_project, "myapp-apk-lib")
+        assert _labelled(
+            app_project, "install_build_myapp_libs_arm64-v8a_libmyapp_arm64-v8a.so"
+        )
 
     def test_one_made_by_hand_is_used_as_it_is(self, app_project, deployable) -> None:
         env = android_env()
@@ -309,7 +311,15 @@ class TestStaging:
 
         _apk(app_project, env, app, staged=staged)
 
-        assert len(_labelled(app_project, "myapp-apk-lib")) == 1
+        assert (
+            len(
+                _labelled(
+                    app_project,
+                    "install_build_myapp_libs_arm64-v8a_libmyapp_arm64-v8a.so",
+                )
+            )
+            == 1
+        )
 
 
 class TestAPackageDeclaredInASubdirectory:
@@ -741,7 +751,7 @@ class TestTheSigningEdge:
             app_project, env, app, keystore="release.jks", store_password="env:KS"
         )
 
-        assert signed.name == "myapp-apk-signed"
+        assert signed.name == "myapp/build/outputs/apk/release/myapp-release-signed.apk"
 
 
 class TestWhatSigningRefuses:

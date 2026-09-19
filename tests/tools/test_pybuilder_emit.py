@@ -736,8 +736,8 @@ class TestReservedNames:
             if parameter.kind is inspect.Parameter.KEYWORD_ONLY
         }
 
-    def test_it_holds_the_four_names_the_call_names_today(self) -> None:
-        assert _reserved_names() == {"target", "source", "name", "depends"}
+    def test_it_holds_the_three_names_the_call_names_today(self) -> None:
+        assert _reserved_names() == {"target", "source", "depends"}
 
     def test_it_excludes_self_and_the_functions_own_arguments(self) -> None:
         assert "self" not in _reserved_names()
@@ -821,7 +821,7 @@ class TestClaimRegistry:
 
         message = str(caught.value)
         assert "PyBuilder edge 'x' would overwrite" in message
-        assert 'Name one of the edges, name="something-else".' in message
+        assert "Give the edges different targets." in message
 
     def test_a_second_claim_with_no_owner_at_all_is_refused(
         self, project: Project, env: Any
@@ -829,9 +829,7 @@ class TestClaimRegistry:
         path = Path("build/pybuilder/x.args.pkl")
         _claim(project, env, path, "x", self._at(1), owner=None)
 
-        with pytest.raises(
-            PyBuilderError, match=r'Name one of the edges, name="something-else"'
-        ):
+        with pytest.raises(PyBuilderError, match=r"Give the edges different targets"):
             _claim(project, env, path, "x", self._at(2), owner=None)
 
     def test_a_shared_owner_across_environments_still_shares(

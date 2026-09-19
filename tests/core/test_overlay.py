@@ -208,14 +208,6 @@ class TestOverlayGraph:
         assert stage.target_type == "interface"
         assert stage.name == "overlay_stage"
 
-    def test_takes_a_name(self, tmp_path):
-        shared, app = make_trees(tmp_path)
-        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment(name="host")
-        stage = project.OverlayDir(env, "stage", sources=[shared, app], name="pkg")
-
-        assert stage.name == "pkg"
-
     def test_the_only_output_is_one_stamp(self, tmp_path):
         shared, app = make_trees(tmp_path)
         _, stage = overlay_project(tmp_path, [shared, app])

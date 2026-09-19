@@ -43,7 +43,6 @@ generated = env.Command(
     target=project.build_dir / "generated.cpp",
     tool=gen,
     command="$TOOL $TARGET",
-    name="generate",
 )
 
 use = project.Program("use", env, sources=[generated.output_nodes[0]])

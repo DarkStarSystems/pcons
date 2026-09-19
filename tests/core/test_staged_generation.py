@@ -194,7 +194,6 @@ env.Command(
     target="out.txt",
     source="in.txt",
     command=["python3", str(root / "gen.py"), "$SOURCE", "$TARGET"],
-    name="generate",
 )
 """
 

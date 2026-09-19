@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from pcons.core.builder import anchor_target_paths
+from pcons.core.builder import anchor_target_paths, output_label
 from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode
 from pcons.core.resolver import PendingSourceFactory
@@ -225,7 +225,6 @@ class TarfileBuilder:
         sources: Sequence[str | Path | FileNode | Target] | None = None,
         compression: str | None = None,
         base_dir: str | Path | None = None,
-        name: str | None = None,
     ) -> ArchiveTarget:
         """Create a Tarfile target.
 
@@ -236,7 +235,6 @@ class TarfileBuilder:
             sources: Input files, directories, and/or Targets.
             compression: Compression type (None, "gzip", "bz2", "xz").
             base_dir: Base directory for archive paths.
-            name: Optional label for this target; not a build-tool name.
 
         Returns:
             ArchiveTarget representing the archive, with settable properties.
@@ -254,13 +252,8 @@ class TarfileBuilder:
                 compression = "xz"
             # .tar gets no compression
 
-        if name is None:
-            name = _name_from_output(
-                output, [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tar"]
-            )
-
         target = ArchiveTarget(
-            name,
+            output_label(env, output_path),
             target_type="archive",
             defined_at=get_caller_location(),
             project=project,
@@ -303,7 +296,6 @@ class ZipfileBuilder:
         output: str | Path,
         sources: Sequence[str | Path | FileNode | Target] | None = None,
         base_dir: str | Path | None = None,
-        name: str | None = None,
     ) -> ArchiveTarget:
         """Create a Zipfile target.
 
@@ -313,18 +305,14 @@ class ZipfileBuilder:
             output: Output archive path.
             sources: Input files, directories, and/or Targets.
             base_dir: Base directory for archive paths.
-            name: Optional label for this target; not a build-tool name.
 
         Returns:
             ArchiveTarget representing the archive, with settable properties.
         """
         output_path = anchor_target_paths(env, [output])[0]
 
-        if name is None:
-            name = _name_from_output(output, [".zip"])
-
         target = ArchiveTarget(
-            name,
+            output_label(env, output_path),
             target_type="archive",
             defined_at=get_caller_location(),
             project=project,
@@ -341,21 +329,3 @@ class ZipfileBuilder:
         target._add_pending_sources(sources or [])
 
         return target
-
-
-def _name_from_output(output: str | Path, suffixes: list[str]) -> str:
-    """Derive target name from output path by stripping archive suffixes.
-
-    Args:
-        output: Output path (e.g., "dist/docs.tar.gz").
-        suffixes: List of suffixes to strip.
-
-    Returns:
-        Derived name (e.g., "dist/docs").
-    """
-    name = str(output)
-    for suffix in suffixes:
-        if name.endswith(suffix):
-            name = name[: -len(suffix)]
-            break
-    return name

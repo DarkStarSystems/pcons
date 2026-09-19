@@ -263,7 +263,7 @@ class BaseBuilder(ABC):
             given = [target]
         else:
             given = list(target)
-        target_paths = anchor_target_paths(env, given, target_name=kwargs.get("name"))
+        target_paths = anchor_target_paths(env, given)
 
         result = self._build(env, target_paths, source_nodes, **kwargs)
         if depends:
@@ -864,6 +864,21 @@ def anchor_target_paths(
             )
         )
     return anchored
+
+
+def output_label(env: Environment | None, path: Path | str) -> str:
+    """The label an anonymous builder wears: what it builds, as the tool sees it.
+
+    *path* is node-canonical, the form :func:`anchor_target_paths` returns.
+    The label is that path as seen from the execution directory, so it reads
+    the way the build file and ``pcons info --targets`` write it. An
+    environment with no project has no execution directory to speak of, and
+    falls back to the path itself.
+    """
+    project = getattr(env, "_project", None) if env is not None else None
+    if project is None:
+        return Path(path).as_posix()
+    return cast(str, project.top_path_resolver.make_execution_relative(path))
 
 
 def _output_role(project: Any, target: Path | str) -> str | None:

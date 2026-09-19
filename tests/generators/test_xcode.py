@@ -549,7 +549,7 @@ class TestXcodeGeneratorStagedTrees:
 
         project = Project("overlay_test", root_dir=tmp_path, build_dir=tmp_path)
         env = project.Environment()
-        project.OverlayDir(env, "stage", sources=["shared", "app"], name="stage_it")
+        project.OverlayDir(env, "stage", sources=["shared", "app"])
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -557,7 +557,7 @@ class TestXcodeGeneratorStagedTrees:
             BaseGenerator._generate_pending(project)
 
         message = str(exc.value)
-        assert "stage_it" in message
+        assert "overlay_stage" in message
         assert "OverlayDir" in message
         assert "ninja" in message
         # Refused before anything was written.

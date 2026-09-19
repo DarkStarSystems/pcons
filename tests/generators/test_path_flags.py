@@ -177,7 +177,6 @@ class TestAuxiliaryInputRelativization:
             target="app.manifest",
             source=None,
             command=["python", "-c", "pass"],
-            name="gen_manifest",
         )
         app = project.Program("app", env, sources=["src/main.c"])
         app.add_sources([manifest])

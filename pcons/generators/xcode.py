@@ -93,7 +93,7 @@ def _display_name_candidates(target: Target) -> Iterator[str]:
     The first is the target's own name, which is what every target in an
     ordinary project gets. The rest only come up when two targets in one
     Xcode project wear one name: two environments each building a ``report``,
-    or two anonymous commands both labelled ``config`` (see
+    or two installs into one directory sharing a label (see
     ``Target.anonymous``).
     """
     yield target.name

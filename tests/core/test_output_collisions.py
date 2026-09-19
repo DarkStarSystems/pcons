@@ -108,7 +108,6 @@ class TestOutputCollisions:
             target=["a.txt", "b.txt"],
             source="in.txt",
             command=["tee", "$TARGETS"],
-            name="fanout",
         )
 
         project.resolve()
