@@ -4659,7 +4659,9 @@ class TestRecordedTargetNames:
             "p = Project('demo')\n"
             "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n",
         )
-        assert self._recorded(build_dir) == ["all", f"hello{EXE_SUFFIX}"]
+        assert self._recorded(build_dir) == sorted(
+            {"all", "hello", f"hello{EXE_SUFFIX}"}
+        )
 
     def test_an_output_prefix_records_both_spellings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -4699,12 +4701,16 @@ class TestRecordedTargetNames:
             "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n"
         )
         build_dir = self._generate(tmp_path, monkeypatch, body)
-        assert self._recorded(build_dir) == ["all", f"hello{EXE_SUFFIX}"]
+        assert self._recorded(build_dir) == sorted(
+            {"all", "hello", f"hello{EXE_SUFFIX}"}
+        )
 
         _clear_cli_vars()
         code, _ = run_script(tmp_path / "pcons-build.py", build_dir, generate=False)
         assert code == 0
-        assert self._recorded(build_dir) == ["all", f"hello{EXE_SUFFIX}"]
+        assert self._recorded(build_dir) == sorted(
+            {"all", "hello", f"hello{EXE_SUFFIX}"}
+        )
 
     def test_nothing_is_recorded_without_persisting(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -4752,7 +4758,9 @@ class TestRecordedTargetNames:
 
         Project._clear_tree()
         assert run_script(script, build_dir, fresh=True)[0] == 0
-        assert self._recorded(build_dir) == ["all", f"goodbye{EXE_SUFFIX}"]
+        assert self._recorded(build_dir) == sorted(
+            {"all", "goodbye", f"goodbye{EXE_SUFFIX}"}
+        )
 
     def test_a_variant_the_script_asked_for_is_recorded(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
