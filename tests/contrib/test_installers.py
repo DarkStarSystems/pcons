@@ -283,7 +283,7 @@ class TestWindowsInstallers:
 
         # Verify target was created
         assert msix is not None
-        assert msix.name == "msix_TestApp"
+        assert msix.name == "TestApp-1.0.0.msix"
 
     def test_create_msix_with_options(self, tmp_path: Path) -> None:
         """Test MSIX creation with display name and description."""
