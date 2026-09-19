@@ -361,7 +361,7 @@ Read by pcons:
 
 | Variable | |
 |---|---|
-| `PCONS_BUILD_DIR` | Default build directory, as if `-B` had been given |
+| `PCONS_BUILD_DIR` | Default build directory, as if `-B` had been given. Refused when it holds another project's build; `-B` overrides |
 | `PCONS_VARS` | Build variables as a JSON object, as if given as `KEY=value` |
 | `PCONS_VARIANT` | Default variant, as if `--variant` had been given |
 | `PCONS_GENERATOR` | Default generator; several may be joined with `:` |

@@ -513,6 +513,26 @@ def _persist_run_settings_to_projects(
         _record_command_listing(cache, may_create=True)
 
 
+def _build_dir_left_to_environment() -> bool:
+    """Whether this command's build directory came from ``$PCONS_BUILD_DIR``.
+
+    True only when ``-B`` was spelled nowhere on the command line: a ``-B``
+    before the command name reaches this command through
+    ``_adopt_options_spelled_earlier`` and still counts as spelled. Outside
+    the CLI there is no command line, and the caller chose the directory.
+    """
+    ctx = click.get_current_context(silent=True)
+    sources = set()
+    while ctx is not None:
+        if "build_dir" in ctx.params:
+            sources.add(ctx.get_parameter_source("build_dir"))
+        ctx = ctx.parent
+    return (
+        ParameterSource.ENVIRONMENT in sources
+        and ParameterSource.COMMANDLINE not in sources
+    )
+
+
 def run_script(
     script_path: Path,
     build_dir: Path,
@@ -596,6 +616,18 @@ def run_script(
     current_source = str(script_path.parent.absolute())
     recorded_source = cache.get("source_dir")
     if isinstance(recorded_source, str) and recorded_source != current_source:
+        if _build_dir_left_to_environment():
+            # An exported PCONS_BUILD_DIR follows the user into every
+            # directory. Here it points at another project's build, and
+            # nothing this run would write there was asked for (#190).
+            logger.error(
+                "$PCONS_BUILD_DIR is %s, which holds the build of the project "
+                "at %s, not of %s. Unset it, or pass -B to build there anyway.",
+                build_dir.absolute(),
+                recorded_source,
+                current_source,
+            )
+            return 1, []
         # The cache belongs to a different source tree (copied or moved build
         # dir). Ignore its settings and start fresh rather than silently applying
         # values meant for another project.
