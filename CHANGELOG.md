@@ -14,17 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 A target is now one of two kinds. The builders you name (`Program`, the
 libraries, `find_package`, the Qt program and library builders)
 are unchanged: the name is the target's identity, and it's what `pcons build`,
-`get_target()` and `Default()` take. Everything else makes an *anonymous*
-target, labelled by what it builds, and a label needn't be unique. That retires
-the uniqueness rule that used to force invented names on scripts.
+`get_target()` and `Default()` take. Every other builder takes `name=`
+optionally, and without one makes an *anonymous* target, labelled by what it
+builds; a label needn't be unique. That retires the uniqueness rule that used
+to force invented names on scripts.
 
 **Breaking:**
 
-- `name=` is gone from `Command`, `PyBuilder` calls, `Install`, `InstallAs`,
-  `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`, `android_apk()`,
-  `sign_apk()` and `create_universal_binary()`. Delete the argument; if you
-  built by that name, declare it with `project.Alias()` instead.
-- `project.Command(name, env, ...)` no longer takes the leading name. Drop it.
+- `name=` is now optional, and keyword-only, on `Command`, `PyBuilder` calls,
+  `Install`, `InstallAs`, `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`,
+  `android_apk()`, `sign_apk()` and `create_universal_binary()`. It used to be
+  required, to keep derived names from colliding, and no lookup answered to
+  it. It's now identity, as a `Program`'s name is: `get_target()`,
+  `Default()`, `pcons build` and `sub::name@env` from another script all find
+  the target. Leave it out and the target is anonymous; if you built it by
+  that name, give it an alias.
+- `project.Command(name, env, ...)` no longer takes the leading name. Pass
+  `name=` instead, or drop it.
 - Labels are written differently: a command or archive wears its first
   output's path (`gen/config.h`), an install its destination
   (`install_lib`), a `Test` the test's own name. Anything reading
@@ -69,6 +75,12 @@ the uniqueness rule that used to force invented names on scripts.
   allows the `-l:libfoo.a` GNU linker format.
 
 ### Fixed
+
+- `target.depends(alias)` now means what it says. An alias was accepted and
+  silently dropped; it now stands for every target and file the alias groups,
+  nested aliases included, and member targets contribute their public usage
+  requirements like a direct `depends(target)`. Members added by a later
+  `Alias()` call count too.
 
 - `android_deployment_settings()` now writes into the application's own
   package directory instead of one fixed name under the project's build
