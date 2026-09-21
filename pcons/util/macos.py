@@ -147,6 +147,8 @@ def create_universal_binary(
     project: Project,
     inputs: list[Target | FileNode | Path | str],
     output: Path | str,
+    *,
+    name: str | None = None,
 ) -> Target:
     """Create a macOS universal binary by combining architecture-specific binaries.
 
@@ -162,6 +164,11 @@ def create_universal_binary(
                 Can be Target objects (uses their output files), FileNode objects,
                 or Path/str paths to files.
         output: Path for the output universal binary.
+        name: Optional name for this target. Give one to refer to it by
+              name later: ``get_target()``, ``Default()``, ``pcons build``,
+              and ``sub::name@env`` from another build script. It must then
+              be unique within its environment and project. Leave it out and
+              the target needs no name.
 
     Returns:
         Target object representing the universal binary.
@@ -222,6 +229,7 @@ def create_universal_binary(
         env = Environment()
 
     lipo_target = env.Command(
+        name=name,
         target=output_path,
         source=sources,
         command="lipo -create -output $TARGET $SOURCES",

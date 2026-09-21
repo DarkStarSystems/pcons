@@ -1449,6 +1449,7 @@ class Environment(_EnvironmentStubs):
         tool: Target | str | Path | None = None,
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
         command: str | Sequence[str | Target | FileNode] = "",
+        name: str | None = None,
         depends: str | Path | Sequence[str | Path] | None = None,
         restat: bool = False,
         write_if_different: bool = False,
@@ -1565,6 +1566,11 @@ class Environment(_EnvironmentStubs):
                     token that must contain a space goes in the list form,
                     which isn't split on whitespace; one whose quotes really
                     are meant goes in ``Verbatim(...)``.
+            name: Optional name for this target. Give one to refer to it by
+                  name later: ``get_target()``, ``Default()``, ``pcons
+                  build``, and ``sub::name@env`` from another build script.
+                  It must then be unique within its environment and project.
+                  Leave it out and the target needs no name.
             depends: Extra files that trigger a rebuild when changed, but
                     don't appear in $SOURCE/$SOURCES. These become implicit
                     dependencies (after ``|`` in ninja). Useful for scripts,
@@ -1793,11 +1799,11 @@ class Environment(_EnvironmentStubs):
 
         # Create Target object
         cmd_target = TargetClass(
-            label,
+            name or label,
             target_type="command",
             defined_at=get_caller_location(),
             env=self,
-            anonymous=True,
+            anonymous=name is None,
         )
         cmd_target._builder_name = "Command"
         # A command makes a product, so a plain `ninja` builds it. A script
@@ -1898,8 +1904,8 @@ class Environment(_EnvironmentStubs):
         is refused at configure time rather than at build time, and so is a
         keyword the function's signature cannot take.
 
-        ``target``, ``source`` and ``depends`` are refused as parameter
-        names: the call spends them on the edge.
+        ``target``, ``source``, ``name`` and ``depends`` are refused as
+        parameter names: the call spends them on the edge.
 
         ``depfile`` and ``deps_style`` are deliberately absent: a function
         that discovers its own dependencies has to write a make-style depfile

@@ -3,8 +3,9 @@
 
 The builders a script names targets for — Program, StaticLibrary — keep the
 uniqueness rule. The ones that derive a label — Command, Install, Tarfile,
-Test — do not, because the label says nothing about which target is meant,
-and they take no name of their own.
+Test — do not, because the label says nothing about which target is meant.
+Most of those take an optional ``name=``, and a call that gives one gets a
+named target back, with the same identity a Program's name carries.
 """
 
 import pytest
@@ -172,15 +173,48 @@ def test_a_test_name_is_written_for_a_person(project):
     assert project.Test("server connects", program).name == "server connects"
 
 
-class TestAnonymousBuildersTakeNoName:
-    def test_command_refuses_a_name(self, project):
+class TestANameMakesTheTargetNamed:
+    """`name=` is optional on these builders, and giving one is an identity."""
+
+    def test_a_named_command_is_not_anonymous(self, project):
+        env = project.Environment()
+        made = env.Command(target="foo.h", command="touch $TARGET", name="gen")
+
+        assert made.name == "gen"
+        assert not made.anonymous
+
+    def test_get_target_finds_it(self, project):
+        env = project.Environment()
+        made = env.Command(target="foo.h", command="touch $TARGET", name="gen")
+
+        assert project.get_target("gen") is made
+
+    def test_a_second_command_of_that_name_raises(self, project):
+        env = project.Environment()
+        env.Command(target="foo.h", command="touch $TARGET", name="gen")
+
+        with pytest.raises(ValueError, match="Target 'gen' already exists"):
+            env.Command(target="foo.c", command="touch $TARGET", name="gen")
+
+    def test_two_environments_part_one_name(self, project):
+        a = project.Environment(name="a")
+        b = project.Environment(name="b")
+
+        first = a.Command(target="a/foo.h", command="touch $TARGET", name="gen")
+        second = b.Command(target="b/foo.h", command="touch $TARGET", name="gen")
+
+        assert project.get_target("gen@a") is first
+        assert project.get_target("gen@b") is second
+
+    def test_a_named_install_is_found_by_name(self, project, tmp_path):
+        (tmp_path / "a.txt").touch()
+        made = project.Install("dist", [tmp_path / "a.txt"], name="staged")
+
+        assert not made.anonymous
+        assert project.get_target("staged") is made
+
+    def test_a_name_goes_through_the_character_rule(self, project):
         env = project.Environment()
 
-        with pytest.raises(TypeError, match="name"):
-            env.Command(target="foo.h", command="touch $TARGET", name="x")
-
-    def test_install_refuses_a_name(self, project, tmp_path):
-        (tmp_path / "a.txt").touch()
-
-        with pytest.raises(TypeError, match="name"):
-            project.Install("dist", [tmp_path / "a.txt"], name="x")
+        with pytest.raises(ValueError, match="invalid characters"):
+            env.Command(target="foo.h", command="touch $TARGET", name="gen it")

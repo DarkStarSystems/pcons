@@ -225,6 +225,7 @@ class TarfileBuilder:
         sources: Sequence[str | Path | FileNode | Target] | None = None,
         compression: str | None = None,
         base_dir: str | Path | None = None,
+        name: str | None = None,
     ) -> ArchiveTarget:
         """Create a Tarfile target.
 
@@ -235,6 +236,11 @@ class TarfileBuilder:
             sources: Input files, directories, and/or Targets.
             compression: Compression type (None, "gzip", "bz2", "xz").
             base_dir: Base directory for archive paths.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
 
         Returns:
             ArchiveTarget representing the archive, with settable properties.
@@ -253,12 +259,12 @@ class TarfileBuilder:
             # .tar gets no compression
 
         target = ArchiveTarget(
-            output_label(env, output_path),
+            name or output_label(env, output_path),
             target_type="archive",
             defined_at=get_caller_location(),
             project=project,
             env=env,
-            anonymous=True,
+            anonymous=name is None,
         )
 
         target._builder_name = "Tarfile"
@@ -296,6 +302,7 @@ class ZipfileBuilder:
         output: str | Path,
         sources: Sequence[str | Path | FileNode | Target] | None = None,
         base_dir: str | Path | None = None,
+        name: str | None = None,
     ) -> ArchiveTarget:
         """Create a Zipfile target.
 
@@ -305,6 +312,11 @@ class ZipfileBuilder:
             output: Output archive path.
             sources: Input files, directories, and/or Targets.
             base_dir: Base directory for archive paths.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
 
         Returns:
             ArchiveTarget representing the archive, with settable properties.
@@ -312,12 +324,12 @@ class ZipfileBuilder:
         output_path = anchor_target_paths(env, [output])[0]
 
         target = ArchiveTarget(
-            output_label(env, output_path),
+            name or output_label(env, output_path),
             target_type="archive",
             defined_at=get_caller_location(),
             project=project,
             env=env,
-            anonymous=True,
+            anonymous=name is None,
         )
 
         target._builder_name = "Zipfile"

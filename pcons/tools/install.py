@@ -186,26 +186,28 @@ def _make_install_target(
     sources: Sequence[Target | Node | Path | str],
     *,
     env: Environment | None = None,
+    anonymous: bool = True,
     defined_at: SourceLocation,
 ) -> Target:
     """Create an interface Target carrying install builder metadata.
 
-    The target is anonymous: its name is a label read off the destination,
-    so several installs into one place wear one.
+    Without a ``name=`` the target is anonymous: its name is a label read off
+    the destination, so several installs into one place wear one.
 
     *env*, when the caller named one, is the environment the destination is
-    anchored under and the copy command comes from.
+    anchored under and the copy command comes from. It is part of a named
+    target's identity, so it goes in at construction.
     """
     install_target = Target(
         target_name,
         target_type="interface",
         defined_at=defined_at,
         project=project,
-        anonymous=True,
+        env=env,
+        anonymous=anonymous,
     )
     if env is not None:
         builder_data["env"] = env
-        install_target._env = env
     install_target._builder_name = builder_name
     # An install operates on products, so it is a step: `ninja all`, an
     # alias, or its name (see pcons.core.tiers).
@@ -670,6 +672,7 @@ class InstallBuilder:
         sources: Sequence[Target | FileNode | Path | str],
         *,
         env: Environment | None = None,
+        name: str | None = None,
         no_prefix: bool = False,
         mode: int | None = None,
     ) -> Target:
@@ -685,6 +688,11 @@ class InstallBuilder:
                 project's build directory, which is what a plain
                 ``project.Install("lib", ...)`` wants; name an environment
                 when the destination has to follow its ``build_prefix``.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
             no_prefix: If True, do not prepend the install prefix to the destination.
             mode: Permissions for the installed copy, e.g. ``0o755``. The copy
                 otherwise carries the source's, which is usually right — this
@@ -695,7 +703,7 @@ class InstallBuilder:
             A Target representing the install operation.
         """
         dest_dir = Path(dest_dir)
-        target_name = _install_target_name(project, dest_dir, "install")
+        target_name = name or _install_target_name(project, dest_dir, "install")
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
         return _make_install_target(
@@ -705,6 +713,7 @@ class InstallBuilder:
             _with_mode({"dest_dir": str(dest_dir)}, mode),
             list(sources),
             env=env,
+            anonymous=name is None,
             defined_at=get_caller_location(),
         )
 
@@ -729,6 +738,7 @@ class InstallAsBuilder:
         source: Target | FileNode | Path | str,
         *,
         env: Environment | None = None,
+        name: str | None = None,
         no_prefix: bool = False,
         mode: int | None = None,
     ) -> Target:
@@ -744,6 +754,11 @@ class InstallAsBuilder:
                 project's build directory, which is what a plain
                 ``project.Install("lib", ...)`` wants; name an environment
                 when the destination has to follow its ``build_prefix``.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
             no_prefix: If True, do not prepend the install prefix to the destination.
             mode: Permissions for the installed copy, e.g. ``0o755``. The copy
                 otherwise carries the source's, which is usually right — this
@@ -768,7 +783,7 @@ class InstallAsBuilder:
         dest = Path(dest)
         # InstallAs names a *file*, so the whole path goes into the label:
         # two files installed into one directory read differently.
-        target_name = _install_target_name(project, dest, "install")
+        target_name = name or _install_target_name(project, dest, "install")
         dest = _apply_install_prefix(project, dest, no_prefix)
 
         return _make_install_target(
@@ -778,6 +793,7 @@ class InstallAsBuilder:
             _with_mode({"dest": str(dest)}, mode),
             [source],
             env=env,
+            anonymous=name is None,
             defined_at=get_caller_location(),
         )
 
@@ -805,6 +821,7 @@ class InstallDirBuilder:
         source: Target | FileNode | Path | str,
         *,
         env: Environment | None = None,
+        name: str | None = None,
         no_prefix: bool = False,
     ) -> Target:
         """Create an InstallDir target.
@@ -819,13 +836,18 @@ class InstallDirBuilder:
                 project's build directory, which is what a plain
                 ``project.Install("lib", ...)`` wants; name an environment
                 when the destination has to follow its ``build_prefix``.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
             no_prefix: If True, do not prepend the install prefix to the destination.
 
         Returns:
             A Target representing the install operation.
         """
         dest_dir = Path(dest_dir)
-        target_name = _install_target_name(project, dest_dir, "install_dir")
+        target_name = name or _install_target_name(project, dest_dir, "install_dir")
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
         return _make_install_target(
@@ -835,6 +857,7 @@ class InstallDirBuilder:
             {"dest_dir": str(dest_dir)},
             [source],
             env=env,
+            anonymous=name is None,
             defined_at=get_caller_location(),
         )
 
@@ -907,6 +930,7 @@ class OverlayDirBuilder:
         dest_dir: Path | str,
         sources: Sequence[Path | str | FileNode | Target],
         *,
+        name: str | None = None,
         exclude: Sequence[str] = (),
     ) -> Target:
         """Create an OverlayDir target.
@@ -919,6 +943,11 @@ class OverlayDirBuilder:
                 directory.
             sources: Source tree roots, in increasing precedence: the last
                 one wins a path the others also hold.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
             exclude: Glob patterns dropped from every source tree, matched
                 against paths relative to each source root. A pattern
                 matching nothing is not an error: source trees legitimately
@@ -928,16 +957,16 @@ class OverlayDirBuilder:
             A Target whose one output is the stamp of the staged tree.
         """
         dest_dir = Path(dest_dir)
-        target_name = _install_target_name(project, dest_dir, "overlay")
+        target_name = name or _install_target_name(project, dest_dir, "overlay")
         anchored = anchor_target_paths(env, [dest_dir], target_name=target_name)[0]
 
-        target = _make_install_target(
+        return _make_install_target(
             project,
             target_name,
             "OverlayDir",
             {"dest_dir": str(anchored), "exclude": list(exclude)},
             list(sources),
+            env=env,
+            anonymous=name is None,
             defined_at=get_caller_location(),
         )
-        target._env = env
-        return target

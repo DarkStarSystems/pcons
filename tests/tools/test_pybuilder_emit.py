@@ -736,8 +736,8 @@ class TestReservedNames:
             if parameter.kind is inspect.Parameter.KEYWORD_ONLY
         }
 
-    def test_it_holds_the_three_names_the_call_names_today(self) -> None:
-        assert _reserved_names() == {"target", "source", "depends"}
+    def test_it_holds_the_four_names_the_call_names_today(self) -> None:
+        assert _reserved_names() == {"target", "source", "name", "depends"}
 
     def test_it_excludes_self_and_the_functions_own_arguments(self) -> None:
         assert "self" not in _reserved_names()

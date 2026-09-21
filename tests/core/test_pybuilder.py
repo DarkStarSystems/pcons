@@ -180,6 +180,42 @@ class TestDecoration:
             report("out.txt")  # ty: ignore[too-many-positional-arguments]
 
 
+class TestTheEdgeMayBeNamed:
+    """`name=` reaches the Command the edge becomes, and is an identity."""
+
+    def _builder(self, env: Any) -> Any:
+        @env.PyBuilder()
+        def report(targets, sources):
+            from pathlib import Path
+
+            Path(targets[0]).write_text(Path(sources[0]).read_text())
+
+        return report
+
+    def test_an_unnamed_edge_is_anonymous(self, project: Project, env: Any) -> None:
+        made = self._builder(env)(target="report.txt", source=["a.txt"])
+
+        assert made.anonymous
+        assert made.name == "report.txt"
+
+    def test_a_named_edge_is_found_by_name(self, project: Project, env: Any) -> None:
+        made = self._builder(env)(
+            target="report.txt", source=["a.txt"], name="report-gen"
+        )
+
+        assert not made.anonymous
+        assert project.get_target("report-gen") is made
+
+    def test_the_name_is_reserved_in_the_function(
+        self, project: Project, env: Any
+    ) -> None:
+        with pytest.raises(PyBuilderError, match="name"):
+
+            @env.PyBuilder()
+            def report(targets, sources, name):
+                pass
+
+
 class TestCommandShape:
     def test_the_runner_is_named_as_a_script(self, project: Project, env: Any) -> None:
         command = tokens(one_source(project, env))

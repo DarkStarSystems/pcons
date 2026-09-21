@@ -155,6 +155,7 @@ def android_apk(
     output: str | Path | None = None,
     release: bool = False,
     no_build: bool = False,
+    name: str | None = None,
 ) -> Target:
     """Run androiddeployqt, and Gradle under it, to build the package.
 
@@ -182,6 +183,11 @@ def android_apk(
                   mode, not a way to stop before Gradle. It writes no
                   package, so the target is a stamp and is not built by
                   default.
+        name: Optional name for this target. Give one to refer to it by
+              name later: ``get_target()``, ``Default()``, ``pcons build``,
+              and ``sub::name@env`` from another build script. It must then
+              be unique within its environment and project. Leave it out and
+              the target needs no name.
 
     Returns:
         The command target: the package, or the stamp under ``no_build``.
@@ -227,6 +233,7 @@ def android_apk(
         produced = apk_path(env, app, output=directory, release=release)
 
     result = env.Command(
+        name=name,
         target=produced,
         tool=tool,
         source=[Path(settings), staged],
@@ -283,6 +290,7 @@ def sign_apk(
     key_password: str | None = None,
     output: str | Path | None = None,
     apksigner: str | Path | None = None,
+    name: str | None = None,
 ) -> Target:
     """Sign a release package with apksigner, on an edge of its own.
 
@@ -326,6 +334,11 @@ def sign_apk(
                 :func:`~pcons.toolchains.qt.android.android_output_dir`.
         apksigner: The apksigner program. Default: the highest build-tools
                    revision installed under the SDK the Android preset names.
+        name: Optional name for this target. Give one to refer to it by
+              name later: ``get_target()``, ``Default()``, ``pcons build``,
+              and ``sub::name@env`` from another build script. It must then
+              be unique within its environment and project. Leave it out and
+              the target needs no name.
 
     Returns:
         The signing target, one package.
@@ -372,6 +385,7 @@ def sign_apk(
     command += ["--out", "$TARGET", "${SOURCES[0]}"]
 
     signed = env.Command(
+        name=name,
         target=signed_apk_path(env, app, output=output),
         tool=tool,
         source=[apk],

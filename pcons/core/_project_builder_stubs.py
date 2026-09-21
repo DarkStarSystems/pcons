@@ -77,6 +77,7 @@ if TYPE_CHECKING:
             tool: Target | str | Path | None = None,
             source: str | Path | list[str | Path] | None = None,
             command: str | Sequence[Any] = '',
+            name: str | None = None,
             restat: bool = False,
             write_if_different: bool = False,
             cwd: str | Path | None = None,
@@ -150,6 +151,7 @@ if TYPE_CHECKING:
             sources: Sequence[Target | FileNode | Path | str],
             *,
             env: Env | None = None,
+            name: str | None = None,
             no_prefix: bool = False,
             mode: int | None = None,
         ) -> Target:
@@ -162,6 +164,7 @@ if TYPE_CHECKING:
             source: Target | FileNode | Path | str,
             *,
             env: Env | None = None,
+            name: str | None = None,
             no_prefix: bool = False,
             mode: int | None = None,
         ) -> Target:
@@ -174,6 +177,7 @@ if TYPE_CHECKING:
             source: Target | FileNode | Path | str,
             *,
             env: Env | None = None,
+            name: str | None = None,
             no_prefix: bool = False,
         ) -> Target:
             """Install a directory tree to a destination."""
@@ -239,6 +243,7 @@ if TYPE_CHECKING:
             dest_dir: Path | str,
             sources: Sequence[Path | str | FileNode | Target],
             *,
+            name: str | None = None,
             exclude: Sequence[str] = (),
         ) -> Target:
             """Merge several source trees into one directory, later sources winning."""
@@ -403,6 +408,7 @@ if TYPE_CHECKING:
             sources: Sequence[str | Path | FileNode | Target] | None = None,
             compression: str | None = None,
             base_dir: str | Path | None = None,
+            name: str | None = None,
         ) -> ArchiveTarget:
             """Create a tar archive from source files/directories."""
             ...
@@ -434,6 +440,7 @@ if TYPE_CHECKING:
             output: str | Path,
             sources: Sequence[str | Path | FileNode | Target] | None = None,
             base_dir: str | Path | None = None,
+            name: str | None = None,
         ) -> ArchiveTarget:
             """Create a zip archive from source files/directories."""
             ...

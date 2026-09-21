@@ -1268,6 +1268,7 @@ class PyBuilder:
         *,
         target: str | Path | list[str | Path],
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
+        name: str | None = None,
         depends: str | Path | Sequence[str | Path] | None = None,
         **kwargs: Any,
     ) -> Target:
@@ -1291,6 +1292,13 @@ class PyBuilder:
             target: Output file or files, as ``env.Command`` takes them.
             source: Input files, or None. They arrive as the function's
                 *sources*, in the order written.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name. Does not affect the argument
+                pickle, which is named after the first target's own
+                build-relative path.
             depends: Extra rebuild triggers that are not sources, for this
                 edge alone. Added to whatever the decoration's own
                 ``depends=`` and :meth:`depends` gave the builder.
@@ -1325,6 +1333,7 @@ class PyBuilder:
         made = self._env.Command(
             target=target,
             source=source,
+            name=name,
             command=[
                 interpreter,
                 self._project.node(runner_rel),
