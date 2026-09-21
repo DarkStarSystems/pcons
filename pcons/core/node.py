@@ -488,6 +488,15 @@ class AliasNode(Node):
             result.extend(nodes)
         return result
 
+    @property
+    def members(self) -> list[Target | Node]:
+        """What this alias groups, as it was given to Alias().
+
+        Unlike ``targets``, a member target stays a Target, so a dependent
+        of the alias can take its usage requirements as well as its output.
+        """
+        return [*self._nodes, *self._target_refs]
+
     def add_target(self, node: Node) -> None:
         """Add a node to this alias."""
         self._nodes.append(node)
