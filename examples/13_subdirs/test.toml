@@ -1,7 +1,7 @@
 # Test configuration for subdirs example
 
 [test]
-description = "Nested subdirectories with add_subdirectory(), plus a generator declared two levels down in libfoo/libbar: its output lands in that subdirectory's build directory and its inputs are read from that subdirectory"
+description = "Nested subdirectories with add_subdirectory(), a sibling's library handed down with imports=, and a generator declared two levels down in libfoo/libbar: its output lands in that subdirectory's build directory and its inputs are read from that subdirectory"
 # Both libraries claim to build either way. Build each on its own as well as
 # embedded, so that claim stays true. libfoo/libbar also covers the two-level
 # case: it sits one level down standalone and two levels down from here, and
@@ -22,6 +22,13 @@ expected_outputs = [
     "build/libfoo/obj.foo/libfoo/src/foo.c.o",
     "build/app/obj.app/app/src/main.c.o",
     "build/app/app",
+]
+
+[verify]
+commands = [
+    # "Hello, World!" is foo_greet from the libfoo target the parent handed
+    # over with `imports=`, ending in the "!" libbar contributes below it.
+    { run = "./build/app/app", expect_stdout = "Hello, World!" },
 ]
 
 [[rebuild]]

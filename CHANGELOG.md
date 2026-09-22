@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `add_subdirectory(..., imports={...})` hands objects down to an included
+  script, which reads them as `project.imports["icons"]`: targets,
+  environments, paths, anything a directory needs from its parent or from a
+  sibling. Built standalone it gets an empty mapping, so a script that does
+  both reads `project.imports.get(...)`.
+
 ### Changed
 
 **Named and anonymous targets** (#194)

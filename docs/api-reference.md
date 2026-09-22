@@ -25,6 +25,8 @@ API:
 | `project.add_package_finder(finder)` | Prepend a custom package finder |
 | `project.add_package_finder(finder, env=env)` | Same, used in that environment only |
 | `project.add_subdirectory(subdir, pick=None)` | Run a subdirectory's `pcons-build.py` as part of this project (also available as a bare `add_subdirectory()`) |
+| `project.add_subdirectory(subdir, env=, vars=, imports=)` | Same, choosing the environment it builds in, the build variables it reads, and the objects it reads as `project.imports` |
+| `project.imports` | The objects this directory's inclusion was handed; empty for a top-level project |
 | `project.add_configure_dependency(path)` | Declare a file the build description read, so editing it re-runs pcons |
 | `project.generated_input(path)` | A build-time-generated file to read: the path once it exists, else `None` |
 | `project.when_generated(*paths)` | Decorator: run a block only once every named file has been generated |
