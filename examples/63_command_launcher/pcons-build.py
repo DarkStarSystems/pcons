@@ -26,19 +26,20 @@ prefix_log = str(project.root_dir / "tools" / "prefix_log.py").replace("\\", "/"
 # Launcher tokens are passed to the build tool as written, so paths in them
 # must be absolute: the command runs from the build directory, and pcons does
 # not rewrite them the way it rewrites an edge's own inputs and outputs.
-# `build_dir` is relative to the project root, hence the join.
-log = str(project.root_dir / project.build_dir / "launchers.log").replace("\\", "/")
+# `build_dir` is relative to the project root, hence the join. Each launcher
+# process drops its own record in this directory; see check_launchers.py.
+logdir = str(project.root_dir / project.build_dir / "launchers").replace("\\", "/")
 
 # Outermost first: "cache" runs "timer", which runs the compiler.
 env.cc.launcher = [
     python,
     prefix_log,
     "cache",
-    log,
+    logdir,
     python,
     prefix_log,
     "timer",
-    log,
+    logdir,
 ]
 
 hello = project.Program("hello", env, sources=[project.root_dir / "src" / "hello.c"])
@@ -56,5 +57,5 @@ manifest = env.Command(
         "$SOURCE",
         "$TARGET",
     ],
-    launcher=[python, prefix_log, "command", log],
+    launcher=[python, prefix_log, "command", logdir],
 )
