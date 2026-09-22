@@ -82,6 +82,11 @@ to force invented names on scripts.
   requirements like a direct `depends(target)`. Members added by a later
   `Alias()` call count too.
 
+- An exported `PCONS_BUILD_DIR` that points at another project's build
+  directory no longer overwrites that project's build files: `pcons` stops
+  and says which project the directory belongs to. An explicit `-B` still
+  builds there, with the existing warning. (#190)
+
 - `android_deployment_settings()` now writes into the application's own
   package directory instead of one fixed name under the project's build
   directory. Two applications, two build prefixes, or two
