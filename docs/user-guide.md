@@ -3784,7 +3784,7 @@ pkg = macos.create_pkg(
 | `sources` | List of Targets, FileNodes, or paths to package |
 | `install_location` | Where files are installed (default: `"/Applications"`) |
 | `min_os_version` | Minimum macOS version (e.g., `"10.13"`) |
-| `welcome`, `readme`, `license`, `conclusion` | Installer UI pages (`.rtf` or `.html`) |
+| `welcome`, `readme`, `license`, `conclusion` | Installer UI pages (`.txt`, `.rtf` or `.html`) |
 | `background` | Background image for the installer |
 | `scripts_dir` | Directory with `preinstall`/`postinstall` scripts |
 | `sign_identity` | Code signing identity |

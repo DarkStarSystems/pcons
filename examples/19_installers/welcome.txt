@@ -1,0 +1,4 @@
+Welcome to the HelloApp installer.
+
+This example package installs a small command-line program, hello,
+into /usr/local/bin. It is built by pcons from examples/19_installers.

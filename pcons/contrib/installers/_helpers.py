@@ -162,6 +162,7 @@ def generate_distribution_xml(
     welcome: Path | None = None,
     readme: Path | None = None,
     license: Path | None = None,
+    conclusion: Path | None = None,
     background: Path | None = None,
     host_architectures: str = "x86_64,arm64",
 ) -> None:
@@ -179,6 +180,7 @@ def generate_distribution_xml(
         welcome: Path to welcome.rtf or welcome.html.
         readme: Path to readme file.
         license: Path to license file.
+        conclusion: Path to the page shown when the install finishes.
         background: Path to background image.
         host_architectures: Supported architectures (comma-separated).
     """
@@ -200,6 +202,8 @@ def generate_distribution_xml(
         lines.append(f'    <readme file="{readme.name}"/>')
     if license:
         lines.append(f'    <license file="{license.name}"/>')
+    if conclusion:
+        lines.append(f'    <conclusion file="{conclusion.name}"/>')
     if background:
         lines.append(
             f'    <background file="{background.name}" alignment="bottomleft"/>'
@@ -452,6 +456,7 @@ def main() -> int:
     dist_parser.add_argument("--welcome", help="Path to welcome file")
     dist_parser.add_argument("--readme", help="Path to readme file")
     dist_parser.add_argument("--license", help="Path to license file")
+    dist_parser.add_argument("--conclusion", help="Path to conclusion file")
     dist_parser.add_argument("--background", help="Path to background image")
 
     # gen_appx_manifest command
@@ -510,6 +515,7 @@ def main() -> int:
             welcome=Path(args.welcome) if args.welcome else None,
             readme=Path(args.readme) if args.readme else None,
             license=Path(args.license) if args.license else None,
+            conclusion=Path(args.conclusion) if args.conclusion else None,
             background=Path(args.background) if args.background else None,
         )
     elif args.command == "gen_appx_manifest":
