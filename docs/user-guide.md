@@ -288,7 +288,15 @@ A `module.modulemap` can be generated instead of hand-written —
 directory for `public.include_dirs`. For distributable libraries,
 `env.swiftc.library_evolution = True` builds with
 `-enable-library-evolution` and emits a `.swiftinterface` next to the
-`.swiftmodule`. And Swift participates in cross presets: two lines target
+`.swiftmodule`.
+
+The Swift language mode is `env.swiftc.language_mode`, passed to every
+compile as `-swift-version`. It defaults to `"5"`, which is swiftc's own
+default on every version; set it to `"6"` for Swift 6 language mode and its
+strict concurrency checking. It is always passed because Swift 6 refuses to
+emit a module interface unless the mode is stated explicitly.
+
+And Swift participates in cross presets: two lines target
 iOS (see `examples/49_swift_ios`):
 
 ```python

@@ -47,6 +47,17 @@ def swift_project(tmp_path, swift_toolchain):
     return project, env
 
 
+def _generate_ninja(project) -> str:
+    """Generate build.ninja and return its content (slashes normalized)."""
+    from pcons.generators.generator import BaseGenerator
+    from pcons.generators.ninja import NinjaGenerator
+
+    NinjaGenerator().generate(project)
+    BaseGenerator._generate_pending(project)
+    ninja = project.root_dir / project.build_dir / "build.ninja"
+    return ninja.read_text().replace("\\", "/")
+
+
 class TestModuleName:
     def test_plain_name_unchanged(self) -> None:
         assert module_name_for("Geometry") == "Geometry"
@@ -200,6 +211,24 @@ class TestClangModuleMap:
         first_mtime = map_file.stat().st_mtime_ns
         map_file2 = clang_module_map(project, "CLib", ["clib.h"]) / "module.modulemap"
         assert map_file2.stat().st_mtime_ns == first_mtime  # untouched
+
+
+class TestLanguageMode:
+    """-swift-version: swiftc 6 needs it stated to emit a .swiftinterface."""
+
+    def test_default_is_mode_5(self, swift_project) -> None:
+        project, env = swift_project
+        assert env.swiftc.language_mode == "5"
+        project.Program("hello", env, sources=["src/main.swift"])
+        assert "-swift-version 5" in _generate_ninja(project)
+
+    def test_explicit_mode_6(self, swift_project) -> None:
+        project, env = swift_project
+        env.swiftc.language_mode = "6"
+        project.Program("hello", env, sources=["src/main.swift"])
+        ninja = _generate_ninja(project)
+        assert "-swift-version 6" in ninja
+        assert "-swift-version 5" not in ninja
 
 
 class TestLibraryEvolution:

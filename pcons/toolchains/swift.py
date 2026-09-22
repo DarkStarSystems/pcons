@@ -145,6 +145,9 @@ class SwiftCompiler(BaseTool):
             # When true, library modules build with -enable-library-evolution
             # and emit a .swiftinterface (for distributable/resilient libs).
             "library_evolution": False,
+            # Always passed: Swift 6 refuses to emit a .swiftinterface
+            # unless the language mode is stated. "5" is swiftc's own default.
+            "language_mode": "5",
             # -emit-dependencies-path is frontend-only; with -wmo there is
             # exactly one frontend job, so -Xfrontend passing is reliable.
             "depflags": [
@@ -157,6 +160,8 @@ class SwiftCompiler(BaseTool):
                 "$swiftc.cmd",
                 "-emit-object",
                 "-wmo",
+                "-swift-version",
+                "$swiftc.language_mode",
                 "-module-name",
                 "$MODULE_NAME",
                 "$MODULE_FLAGS",
