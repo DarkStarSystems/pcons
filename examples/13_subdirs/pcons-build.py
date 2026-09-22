@@ -3,7 +3,8 @@
 
 This example shows how to organize a project with subdirectories. A subdir
 whose dependencies all sit below it builds standalone as well as here; one
-that reaches sideways, as app does, builds as part of this project.
+that reaches sideways, as app does, builds as part of this project and is
+handed what it needs with `imports=`.
 
 Structure:
   13_subdirs/
@@ -38,6 +39,8 @@ env = project.Environment(toolchain="c")
 # defined in the subdir's pcons-build.py.  libfoo/pcons-build.py assigns
 # `libfoo = project.StaticLibrary(...)` at module scope, so it is exported.
 libfoo_ns = add_subdirectory("libfoo")
-# libfoo_ns.libfoo is the StaticLibrary target, pass it to dependents if needed.
 
-add_subdirectory("app")
+# The return value is the way up; `imports=` is the way down. app sits beside
+# libfoo rather than below it, so it has no way of its own to reach that
+# target: this script hands it over, and app reads it as `project.imports`.
+add_subdirectory("app", imports={"libfoo": libfoo_ns.libfoo})

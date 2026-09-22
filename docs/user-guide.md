@@ -1011,10 +1011,35 @@ project.get_target("foo@host")
 
 #### Reaching a target another script declared
 
-There are two ways across the boundary. `add_subdirectory()`'s return value
-hands you the child's targets as objects, which is the direct route when the
-parent includes the child itself. The other is by name: the child names the
-target, and any script in the build looks it up.
+There are three ways across the boundary, one per direction.
+
+`add_subdirectory()`'s return value is the way up, for what the parent wants
+from what the child made; that's the `libfoo.libfoo` above.
+
+`imports=` is the way down, for what a directory needs from its parent or from
+a sibling:
+
+```python
+# the parent
+icons = add_subdirectory("icons")
+add_subdirectory("app", imports={"icons": icons.icon_header})
+```
+
+```python
+# app/pcons-build.py
+app.depends(project.imports["icons"])
+```
+
+Anything travels that way: targets, environments, paths, functions, plain
+values. Each inclusion has its own mapping, so a grandchild sees only what its
+own parent passed, and a directory included once per environment can get
+different objects each time. Built standalone, a script gets an empty mapping,
+so it reads `project.imports.get("icons")` and does without.
+`examples/13_subdirs` hands a library down this way to the sibling that links
+it.
+
+The third way is by name, and it goes either direction: the declaring script
+names the target, and any script in the build looks it up.
 
 ```python
 # libfoo/pcons-build.py
@@ -1026,12 +1051,12 @@ stamp = env.Command(target="stamp.txt", command="...", name="stamp")
 app.depends(project.get_target("libfoo::stamp@host"))
 ```
 
-Prefer the return value when the parent includes the child directly; it's one
-less name to keep in step. Prefer the name when threading objects around is
-awkward: a sibling subdirectory the parent hands nothing to, or a loop over
-environments that declares a target per pass, where every pass writes the same
-`name=` and the environment tells the copies apart. `examples/75_multi_env`
-does the latter, with `parity::stamp@host` and `parity::stamp@strict`.
+Prefer the objects: the return value when the parent wants the child's target,
+`imports=` when the child wants the parent's or a sibling's. Prefer the name
+when threading objects around is awkward, such as a loop over environments that
+declares a target per pass, where every pass writes the same `name=` and the
+environment tells the copies apart. `examples/75_multi_env` does that, with
+`parity::stamp@host` and `parity::stamp@strict`.
 
 #### Configuring what you include
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
@@ -243,6 +243,32 @@ def _graph_detail(spec: str | None) -> dict[str, bool]:
     return options
 
 
+class Imports(Mapping[str, Any]):
+    """The objects an inclusion was handed, read as ``project.imports``."""
+
+    def __init__(self, given: Mapping[str, Any]) -> None:
+        self._given = dict(given)
+
+    def __getitem__(self, key: str) -> Any:
+        if key not in self._given:
+            given = ", ".join(repr(k) for k in self._given) or "nothing"
+            raise KeyError(
+                f"{key!r} was not handed to this directory. The including "
+                f"script passes objects down with "
+                f"add_subdirectory(imports={{...}}); it passed: {given}."
+            )
+        return self._given[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._given)
+
+    def __len__(self) -> int:
+        return len(self._given)
+
+
+_NO_IMPORTS = Imports({})
+
+
 class Project(_ProjectBuilders):
     """Top-level container for a pcons build.
 
@@ -299,6 +325,7 @@ class Project(_ProjectBuilders):
         "_children",
         "_subdir",
         "_offset",
+        "_imports",
         "__generated",
         "__weakref__",  # allow weak references (e.g. per-project caches)
     )
@@ -407,6 +434,11 @@ class Project(_ProjectBuilders):
             self._parent = Project.__parent_stack[-1]
         else:
             self._parent = None
+
+        # What this project's own inclusion was handed. The parent holds it
+        # while the included script runs, so a script that makes no Project
+        # of its own reads the same mapping off the parent's.
+        self._imports = self._parent._imports if self._parent else _NO_IMPORTS
 
         if self._parent:
             if build_dir is not None:
@@ -579,7 +611,10 @@ class Project(_ProjectBuilders):
 
     @contextmanager
     def _enter_subdir(
-        self, subdir: str | Path, env: Env | None = None
+        self,
+        subdir: str | Path,
+        env: Env | None = None,
+        imports: Mapping[str, Any] | None = None,
     ) -> Generator[None, None, None]:
         """Context manager for entering a subdirectory in the project.
 
@@ -591,10 +626,15 @@ class Project(_ProjectBuilders):
                 gets it instead of the parent's own first environment.
                 A nested entry inherits it and may override it for its own
                 subtree.
+            imports: Objects the entered script reads as ``project.imports``.
+                Each entry stands for one inclusion, so an entry that passes
+                none clears what an enclosing one passed.
         """
         old_subdir = self._subdir
         old_current = Project.__current
         old_default_env = Project.__default_env
+        old_imports = self._imports
+        self._imports = Imports(imports) if imports else _NO_IMPORTS
         self._subdir = subdir if old_subdir is None else f"{old_subdir}/{subdir}"
         # The entered project is the context: the subdirectory script's
         # Project.current() must mean this tree even when another sibling
@@ -608,6 +648,7 @@ class Project(_ProjectBuilders):
         finally:
             Project.__parent_stack.pop()
             self._subdir = old_subdir
+            self._imports = old_imports
             Project.__current = old_current
             Project.__default_env = old_default_env
 
@@ -695,6 +736,7 @@ class Project(_ProjectBuilders):
         *,
         env: Env | None = None,
         vars: Mapping[str, VarValue] | None = None,
+        imports: Mapping[str, Any] | None = None,
     ) -> Any:
         """Run *subdir*'s pcons-build.py as part of this project.
 
@@ -704,7 +746,32 @@ class Project(_ProjectBuilders):
         """
         from pcons.util.add_subdirectory import add_subdirectory
 
-        return add_subdirectory(subdir, pick, project=self, env=env, vars=vars)
+        return add_subdirectory(
+            subdir, pick, project=self, env=env, vars=vars, imports=imports
+        )
+
+    @property
+    def imports(self) -> Mapping[str, Any]:
+        """The objects this directory's inclusion was handed.
+
+        ``add_subdirectory("c", imports={"icons": icons})`` in the including
+        script, ``project.imports["icons"]`` here. Anything can travel this
+        way: targets, environments, paths, functions, plain values.
+
+        This is the way down. The other two directions:
+        ``add_subdirectory()``'s return value is the way up, for what the
+        parent wants from what the child made, and ``get_target("sub::name")``
+        reaches either way, for anything the declaring script gave a ``name``.
+        Use ``imports`` when a directory needs something its parent or a
+        sibling made, which is the case neither of the others covers.
+
+        Each inclusion has its own mapping, so a grandchild sees only what
+        its own parent passed, and a directory included twice can get
+        different objects each time. A top-level project, or a directory
+        included without ``imports=``, gets an empty mapping, so a script
+        that also builds standalone reads ``project.imports.get("icons")``.
+        """
+        return self._imports
 
     @property
     def config(self) -> Any:

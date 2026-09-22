@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
-from typing import overload
+from typing import Any, overload
 
 from pcons.core.environment import Environment as Env
 from pcons.core.invocation import RUN_NAME
@@ -68,6 +68,7 @@ def add_subdirectory(
     project: Project | None = None,
     env: Env | None = None,
     vars: Mapping[str, VarValue] | None = None,
+    imports: Mapping[str, Any] | None = None,
 ) -> tuple: ...
 
 
@@ -79,6 +80,7 @@ def add_subdirectory(
     project: Project | None = None,
     env: Env | None = None,
     vars: Mapping[str, VarValue] | None = None,
+    imports: Mapping[str, Any] | None = None,
 ) -> SimpleNamespace: ...
 
 
@@ -89,6 +91,7 @@ def add_subdirectory(
     project: Project | None = None,
     env: Env | None = None,
     vars: Mapping[str, VarValue] | None = None,
+    imports: Mapping[str, Any] | None = None,
 ) -> tuple | SimpleNamespace:
     """Adds a subdirectory to the project.
 
@@ -138,6 +141,21 @@ def add_subdirectory(
                 add_subdirectory("libfoo", vars={"LIBFOO_PYTHON": False})
 
             Names not mentioned keep whatever the command line gave them.
+        imports: Objects handed to the included script, which reads them as
+            ``project.imports``. This is the way down, for what a directory
+            needs from its parent or from a sibling::
+
+                b = add_subdirectory("b")
+                add_subdirectory("c", imports={"icons": b.icons})
+
+                # c/pcons-build.py
+                app.depends(project.imports["icons"])
+
+            Anything can travel: targets, environments, paths, functions,
+            plain values. Each inclusion has its own mapping, so a grandchild
+            sees only what its own parent passed, and a directory included
+            twice can get different objects each time. A script that also
+            builds standalone reads ``project.imports.get("icons")``.
 
     Returns:
         - If ``pick`` is not specified, a ``SimpleNamespace`` whose attributes
@@ -156,7 +174,7 @@ def add_subdirectory(
     # script; register it directly or editing it wouldn't re-run pcons.
     project.add_configure_dependency(script)
 
-    with project._enter_subdir(subdir, env=env):
+    with project._enter_subdir(subdir, env=env, imports=imports):
         # The script reaches its own neighbours the way a root build script
         # does, which the CLI arranges for that one.
         old_path = sys.path.copy()
