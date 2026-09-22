@@ -7,8 +7,8 @@ expected_outputs = [
     "build/obj.hello/src/hello.c.o",
     "build/hello",
     "build/manifest.txt",
-    # Written only by the launchers, so its existence proves they ran.
-    "build/launchers.log",
+    # Written only by the launchers, so these records prove they ran.
+    "build/launchers/*.log",
 ]
 
 [verify]
