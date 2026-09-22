@@ -260,7 +260,6 @@ class CargoBuildBuilder:
         # single token. Shell-quoting individual tokens would wrap pcons
         # specials like $TARGET in single quotes and prevent expansion.
         cargo_target = env.Command(
-            name=name if is_bin else f"{name}_cargo",
             target=artifact_path,
             source=None,
             depends=rust_sources,
@@ -295,7 +294,6 @@ class CargoBuildBuilder:
             ]
 
             cbindgen_target = env.Command(
-                name=f"{name}_cbindgen",
                 target=header_path,
                 source=None,
                 depends=[cbindgen_config, *rust_sources],

@@ -408,6 +408,34 @@ def _looks_like_a_path(name: str) -> bool:
     return "/" in name or "\\" in name
 
 
+def _flatten_aliases(items: Iterable[Target | Node]) -> list[Target | Node]:
+    """*items*, with every alias replaced by what it groups.
+
+    An alias is a name for a group, so depending on one means depending on
+    each target and node in it, through nested aliases (Alias() refuses
+    cycles). Flattening happens on each call, so a member added to an alias
+    after the depends() call counts too.
+    """
+    from pcons.core.node import AliasNode
+
+    result: list[Target | Node] = []
+    seen: set[int] = set()
+
+    def add(item: Target | Node) -> None:
+        if id(item) in seen:
+            return
+        seen.add(id(item))
+        if isinstance(item, AliasNode):
+            for member in item.members:
+                add(member)
+        else:
+            result.append(item)
+
+    for item in items:
+        add(item)
+    return result
+
+
 class Target:
     """A named build target with usage requirements.
 
@@ -488,6 +516,9 @@ class Target:
         # on targets with thousands of sources.
         "_source_set",
         "_subdir",
+        # Whether the name is a label pcons derived rather than an identity
+        # the script chose. See the `anonymous` property.
+        "_anonymous",
         # Which invocation reaches this target: see pcons/core/tiers.py.
         # The value the builder placed it in, or the script's own choice.
         "_build_tier",
@@ -506,6 +537,7 @@ class Target:
         defined_at: SourceLocation | None = None,
         project: Project | None = None,
         env: Environment | None = None,
+        anonymous: bool = False,
     ) -> None:
         """Create a target. Toolchains define their own target_type strings.
 
@@ -518,9 +550,16 @@ class Target:
         environment are its identity, and the project checks that identity as
         soon as the target is registered, which happens before ``__init__``
         returns.
+
+        ``anonymous`` says the name is a label rather than an identity; see
+        the :attr:`anonymous` property. The builder decides it, once, for
+        every target it makes. A label is only ever read, so the character
+        rule that keeps a name usable in a path does not apply to it.
         """
-        _validate_target_name(name)
+        if not anonymous:
+            _validate_target_name(name)
         self.name = name
+        self._anonymous = anonymous
         self.builder = builder
         self._sources: list[Node] = []
         self._source_set: set[Node] = set()
@@ -583,6 +622,30 @@ class Target:
     def project(self) -> Project:
         """Get the project this target belongs to."""
         return self.__project
+
+    @property
+    def anonymous(self) -> bool:
+        """Whether this target's name is a label rather than an identity.
+
+        A named target is one the script named: Program, StaticLibrary and
+        the other builders that take a name. The name is unique within
+        project and environment, ``get_target()`` answers to it, and so do
+        ``Default()``, ``pcons explain`` and ``pcons build``. It also gives
+        the output its base name and the target its build subdirectory.
+
+        An anonymous target wears a label its builder derived from what it
+        builds: the first output's path as the build tool writes it, the
+        flattened install destination, a test's own name. A label is only
+        read, in ``pcons info --targets``, the tier report and diagnostics:
+        two targets may wear one and no lookup answers to it.
+        ``env.Command``, ``Install``, ``Tarfile`` and the rest make anonymous
+        targets unless the call gives a ``name=``, which makes the target a
+        named one. To build an anonymous target by a name, give it an alias.
+
+        A builder that derives a path from a target's name must therefore be
+        a named one, as ``Program`` is.
+        """
+        return self._anonymous
 
     @property
     def qualified_name(self) -> str:
@@ -671,8 +734,14 @@ class Target:
         )
 
     def _dependency_targets(self) -> list[Target]:
-        """The targets named by depends(), in order."""
-        return [d for d in self._dependencies if isinstance(d, Target)]
+        """The targets named by depends(), in order, with an alias standing
+        for the targets it groups. An alias that groups this target itself
+        is a group this target belongs to, not a dependency of it."""
+        return [
+            d
+            for d in _flatten_aliases(self._dependencies)
+            if isinstance(d, Target) and d is not self
+        ]
 
     @property
     def sources(self) -> list[Node]:
@@ -883,7 +952,9 @@ class Target:
         as with ``link()`` -- but it is not linked. A file (Node, Path or
         str, read from the directory of the script that declared this
         target, like ``add_sources()``) is up to date first, without being
-        passed as a source.
+        passed as a source. An alias stands for each target and file it
+        groups, read when the project resolves, so a member another script
+        adds to it later counts too.
 
         Each build step of this target then holds the dependency's outputs
         (or the file) as tightly as it needs to. A step that records what it
@@ -974,7 +1045,8 @@ class Target:
 
     def _waited_outputs(self, dep: Target | Node) -> list[Node]:
         """What this target's steps wait for on account of *dep*: its
-        outputs, less any that are this target's own nodes.
+        outputs, less any that are this target's own nodes. An alias stands
+        for what it groups, so its members' outputs are what to wait for.
 
         An ObjectLibrary given as a source is a dependency whose outputs
         are adopted as this target's own objects. Each is built by the
@@ -982,7 +1054,13 @@ class Target:
         is at best idle and at worst a cycle, through whatever generated
         that sibling's source, and waiting for itself is a cycle outright.
         """
-        outputs = dep.ordering_outputs() if isinstance(dep, Target) else [dep]
+        outputs = [
+            node
+            for item in _flatten_aliases([dep])
+            for node in (
+                item.ordering_outputs() if isinstance(item, Target) else [item]
+            )
+        ]
         own = {id(n) for n in (*self.intermediate_nodes, *self.output_nodes)}
         return [out for out in outputs if id(out) not in own]
 
@@ -999,8 +1077,8 @@ class Target:
         if self.output_nodes:
             return list(self.output_nodes)
         result: list[Node] = []
-        for dep in self._dependencies:
-            if dep in seen:
+        for dep in _flatten_aliases(self._dependencies):
+            if dep in seen or dep is self:
                 continue
             seen.add(dep)
             if isinstance(dep, Target):
@@ -1387,14 +1465,6 @@ class Target:
     def __repr__(self) -> str:
         deps = ", ".join(d.qualified_name for d in self.dependencies)
         return f"Target({self.qualified_name!r}, deps=[{deps}])"
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Target):
-            return NotImplemented
-        return self.qualified_name == other.qualified_name
-
-    def __hash__(self) -> int:
-        return hash(self.qualified_name)
 
 
 class ImportedTarget(Target):

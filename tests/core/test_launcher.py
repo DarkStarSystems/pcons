@@ -67,7 +67,6 @@ class TestPerCommandLauncher:
         project = Project("demo", root_dir=tmp_path, build_dir="build")
         env = project.Environment()
         env.Command(
-            name="gen",
             target=project.build_dir / "out.txt",
             source=source,
             command=["copy", "$SOURCE", "$TARGET"],
@@ -109,14 +108,12 @@ class TestPerCommandLauncher:
         project = Project("demo", root_dir=tmp_path, build_dir="build")
         env = project.Environment()
         env.Command(
-            name="wrapped",
             target=project.build_dir / "a.txt",
             source=source,
             command=["copy", "$SOURCE", "$TARGET"],
             launcher=["valgrind"],
         )
         env.Command(
-            name="plain",
             target=project.build_dir / "b.txt",
             source=source,
             command=["convert", "$SOURCE", "$TARGET"],

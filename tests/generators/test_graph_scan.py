@@ -79,9 +79,9 @@ class TestIncludeScan:
     def test_draws_scan_and_collate_files(self, scanned):
         output = render(scanned, include_scan=True)
         assert "packs/a.pack.scaninfo.json" in output
-        assert "t.pack_a.dyndep" in output
-        assert "t.pack_a.manifest.json" in output
-        assert "t.pack_a.exports.json" in output
+        assert "t.packs_a.pack.dyndep" in output
+        assert "t.packs_a.pack.manifest.json" in output
+        assert "t.packs_a.pack.exports.json" in output
 
     def test_scan_files_are_not_sources(self, scanned):
         """The dyndep file has a producer, so it must not read as a leaf."""
@@ -89,14 +89,14 @@ class TestIncludeScan:
         dyndep = [
             line
             for line in output.splitlines()
-            if "t.pack_a.dyndep" in line and "[" in line
+            if "t.packs_a.pack.dyndep" in line and "[" in line
         ]
         assert dyndep and "shape=note" not in dyndep[0]
 
     def test_collate_orders_the_governed_edge(self, scanned):
         output = render(scanned, include_scan=True)
         assert (
-            "  scan_scene_refs_t_pack_a_dyndep -> packs_a_pack "
+            "  scan_scene_refs_t_packs_a_pack_dyndep -> packs_a_pack "
             '[style=dashed color="#999999"];' in output
         )
 
@@ -132,7 +132,7 @@ class TestIncludeScan:
         )
         output = render(project, include_scan=True)
         assert (
-            "  scan_scene_refs_t_pack_a_linkargs -> packs_a_pack "
+            "  scan_scene_refs_t_packs_a_pack_linkargs -> packs_a_pack "
             '[style=dashed color="#999999"];' in output
         )
 
@@ -145,7 +145,7 @@ class TestIncludeDiscovered:
         assert "1f7a4d" not in output
 
     def test_draws_requires_and_provides(self, scanned, tmp_path):
-        scope = scanned._scan_scopes[("scene-refs", "t::pack_b")]
+        scope = scanned._scan_scopes[("scene-refs", "t::packs/b.pack")]
         write_dyndep_entries(
             [("packs/b.pack", ["packs/b.digest"], ["packs/a.pack"])],
             tmp_path / "build" / scope.dyndep_rel,
@@ -162,7 +162,7 @@ class TestIncludeDiscovered:
         assert 'packs_b_digest [label="packs/b.digest"' in output
 
     def test_mermaid_labels_discovered_edges(self, scanned, tmp_path):
-        scope = scanned._scan_scopes[("scene-refs", "t::pack_b")]
+        scope = scanned._scan_scopes[("scene-refs", "t::packs/b.pack")]
         write_dyndep_entries(
             [("packs/b.pack", [], ["packs/a.pack"])],
             tmp_path / "build" / scope.dyndep_rel,

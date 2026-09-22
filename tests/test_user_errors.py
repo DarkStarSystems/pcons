@@ -457,7 +457,6 @@ class TestVariableAndFlagErrors:
         project, env = project_env
         with pytest.raises(MissingVariableError, match="NONEXISTENT_TOOL"):
             project.Command(
-                "gen",
                 env,
                 target="out.txt",
                 source="src/main.c",
@@ -685,7 +684,7 @@ class TestEveryPyBuilderRemedyWorks:
         def render(targets, sources):
             return 1
 
-        assert render(target="out.txt").name == "out"
+        assert render(target="out.txt").name == "out.txt"
 
     def test_a_method_moves_out_of_the_class(self, project_env):
         """ "move the def out of the class"."""
@@ -695,7 +694,7 @@ class TestEveryPyBuilderRemedyWorks:
         def render(targets, sources):
             return 1
 
-        assert render(target="out.txt").name == "out"
+        assert render(target="out.txt").name == "out.txt"
 
     def test_a_coroutine_becomes_a_plain_def(self, project_env):
         """ "Write it as a plain def"."""
@@ -705,7 +704,7 @@ class TestEveryPyBuilderRemedyWorks:
         def render(targets, sources):
             return 1
 
-        assert render(target="out.txt").name == "out"
+        assert render(target="out.txt").name == "out.txt"
 
     def test_a_closure_becomes_a_parameter(self, project_env, tmp_path):
         """ "Take it as a parameter and pass it at the call: f(target=..., title=...)"."""
@@ -851,7 +850,9 @@ class TestEveryPyBuilderRemedyWorks:
         def render(targets, sources, title):
             return title
 
-        assert render(target="out.txt", title="typed from the message").name == "out"
+        assert (
+            render(target="out.txt", title="typed from the message").name == "out.txt"
+        )
 
     def test_a_target_moves_to_source(self, project_env):
         """ "List it in source= instead, and the function receives its output paths"."""
@@ -985,8 +986,8 @@ class TestEveryPyBuilderRemedyWorks:
 
         assert generated == ["a.txt.args.pkl", "b.txt.args.pkl", "render.py"]
 
-    def test_one_of_the_edges_is_named(self, project_env, tmp_path):
-        """'Name one of the edges, name="something-else"'."""
+    def test_the_edges_get_different_targets(self, project_env, tmp_path):
+        """ "Give the edges different targets"."""
         project, env = project_env
 
         @env.PyBuilder()
@@ -994,10 +995,10 @@ class TestEveryPyBuilderRemedyWorks:
             return 1
 
         render(target="report.txt")
-        second = render(target="sub/report.txt", name="sub-report")
+        second = render(target="sub/report.txt")
         project.resolve()
 
-        assert second.name == "sub-report"
+        assert second.name == "sub/report.txt"
         assert (tmp_path / "build/pybuilder/sub/report.txt.args.pkl").is_file()
 
     def test_one_environment_gets_a_build_prefix(self, project_env, tmp_path):
@@ -1029,7 +1030,7 @@ class TestEveryPyBuilderRemedyWorks:
         def render(targets, sources, title):
             return title
 
-        assert render(target="out.txt", title="t").name == "out"
+        assert render(target="out.txt", title="t").name == "out.txt"
 
     def test_the_slash_moves_up_to_follow_sources(self, project_env, tmp_path):
         """ "Move the / up so it follows sources: def f(targets, sources, /, title)"."""
@@ -1190,7 +1191,7 @@ class TestPyBuilderErrors:
             render(target="out.txt", t=made)
 
         message = str(caught.value)
-        assert "argument t is the target 'made'" in message
+        assert "argument t is the target 'made.txt'" in message
         assert "the build description does not exist when the function runs" in message
         assert "List it in source= instead" in message
         assert caught.value.location.lineno == call_line
@@ -1210,7 +1211,9 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
             render(target="out.txt", inputs={"first": [made]})
 
-        assert "argument inputs['first'][0] is the target 'made'" in str(caught.value)
+        assert "argument inputs['first'][0] is the target 'made.txt'" in str(
+            caught.value
+        )
 
     def test_the_environment_in_kwargs_says_to_read_it_here(self, project_env):
         _, env = project_env
@@ -1298,24 +1301,24 @@ class TestPyBuilderErrors:
 
     def test_two_edges_to_one_target_collide_on_the_pickle(self, project_env):
         """The pickle follows the target, so two edges to one target collide
-        on it even when they are named apart."""
+        on it."""
         _, env = project_env
 
         @env.PyBuilder()
         def render(targets, sources):
             return 1
 
-        render(target="report.txt", name="one")
+        render(target="report.txt")
 
         with pytest.raises(PconsError) as caught:
-            render(target="report.txt", name="two")
+            render(target="report.txt")
 
         message = str(caught.value)
-        assert "PyBuilder edge 'two' would overwrite" in message
+        assert "PyBuilder edge 'report.txt' would overwrite" in message
         assert "build/pybuilder/report.txt.args.pkl" in message
         assert "already written by the edge at " in message
         assert "test_user_errors.py:" in message.split("already written by")[1]
-        assert 'Name one of the edges, name="something-else".' in message
+        assert "Give the edges different targets." in message
 
     def test_one_function_decorated_twice_says_to_call_it_twice(self, project_env):
         """The reshape's own mistake: two decorations where one would do."""
@@ -1457,7 +1460,7 @@ class TestPyBuilderErrors:
         def render(targets, sources, /, title):
             return title
 
-        assert render(target="out.txt", title="t").name == "out"
+        assert render(target="out.txt", title="t").name == "out.txt"
 
     def test_sources_as_a_call_keyword_points_at_source(self, project_env):
         """bind would say "multiple values for argument 'sources'"."""
@@ -1496,7 +1499,7 @@ class TestPyBuilderErrors:
         def render(first, second, **rest):
             return rest
 
-        assert render(target="o.txt", sources="a literal argument").name == "o"
+        assert render(target="o.txt", sources="a literal argument").name == "o.txt"
 
     def test_a_parameter_named_env_is_fine(self, project_env):
         """env is not reserved: the call has no env= to collide with."""
@@ -1508,7 +1511,7 @@ class TestPyBuilderErrors:
 
         made = render(target="out.txt", env="production")
 
-        assert made.name == "out"
+        assert made.name == "out.txt"
 
     def test_two_functions_of_one_name_say_to_rename_one(self, project_env, tmp_path):
         """The module is named after the function, so name= cannot part these."""
@@ -1762,7 +1765,7 @@ class TestPyBuilderErrors:
             where=Path("x/y"),
         )
 
-        assert made.name == "out"
+        assert made.name == "out.txt"
 
     def test_a_dataclass_from_the_script_itself_is_not_flagged_as_pcons(
         self, project_env, tmp_path
@@ -1811,7 +1814,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
             render(target="out.txt", m={made: 1})
 
-        assert "a key of argument m is the target 'made'" in str(caught.value)
+        assert "a key of argument m is the target 'made.txt'" in str(caught.value)
 
     def test_a_target_in_a_set_is_found_without_an_index(self, project_env):
         _, env = project_env
@@ -1828,7 +1831,7 @@ class TestPyBuilderErrors:
         with pytest.raises(PconsError) as caught:
             render(target="out.txt", s={made})
 
-        assert "an element of argument s is the target 'made'" in str(caught.value)
+        assert "an element of argument s is the target 'made.txt'" in str(caught.value)
 
     def test_a_node_in_kwargs_points_at_source(self, project_env):
         """A node is the fifth build-description type, and reads as a path."""
@@ -1863,7 +1866,7 @@ class TestPyBuilderErrors:
         def render(targets, sources, loop):
             return loop
 
-        with pytest.raises(PconsError, match="is the target 'made'"):
+        with pytest.raises(PconsError, match="is the target 'made.txt'"):
             render(target="out.txt", loop=looping)
 
     def test_a_renamed_lambda_says_its_source_is_not_a_def(self, project_env):

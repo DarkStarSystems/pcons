@@ -242,7 +242,7 @@ class TestEnvironmentCommand:
         error names the target that does build it, not just a missing file."""
         project = Project("gen_src", root_dir=tmp_path)
         env = project.Environment(toolchain="c")
-        env.Command(target="gen/hello.c", command="touch $TARGET", name="gen_hello")
+        env.Command(target="gen/hello.c", command="touch $TARGET")
         project.Program("app", env, sources=["gen/hello.c"])
 
         with pytest.raises(MissingSourceError) as excinfo:
@@ -250,8 +250,8 @@ class TestEnvironmentCommand:
 
         message = str(excinfo.value)
         assert (
-            "Target 'gen_hello' builds a file of that path, as 'build/gen/hello.c'"
-            in message
+            "Target 'gen/hello.c' builds a file of that path, "
+            "as 'build/gen/hello.c'" in message
         )
         assert "pass that target itself, or use the real path" in message
         # Written with project.build_dir, never the directory's name: that
@@ -329,23 +329,13 @@ class TestEnvironmentCommand:
         assert isinstance(result, Target)
         assert all(isinstance(n, FileNode) for n in result.output_nodes)
 
-    def test_command_name_derived_from_target(self, test_project):  # noqa: F811
-        """Command target name is derived from first target file if not specified."""
+    def test_command_label_is_its_first_output(self, test_project):  # noqa: F811
+        """A command's label is the file it builds, as the build tool writes it."""
         env = Environment()
 
-        result = env.Command(target="my_output.txt", source="in.txt", command="cmd")
+        result = env.Command(target="gen/my_output.txt", source="in.txt", command="cmd")
 
-        assert result.name == "my_output"
-
-    def test_command_explicit_name(self, test_project):  # noqa: F811
-        """Command can have an explicit name."""
-        env = Environment()
-
-        result = env.Command(
-            target="out.txt", source="in.txt", command="cmd", name="my_custom_name"
-        )
-
-        assert result.name == "my_custom_name"
+        assert result.name == "gen/my_output.txt"
 
 
 class TestCommandDepfile:
@@ -1016,14 +1006,12 @@ class TestDeclaredSourceOrder:
             target=[project.build_dir / "one.c", project.build_dir / "two.c"],
             source=None,
             command="generate $TARGETS",
-            name="gen",
         )
 
         cmd = env.Command(
             target=project.build_dir / "out.txt",
             source=[generator, "a.txt"],
             command="$SOURCES > $TARGET",
-            name="consume",
         )
         project.resolve()
 

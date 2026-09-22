@@ -46,7 +46,6 @@ def test_a_built_tool_runs_without_a_hand_written_dot_slash(
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         tool=gen,
         source=["in.txt"],
@@ -67,7 +66,6 @@ def test_the_tool_is_a_dependency_and_not_a_source(
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         tool=gen,
         source=["in.txt"],
@@ -92,7 +90,6 @@ def test_a_tool_from_another_environment_carries_its_prefix(
     gen = project.Program("gen", host, sources=["gen.c"])
     app = project.Program("app", tgt, sources=["gen.c"])
     tgt.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         tool=gen,
         source=[app],
@@ -119,7 +116,6 @@ def test_an_installed_tool_keeps_its_absolute_path(
     env = project.Environment(toolchain=gcc_toolchain)
     tool = "/opt/qt/bin/androiddeployqt"
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         tool=tool,
         source=["in.txt"],
@@ -137,7 +133,6 @@ def test_a_tool_on_the_path_stays_a_bare_name(tmp_path: Path, gcc_toolchain) -> 
     project = _project(tmp_path)
     env = project.Environment(toolchain=gcc_toolchain)
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         tool="zip",
         source=["in.txt"],
@@ -153,7 +148,6 @@ def test_a_tool_nobody_runs_is_an_error(tmp_path: Path, gcc_toolchain) -> None:
 
     with pytest.raises(PconsError, match="never run"):
         env.Command(
-            name="run",
             target=project.build_dir / "out.txt",
             tool="zip",
             source=["in.txt"],
@@ -167,7 +161,6 @@ def test_a_tool_marker_with_no_tool_is_an_error(tmp_path: Path, gcc_toolchain) -
 
     with pytest.raises(PconsError, match=r"\$TOOL"):
         env.Command(
-            name="run",
             target=project.build_dir / "out.txt",
             source=["in.txt"],
             command="$TOOL $SOURCE $TARGET",
@@ -179,7 +172,6 @@ def test_make_runs_the_same_tool(tmp_path: Path, gcc_toolchain) -> None:
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         tool=gen,
         source=["in.txt"],
@@ -226,7 +218,6 @@ def test_text_attached_to_the_marker_comes_along(tmp_path: Path, gcc_toolchain) 
     env = project.Environment(toolchain=gcc_toolchain)
     tool = "/opt/sdk/bin/signer"
     env.Command(
-        name="run",
         target=project.build_dir / "out.txt",
         tool=tool,
         source=["in.txt"],
@@ -247,7 +238,6 @@ def test_project_command_takes_a_tool_too(tmp_path: Path, gcc_toolchain) -> None
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     run = project.Command(
-        "run",
         env,
         target=project.build_dir / "out.txt",
         tool=gen,
@@ -268,7 +258,6 @@ def test_the_tool_is_an_implicit_dependency_even_with_a_depfile(
     env = project.Environment(toolchain=gcc_toolchain)
     gen = project.Program("gen", env, sources=["gen.c"])
     run = env.Command(
-        name="run",
         target=project.build_dir / "out.h",
         tool=gen,
         source=["in.txt"],

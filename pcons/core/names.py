@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 """The character rule shared by every name that reaches a build file.
 
-Target names end up in ninja paths and rule names, environment names end up
-in ``name@env`` specs, so both must avoid the characters that would make
-either unparseable.
+A named target's name ends up in the paths it builds into, environment names
+end up in ``name@env`` specs, so both must avoid the characters that would
+make either unparseable. An anonymous target's label reaches neither (see
+``Target.anonymous``) and is not checked.
 """
 
 from __future__ import annotations

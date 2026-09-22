@@ -78,6 +78,31 @@ successful build ... Ninja explains:
 WARNING:     output declared.txt doesn't exist
 ```
 
+#### What a target argument may be
+
+Each positional argument is resolved in this order, and the first rule that
+claims it wins:
+
+1. **An alias**, or `all` / `test-build`, which every generated manifest
+   defines. These are phonies the build tool resolves itself, so an alias
+   beats a target of the same name.
+2. **A named target**, as `name`, `name@env` or `project::name@env` (see
+   [Named and anonymous targets](user-guide.md#named-and-anonymous-targets)).
+   ninja and make know output paths, never pcons names, so pcons translates
+   the name into that target's outputs before handing them over. A plain
+   `name` that two environments both build is refused, with both qualified
+   names printed: pick one with `name@env`. An unknown name, by contrast, is
+   passed through, because it's most likely a file path.
+3. **Anything else**, handed to the build tool as written: an output path, or
+   one of its own targets.
+
+An anonymous target has no name to type. Build it by its output path, or give
+it an alias in the build script.
+
+This works whether or not pcons regenerates first: every generate records the
+names and their output paths in the build directory, so a build that only runs
+ninja resolves them too.
+
 ### `pcons clean`
 
 Remove build artifacts.
@@ -93,6 +118,9 @@ Show the build script's documentation and the variables it reads.
 | Option | |
 |---|---|
 | `-t`, `--targets` | List every target (runs the build script) |
+
+The listing is in two parts: named targets, which `pcons build <name>` takes,
+and anonymous ones, listed by what they build.
 
 ### `pcons explain`
 
@@ -111,7 +139,9 @@ directory — so with `--width 0` they can be pasted into a shell there and
 re-run or hand-edited.
 
 Arguments are targets to explain and/or build variables (`KEY=value`); with
-no targets, every target is explained.
+no targets, every target is explained. A named target is taken as
+`pcons build` takes it; an anonymous target's label is accepted too, and
+every target wearing it is explained.
 
 | Option | |
 |---|---|
@@ -261,6 +291,11 @@ PowerShell completion class.
 | `-G` | generator names |
 | `--ninja` | `ninja` and `n2` |
 | `--lang`, `pcons completion <shell>` | the values they accept |
+
+What completes as a target is exactly what a build accepts: every alias, `all`,
+every output path, and every named target under both `name` and `name@env`. An
+anonymous target's label is offered by neither, since typing it would build
+nothing.
 
 Target and variant names come from `pcons_cache.json`, written by the last
 `pcons generate` or `pcons build`. Completion never runs the build script: it

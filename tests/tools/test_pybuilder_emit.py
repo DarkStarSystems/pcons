@@ -821,7 +821,7 @@ class TestClaimRegistry:
 
         message = str(caught.value)
         assert "PyBuilder edge 'x' would overwrite" in message
-        assert 'Name one of the edges, name="something-else".' in message
+        assert "Give the edges different targets." in message
 
     def test_a_second_claim_with_no_owner_at_all_is_refused(
         self, project: Project, env: Any
@@ -829,9 +829,7 @@ class TestClaimRegistry:
         path = Path("build/pybuilder/x.args.pkl")
         _claim(project, env, path, "x", self._at(1), owner=None)
 
-        with pytest.raises(
-            PyBuilderError, match=r'Name one of the edges, name="something-else"'
-        ):
+        with pytest.raises(PyBuilderError, match=r"Give the edges different targets"):
             _claim(project, env, path, "x", self._at(2), owner=None)
 
     def test_a_shared_owner_across_environments_still_shares(

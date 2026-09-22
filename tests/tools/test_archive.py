@@ -28,40 +28,19 @@ class TestTarfileBuilder:
         assert isinstance(tar, Target)
         assert tar.target_type == "archive"
 
-    def test_tarfile_name_derived_from_output(self, tmp_path):
-        """Tarfile name is derived from output path."""
+    def test_tarfile_label_is_the_archive_it_writes(self, tmp_path):
+        """The label is the output path, extension and all."""
         project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
-        # Test various compression extensions
-        tar_gz = project.Tarfile(env, output="dist/docs.tar.gz", sources=[])
-        assert tar_gz.name == "dist/docs"
-
-        tar_bz2 = project.Tarfile(env, output="dist/backup.tar.bz2", sources=[])
-        assert tar_bz2.name == "dist/backup"
-
-        tar_xz = project.Tarfile(env, output="dist/data.tar.xz", sources=[])
-        assert tar_xz.name == "dist/data"
-
-        tar_plain = project.Tarfile(env, output="dist/plain.tar", sources=[])
-        assert tar_plain.name == "dist/plain"
-
-        tgz = project.Tarfile(env, output="dist/short.tgz", sources=[])
-        assert tgz.name == "dist/short"
-
-    def test_tarfile_explicit_name(self, tmp_path):
-        """Tarfile can have explicit name."""
-        project = Project("test", root_dir=tmp_path, build_dir=".")
-        env = project.Environment()
-
-        tar = project.Tarfile(
-            env,
-            output="out.tar.gz",
-            sources=[],
-            name="my_archive",
-        )
-
-        assert tar.name == "my_archive"
+        for output in (
+            "dist/docs.tar.gz",
+            "dist/backup.tar.bz2",
+            "dist/data.tar.xz",
+            "dist/plain.tar",
+            "dist/short.tgz",
+        ):
+            assert project.Tarfile(env, output=output, sources=[]).name == output
 
     def test_tarfile_compression_inferred_from_extension(self, tmp_path):
         """Compression type is inferred from output extension."""
@@ -69,11 +48,11 @@ class TestTarfileBuilder:
         env = project.Environment()
 
         # Create tarfiles with different extensions
-        tar_gz = project.Tarfile(env, output="a.tar.gz", sources=[], name="a")
-        tar_bz2 = project.Tarfile(env, output="b.tar.bz2", sources=[], name="b")
-        tar_xz = project.Tarfile(env, output="c.tar.xz", sources=[], name="c")
-        tar_plain = project.Tarfile(env, output="d.tar", sources=[], name="d")
-        tgz = project.Tarfile(env, output="e.tgz", sources=[], name="e")
+        tar_gz = project.Tarfile(env, output="a.tar.gz", sources=[])
+        tar_bz2 = project.Tarfile(env, output="b.tar.bz2", sources=[])
+        tar_xz = project.Tarfile(env, output="c.tar.xz", sources=[])
+        tar_plain = project.Tarfile(env, output="d.tar", sources=[])
+        tgz = project.Tarfile(env, output="e.tgz", sources=[])
 
         assert tar_gz._builder_data["compression"] == "gzip"
         assert tar_bz2._builder_data["compression"] == "bz2"
@@ -92,7 +71,6 @@ class TestTarfileBuilder:
             output="archive.tar.gz",
             sources=[],
             compression="bz2",
-            name="override",
         )
 
         assert tar._builder_data["compression"] == "bz2"
@@ -107,7 +85,6 @@ class TestTarfileBuilder:
             output="archive.tar.gz",
             sources=[],
             base_dir="src",
-            name="with_base",
         )
 
         assert tar._builder_data["base_dir"] == "src"
@@ -117,9 +94,7 @@ class TestTarfileBuilder:
         project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
-        tar = project.Tarfile(
-            env, output="archive.tar.gz", sources=[], name="default_base"
-        )
+        tar = project.Tarfile(env, output="archive.tar.gz", sources=[])
 
         assert tar._builder_data["base_dir"] == "."
 
@@ -141,27 +116,13 @@ class TestZipfileBuilder:
         assert isinstance(zf, Target)
         assert zf.target_type == "archive"
 
-    def test_zipfile_name_derived_from_output(self, tmp_path):
-        """Zipfile name is derived from output path."""
+    def test_zipfile_label_is_the_archive_it_writes(self, tmp_path):
+        """The label is the output path, extension and all."""
         project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         zf = project.Zipfile(env, output="dist/release.zip", sources=[])
-        assert zf.name == "dist/release"
-
-    def test_zipfile_explicit_name(self, tmp_path):
-        """Zipfile can have explicit name."""
-        project = Project("test", root_dir=tmp_path, build_dir=".")
-        env = project.Environment()
-
-        zf = project.Zipfile(
-            env,
-            output="out.zip",
-            sources=[],
-            name="my_zip",
-        )
-
-        assert zf.name == "my_zip"
+        assert zf.name == "dist/release.zip"
 
     def test_zipfile_base_dir(self, tmp_path):
         """Zipfile respects base_dir parameter."""
@@ -173,7 +134,6 @@ class TestZipfileBuilder:
             output="archive.zip",
             sources=[],
             base_dir="src",
-            name="with_base",
         )
 
         assert zf._builder_data["base_dir"] == "src"
@@ -188,7 +148,7 @@ class TestArchiveTargetProperties:
         env = project.Environment()
 
         # Create tarfile with default compression inferred from extension
-        tar = project.Tarfile(env, output="archive.tar.gz", sources=[], name="test")
+        tar = project.Tarfile(env, output="archive.tar.gz", sources=[])
         assert tar.compression == "gzip"  # Inferred from extension
 
         # Override compression after creation
@@ -201,7 +161,7 @@ class TestArchiveTargetProperties:
         env = project.Environment()
 
         # Create tarfile with default basedir
-        tar = project.Tarfile(env, output="archive.tar.gz", sources=[], name="test")
+        tar = project.Tarfile(env, output="archive.tar.gz", sources=[])
         assert tar.basedir == "."
 
         # Override basedir after creation
@@ -213,7 +173,7 @@ class TestArchiveTargetProperties:
         project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
-        zf = project.Zipfile(env, output="archive.zip", sources=[], name="test")
+        zf = project.Zipfile(env, output="archive.zip", sources=[])
         assert zf.basedir == "."
 
         zf.basedir = "src"
@@ -227,7 +187,7 @@ class TestArchiveTargetProperties:
         env = project.Environment()
 
         tar = project.Tarfile(
-            env, output="archive.tar.gz", sources=[], name="test", base_dir="initial"
+            env, output="archive.tar.gz", sources=[], base_dir="initial"
         )
 
         # Override after creation
@@ -256,7 +216,6 @@ class TestArchiveNinjaGeneration:
             env,
             output="dist/archive.tar.gz",
             sources=[str(src_file)],
-            name="tar_rule_test",
         )
 
         project.resolve()
@@ -290,7 +249,6 @@ class TestArchiveNinjaGeneration:
             env,
             output="dist/archive.zip",
             sources=[str(src_file)],
-            name="zip_rule_test",
         )
 
         project.resolve()
@@ -321,7 +279,6 @@ class TestArchiveNinjaGeneration:
             env,
             output="output.tar.gz",
             sources=[str(file1), str(file2)],
-            name="build_test",
         )
 
         project.resolve()
@@ -354,7 +311,6 @@ class TestArchiveNinjaGeneration:
             output="archive.tar.gz",
             sources=[str(src_file)],
             base_dir=str(src_dir),  # Path with spaces
-            name="space_test",
         )
 
         project.resolve()
@@ -415,7 +371,6 @@ class TestArchiveWithInstall:
             env,
             output="dist/archive.tar.gz",
             sources=[str(src_file)],
-            name="installable_archive",
         )
 
         # Install the archive

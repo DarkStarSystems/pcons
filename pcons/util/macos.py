@@ -145,9 +145,10 @@ def fix_dylib_references(
 
 def create_universal_binary(
     project: Project,
-    name: str,
     inputs: list[Target | FileNode | Path | str],
     output: Path | str,
+    *,
+    name: str | None = None,
 ) -> Target:
     """Create a macOS universal binary by combining architecture-specific binaries.
 
@@ -159,21 +160,24 @@ def create_universal_binary(
 
     Args:
         project: The pcons Project instance.
-        name: A unique name for this universal binary target.
         inputs: List of architecture-specific binaries to combine.
                 Can be Target objects (uses their output files), FileNode objects,
                 or Path/str paths to files.
         output: Path for the output universal binary.
+        name: Optional name for this target. Give one to refer to it by
+              name later: ``get_target()``, ``Default()``, ``pcons build``,
+              and ``sub::name@env`` from another build script. It must then
+              be unique within its environment and project. Leave it out and
+              the target needs no name.
 
     Returns:
         Target object representing the universal binary.
 
-    One environment per architecture, and a *distinct name* per architecture —
-    the per-arch builds are separate targets producing separate files, and only
-    the lipo output carries the name you ship. Two targets with the same name
-    are the same target, and two targets writing the same output path collide
-    on one node. Objects are keyed by environment, so the per-arch builds never
-    share a compile.
+    One environment per architecture, and a *distinct name* per architecture:
+    the per-arch builds are separate targets producing separate files. Two
+    targets with the same name are the same target, and two targets writing
+    the same output path collide on one node. Objects are keyed by
+    environment, so the per-arch builds never share a compile.
 
     Example:
         from pcons import Project
@@ -189,7 +193,7 @@ def create_universal_binary(
 
         # libmylib-arm64.a + libmylib-x86_64.a -> libmylib.a
         lib_universal = create_universal_binary(
-            project, "mylib_universal",
+            project,
             inputs=libs,
             output="build/universal/libmylib.a",
         )
@@ -225,10 +229,10 @@ def create_universal_binary(
         env = Environment()
 
     lipo_target = env.Command(
+        name=name,
         target=output_path,
         source=sources,
         command="lipo -create -output $TARGET $SOURCES",
-        name=name,
     )
 
     # Mark the build info with tool="lipo" for the ninja generator

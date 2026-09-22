@@ -29,13 +29,16 @@ COPY = [
 ]
 
 
-def command(env, name: str, target: str):
-    """A product-making command target, cheap enough for any test here."""
+def command(env, target: str):
+    """A product-making command target, cheap enough for any test here.
+
+    Anonymous, like every command: its name is the path it builds, which is
+    what the report and `pcons info --targets` show it under.
+    """
     return env.Command(
         target=target,
         source="in.txt",
         command=[*COPY, "$SOURCE", "$TARGET"],
-        name=name,
     )
 
 
@@ -67,16 +70,16 @@ class TestBuilderPlacement:
     """Rule 3: the builder that creates a target places it."""
 
     def test_a_command_is_a_product(self, project, env):
-        command(env, "note", "note.txt")
-        assert tiers_of(project)["note"] == "default"
-        assert reasons_of(project)["note"] == "product (Command)"
+        command(env, "note.txt")
+        assert tiers_of(project)["note.txt"] == "default"
+        assert reasons_of(project)["note.txt"] == "product (Command)"
 
     def test_an_install_is_a_step(self, project, env):
-        product = command(env, "note", "note.txt")
+        product = command(env, "note.txt")
         project.Install("dist", [product])
 
         decided = tiers_of(project)
-        assert decided["note"] == "default"
+        assert decided["note.txt"] == "default"
         assert decided["install_dist"] == "all"
         assert reasons_of(project)["install_dist"] == "step (Install)"
 
@@ -123,21 +126,21 @@ class TestScriptChoice:
     """Rule 1: what the script sets wins, and says where it was set."""
 
     def test_a_product_moved_out_of_the_default_build(self, project, env):
-        bench = command(env, "bench", "bench.txt")
+        bench = command(env, "bench.txt")
         bench.build_tier = "all"
 
-        assert tiers_of(project)["bench"] == "all"
-        assert reasons_of(project)["bench"] == 'build_tier = "all"'
+        assert tiers_of(project)["bench.txt"] == "all"
+        assert reasons_of(project)["bench.txt"] == 'build_tier = "all"'
 
     def test_a_step_moved_into_the_default_build(self, project, env):
-        product = command(env, "note", "note.txt")
+        product = command(env, "note.txt")
         installed = project.Install("dist", [product])
         installed.build_tier = "default"
 
         assert tiers_of(project)["install_dist"] == "default"
 
     def test_a_product_moved_out_of_all(self, project, env):
-        rewriter = command(env, "rewrite", "rewrite.txt")
+        rewriter = command(env, "rewrite.txt")
         rewriter.build_tier = "manual"
 
         decided = decide_build_tiers(project)
@@ -145,7 +148,7 @@ class TestScriptChoice:
         assert rewriter not in decided.all_targets
 
     def test_the_choice_records_the_build_script_line(self, project, env):
-        bench = command(env, "bench", "bench.txt")
+        bench = command(env, "bench.txt")
         bench.build_tier = "all"
 
         location = decide_build_tiers(project)[bench].location
@@ -153,132 +156,132 @@ class TestScriptChoice:
         assert location.filename == __file__
 
     def test_an_unknown_tier_is_refused(self, project, env):
-        note = command(env, "note", "note.txt")
+        note = command(env, "note.txt")
         with pytest.raises(PconsError, match="build_tier must be one of"):
             note.build_tier = "sometimes"
 
     def test_a_script_choice_beats_the_builder(self, project, env):
         """A script assignment survives a builder placing the same target."""
-        product = command(env, "note", "note.txt")
+        product = command(env, "note.txt")
         product.build_tier = "all"
         product.place_in_tier("default", by="SomeWrapper")
 
-        assert tiers_of(project)["note"] == "all"
+        assert tiers_of(project)["note.txt"] == "all"
 
 
 class TestDefaultCall:
     """Rule 2: Default() names the default tier outright."""
 
     def test_a_named_product_stays_default(self, project, env):
-        app = command(env, "app", "app.txt")
-        command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        command(env, "note.txt")
         project.Default(app)
 
         decided = tiers_of(project)
-        assert decided["app"] == "default"
-        assert reasons_of(project)["app"] == "named in Default()"
+        assert decided["app.txt"] == "default"
+        assert reasons_of(project)["app.txt"] == "named in Default()"
 
     def test_an_unnamed_product_is_demoted(self, project, env):
-        app = command(env, "app", "app.txt")
-        command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        command(env, "note.txt")
         project.Default(app)
 
-        assert tiers_of(project)["note"] == "all"
-        assert reasons_of(project)["note"] == "not named in Default()"
+        assert tiers_of(project)["note.txt"] == "all"
+        assert reasons_of(project)["note.txt"] == "not named in Default()"
 
     def test_a_named_step_is_promoted(self, project, env):
-        product = command(env, "note", "note.txt")
+        product = command(env, "note.txt")
         installed = project.Install("dist", [product])
         project.Default(installed)
 
         assert tiers_of(project)["install_dist"] == "default"
 
     def test_an_unnamed_step_is_untouched(self, project, env):
-        app = command(env, "app", "app.txt")
-        product = command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        product = command(env, "note.txt")
         project.Install("dist", [product])
         project.Default(app)
 
         assert tiers_of(project)["install_dist"] == "all"
 
     def test_an_unnamed_manual_target_is_untouched(self, project, env):
-        app = command(env, "app", "app.txt")
-        rewriter = command(env, "rewrite", "rewrite.txt")
+        app = command(env, "app.txt")
+        rewriter = command(env, "rewrite.txt")
         rewriter.place_in_tier("manual", by="Rewriter")
         project.Default(app)
 
-        assert tiers_of(project)["rewrite"] == "manual"
+        assert tiers_of(project)["rewrite.txt"] == "manual"
 
     def test_the_demotion_names_the_default_call(self, project, env):
-        app = command(env, "app", "app.txt")
-        note = command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        note = command(env, "note.txt")
         project.Default(app)
 
         decided = decide_build_tiers(project)
         assert decided[note].location == decided[app].location
 
     def test_several_calls_append(self, project, env):
-        app = command(env, "app", "app.txt")
-        tool = command(env, "tool", "tool.txt")
-        command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        tool = command(env, "tool.txt")
+        command(env, "note.txt")
         project.Default(app)
         project.Default(tool)
 
         decided = tiers_of(project)
-        assert decided["app"] == "default"
-        assert decided["tool"] == "default"
-        assert decided["note"] == "all"
+        assert decided["app.txt"] == "default"
+        assert decided["tool.txt"] == "default"
+        assert decided["note.txt"] == "all"
 
 
 class TestOrderIndependence:
     """Nothing is decided at the call, so call order cannot matter."""
 
     def test_default_before_the_other_targets_exist(self, project, env):
-        app = command(env, "app", "app.txt")
+        app = command(env, "app.txt")
         project.Default(app)
         # Created after the Default() call: still demoted, as if it were first.
-        command(env, "note", "note.txt")
+        command(env, "note.txt")
 
-        assert tiers_of(project) == {"app": "default", "note": "all"}
+        assert tiers_of(project) == {"app.txt": "default", "note.txt": "all"}
 
     def test_default_after_the_other_targets_exist(self, project, env):
-        app = command(env, "app", "app.txt")
-        command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        command(env, "note.txt")
         project.Default(app)
 
-        assert tiers_of(project) == {"app": "default", "note": "all"}
+        assert tiers_of(project) == {"app.txt": "default", "note.txt": "all"}
 
     def test_build_tier_set_before_and_after_default(self, project, env):
-        early = command(env, "early", "early.txt")
+        early = command(env, "early.txt")
         early.build_tier = "manual"
-        app = command(env, "app", "app.txt")
+        app = command(env, "app.txt")
         project.Default(app)
-        late = command(env, "late", "late.txt")
+        late = command(env, "late.txt")
         late.build_tier = "manual"
 
         decided = tiers_of(project)
-        assert decided["early"] == "manual"
-        assert decided["late"] == "manual"
+        assert decided["early.txt"] == "manual"
+        assert decided["late.txt"] == "manual"
 
     def test_a_subdirectory_default_governs_the_whole_tree(self, project, env):
         """Location never matters: a child's Default() demotes the parent's
         products exactly as a top-level call would."""
-        app = command(env, "app", "app.txt")
+        app = command(env, "app.txt")
         with project._enter_subdir("sub"):
             child = Project("sub", root_dir=project.root_dir / "sub")
             child_env = child.Environment()
-            tool = command(child_env, "tool", "tool.txt")
+            tool = command(child_env, "tool.txt")
             child.Default(tool)
 
         decided = tiers_of(project)
-        assert decided["tool"] == "default"
-        assert decided["app"] == "all"
+        assert decided[tool.name] == "default"
+        assert decided["app.txt"] == "all"
         assert decide_build_tiers(project)[app].reason == "not named in Default()"
 
 
 class TestContradiction:
     def test_named_in_default_and_set_to_all(self, project, env):
-        bench = command(env, "bench", "bench.txt")
+        bench = command(env, "bench.txt")
         bench.build_tier = "all"
         tier_line = sys._getframe().f_lineno - 1
         project.Default(bench)
@@ -287,7 +290,7 @@ class TestContradiction:
         with pytest.raises(PconsError) as excinfo:
             decide_build_tiers(project)
         message = str(excinfo.value)
-        assert "bench" in message
+        assert "bench.txt" in message
         # Both lines are named: the build_tier assignment and the
         # Default() call, two lines apart in this test.
         assert "named in Default()" in message
@@ -297,7 +300,7 @@ class TestContradiction:
         assert assigned and called
 
     def test_named_in_default_and_set_to_manual(self, project, env):
-        rewriter = command(env, "rewrite", "rewrite.txt")
+        rewriter = command(env, "rewrite.txt")
         rewriter.build_tier = "manual"
         project.Default(rewriter)
 
@@ -305,16 +308,16 @@ class TestContradiction:
             decide_build_tiers(project)
 
     def test_named_in_default_and_set_to_default_is_fine(self, project, env):
-        app = command(env, "app", "app.txt")
+        app = command(env, "app.txt")
         app.build_tier = "default"
         project.Default(app)
 
-        assert tiers_of(project)["app"] == "default"
+        assert tiers_of(project)["app.txt"] == "default"
 
     def test_a_builder_placement_is_no_contradiction(self, project, env):
         """Default() on an install is how an install joins the ordinary
         build; only a script's own choice can contradict."""
-        product = command(env, "note", "note.txt")
+        product = command(env, "note.txt")
         installed = project.Install("dist", [product])
         project.Default(installed)
 
@@ -325,7 +328,7 @@ class TestBuildByDefaultAlias:
     """The deprecated boolean, kept one release."""
 
     def test_true_reads_default(self, project, env):
-        note = command(env, "note", "note.txt")
+        note = command(env, "note.txt")
         assert note.build_by_default is True
         assert note.build_tier == "default"
 
@@ -333,26 +336,26 @@ class TestBuildByDefaultAlias:
         """False kept a target out of `all` as well as the default build,
         which is what manual means; mapping it to `all` would put a
         source-rewriting target on `ninja all` with nothing said."""
-        note = command(env, "note", "note.txt")
+        note = command(env, "note.txt")
         note.build_by_default = False
         assert note.build_tier == "manual"
         assert note.build_by_default is False
 
     def test_true_writes_default(self, project, env):
-        product = command(env, "note", "note.txt")
+        product = command(env, "note.txt")
         installed = project.Install("dist", [product])
         installed.build_by_default = True
         assert installed.build_tier == "default"
 
     def test_a_manual_target_reads_false(self, project, env):
-        note = command(env, "note", "note.txt")
+        note = command(env, "note.txt")
         note.build_tier = "manual"
         assert note.build_by_default is False
 
     def test_writing_the_alias_is_a_script_choice(self, project, env):
         """It goes through build_tier, so it wins over the placement and
         records its line."""
-        note = command(env, "note", "note.txt")
+        note = command(env, "note.txt")
         note.build_by_default = False
         note.place_in_tier("default", by="Command")
 
@@ -363,10 +366,10 @@ class TestBuildByDefaultAlias:
 
 class TestReport:
     def test_every_target_gets_a_line(self, project, env):
-        app = command(env, "app", "app.txt")
-        product = command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        product = command(env, "note.txt")
         project.Install("dist", [product])
-        bench = command(env, "bench", "bench.txt")
+        bench = command(env, "bench.txt")
         bench.build_tier = "all"
         project.Default(app)
 
@@ -376,46 +379,59 @@ class TestReport:
         # One section per tier, widest invocation first.
         assert [k for k in rows if k.endswith(":")] == ["default:", "all:"]
         order = [line.split()[0] for line in lines[1:]]
-        assert order == ["default:", "app", "all:", "bench", "install_dist", "note"]
-        assert "named in Default()" in rows["app"]
-        assert "not named in Default()" in rows["note"]
+        assert order == [
+            "default:",
+            "app.txt",
+            "all:",
+            "bench.txt",
+            "install_dist",
+            "note.txt",
+        ]
+        assert "named in Default()" in rows["app.txt"]
+        assert "not named in Default()" in rows["note.txt"]
         assert "step (Install)" in rows["install_dist"]
-        assert 'build_tier = "all"' in rows["bench"]
+        assert 'build_tier = "all"' in rows["bench.txt"]
         # A script line is named, spelled as the reader would write it.
-        assert "test_build_tiers.py:" in rows["bench"]
-        assert "test_build_tiers.py:" in rows["app"]
+        assert "test_build_tiers.py:" in rows["bench.txt"]
+        assert "test_build_tiers.py:" in rows["app.txt"]
         # A builder placement has no script line to name.
         assert ":" not in rows["install_dist"]
 
     def test_sections_sort_by_subdirectory_then_name(self, project, env):
         """Within a tier, the order is the tree's, not the script's:
         top level first, then each subdirectory, names case-insensitively."""
-        command(env, "zeta", "zeta.txt")
+        command(env, "zeta.txt")
         with project._enter_subdir("lib"):
-            command(env, "Beta", "beta.txt")
-            command(env, "alpha", "alpha.txt")
+            command(env, "Beta.txt")
+            command(env, "alpha.txt")
         with project._enter_subdir("app"):
-            command(env, "gamma", "gamma.txt")
-        command(env, "Alpha", "top-alpha.txt")
+            command(env, "gamma.txt")
+        command(env, "Alpha.txt")
 
         lines = decide_build_tiers(project).report_lines()
         rows = [line.split() for line in lines[2:]]
-        assert [row[0] for row in rows] == ["Alpha", "zeta", "gamma", "alpha", "Beta"]
+        assert [row[0] for row in rows] == [
+            "Alpha.txt",
+            "zeta.txt",
+            "app/gamma.txt",
+            "lib/alpha.txt",
+            "lib/Beta.txt",
+        ]
         # The subdirectory column shows where each one lives.
-        assert [row[1] for row in rows if row[0] == "gamma"] == ["app"]
-        assert [row[1] for row in rows if row[0] == "Beta"] == ["lib"]
+        assert [row[1] for row in rows if row[0] == "app/gamma.txt"] == ["app"]
+        assert [row[1] for row in rows if row[0] == "lib/Beta.txt"] == ["lib"]
 
     def test_flat_project_has_no_subdirectory_column(self, project, env):
-        command(env, "note", "note.txt")
+        command(env, "note.txt")
         line = decide_build_tiers(project).report_lines()[2]
-        assert line.split()[:2] == ["note", "product"]
+        assert line.split()[:2] == ["note.txt", "product"]
 
     def test_a_subset_reports_only_those_targets(self, project, env):
-        app = command(env, "app", "app.txt")
-        command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        command(env, "note.txt")
 
         lines = decide_build_tiers(project).report_lines([app])
-        assert lines == ["build tiers:", "  default:", "    app  product (Command)"]
+        assert lines == ["build tiers:", "  default:", "    app.txt  product (Command)"]
 
     def test_no_targets_no_report(self, project):
         assert decide_build_tiers(project).report_lines() == []
@@ -423,8 +439,8 @@ class TestReport:
     def test_explain_shows_the_section(self, project, env, capsys):
         from pcons import _cli_explain
 
-        app = command(env, "app", "app.txt")
-        product = command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        product = command(env, "note.txt")
         project.Install("dist", [product])
         project.Default(app)
         project.resolve()
@@ -446,7 +462,7 @@ class TestReport:
     def test_generate_logs_the_report_when_verbose(self, project, env, caplog):
         import logging
 
-        command(env, "note", "note.txt")
+        command(env, "note.txt")
         with caplog.at_level(logging.INFO, logger="pcons"):
             _generate(project, NinjaGenerator())
 
@@ -457,7 +473,7 @@ class TestReport:
     def test_generate_is_quiet_without_verbose(self, project, env, caplog):
         import logging
 
-        command(env, "note", "note.txt")
+        command(env, "note.txt")
         with caplog.at_level(logging.WARNING, logger="pcons"):
             _generate(project, NinjaGenerator())
 
@@ -509,10 +525,10 @@ class TestGenerators:
     @pytest.fixture
     def mixed(self, project, env):
         """One product, one step, one manual target, one demoted product."""
-        app = command(env, "app", "app.txt")
-        product = command(env, "note", "note.txt")
+        app = command(env, "app.txt")
+        product = command(env, "note.txt")
         project.InstallAs("dist/renamed.txt", product)
-        rewriter = command(env, "rewrite", "rewrite.txt")
+        rewriter = command(env, "rewrite.txt")
         rewriter.build_tier = "manual"
         return project, app
 
@@ -571,7 +587,6 @@ class TestMakefileManualOnlyProject:
             target="stamp.txt",
             source=["in.txt"],
             command="cp $SOURCE $TARGET",
-            name="stamp",
         )
         stamp.build_tier = "manual"
         project.resolve()
@@ -589,7 +604,7 @@ class TestAnEmptyDefaultTier:
 
     @pytest.fixture
     def steps_only(self, project, env):
-        note = command(env, "note", "note.txt")
+        note = command(env, "note.txt")
         note.build_tier = "manual"
         project.Install("dist", [note])
         project.resolve()

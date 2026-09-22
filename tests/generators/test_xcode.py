@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pcons.core.errors import PconsError
+from pcons.core.errors import DuplicateTargetError, PconsError
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
@@ -113,21 +113,6 @@ class TestXcodeGeneratorTargets:
             not xcodeproj_path.exists()
             or not (xcodeproj_path / "project.pbxproj").exists()
         )
-
-
-class TestXcodeGeneratorDuplicateNames:
-    """Xcode addresses a target by name, so two of one name cannot both exist."""
-
-    def test_it_refuses_them(self, tmp_path, gcc_toolchain):
-        project = Project("app", root_dir=tmp_path, build_dir=tmp_path)
-        for name in ("mcu", "host"):
-            env = project.Environment(toolchain=gcc_toolchain, name=name)
-            env.build_prefix = name
-            Target("common", target_type="static_library", env=env)
-
-        XcodeGenerator().generate(project)
-        with pytest.raises(PconsError, match="common@mcu"):
-            BaseGenerator._generate_pending(project)
 
 
 class TestXcodeGeneratorBuildSettings:
@@ -564,7 +549,7 @@ class TestXcodeGeneratorStagedTrees:
 
         project = Project("overlay_test", root_dir=tmp_path, build_dir=tmp_path)
         env = project.Environment()
-        project.OverlayDir(env, "stage", sources=["shared", "app"], name="stage_it")
+        project.OverlayDir(env, "stage", sources=["shared", "app"])
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -572,7 +557,7 @@ class TestXcodeGeneratorStagedTrees:
             BaseGenerator._generate_pending(project)
 
         message = str(exc.value)
-        assert "stage_it" in message
+        assert "overlay_stage" in message
         assert "OverlayDir" in message
         assert "ninja" in message
         # Refused before anything was written.
@@ -900,3 +885,95 @@ class TestXcodeGeneratorDyndep:
         with pytest.raises(PconsError):
             BaseGenerator._generate_pending(project)
         assert not (tmp_path / "myapp.xcodeproj").exists()
+
+
+class TestXcodeDisplayNames:
+    """Xcode tells its targets apart by name; pcons no longer does.
+
+    An anonymous target's name is a label derived from its output, and two
+    of them may share one (see ``Target.anonymous``). The generator gives
+    each target a name of its own for Xcode's UI.
+    """
+
+    def _install(self, project, label, filename, tmp_path):
+        """An anonymous Install target labelled `label`, staging `filename`."""
+        target = Target(label, target_type="interface", anonymous=True, project=project)
+        target._builder_name = "Install"
+        target._builder_data = {"dest_dir": "bin"}
+        source = FileNode(tmp_path / filename)
+        dest = FileNode(tmp_path / "bin" / filename)
+        dest.depends([source])
+        dest._build_info = {
+            "tool": "install",
+            "command_var": "copycmd",
+            "sources": [source],
+        }
+        target.output_nodes.append(dest)
+        target._install_nodes = [dest]
+        return target
+
+    def _generated_target_names(self, tmp_path, project_name):
+        from pbxproj import XcodeProject
+
+        written = XcodeProject.load(
+            str(tmp_path / f"{project_name}.xcodeproj" / "project.pbxproj")
+        )
+        return sorted(str(t.name) for t in written.objects.get_targets())
+
+    def test_one_label_two_targets(self, tmp_path):
+        """Two anonymous targets sharing a label still make two Xcode targets."""
+        project = Project("shared_label", root_dir=tmp_path, build_dir=tmp_path)
+        self._install(project, "config", "config.h", tmp_path)
+        self._install(project, "config", "config.c", tmp_path)
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert self._generated_target_names(tmp_path, "shared_label") == [
+            "config",
+            "config.c",
+        ]
+
+    def test_an_ordinary_target_keeps_its_name(self, tmp_path):
+        """A name of its own is only synthesized for a clash."""
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
+        Target("myapp", target_type="program")
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert self._generated_target_names(tmp_path, "myapp") == ["myapp"]
+
+    def test_one_name_in_two_environments(self, tmp_path, gcc_toolchain):
+        """A name two named targets share legitimately, differing by
+        environment, is disambiguated by the environment."""
+        project = Project("app", root_dir=tmp_path, build_dir=tmp_path)
+        for name in ("mcu", "host"):
+            env = project.Environment(toolchain=gcc_toolchain, name=name)
+            env.build_prefix = name
+            Target("common", target_type="static_library", env=env)
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert self._generated_target_names(tmp_path, "app") == [
+            "common",
+            "common@host",
+        ]
+
+    def test_two_named_targets_of_one_name_are_still_refused(self, tmp_path):
+        """One subdirectory included twice: two `child::common` targets."""
+        top = Project("t", root_dir=tmp_path, build_dir=tmp_path)
+        for _ in range(2):
+            with top._enter_subdir("sub"):
+                child = Project("child", root_dir=tmp_path / "sub")
+                Target("common", target_type="program", project=child)
+
+        gen = XcodeGenerator()
+        gen.generate(top)
+
+        with pytest.raises(DuplicateTargetError, match="child::common"):
+            BaseGenerator._generate_pending(top)

@@ -69,7 +69,6 @@ def build_project(tmp_path, spec):
         (source_dir / source_name).write_text(f"contents {i}\n")
         relative = f"{subdir}/{source_name}" if subdir else source_name
         env.Command(
-            name=f"copy{i}",
             target=output_name,
             source=relative,
             command=[sys.executable, "-c", COPY, "$SOURCE", "$TARGET"],

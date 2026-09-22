@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from pcons.core.builder import anchor_target_paths
+from pcons.core.builder import anchor_target_paths, output_label
 from pcons.core.errors import PconsError
 from pcons.core.invocation import RUN_NAME, launcher_entry
 from pcons.util import pybuilder as runner
@@ -473,7 +473,7 @@ def emit_args(*, project: Project, env: Environment, name: str, target: object) 
     Args:
         project: Any project of the tree; the claim registry hangs off its top.
         env: The environment whose build directory holds the pickle.
-        name: The edge's name, used in a collision message and as the
+        name: The edge's label, used in a collision message and as the
             fallback file stem when the target's own path cannot be used.
         target: The call's ``target=``, the pickle's file name follows its
             first element's build-relative path.
@@ -504,12 +504,12 @@ def _pickle_relpath(env: Environment, target: object, name: str) -> Path:
     when their targets share a name, and a target in a subdirectory keeps it,
     ``out/report.txt`` landing at ``pybuilder/out/report.txt.args.pkl``.
 
-    Falls back to the sanitized edge name, today's behaviour, when the
-    target's anchored path cannot be expressed relative to the gen dir's
-    parent: an absolute target outside the environment's own build
-    directory, or one that climbs out of it with ``..``. Both are rare and
-    already unusual targets; the fallback keeps the pickle inside the gen
-    dir rather than reasoning further about where it should land.
+    Falls back to the sanitized edge label when the target's anchored path
+    cannot be expressed relative to the gen dir's parent: an absolute target
+    outside the environment's own build directory, or one that climbs out of
+    it with ``..``. Both are rare and already unusual targets; the fallback
+    keeps the pickle inside the gen dir rather than reasoning further about
+    where it should land.
     """
     first = target if isinstance(target, (str, Path)) else _as_list(target)[0]
     anchored = anchor_target_paths(env, [first])[0]
@@ -845,20 +845,20 @@ def _collision_advice(
 ) -> str:
     """What to do about two claims on one path, in the words that apply.
 
-    A pickle belongs to one edge, so naming one of the edges parts them. A
-    module belongs to one function, so naming an edge does nothing for it:
-    when two environments share a build directory, only a build_prefix parts
-    them, and when one environment claims twice, the answer turns on whether
-    it is one function or two. The module text is what tells those apart. A
-    factory that writes the ``def`` inside itself makes a fresh function
-    object every call, so comparing the objects would report a name clash
-    where there is one function and no clash at all.
+    A pickle is named after the edge's first target, so different targets
+    part them. A module belongs to one function: when two environments share
+    a build directory, only a build_prefix parts them, and when one
+    environment claims twice, the answer turns on whether it is one function
+    or two. The module text is what tells those apart. A factory that writes
+    the ``def`` inside itself makes a fresh function object every call, so
+    comparing the objects would report a name clash where there is one
+    function and no clash at all.
     """
     fixes: list[str] = []
     if not same_env:
         fixes.append("give one environment its own build_prefix")
     if owner is None or first is None:
-        fixes.append('name one of the edges, name="something-else"')
+        fixes.append("give the edges different targets")
     elif owner.module_text != first.module_text:
         fixes.append("rename one of the functions")
     elif same_env:
@@ -1143,10 +1143,13 @@ def _as_list(value: object) -> list[Any]:
     return list(cast("Sequence[Any]", value))
 
 
-def _derive_name(target: object) -> str:
-    """The edge's name when the script gave none: the first target's stem."""
+def _edge_label(env: Environment, target: object) -> str:
+    """How a message names one edge: its first output, as the build tool writes it.
+
+    The same label ``env.Command`` puts on the target this edge becomes.
+    """
     first = target if isinstance(target, (str, Path)) else _as_list(target)[0]
-    return Path(str(first)).stem
+    return output_label(env, anchor_target_paths(env, [first])[0])
 
 
 @dataclass(frozen=True)
@@ -1289,10 +1292,13 @@ class PyBuilder:
             target: Output file or files, as ``env.Command`` takes them.
             source: Input files, or None. They arrive as the function's
                 *sources*, in the order written.
-            name: Edge name for ``ninja <name>``. Defaults to the first
-                target's stem, the same rule ``env.Command`` uses. Does not
-                affect the argument pickle, which is named after the first
-                target's own build-relative path.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name. Does not affect the argument
+                pickle, which is named after the first target's own
+                build-relative path.
             depends: Extra rebuild triggers that are not sources, for this
                 edge alone. Added to whatever the decoration's own
                 ``depends=`` and :meth:`depends` gave the builder.
@@ -1308,7 +1314,7 @@ class PyBuilder:
                 pickled, or if the generated module collides with another
                 builder's.
         """
-        edge_name = name or _derive_name(target)
+        edge_label = _edge_label(self._env, target)
         payload = check_arguments(
             self._function, kwargs=kwargs, sys_path=self._sys_path
         )
@@ -1316,7 +1322,7 @@ class PyBuilder:
             self._function, project=self._project, env=self._env
         )
         args_rel = emit_args(
-            project=self._project, env=self._env, name=edge_name, target=target
+            project=self._project, env=self._env, name=edge_label, target=target
         )
         runner_rel = _runner_rel(self._project)
         root = self._project.top_path_resolver.project_root
@@ -1327,7 +1333,7 @@ class PyBuilder:
         made = self._env.Command(
             target=target,
             source=source,
-            name=edge_name,
+            name=name,
             command=[
                 interpreter,
                 self._project.node(runner_rel),

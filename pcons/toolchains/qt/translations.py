@@ -140,7 +140,6 @@ def _add_lupdate_target(
         target=stamp,
         source=list(sources),
         command=command,
-        name=f"{name}-lupdate",
     )
     lupdate_target.place_in_tier("manual", by="QtTranslations")
     project.Alias("lupdate", lupdate_target)

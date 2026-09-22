@@ -42,7 +42,7 @@ API:
 | `target.set_option(key, value)` | Set a builder/toolchain option (e.g. `install_name`, `exported_symbols`) |
 | `target.link(t, "m")` | Link a dependency (or raw lib name) and re-export it to consumers |
 | `target.link_private(t, "m")` | Link a dependency (or raw lib name), keeping it local |
-| `target.depends(*items, on_change=None)` | Build targets or have files first, without linking them; `on_change=True` for a file a step reads but can't report, `False` for one it only needs to exist |
+| `target.depends(*items, on_change=None)` | Build targets or have files first, without linking them; an alias stands for everything it groups; `on_change=True` for a file a step reads but can't report, `False` for one it only needs to exist |
 | `target.pre_build(command)` | Shell command to run before this target is built |
 | `target.post_build(command)` | Shell command to run after this target is built |
 | `target.get_option(key, default=None)` | Read an option set with `set_option()` |
@@ -79,9 +79,9 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.override(**kwargs)` | Context manager for temporary overrides |
 | `env.add_toolchain(toolchain)` | Add additional toolchain (e.g., CUDA) |
 | `env.toolchain` | The primary toolchain this environment was created with |
-| `env.Command(target, source, cmd)` | Run arbitrary shell command |
+| `env.Command(target, source, cmd, name=)` | Run arbitrary shell command; `name=` is optional and makes the target findable by name |
 | `env.PyBuilder(python=, worker=, cwd=, launcher=, env_vars=, restat=, write_if_different=)` | Decorator: turn a Python function of the build script into a builder. Says how the function runs |
-| `builder(target, source, name, depends, **kwargs)` | Call the builder: one build edge, with the function's own arguments as plain keywords |
+| `builder(target, source, depends, name=, **kwargs)` | Call the builder: one build edge, with the function's own arguments as plain keywords |
 | `env.Framework(*names)` | Link macOS frameworks (macOS only) |
 | `env.Glob(pattern)` | Find files matching a glob pattern |
 | `env.cc` | C compiler settings |
@@ -133,7 +133,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 
 | Function | Description |
 |----------|-------------|
-| `create_universal_binary(project, name, inputs, output)` | Combine arch-specific binaries into universal binary (returns Target) |
+| `create_universal_binary(project, inputs, output, name=)` | Combine arch-specific binaries into universal binary (returns Target) |
 | `get_dylib_install_name(path)` | Get a dylib's install name |
 | `fix_dylib_references(target, dylibs, lib_dir)` | Fix dylib references for bundle creation |
 

@@ -4,11 +4,23 @@
 Generates structured metadata about project targets (programs, libraries,
 and other target kinds) so IDE plugins can query available targets and
 their relationships.
+
+A target is addressed in this file by its ``id``, which is unique within the
+file and the same on every run of an unchanged build. The id is the target's
+qualified name, and for an anonymous one (see ``Target.anonymous``, whose
+name is a label its builder derived) a ``#n`` suffix: its position, in
+declaration order, among the anonymous targets of its project wearing that
+qualified name. ``dependencies`` is a list of ids, in the order the target
+depends on them. ``anonymous`` says which kind of target this is.
+
+``name`` and ``qualified_name`` are for display. Neither is unique: two
+installs into one directory wear one label, and so do two tests of one name.
 """
 
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,12 +34,30 @@ if TYPE_CHECKING:
     from pcons.core.tiers import BuildTiers
 
 
+def _project_target_ids(project: Project) -> dict[int, str]:
+    """Ids for one project's own targets, keyed by target identity.
+
+    See the module docstring for the rule.
+    """
+    ids: dict[int, str] = {}
+    ordinals: Counter[str] = Counter()
+    for target in project._targets:
+        qualified = target.qualified_name
+        if target.anonymous:
+            ordinals[qualified] += 1
+            ids[id(target)] = f"{qualified}#{ordinals[qualified]}"
+        else:
+            ids[id(target)] = qualified
+    return ids
+
+
 class MetadataGenerator(BaseGenerator):
     """Generator that writes IDE-friendly target metadata as JSON."""
 
     def __init__(self, *, output_filename: str = "pcons_metadata.json") -> None:
         super().__init__("metadata")
         self._output_filename = output_filename
+        self._ids: dict[int, str] = {}
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate the metadata JSON file in output_dir."""
@@ -38,8 +68,9 @@ class MetadataGenerator(BaseGenerator):
 
         # One decision for the whole tree, as the build generators use.
         tiers = decide_build_tiers(project)
+        self._ids = {}
         metadata: dict[str, Any] = {
-            "schema_version": 3,
+            "schema_version": 4,
             "generator": self.name,
             "projects": [
                 self._serialize_project(p, tiers) for p in self._walk_projects(project)
@@ -49,6 +80,18 @@ class MetadataGenerator(BaseGenerator):
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
             f.write("\n")
+
+    def _id_of(self, target: Target) -> str:
+        """The id this file gives *target*.
+
+        A dependency may reach a project the walk has not come to yet, or one
+        outside this file altogether; either way its project settles its id.
+        """
+        known = self._ids.get(id(target))
+        if known is None:
+            self._ids.update(_project_target_ids(target.project))
+            known = self._ids[id(target)]
+        return known
 
     def _walk_projects(self, project: Project) -> list[Project]:
         """Flatten the project tree depth-first (root before descendants)."""
@@ -92,7 +135,7 @@ class MetadataGenerator(BaseGenerator):
             for node in target.sources
             if isinstance(node, FileNode)
         ]
-        dependencies = sorted({dep.name for dep in target.dependencies})
+        dependencies = [self._id_of(dep) for dep in target.dependencies]
         decision = tiers.get(target)
 
         location: dict[str, Any] = {
@@ -105,8 +148,10 @@ class MetadataGenerator(BaseGenerator):
             location["function"] = target.defined_at.function
 
         entry: dict[str, Any] = {
+            "id": self._id_of(target),
             "name": target.name,
             "qualified_name": target.qualified_name,
+            "anonymous": target.anonymous,
             "sub_directory": str(target._subdir) if target._subdir.parts else None,
             "type": target.target_type or "other",
             "build_tier": decision.tier if decision else target.build_tier,

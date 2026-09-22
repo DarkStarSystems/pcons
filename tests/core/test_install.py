@@ -39,21 +39,6 @@ class TestInstall:
         assert install.target_type == "interface"
         assert install.name == "install_dist"
 
-    def test_install_custom_name(self, tmp_path):
-        """Install can have a custom name."""
-        project = Project("test", root_dir=tmp_path)
-
-        src_file = tmp_path / "mylib.a"
-        src_file.touch()
-
-        install = project.Install(
-            tmp_path / "dist",
-            [src_file],
-            name="my_install",
-        )
-
-        assert install.name == "my_install"
-
     def test_install_creates_copy_nodes(self, tmp_path):
         """Install creates copy nodes for each source file after resolve."""
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
@@ -175,7 +160,11 @@ class TestInstall:
             assert install.output_nodes[0].role == "install_output"
 
     def test_install_target_registered(self, tmp_path):
-        """Install target is registered with the project."""
+        """Install target is registered with the project.
+
+        By identity, not by name: its name is a label Install derived from
+        the destination, and several installs may wear it.
+        """
         project = Project("test", root_dir=tmp_path)
 
         src_file = tmp_path / "file.txt"
@@ -183,9 +172,9 @@ class TestInstall:
 
         install = project.Install(tmp_path / "dist", [src_file])
 
-        # Target should be findable
-        found = project.get_target(install.name)
-        assert found is install
+        assert install in project.targets
+        assert install.anonymous
+        assert not project.has_target(install.name)
 
     def test_install_node_dependencies(self, tmp_path):
         """Install nodes depend on source files after resolve."""
@@ -360,7 +349,6 @@ class TestInstallWithNinja:
         cmd = env.Command(
             target=project.build_dir / "out.txt",
             command="echo done > $TARGET",
-            name="after",
         )
         cmd.depends(staged)
 
@@ -517,12 +505,8 @@ class TestInstallWithNinja:
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment()
-        a = env.Command(
-            target=project.build_dir / "a.txt", command="echo a > $TARGET", name="a"
-        )
-        b = env.Command(
-            target=project.build_dir / "b.txt", command="echo b > $TARGET", name="b"
-        )
+        a = env.Command(target=project.build_dir / "a.txt", command="echo a > $TARGET")
+        b = env.Command(target=project.build_dir / "b.txt", command="echo b > $TARGET")
         project.Install("dist", [a, b])
 
         project.resolve()
@@ -707,12 +691,10 @@ class TestInstallOrderIndependence:
 
         # Install from intermediate to final (declared first)
         # Note: This references intermediate_install which doesn't exist yet
-        final_install = project.Install(final_dir, [src_file], name="final_install")
+        final_install = project.Install(final_dir, [src_file])
 
         # Install from source to intermediate (declared second)
-        intermediate_install = project.Install(
-            intermediate_dir, [src_file], name="intermediate_install"
-        )
+        intermediate_install = project.Install(intermediate_dir, [src_file])
 
         # Resolve
         project.resolve()
@@ -919,7 +901,6 @@ class TestInstallDirectoryAutoDetection:
             target=str(generated),
             source=[],
             command="touch $TARGET",
-            name="gen_rsrc",
         )
 
         # User code references the same file via project.node() for Install
@@ -984,9 +965,8 @@ class TestInstallMode:
 
 
 class TestInstallTargetNaming:
-    """Installing several things into one directory is ordinary; the
-    auto-generated name derives from the destination alone, so those collide
-    by design. Only a repeated explicit name= is a mistake worth saying."""
+    """An install's name is a label read off its destination, so installs
+    that share a destination share a label and nothing is renamed."""
 
     def test_many_installs_into_one_directory_are_quiet(
         self, tmp_path, gcc_toolchain, caplog
@@ -997,15 +977,5 @@ class TestInstallTargetNaming:
             (tmp_path / f"{name}.txt").write_text(name)
             project.Install("config", [f"{name}.txt"])
 
-        assert "renamed" not in caplog.text
-
-    def test_a_repeated_explicit_name_still_warns(
-        self, tmp_path, gcc_toolchain, caplog
-    ):
-        project = Project("q", root_dir=tmp_path, build_dir="build")
-        project.Environment(toolchain=gcc_toolchain)
-        for name in "ab":
-            (tmp_path / f"{name}.txt").write_text(name)
-            project.Install("config", [f"{name}.txt"], name="my_install")
-
-        assert "renamed" in caplog.text
+        assert caplog.text == ""
+        assert [t.name for t in project.targets] == ["install_config"] * 5

@@ -6,12 +6,16 @@ reaches it:
 
 - ``"default"``: plain ``ninja``, and everything below it. The products —
   programs, libraries, commands, documents, packs, whatever this build makes.
-- ``"all"``: ``ninja all``, naming the target, and being a dependency. The
-  steps that operate on products: installs, overlays, archives, installers.
-- ``"manual"``: naming only. Test runs (``ninja test``), and targets that
-  must not run unasked: one that rewrites sources (Qt's lupdate), one too
-  slow or too destructive for a
+- ``"all"``: ``ninja all``, asking for the target itself, and being a
+  dependency. The steps that operate on products: installs, overlays,
+  archives, installers.
+- ``"manual"``: asking for the target itself, only. Test runs (``ninja
+  test``, an alias), and targets that must not run unasked: one that
+  rewrites sources (Qt's lupdate), one too slow or too destructive for a
   routine build.
+
+Asking for a target is ``pcons build <name>`` when the script named it, and
+either way its output path or an alias.
 
 The builder that creates a target places it (:meth:`Target.place_in_tier`);
 a script may move one (``bench.build_tier = "all"``); ``Default()`` names the
@@ -167,9 +171,9 @@ def _subdir_text(target: Target) -> str:
 def _listing_key(decision: TierDecision) -> tuple[tuple[str, ...], str, str]:
     """Sort key for the report: subdirectory, then name (case-insensitive,
     with the exact name breaking ties so the order is stable)."""
-    target = decision.target
-    subdir = tuple(part.casefold() for part in target._subdir.parts)
-    return (subdir, target.name.casefold(), target.name)
+    subdir = tuple(part.casefold() for part in decision.target._subdir.parts)
+    name = decision.target.name
+    return (subdir, name.casefold(), name)
 
 
 def decide_build_tiers(project: Project) -> BuildTiers:

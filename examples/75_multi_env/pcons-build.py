@@ -22,6 +22,10 @@ What it shows:
   `project.get_target`, by `project.Default` and by `pcons build`. A link
   string stays a raw link token, so the target is passed as an object and
   `link("m")` still means `-lm`.
+- `parity::stamp@host`, the same spelling across a script boundary: `parity/`
+  names its generator, so this script finds it without the subdirectory
+  handing it back. `add_subdirectory`'s return value, used just below for the
+  library, is the other way across.
 
 Not the same as example 66_multi_project, which is two top-level projects with
 two build directories and no edges between them, nor 34_multi_build_dir, which
@@ -57,5 +61,6 @@ for env in (host, strict):
     app = project.Program("app", env, sources=["src/main.c"])
     app.link(project.get_target(f"checksum@{env.name}"))
     app.link(parity[env.name])
+    app.depends(project.get_target(f"parity::stamp@{env.name}"))
 
 project.Default("app@host", "app@strict")

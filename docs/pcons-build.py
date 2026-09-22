@@ -46,7 +46,6 @@ site = env.Command(
         "-d",
         str(site_dir),
     ],
-    name="site",
 )
 
 project.Default(site)

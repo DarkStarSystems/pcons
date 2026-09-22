@@ -35,7 +35,6 @@ if get_platform().is_macos:
             "$SOURCE",
             "$TARGET",
         ],
-        name="demo_plist",
     )
     deploy = project.QtDeploy("deploy", env, app=app, bundle="Demo.app")
     deploy.depends(bundle_bin, plist)

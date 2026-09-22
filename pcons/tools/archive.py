@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from pcons.core.builder import anchor_target_paths
+from pcons.core.builder import anchor_target_paths, output_label
 from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode
 from pcons.core.resolver import PendingSourceFactory
@@ -236,7 +236,11 @@ class TarfileBuilder:
             sources: Input files, directories, and/or Targets.
             compression: Compression type (None, "gzip", "bz2", "xz").
             base_dir: Base directory for archive paths.
-            name: Optional target name.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
 
         Returns:
             ArchiveTarget representing the archive, with settable properties.
@@ -254,17 +258,13 @@ class TarfileBuilder:
                 compression = "xz"
             # .tar gets no compression
 
-        if name is None:
-            name = _name_from_output(
-                output, [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tar"]
-            )
-
         target = ArchiveTarget(
-            name,
+            name or output_label(env, output_path),
             target_type="archive",
             defined_at=get_caller_location(),
             project=project,
             env=env,
+            anonymous=name is None,
         )
 
         target._builder_name = "Tarfile"
@@ -312,22 +312,24 @@ class ZipfileBuilder:
             output: Output archive path.
             sources: Input files, directories, and/or Targets.
             base_dir: Base directory for archive paths.
-            name: Optional target name.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
 
         Returns:
             ArchiveTarget representing the archive, with settable properties.
         """
         output_path = anchor_target_paths(env, [output])[0]
 
-        if name is None:
-            name = _name_from_output(output, [".zip"])
-
         target = ArchiveTarget(
-            name,
+            name or output_label(env, output_path),
             target_type="archive",
             defined_at=get_caller_location(),
             project=project,
             env=env,
+            anonymous=name is None,
         )
 
         target._builder_name = "Zipfile"
@@ -339,21 +341,3 @@ class ZipfileBuilder:
         target._add_pending_sources(sources or [])
 
         return target
-
-
-def _name_from_output(output: str | Path, suffixes: list[str]) -> str:
-    """Derive target name from output path by stripping archive suffixes.
-
-    Args:
-        output: Output path (e.g., "dist/docs.tar.gz").
-        suffixes: List of suffixes to strip.
-
-    Returns:
-        Derived name (e.g., "dist/docs").
-    """
-    name = str(output)
-    for suffix in suffixes:
-        if name.endswith(suffix):
-            name = name[: -len(suffix)]
-            break
-    return name

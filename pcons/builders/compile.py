@@ -296,13 +296,13 @@ class CommandBuilder:
     @staticmethod
     def create_target(
         project: Project,
-        name: str,
         env: Environment,
         *,
         target: str | Path | list[str | Path],
         tool: Target | str | Path | None = None,
         source: str | Path | list[str | Path] | None = None,
         command: str | Sequence[Any] = "",
+        name: str | None = None,
         restat: bool = False,
         write_if_different: bool = False,
         cwd: str | Path | None = None,
@@ -321,12 +321,16 @@ class CommandBuilder:
 
         Args:
             project: The project to add the target to.
-            name: Target name for `ninja <name>`.
             env: Environment to use.
             target: Output file(s).
             tool: The program that runs the command, written ``$TOOL``.
             source: Input file(s).
             command: The shell command to run.
+            name: Optional name for this target. Give one to refer to it by
+                name later: ``get_target()``, ``Default()``, ``pcons build``,
+                and ``sub::name@env`` from another build script. It must then
+                be unique within its environment and project. Leave it out and
+                the target needs no name.
             restat: Re-check the output timestamp after running.
             write_if_different: Restore identically-rewritten outputs.
             cwd: Directory to run the command in.

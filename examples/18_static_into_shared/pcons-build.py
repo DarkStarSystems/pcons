@@ -42,17 +42,14 @@ prog.private.link_libs.append(wrapper_lib)
 installed_libs = project.Install(
     install_dir(env, "shared_library"),
     [wrapper_lib],
-    name="install-libraries",
 )
 installed_archives = project.Install(
     install_dir(env, "static_library"),
     [core_lib],
-    name="install-archives",
 )
 installed_bins = project.Install(
     install_dir(env, "program"),
     [prog],
-    name="install-binaries",
 )
 
 project.Alias("install", [installed_libs, installed_archives, installed_bins])

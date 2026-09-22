@@ -142,7 +142,7 @@ class TestMacOSInstallers:
 
         # Verify target was created
         assert dmg is not None
-        assert dmg.name == "dmg_TestApp"
+        assert dmg.name == "TestApp.dmg"
 
     def test_create_pkg_basic(self, tmp_path: Path) -> None:
         """Test basic PKG creation setup."""
@@ -169,7 +169,7 @@ class TestMacOSInstallers:
 
         # Verify target was created
         assert pkg is not None
-        assert pkg.name == "pkg_TestApp"
+        assert pkg.name == "TestApp-1.0.0.pkg"
 
     def test_create_component_pkg_basic(self, tmp_path: Path) -> None:
         """Test basic component PKG creation setup."""
@@ -195,7 +195,7 @@ class TestMacOSInstallers:
 
         # Verify target was created
         assert pkg is not None
-        assert "com_test_app" in pkg.name
+        assert "com.test.app" in pkg.name
 
     def test_create_pkg_with_directory_source(self, tmp_path: Path) -> None:
         """Test PKG creation with a directory source (auto-detected)."""
@@ -223,7 +223,7 @@ class TestMacOSInstallers:
         )
 
         assert pkg is not None
-        assert pkg.name == "pkg_TestApp"
+        assert pkg.name == "TestApp-1.0.0.pkg"
 
     def test_sign_pkg_command(self, tmp_path: Path) -> None:
         """Test that sign_pkg returns correct command."""
@@ -283,7 +283,7 @@ class TestWindowsInstallers:
 
         # Verify target was created
         assert msix is not None
-        assert msix.name == "msix_TestApp"
+        assert msix.name == "TestApp-1.0.0.msix"
 
     def test_create_msix_with_options(self, tmp_path: Path) -> None:
         """Test MSIX creation with display name and description."""
@@ -546,7 +546,6 @@ class TestValidateStagingPath:
             / "leftover.txt",
             source=None,
             command="",
-            name="conflicting_target",
         )
 
         with pytest.raises(ValueError, match="conflicts with"):
@@ -574,7 +573,6 @@ class TestValidateStagingPath:
             target=Path("dist") / "output.txt",
             source=None,
             command="",
-            name="unrelated_target",
         )
         project.node(project.build_dir / "other" / "file.txt")
 
@@ -594,7 +592,6 @@ class TestValidateStagingPath:
             target=project.build_dir / ".pkg_staging_extra" / "file.txt",
             source=None,
             command="",
-            name="sibling_target",
         )
 
         macos._validate_staging_path(project, ".pkg_staging")
@@ -847,7 +844,6 @@ class TestInstallerDepends:
         filler = env.Command(
             target=project.build_dir / "filled.stamp",
             command="echo fill > $TARGET",
-            name="fill",
         )
         macos.create_pkg(
             project,

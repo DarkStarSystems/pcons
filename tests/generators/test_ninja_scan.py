@@ -59,7 +59,6 @@ def build_ninja(
             target=f"packs/{letter}.pack",
             source=[f"{letter}.scene"],
             command=["cp", "$SOURCE", "$TARGET"],
-            name=f"pack_{letter}",
         )
 
     a, b = pack("a"), pack("b")
@@ -153,13 +152,13 @@ class TestGovernedStatement:
 
         block = statement(content, "build packs/b.pack:")
 
-        assert "| scan/scene-refs/t.pack_b.dyndep" in block[0]
-        assert "dyndep = scan/scene-refs/t.pack_b.dyndep" in block
+        assert "| scan/scene-refs/t.packs_b.pack.dyndep" in block[0]
+        assert "dyndep = scan/scene-refs/t.packs_b.pack.dyndep" in block
 
     def test_each_target_gets_its_own_dyndep_file(self, tmp_path, monkeypatch):
         content = build_ninja(tmp_path, monkeypatch)
 
-        assert "dyndep = scan/scene-refs/t.pack_a.dyndep" in statement(
+        assert "dyndep = scan/scene-refs/t.packs_a.pack.dyndep" in statement(
             content, "build packs/a.pack:"
         )
 
@@ -186,18 +185,18 @@ class TestCollateStatement:
 
         line = statement(
             content,
-            "build scan/scene-refs/t.pack_b.dyndep "
-            "| scan/scene-refs/t.pack_b.exports.json:",
+            "build scan/scene-refs/t.packs_b.pack.dyndep "
+            "| scan/scene-refs/t.packs_b.pack.exports.json:",
         )[0]
 
         assert "packs/b.pack.scaninfo.json" in line
-        assert "scan/scene-refs/t.pack_b.manifest.json" in line
-        assert "scan/scene-refs/t.pack_a.exports.json" in line
+        assert "scan/scene-refs/t.packs_b.pack.manifest.json" in line
+        assert "scan/scene-refs/t.packs_a.pack.exports.json" in line
 
     def test_each_collate_statement_binds_its_own_manifest(self, tmp_path, monkeypatch):
         content = build_ninja(tmp_path, monkeypatch)
 
-        for scope in ("t.pack_a", "t.pack_b"):
+        for scope in ("t.packs_a.pack", "t.packs_b.pack"):
             block = statement(
                 content,
                 f"build scan/scene-refs/{scope}.dyndep "
@@ -233,8 +232,8 @@ class TestEdgeArgsInNinja:
 
         line = statement(
             content,
-            "build scan/scene-refs/t.pack_b.dyndep "
-            "| scan/scene-refs/t.pack_b.exports.json packs/b.pack.refs:",
+            "build scan/scene-refs/t.packs_b.pack.dyndep "
+            "| scan/scene-refs/t.packs_b.pack.exports.json packs/b.pack.refs:",
         )[0]
 
         assert "packs/b.pack.refs:" in line
@@ -266,7 +265,6 @@ class TestAGovernedEdgeStillRebuildsOnWhatItDependsOn:
             source=["a.scene"],
             command=[sys.executable, "$SRCDIR/tools/pack.py", "$SOURCE", "$TARGET"],
             depends=["tools/pack.py"],
-            name="pack_a",
         )
         make_scanner().attach(a)
         project.resolve()

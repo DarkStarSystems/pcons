@@ -489,7 +489,9 @@ class TestTargetCompletion:
         yield root
 
     def test_after_a_command_name(self, project: Path) -> None:
-        assert _completions(["build"], "") == ["all", f"hello{EXE_SUFFIX}"]
+        assert _completions(["build"], "") == sorted(
+            {"all", "hello", f"hello{EXE_SUFFIX}"}
+        )
 
     def test_env_qualified_spellings_are_offered_too(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -520,14 +522,16 @@ class TestTargetCompletion:
         assert offered == ["hello@host", "hello@strict"]
 
     def test_a_prefix_filters(self, project: Path) -> None:
-        assert _completions(["build"], "hel") == [f"hello{EXE_SUFFIX}"]
+        assert _completions(["build"], "hel") == sorted({"hello", f"hello{EXE_SUFFIX}"})
 
     def test_explain_offers_them_too(self, project: Path) -> None:
-        assert _completions(["explain"], "") == ["all", f"hello{EXE_SUFFIX}"]
+        assert _completions(["explain"], "") == sorted(
+            {"all", "hello", f"hello{EXE_SUFFIX}"}
+        )
 
     def test_at_the_top_level(self, project: Path) -> None:
         """`pcons hello` builds a target, so the group offers the names itself."""
-        assert _completions([], "hel") == [f"hello{EXE_SUFFIX}"]
+        assert _completions([], "hel") == sorted({"hello", f"hello{EXE_SUFFIX}"})
 
     def test_the_command_names_survive_at_the_top_level(self, project: Path) -> None:
         offered = _completions([], "")
@@ -563,7 +567,9 @@ class TestTargetCompletion:
         assert run_script(project / "pcons-build.py", project / "out")[0] == 0
 
         wanted = "hello" if args == ["build"] else "elsewhere"
-        assert _completions(args, "") == ["all", f"{wanted}{EXE_SUFFIX}"]
+        assert _completions(args, "") == sorted(
+            {"all", wanted, f"{wanted}{EXE_SUFFIX}"}
+        )
 
     def test_no_build_dir_offers_no_env_spellings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -650,8 +656,10 @@ class TestTargetCompletion:
             "from pcons import Project\n"
             "Project('demo')\n"
         )
-        assert _completions(["build"], "") == ["all", f"hello{EXE_SUFFIX}"]
-        assert _completions([], "hel") == [f"hello{EXE_SUFFIX}"]
+        assert _completions(["build"], "") == sorted(
+            {"all", "hello", f"hello{EXE_SUFFIX}"}
+        )
+        assert _completions([], "hel") == sorted({"hello", f"hello{EXE_SUFFIX}"})
         assert not marker.exists()
 
 
@@ -758,16 +766,16 @@ class TestTheBuildDirBehindTheNames:
         ctx.params["build_dir"] = tmp_path
         assert _cached_names(ctx, "targets") == []
 
-    def test_no_build_dir_names_no_env_spellings(self) -> None:
-        from pcons._cli_click import _cached_env_spellings
+    def test_no_build_dir_names_no_target_spellings(self) -> None:
+        from pcons._cli_click import _cached_target_spellings
 
         ctx = click.Context(self._without_a_build_dir())
-        assert _cached_env_spellings(ctx) == []
+        assert _cached_target_spellings(ctx) == []
 
-    def test_an_unreadable_cache_names_no_env_spellings(
+    def test_an_unreadable_cache_names_no_target_spellings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from pcons._cli_click import _cached_env_spellings
+        from pcons._cli_click import _cached_target_spellings
 
         def refuse(build_dir: Path) -> None:
             raise OSError("cache unreadable")
@@ -775,4 +783,4 @@ class TestTheBuildDirBehindTheNames:
         monkeypatch.setattr("pcons.core.cache.BuildCache", refuse)
         ctx = click.Context(cli)
         ctx.params["build_dir"] = tmp_path
-        assert _cached_env_spellings(ctx) == []
+        assert _cached_target_spellings(ctx) == []

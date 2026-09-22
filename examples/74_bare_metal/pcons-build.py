@@ -116,7 +116,6 @@ version_h = host_env.Command(
     source=[genver],
     command="$SOURCE $TARGET",
     cwd=project.root_dir,
-    name="version-header",
 )
 
 
@@ -166,27 +165,22 @@ fw.private.link_flags += ["-Wl,-u,Reset_Handler"]
 fw.depends("link/lm3s6965evb.ld")
 fw.depends(version_h)
 
-# name= is required: Command derives its target name from the output stem,
-# which would collide with the Program named "firmware".
 binary = env.Command(
     target="firmware.bin",
     source=[fw],
     command="arm-none-eabi-objcopy -O binary $SOURCE $TARGET",
-    name="firmware-bin",
 )
 
 hexfile = env.Command(
     target="firmware.hex",
     source=[fw],
     command="arm-none-eabi-objcopy -O ihex $SOURCE $TARGET",
-    name="firmware-hex",
 )
 
 sizereport = env.Command(
     target="firmware.size",
     source=[fw],
     command="arm-none-eabi-size $SOURCE > $TARGET",
-    name="firmware-size",
 )
 
 project.Default(fw, binary, hexfile, sizereport, checksum_test)

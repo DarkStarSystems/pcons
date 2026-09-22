@@ -202,7 +202,6 @@ def create_component_pkg(
             target=project.build_dir / output,
             source=[stage_target],
             command=pkgbuild_args,
-            name=f"pkg_{identifier.replace('.', '_')}",
         ),
         by="create_component_pkg",
     )
@@ -292,7 +291,6 @@ def create_pkg(
     stage_target = project.Install(
         payload_rel,
         sources,
-        name=f"pkg_payload_{name}",
         no_prefix=True,
     )
     if depends:
@@ -348,7 +346,6 @@ def create_pkg(
                     str(component_plist_path),
                     *bundle_args,
                 ],
-                name=f"plist_{name}",
             ),
             by="create_pkg",
         )
@@ -366,7 +363,6 @@ def create_pkg(
             target=project.build_dir / component_pkg_path,
             source=component_deps,
             command=pkgbuild_args,
-            name=f"component_{name}",
         ),
         by="create_pkg",
     )
@@ -398,7 +394,6 @@ def create_pkg(
             target=project.build_dir / dist_xml_path,
             source=[component_target],
             command=dist_cmd,
-            name=f"distribution_{name}",
         ),
         by="create_pkg",
     )
@@ -407,18 +402,11 @@ def create_pkg(
     productbuild_deps: list[Target] = [dist_target, component_target]
 
     # Copy resource files if provided
-    res_names = ["welcome", "readme", "license", "conclusion", "background"]
-    for res_name, res_file in zip(
-        res_names, [welcome, readme, license, conclusion, background], strict=True
-    ):
+    for res_file in (welcome, readme, license, conclusion, background):
         if res_file is not None:
-            res_target = project.Install(
-                resources_rel,
-                [res_file],
-                name=f"pkg_resource_{name}_{res_name}",
-                no_prefix=True,
+            productbuild_deps.append(
+                project.Install(resources_rel, [res_file], no_prefix=True)
             )
-            productbuild_deps.append(res_target)
 
     # Build final package with productbuild
     productbuild_args = [
@@ -442,7 +430,6 @@ def create_pkg(
             target=project.build_dir / output,
             source=productbuild_deps,
             command=productbuild_args,
-            name=f"pkg_{name}",
         ),
         by="create_pkg",
     )
@@ -537,7 +524,6 @@ def create_dmg(
             target=project.build_dir / output,
             source=[stage_target],
             command=hdiutil_cmd,
-            name=f"dmg_{name}",
         ),
         by="create_dmg",
     )

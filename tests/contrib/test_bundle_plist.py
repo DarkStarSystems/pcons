@@ -62,7 +62,6 @@ class TestCreateMacosBundleStringPlist:
             target="myplugin.so",
             source=None,
             command="true",
-            name="plugin",
         )
 
     def test_string_info_plist_creates_info_plist_install_target(
@@ -130,9 +129,7 @@ class TestPkgInfoAndConfigureTimeWriting:
     generate, so a bundle costs no rule and no process of its own."""
 
     def _make_plugin(self, project, env):
-        return env.Command(
-            target="myplugin.so", source=None, command="true", name="plugin"
-        )
+        return env.Command(target="myplugin.so", source=None, command="true")
 
     def test_pkginfo_is_written_byte_exact(self, tmp_path: Path) -> None:
         """A classic PkgInfo is 8 bytes with no trailing newline."""

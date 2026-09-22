@@ -68,7 +68,6 @@ def _plugins(manifest_path: Path) -> None:
         source=[plugins_list],
         depends=["src/gen-plugins.py"],
         command=f"{python} $SRCDIR/src/gen-plugins.py $SOURCE",
-        name="gen_plugin_sources",
         # The generator rewrites every file every run. Without this, adding
         # one plugin would recompile all of them.
         write_if_different=True,

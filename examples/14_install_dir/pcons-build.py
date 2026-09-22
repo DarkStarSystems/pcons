@@ -26,7 +26,6 @@ src_dir = project.root_dir
 installed_assets = project.InstallDir(
     ".",
     src_dir / "assets",
-    name="install-assets",
 )
 
 # Set as default target

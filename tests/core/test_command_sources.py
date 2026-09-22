@@ -15,7 +15,6 @@ def _rule(tmp_path: Path, command: list[str], sources: list[str]) -> str:
     project = Project("demo", root_dir=tmp_path, build_dir="build")
     env = project.Environment()
     env.Command(
-        name="gen",
         target=project.build_dir / "out.txt",
         source=[tmp_path / name for name in sources],
         command=command,
@@ -55,7 +54,6 @@ def test_every_source_is_still_a_dependency(tmp_path: Path) -> None:
     project = Project("demo", root_dir=tmp_path, build_dir="build")
     env = project.Environment()
     env.Command(
-        name="gen",
         target=project.build_dir / "out.txt",
         source=[tmp_path / "entry.py", tmp_path / "shared.py"],
         command=["run", "${SOURCES[0]}"],
@@ -83,7 +81,6 @@ class TestSingularSourceWarning:
         project = Project("demo", root_dir=tmp_path, build_dir="build")
         env = project.Environment()
         env.Command(
-            name="gen",
             target=project.build_dir / "out.txt",
             source=[tmp_path / name for name in sources],
             command=command,
@@ -144,7 +141,6 @@ class TestWarningAttribution:
         env = project.Environment()
 
         env.Command(
-            name="gen",
             target=project.build_dir / "out.txt",
             source=self._sources(tmp_path),
             command=["run", "$SOURCE"],
@@ -158,7 +154,6 @@ class TestWarningAttribution:
         env = project.Environment()
 
         project.Command(
-            "gen",
             env,
             target=project.build_dir / "out.txt",
             source=self._sources(tmp_path),
@@ -185,7 +180,6 @@ class TestRegisteredBuilder:
 
         target = CommandBuilder.create_target(
             project,
-            "gen",
             env,
             target=project.build_dir / "out.txt",
             source=tmp_path / "in.txt",
@@ -194,7 +188,7 @@ class TestRegisteredBuilder:
             launcher=["time"],
         )
 
-        assert target.name == "gen"
+        assert target.name == "out.txt"
         node = target.output_nodes[0]
         assert node._build_info["restat"] is True
         assert node._build_info["launcher"] == ["time"]

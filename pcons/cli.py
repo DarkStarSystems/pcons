@@ -348,15 +348,19 @@ def _record_command_listing(cache: BuildCache, *, may_create: bool) -> None:
         cache.update({"commands": _declared_command_listing()})
 
 
-def _buildable_names(project: Project) -> list[str]:
-    """Every name a build tool accepts for this project, as the tool sees it.
+#: Ninja targets which every pcons manifest defines, so a request for one goes to
+#: every sibling project rather than being looked up in any of them.
+_TARGETS_IN_EVERY_PROJECT = frozenset({"all", "test-build"})
 
-    Output paths rendered from the build directory, which is the contract every
-    generator that runs there shares, plus the aliases and the ``all`` phony the
-    generators add. Not ``target.name``: a target that sets ``output_name`` or
-    ``output_prefix`` is spelled differently in the build file, so
-    ``examples/03_variants`` would offer ``variant_demo_debug`` for a build file
-    that only knows ``debug/variant_demo``.
+
+def _buildable_names(project: Project) -> list[str]:
+    """Every name this project can be asked to build, for shell completion.
+
+    The output paths rendered from the build directory, which is the contract
+    every generator that runs there shares, the aliases and the ``all`` phony
+    the generators add, and the target spellings pcons translates to those
+    paths (see :func:`_named_target_paths`), so completion offers exactly
+    what a build accepts.
 
     Only shell completion reads this. It must never run the build script, so the
     names are recorded when one does run.
@@ -365,6 +369,7 @@ def _buildable_names(project: Project) -> list[str]:
 
     resolver = project.top_path_resolver
     names = {"all", *project.tree_aliases}
+    names.update(name for name, paths in _named_target_paths(project).items() if paths)
     for target in project.targets:
         for node in target.output_nodes:
             if isinstance(node, FileNode):
@@ -372,46 +377,66 @@ def _buildable_names(project: Project) -> list[str]:
     return sorted(names)
 
 
-def _env_target_paths(project: Project) -> dict[str, list[str]]:
-    """Output paths per ``name@env`` spelling, as the build tool sees them.
+def _named_target_paths(project: Project) -> dict[str, list[str]]:
+    """Output paths per target spelling a user can type, as the tool sees them.
 
-    A build tool knows output paths, never pcons target names, so a
-    ``common@mcu`` on the command line has to be translated before it is
-    handed over. Recorded here for the runs that build without regenerating,
-    which have no project objects to ask.
+    ninja and make know output paths and their own aliases, never pcons target
+    names, so ``common`` or ``common@mcu`` on the command line has to be
+    translated before it is handed over. Recorded here for the runs that build
+    without regenerating, which have no project objects to ask.
+
+    Named targets only: an anonymous target's label is not a spelling anyone
+    can type (see ``Target.anonymous``). A plain name that an alias or one of
+    the phonies every manifest defines claims is left to the build tool. One
+    that several targets answer to is recorded with no paths at all, so a
+    later run refuses it and points at the ``name@env`` spellings, the way a
+    run that resolved the project would.
     """
     from pcons.core.node import FileNode
 
     resolver = project.top_path_resolver
+    taken = {*project.tree_aliases, *_TARGETS_IN_EVERY_PROJECT}
     spellings: dict[str, list[str]] = {}
+    contested: set[str] = set()
     for target in project.targets:
-        env = target.env
-        if env is None or not env.name:
+        if target.anonymous:
             continue
         paths = [
             resolver.make_execution_relative(node.path)
             for node in target.output_nodes
             if isinstance(node, FileNode)
         ]
-        if paths:
+        if not paths:
+            continue
+        env = target.env
+        if env is not None and env.name:
             spellings[f"{target.name}@{env.name}"] = paths
+        if target.name in taken:
+            continue
+        if target.name in spellings:
+            contested.add(target.name)
+        else:
+            spellings[target.name] = paths
+    for name in contested:
+        spellings[name] = []
     return spellings
 
 
-def _merged_env_target_paths(projects: list[Project]) -> dict[str, list[str]]:
+def _merged_named_target_paths(projects: list[Project]) -> dict[str, list[str]]:
     """The same, merged over sibling projects, under both spellings.
 
     ``name@env`` is what one types in a single-project build, but two siblings
     may each hold one, so the full ``project::name@env`` is recorded too, and
-    a short spelling that two projects claim is recorded for neither.
+    a short spelling that two projects claim is recorded with no paths, as
+    :func:`_named_target_paths` records a name two environments claim.
     """
     if len(projects) == 1:
-        return _env_target_paths(projects[0])
+        return _named_target_paths(projects[0])
 
     merged: dict[str, list[str]] = {}
     contested: set[str] = set()
     for project in projects:
-        short = _env_target_paths(project)
+        short = _named_target_paths(project)
         for spelling, paths in short.items():
             merged[f"{project.name}::{spelling}"] = paths
             if spelling in merged:
@@ -419,7 +444,7 @@ def _merged_env_target_paths(projects: list[Project]) -> dict[str, list[str]]:
             else:
                 merged[spelling] = paths
     for spelling in contested:
-        merged.pop(spelling, None)
+        merged[spelling] = []
     return merged
 
 
@@ -431,7 +456,7 @@ def _persist_run_settings(
     source_dir: str,
     targets: list[str] | None = None,
     variants: set[str] | None = None,
-    env_targets: dict[str, list[str]] | None = None,
+    target_paths: dict[str, list[str]] | None = None,
 ) -> None:
     """Persist the settings resolved for this run into the build-dir cache.
 
@@ -466,8 +491,8 @@ def _persist_run_settings(
         updates["generator"] = generator
     if targets is not None:
         updates["targets"] = targets
-    if env_targets is not None:
-        updates["env_targets"] = env_targets
+    if target_paths is not None:
+        updates["target_paths"] = target_paths
     if variants:
         recorded = cache.get("variants")
         recorded = recorded if isinstance(recorded, list) else []
@@ -506,7 +531,7 @@ def _persist_run_settings_to_projects(
             source_dir,
             targets=_buildable_names(project),
             variants=variants,
-            env_targets=_env_target_paths(project),
+            target_paths=_named_target_paths(project),
         )
         # The declared-command listing too: `pcons -B <this dir> run` reads
         # it from here, and must list the same commands the primary does.
@@ -810,7 +835,7 @@ def run_script(
                         if wants_generate()
                         else None,
                         variants=pcons.core.vars._seen_variant_names(),
-                        env_targets=_merged_env_target_paths(top_levels)
+                        target_paths=_merged_named_target_paths(top_levels)
                         if wants_generate()
                         else None,
                     )
@@ -1417,44 +1442,56 @@ def _no_build_described() -> int:
     return 0
 
 
-#: Ninja targets which every pcons manifest defines, so a request for one goes to
-#: every sibling project rather than being looked up in any of them.
-_TARGETS_IN_EVERY_PROJECT = frozenset({"all", "test-build"})
-
-
-def _translate_env_tokens(
+def _translate_target_tokens(
     tokens: list[str], lookup: Callable[[str], list[str] | None]
-) -> list[str]:
-    """Replace every ``name@env`` token with the paths the build tool knows.
+) -> list[str] | None:
+    """Replace every token naming a target with the paths the build tool knows.
 
-    Other tokens pass through: a build tool knows names pcons does not, file
-    paths among them. A token carrying an ``@`` that names no target passes
-    through too, since ``@`` is legal in a file name: the lookup logs why it
-    could not translate it, and the build tool decides whether the token means
-    something after all.
+    pcons resolves its own names, ``name`` and ``name@env`` alike; ninja and
+    make know output paths and the aliases the generators wrote, nothing else.
+    A token the lookup does not claim passes through untranslated, a file path
+    being the usual one.
+
+    Returns None when a token names several targets at once: the lookup has
+    said which, and a name meaning two things is a mistake to stop for rather
+    than hand on.
     """
     translated: list[str] = []
     for token in tokens:
-        paths = lookup(token) if "@" in token else None
+        try:
+            paths = lookup(token)
+        except KeyError as exc:
+            logger.error("%s", exc.args[0] if exc.args else exc)
+            return None
         translated.extend(paths or [token])
     return translated
 
 
-def _project_env_lookup(project: Project) -> Callable[[str], list[str] | None]:
-    """Resolve a ``name@env`` spelling against a project that has been resolved.
+def _project_target_lookup(project: Project) -> Callable[[str], list[str] | None]:
+    """Resolve a target name against a project that has been resolved.
 
-    A token that names no target is reported at debug level, not as an error:
-    the caller hands it to the build tool anyway, and ``@`` in a file path is
-    the common reason a lookup fails. A token that *does* name a target and
-    still yields nothing to build is a real error and says so.
+    Both spellings, ``name`` and ``name@env``. None means the token is not
+    pcons' to translate: an alias and the phonies every manifest defines are
+    the build tool's own, and a token naming no target is handed over as
+    written, since it is most likely a file path. A token that *does* name a
+    target and still yields nothing to build is a real error and says so.
+
+    Raises:
+        KeyError: Several targets answer to the token. The caller stops the
+            build: an unknown name may be a path, an ambiguous one cannot be.
     """
     from pcons.core.node import FileNode
 
     def lookup(token: str) -> list[str] | None:
+        if token in project.tree_aliases or token in _TARGETS_IN_EVERY_PROJECT:
+            return None
         try:
-            target = project.get_target(token)
-        except (KeyError, ValueError) as exc:
+            target = project.get_target(token, raise_if_missing=False)
+        except ValueError as exc:
             logger.debug("%s", exc.args[0] if exc.args else exc)
+            return None
+        if target is None:
+            logger.debug("no target named '%s' in project '%s'", token, project.name)
             return None
         resolver = project.top_path_resolver
         paths = [
@@ -1470,8 +1507,8 @@ def _project_env_lookup(project: Project) -> Callable[[str], list[str] | None]:
     return lookup
 
 
-def _cached_env_lookup(build_dir: Path) -> Callable[[str], list[str] | None]:
-    """Resolve a ``name@env`` spelling from what the last generate recorded.
+def _cached_target_lookup(build_dir: Path) -> Callable[[str], list[str] | None]:
+    """Resolve a target name from what the last generate recorded.
 
     The recording is read once, through the invocation's own cache instance.
     Reading it here rather than per token is safe because ``_build`` builds the
@@ -1479,13 +1516,27 @@ def _cached_env_lookup(build_dir: Path) -> Callable[[str], list[str] | None]:
     this sees what that generation wrote.
 
     An unknown spelling is reported at debug level: the caller hands the token
-    to the build tool anyway, and ``@`` is legal in a file path.
+    to the build tool anyway, and a build directory written by an older pcons
+    records nothing at all.
+
+    Raises:
+        KeyError: The token was recorded as naming several targets. The
+            message lists the spellings that pick one out.
     """
-    recorded = _open_cache(build_dir).get("env_targets")
+    recorded = _open_cache(build_dir).get("target_paths")
     recorded = recorded if isinstance(recorded, dict) else {}
 
     def lookup(token: str) -> list[str] | None:
         paths = recorded.get(token)
+        if paths == []:
+            choices = sorted(
+                spelling
+                for spelling, its_paths in recorded.items()
+                if its_paths and spelling != token and _picks_out(spelling, token)
+            )
+            raise KeyError(
+                f"'{token}' names several targets; pick one: {', '.join(choices)}"
+            )
         if not paths:
             known = ", ".join(sorted(recorded))
             logger.debug(
@@ -1498,6 +1549,12 @@ def _cached_env_lookup(build_dir: Path) -> Callable[[str], list[str] | None]:
         return [str(path) for path in paths]
 
     return lookup
+
+
+def _picks_out(spelling: str, name: str) -> bool:
+    """Whether *spelling* is a qualified form of the plain target *name*."""
+    base = spelling.rsplit("::", 1)[-1]
+    return base == name or base.startswith(f"{name}@")
 
 
 def _route_targets(
@@ -1513,9 +1570,8 @@ def _route_targets(
     if not targets:
         return [(p, None) for p in projects]
     if len(projects) == 1:
-        # Pass through: ninja may know names pcons doesn't (file paths).
-        tokens = _translate_env_tokens(targets, _project_env_lookup(projects[0]))
-        return [(projects[0], tokens)]
+        tokens = _translate_target_tokens(targets, _project_target_lookup(projects[0]))
+        return None if tokens is None else [(projects[0], tokens)]
 
     from pcons.core.target import split_qualified_name
 
@@ -1582,7 +1638,9 @@ def _route_targets(
     for p in projects:
         if not routed[id(p)]:
             continue
-        tokens = _translate_env_tokens(routed[id(p)], _project_env_lookup(p))
+        tokens = _translate_target_tokens(routed[id(p)], _project_target_lookup(p))
+        if tokens is None:
+            return None
         plan.append((p, tokens))
     return plan
 
@@ -1661,7 +1719,11 @@ def _build(
         # No regeneration ran: build the requested directory. With sibling
         # projects, -B scopes the build to the one owning that directory.
         if targets:
-            targets = _translate_env_tokens(targets, _cached_env_lookup(build_dir))
+            targets = _translate_target_tokens(
+                targets, _cached_target_lookup(build_dir)
+            )
+            if targets is None:
+                return 1, [build_dir]
         return _run_build_tool(
             build_dir,
             targets=targets,
@@ -1913,7 +1975,6 @@ def _info_targets(
             print(line)
         print()
 
-    by_type: dict[str, list[tuple[str, str]]] = {}
     type_order = [
         "program",
         "shared_library",
@@ -1924,46 +1985,67 @@ def _info_targets(
         "archive",
         "installer",
     ]
+    named: dict[str, list[tuple[str, str]]] = {}
+    anonymous: dict[str, list[tuple[str, str]]] = {}
 
     for project in top_levels:
         for target in project.targets:
-            ttype = target.target_type
-            type_name = ttype if ttype else "other"
-            outputs = ""
-            if target.output_nodes:
-                paths = []
-                for n in target.output_nodes:
-                    if isinstance(n, FileNode):
-                        try:
-                            paths.append(str(n.path.relative_to(project.build_dir)))
-                        except ValueError:
-                            paths.append(str(n.path))
-                if paths:
-                    outputs = ", ".join(paths)
-            shown = target.qualified_name if qualify else target.name
-            entry = (shown, outputs)
-            by_type.setdefault(type_name, []).append(entry)
-
-    def print_entries(label: str, entries: list[tuple[str, str]]) -> None:
-        print(f"  [{label}]")
-        for name, outputs in entries:
-            if outputs:
-                print(f"    {name:30s} -> {outputs}")
+            type_name = target.target_type or "other"
+            paths = [
+                _build_relative(n.path, project.build_dir)
+                for n in target.output_nodes
+                if isinstance(n, FileNode)
+            ]
+            outputs = ", ".join(paths)
+            if target.anonymous:
+                # A label that is already the output path says it once.
+                label = target.name
+                anonymous.setdefault(type_name, []).append(
+                    (label, "" if outputs == label else outputs)
+                )
             else:
-                print(f"    {name}")
-        print()
+                shown = target.qualified_name if qualify else target.name
+                named.setdefault(type_name, []).append((shown, outputs))
 
-    print("Targets:")
-    for ttype in type_order:
-        entries = by_type.pop(ttype, None)
-        if entries:
-            print_entries(ttype, entries)
+    def print_group(by_type: dict[str, list[tuple[str, str]]]) -> None:
+        for type_name in [*type_order, *by_type]:
+            entries = by_type.pop(type_name, None)
+            if not entries:
+                continue
+            print(f"  [{type_name}]")
+            for left, right in entries:
+                print(f"    {left:30s} -> {right}" if right else f"    {left}")
+            print()
 
-    # Any remaining types not in our order
-    for type_name, entries in by_type.items():
-        print_entries(type_name, entries)
+    if named:
+        print("Named targets (build with `pcons build <name>`):")
+        print_group(named)
+    if anonymous:
+        print("Anonymous targets (build by output path, or give one an alias):")
+        print_group(anonymous)
 
     return 0
+
+
+def _build_relative(path: Path, build_dir: Path) -> str:
+    """A node path as the build directory sees it, or whole if it sits outside."""
+    try:
+        return str(path.relative_to(build_dir))
+    except ValueError:
+        return str(path)
+
+
+def _targets_written_as(project: Project, name: str) -> list[Target]:
+    """Every target *name* picks out for a report.
+
+    A named target is one target, the usual case. A label an anonymous
+    builder derived may sit on several targets, and a report is the one place
+    that can show them all rather than pick (see ``Target.anonymous``).
+    """
+    target = project.get_target(name, raise_if_missing=False)
+    if target is not None:
+        return [target]
+    return [t for t in project.targets if t.anonymous and t.name == name]
 
 
 def _explain_targets(
@@ -2020,12 +2102,12 @@ def _explain_targets(
             owners = []
             for p in top_levels:
                 try:
-                    target = p.get_target(name, raise_if_missing=False)
+                    found = _targets_written_as(p, name)
                 except KeyError as e:  # duplicate name inside one project
                     logger.error("%s", e)
                     return 1
-                if target is not None:
-                    owners.append((p, target))
+                if found:
+                    owners.append((p, found))
             if not owners:
                 missing.append(name)
             elif len(owners) > 1:
@@ -2037,8 +2119,8 @@ def _explain_targets(
                 )
                 return 1
             else:
-                p, target = owners[0]
-                per_project[id(p)].append(target)
+                p, found = owners[0]
+                per_project[id(p)].extend(found)
         if missing:
             known = sorted({t.name for p in top_levels for t in p.targets})
             logger.error("No such target: %s", ", ".join(missing))

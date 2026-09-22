@@ -46,7 +46,7 @@ class TestBuilderTargetCreation:
 
         assert t.target_type == "test"
         assert t._builder_name == "Test"
-        assert t.name.startswith("test_")
+        assert t.name == "hello.smoke"
         # Depends on the program so test-build / topo sort work.
         assert prog in t.dependencies
         # No output files: tests are purely declarative.
@@ -74,40 +74,39 @@ class TestBuilderTargetCreation:
         assert partial["serial"] is True
         assert partial["disabled"] is True
 
-    def test_name_collision_is_disambiguated(self, project):
-        """Two tests with the same name produce two unique target names."""
+    def test_two_tests_of_one_name_are_two_runs(self, project):
+        """The internal target's name is a label, so two may wear it."""
         proj, _env, prog = project
         a = proj.Test("dup", prog)
         b = proj.Test("dup", prog)
-        assert a.name != b.name
-        # User-visible spec name should match what the user supplied,
-        # disambiguation happens only at the internal target-name level.
+        assert a.name == b.name == "dup"
+        assert a is not b
+        # The user-visible name, which reaches tests.json, is the one given.
         assert a._builder_data["spec_partial"]["name"] == "dup"
         assert b._builder_data["spec_partial"]["name"] == "dup"
 
-    def test_an_ambiguous_name_takes_the_counter(self, tmp_path, gcc_toolchain):
-        """A derived name matching two environments is taken, not a crash."""
+    def test_a_label_may_repeat_a_program_name(self, tmp_path, gcc_toolchain):
+        """A test's label landing on a program's name is not a collision."""
         src = tmp_path / "main.c"
         src.write_text("int main(void){return 0;}\n")
         proj = Project("unit", root_dir=tmp_path, build_dir=tmp_path / "build")
         host = proj.Environment(toolchain=gcc_toolchain, name="host")
         mcu = proj.Environment(toolchain=gcc_toolchain, name="mcu")
-        prog = proj.Program("test_smoke", host, sources=[str(src)])
-        proj.Program("test_smoke", mcu, sources=[str(src)])
+        prog = proj.Program("smoke", host, sources=[str(src)])
+        proj.Program("smoke", mcu, sources=[str(src)])
 
-        assert proj.Test("smoke", prog).name == "test_smoke_1"
+        assert proj.Test("smoke", prog).name == "smoke"
 
     def test_rejects_empty_name(self, project):
         proj, _env, prog = project
         with pytest.raises(TypeError, match="non-empty"):
             proj.Test("", prog)
 
-    def test_friendly_names_sanitized_internally(self, project):
-        """Spaces, colons, parens etc. in user-facing names don't crash.
+    def test_friendly_names_are_kept_verbatim(self, project):
+        """A label reaches no path, so a name written for a person survives.
 
-        Catch2 test names ("first scenario") and gtest names with
-        special chars would otherwise fail Target._validate_target_name.
-        The user-visible name on the spec is preserved unchanged.
+        Catch2 test names ("first scenario") and gtest names with special
+        characters are the label as well as the user-visible name.
         """
         proj, _env, prog = project
         cases = [
@@ -119,10 +118,7 @@ class TestBuilderTargetCreation:
         targets = [proj.Test(name, prog) for name in cases]
         proj.resolve()
         for name, target in zip(cases, targets, strict=True):
-            # Internal target name is Ninja-safe...
-            assert " " not in target.name
-            assert ":" not in target.name
-            # ...but the user-visible name on the spec is unchanged.
+            assert target.name == name
             assert target._builder_data["spec"].name == name
 
 

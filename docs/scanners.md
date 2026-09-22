@@ -204,7 +204,6 @@ def pack(name: str, *scenes: str) -> Target:
         source=list(scenes),
         command=[python, "$SRCDIR/tools/pack_scene.py", "$TARGET", "$SOURCES"],
         depends=["tools/pack_scene.py"],
-        name=f"pack_{name}",
     )
 
 

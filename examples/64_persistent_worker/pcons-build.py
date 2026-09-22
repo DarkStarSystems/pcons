@@ -23,7 +23,6 @@ python = sys.executable.replace("\\", "/")
 src_dir = project.root_dir / "src"
 
 report = env.Command(
-    name="report",
     target=project.build_dir / "report.txt",
     source=[src_dir / "render.py", src_dir / "items.xml"],
     command=[python, "${SOURCES[0]}", "${SOURCES[1]}", "$TARGET"],

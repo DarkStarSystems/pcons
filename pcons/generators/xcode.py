@@ -30,15 +30,19 @@ Path handling:
 from __future__ import annotations
 
 import importlib.util
+import itertools
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.errors import PconsError
-from pcons.core.graph import strongly_connected_components
+from pcons.core.graph import refuse_duplicate_names, strongly_connected_components
+from pcons.core.node import FileNode
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from pbxproj import XcodeProject
 
     from pcons.core.project import Project
@@ -83,19 +87,43 @@ def _generate_id() -> str:
     return uuid.uuid4().hex[:24].upper()
 
 
-def _refuse_duplicate_names(project: Project) -> None:
-    """Xcode identifies a target by its name, so two of one name cannot both exist."""
-    seen: dict[str, Target] = {}
+def _display_name_candidates(target: Target) -> Iterator[str]:
+    """Xcode display names to try for ``target``, most wanted first.
+
+    The first is the target's own name, which is what every target in an
+    ordinary project gets. The rest only come up when two targets in one
+    Xcode project wear one name: two environments each building a ``report``,
+    or two installs into one directory sharing a label (see
+    ``Target.anonymous``).
+    """
+    yield target.name
+    env_name = target.env.name if target.env is not None else None
+    if env_name:
+        yield f"{target.name}@{env_name}"
+    for node in target.output_nodes:
+        if isinstance(node, FileNode):
+            yield node.path.name
+            break
+    for ordinal in itertools.count(2):
+        yield f"{target.name}-{ordinal}"
+
+
+def _display_names(project: Project) -> dict[int, str]:
+    """One unique Xcode display name per target, keyed by target identity.
+
+    Xcode tells its targets apart by name, and pcons no longer does: an
+    anonymous target's name is a label two targets may share, and two named
+    targets differ by environment. So the name Xcode shows is synthesized
+    here, in declaration order, and belongs to its UI alone — it never
+    reaches a file path.
+    """
+    taken: set[str] = set()
+    names: dict[int, str] = {}
     for target in project.targets:
-        other = seen.get(target.name)
-        if other is not None:
-            raise PconsError(
-                f"The Xcode generator cannot build targets "
-                f"'{other.qualified_name}' and '{target.qualified_name}': "
-                f"it identifies a target by its name, and these share one. Give "
-                f"them different names, or generate ninja for this project."
-            )
-        seen[target.name] = target
+        name = next(c for c in _display_name_candidates(target) if c not in taken)
+        taken.add(name)
+        names[id(target)] = name
+    return names
 
 
 class XcodeGenerator(BaseGenerator):
@@ -114,16 +142,17 @@ class XcodeGenerator(BaseGenerator):
         self._output_dir: Path | None = None
         self._project_root: Path | None = None
         self._pcons_project: Project | None = None  # Reference to pcons project
-        self._target_ids: dict[str, str] = {}  # pcons target name -> Xcode target id
+        # Every per-target map here is keyed by id(target): a target's name
+        # no longer tells it apart from another (see _display_names).
+        self._display_names: dict[int, str] = {}
+        self._target_ids: dict[int, str] = {}  # -> Xcode target id
         self._objects: dict[str, dict[str, Any]] = {}
         self._main_group_id: str = ""
         self._products_group_id: str = ""
         self._sources_group_id: str = ""
         self._topdir: str = ".."  # Relative path from output_dir to project root
-        self._frameworks_phase_ids: dict[
-            str, str
-        ] = {}  # target name -> frameworks phase id
-        self._product_ref_ids: dict[str, str] = {}  # target name -> product file ref id
+        self._frameworks_phase_ids: dict[int, str] = {}  # -> frameworks phase id
+        self._product_ref_ids: dict[int, str] = {}  # -> product file ref id
 
     # Install-tool commands that stage a whole directory tree, and the
     # builder each one comes from. InstallDir's copytreecmd is deliberately
@@ -190,11 +219,12 @@ class XcodeGenerator(BaseGenerator):
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        _refuse_duplicate_names(project)
+        refuse_duplicate_names(project.targets)
 
         self._output_dir = output_dir.resolve()
         self._project_root = project.root_dir.resolve()
         self._pcons_project = project
+        self._display_names = _display_names(project)
         self._target_ids = {}
         self._objects = {}
         self._frameworks_phase_ids = {}
@@ -245,6 +275,10 @@ class XcodeGenerator(BaseGenerator):
 
         self._xcode_project.save()
 
+    def _display_name(self, target: Target) -> str:
+        """The name Xcode shows for ``target``, and keys its own API on."""
+        return self._display_names[id(target)]
+
     def _create_project_tree(self, project: Project) -> dict[str, Any]:
         """Create the base Xcode project tree (dict for XcodeProject)."""
         proj_id = _generate_id()
@@ -264,21 +298,21 @@ class XcodeGenerator(BaseGenerator):
             target_id = self._create_target_objects(target, objects)
             if target_id:
                 target_ids.append(target_id)
-                self._target_ids[target.name] = target_id
+                self._target_ids[id(target)] = target_id
 
         # Second pass: add library deps to the frameworks link phase. Must
         # happen on the plain-dict `objects` before XcodeProject is created —
         # PBXGenericObject mutations after construction do not reliably
         # persist in the serialized output.
         for target in project.targets:
-            frameworks_phase_id = self._frameworks_phase_ids.get(target.name)
+            frameworks_phase_id = self._frameworks_phase_ids.get(id(target))
             if not frameworks_phase_id:
                 continue
             for dep in target.dependencies:
                 dep_type = str(dep.target_type) if dep.target_type else None
                 if dep_type not in ("static_library", "shared_library"):
                     continue
-                dep_product_ref = self._product_ref_ids.get(dep.name)
+                dep_product_ref = self._product_ref_ids.get(id(dep))
                 if not dep_product_ref:
                     continue
                 build_file_id = _generate_id()
@@ -481,15 +515,15 @@ class XcodeGenerator(BaseGenerator):
             "buildPhases": [sources_phase_id, frameworks_phase_id],
             "buildRules": [],
             "dependencies": [],
-            "name": target.name,
+            "name": self._display_name(target),
             "productName": product_name,
             "productReference": product_ref_id,
             "productType": product_type,
         }
 
         # Store phase and product IDs for later linking setup
-        self._frameworks_phase_ids[target.name] = frameworks_phase_id
-        self._product_ref_ids[target.name] = product_ref_id
+        self._frameworks_phase_ids[id(target)] = frameworks_phase_id
+        self._product_ref_ids[id(target)] = product_ref_id
 
         return target_id
 
@@ -537,8 +571,8 @@ class XcodeGenerator(BaseGenerator):
             "buildConfigurationList": target_config_list_id,
             "buildPhases": build_phases,
             "dependencies": [],
-            "name": target.name,
-            "productName": target.name,
+            "name": self._display_name(target),
+            "productName": self._display_name(target),
         }
 
         return target_id
@@ -780,11 +814,11 @@ class XcodeGenerator(BaseGenerator):
         if self._xcode_project is None:
             return
 
-        if target.name not in self._target_ids:
+        if id(target) not in self._target_ids:
             return
 
         # Create a group for this target's sources
-        group = self._xcode_project.get_or_create_group(target.name)
+        group = self._xcode_project.get_or_create_group(self._display_name(target))
 
         for source in target.sources:
             if hasattr(source, "path"):
@@ -804,7 +838,7 @@ class XcodeGenerator(BaseGenerator):
                     parent=group,
                     force=False,
                     file_options=file_options,
-                    target_name=target.name,
+                    target_name=self._display_name(target),
                 )
 
     def _discover_headers(self, target: Target) -> list[Path]:
@@ -828,7 +862,7 @@ class XcodeGenerator(BaseGenerator):
         if self._xcode_project is None:
             return
 
-        if target.name not in self._target_ids:
+        if id(target) not in self._target_ids:
             return
 
         env = target._env
@@ -867,7 +901,7 @@ class XcodeGenerator(BaseGenerator):
             self._xcode_project.set_flags(
                 "HEADER_SEARCH_PATHS",
                 include_dirs,
-                target_name=target.name,
+                target_name=self._display_name(target),
             )
 
         defines: list[str] = []
@@ -877,7 +911,7 @@ class XcodeGenerator(BaseGenerator):
             self._xcode_project.set_flags(
                 "GCC_PREPROCESSOR_DEFINITIONS",
                 defines,
-                target_name=target.name,
+                target_name=self._display_name(target),
             )
 
         cflags: list[str] = []
@@ -900,12 +934,12 @@ class XcodeGenerator(BaseGenerator):
             self._xcode_project.set_flags(
                 "OTHER_CFLAGS",
                 cflags,
-                target_name=target.name,
+                target_name=self._display_name(target),
             )
             self._xcode_project.set_flags(
                 "OTHER_CPLUSPLUSFLAGS",
                 cflags,
-                target_name=target.name,
+                target_name=self._display_name(target),
             )
 
         from pcons.core.target import Target
@@ -927,7 +961,7 @@ class XcodeGenerator(BaseGenerator):
             self._xcode_project.set_flags(
                 "OTHER_LDFLAGS",
                 ldflags,
-                target_name=target.name,
+                target_name=self._display_name(target),
             )
 
         # Library search paths from environment
@@ -938,7 +972,7 @@ class XcodeGenerator(BaseGenerator):
                     self._xcode_project.set_flags(
                         "LIBRARY_SEARCH_PATHS",
                         [str(d) for d in libdirs],
-                        target_name=target.name,
+                        target_name=self._display_name(target),
                     )
 
     def _setup_dependencies(self, target: Target) -> None:
@@ -950,10 +984,10 @@ class XcodeGenerator(BaseGenerator):
         if self._xcode_project is None:
             return
 
-        if target.name not in self._target_ids:
+        if id(target) not in self._target_ids:
             return
 
-        xcode_target = self._xcode_project.get_target_by_name(target.name)
+        xcode_target = self._xcode_project.get_object(self._target_ids[id(target)])
         if xcode_target is None:
             return
 
@@ -964,13 +998,9 @@ class XcodeGenerator(BaseGenerator):
             dep_targets.extend(self._find_source_target_deps(target))
 
         for dep in dep_targets:
-            if dep.name not in self._target_ids:
+            if id(dep) not in self._target_ids:
                 continue
             if self._cycle_unit.get(id(dep)) == self._cycle_unit[id(target)]:
-                continue
-
-            dep_target = self._xcode_project.get_target_by_name(dep.name)
-            if dep_target is None:
                 continue
 
             proxy_id = _generate_id()
@@ -986,15 +1016,15 @@ class XcodeGenerator(BaseGenerator):
             proxy_obj["isa"] = "PBXContainerItemProxy"
             proxy_obj["containerPortal"] = root_project
             proxy_obj["proxyType"] = "1"
-            proxy_obj["remoteGlobalIDString"] = self._target_ids[dep.name]
-            proxy_obj["remoteInfo"] = dep.name
+            proxy_obj["remoteGlobalIDString"] = self._target_ids[id(dep)]
+            proxy_obj["remoteInfo"] = self._display_name(dep)
             self._xcode_project.objects[proxy_id] = proxy_obj
 
             # PBXTargetDependency
             dep_obj = cast(Any, PBXGenericObject())
             dep_obj._id = dep_id  # pbxproj internal
             dep_obj["isa"] = "PBXTargetDependency"
-            dep_obj["target"] = self._target_ids[dep.name]
+            dep_obj["target"] = self._target_ids[id(dep)]
             dep_obj["targetProxy"] = proxy_id
             self._xcode_project.objects[dep_id] = dep_obj
 
@@ -1006,7 +1036,7 @@ class XcodeGenerator(BaseGenerator):
         """Find targets that produced an aggregate target's source files
         (e.g., installing a built executable), for Xcode dependencies."""
         dep_targets: list[Target] = []
-        seen_names: set[str] = set()
+        seen: set[int] = set()
 
         # Use the generator's project reference; target._project may be None
         project = self._pcons_project
@@ -1016,7 +1046,7 @@ class XcodeGenerator(BaseGenerator):
         # Map output paths to targets (resolved, for relative/absolute mixes)
         output_to_target: dict[Path, Target] = {}
         for other_target in project.targets:
-            if other_target.name == target.name:
+            if other_target is target:
                 continue
             for output in other_target.output_nodes:
                 if hasattr(output, "path"):
@@ -1046,9 +1076,9 @@ class XcodeGenerator(BaseGenerator):
 
                 if source_resolved in output_to_target:
                     dep = output_to_target[source_resolved]
-                    if dep.name not in seen_names:
+                    if id(dep) not in seen:
                         dep_targets.append(dep)
-                        seen_names.add(dep.name)
+                        seen.add(id(dep))
 
         return dep_targets
 

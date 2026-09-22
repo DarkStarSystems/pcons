@@ -47,7 +47,6 @@ hello = project.Program("hello", env, sources=[project.root_dir / "src" / "hello
 # what a persistent-worker client would use: the wrapper applies to this edge
 # alone, and runs inside any launcher set on the `command` tool.
 manifest = env.Command(
-    name="manifest",
     target=project.build_dir / "manifest.txt",
     source=project.root_dir / "src" / "hello.c",
     command=[

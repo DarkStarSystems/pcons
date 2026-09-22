@@ -90,16 +90,10 @@ class TestOutputCollisions:
         env = project.Environment(toolchain=gcc_toolchain)
         (tmp_path / "in.txt").write_text("x")
         env.Command(
-            target="out.txt",
-            source="in.txt",
-            command=["cp", "$SOURCE", "$TARGET"],
-            name="one",
+            target="out.txt", source="in.txt", command=["cp", "$SOURCE", "$TARGET"]
         )
         env.Command(
-            target="out.txt",
-            source="in.txt",
-            command=["cp", "$SOURCE", "$TARGET"],
-            name="two",
+            target="out.txt", source="in.txt", command=["cp", "$SOURCE", "$TARGET"]
         )
 
         with pytest.raises(PconsError, match="both build"):
@@ -114,7 +108,6 @@ class TestOutputCollisions:
             target=["a.txt", "b.txt"],
             source="in.txt",
             command=["tee", "$TARGETS"],
-            name="fanout",
         )
 
         project.resolve()

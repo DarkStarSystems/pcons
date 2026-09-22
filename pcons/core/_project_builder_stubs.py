@@ -71,13 +71,13 @@ if TYPE_CHECKING:
 
         def Command(
             self,
-            name: str,
             env: Env,
             *,
             target: str | Path | list[str | Path],
             tool: Target | str | Path | None = None,
             source: str | Path | list[str | Path] | None = None,
             command: str | Sequence[Any] = '',
+            name: str | None = None,
             restat: bool = False,
             write_if_different: bool = False,
             cwd: str | Path | None = None,

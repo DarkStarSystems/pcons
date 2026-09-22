@@ -18,26 +18,26 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
 
 
-def _index(targets: list[Target]) -> dict[str, Target]:
-    """Targets by qualified name, which is what the graph walks key on.
+def refuse_duplicate_names(targets: list[Target]) -> None:
+    """Refuse two named targets answering to one qualified name.
 
-    Args:
-        targets: The targets to index.
-
-    Returns:
-        The targets, keyed by ``qualified_name``.
+    A project refuses a duplicate as it is registered, but two sibling
+    projects each registering a ``common`` are only in one view here. An
+    anonymous target carries a label rather than a name (see
+    ``Target.anonymous``), so it is skipped: the walks below key on the
+    targets themselves, which is what tells two of them apart.
 
     Raises:
-        DuplicateTargetError: Two targets answer to one qualified name. The
-            walks cannot tell them apart, and folding them together would turn
-            a duplicate into a bogus dependency cycle.
+        DuplicateTargetError: Two named targets answer to one qualified name.
+            Nothing that names a target can tell them apart.
     """
-    indexed: dict[str, Target] = {}
+    seen: dict[str, Target] = {}
     for target in targets:
-        first = indexed.setdefault(target.qualified_name, target)
+        if target.anonymous:
+            continue
+        first = seen.setdefault(target.qualified_name, target)
         if first is not target:
             raise DuplicateTargetError(target.qualified_name, first, target)
-    return indexed
 
 
 #: Target types that may link each other in a cycle. Each contributes at
@@ -56,7 +56,7 @@ def cycle_reason(members: list[Target]) -> str | None:
     output is another's source, says "build that first", which no order can
     satisfy in a loop.
     """
-    names = {target.qualified_name for target in members}
+    in_cycle = set(members)
     for target in members:
         if target.target_type not in LINKABLE_IN_A_CYCLE:
             kind = target.target_type or "target"
@@ -70,7 +70,7 @@ def cycle_reason(members: list[Target]) -> str | None:
             *(t for t in (target._pending_sources or ()) if isinstance(t, Target)),
         )
         for dep in built_first:
-            if dep.qualified_name in names:
+            if dep in in_cycle:
                 return (
                     f"{target.qualified_name} must be built after "
                     f"{dep.qualified_name}, which is in the same cycle; only "
@@ -139,9 +139,9 @@ def topological_sort_targets(targets: list[Target]) -> list[Target]:
     if not targets:
         return []
 
-    _index(targets)  # refuses two targets with one qualified name
+    refuse_duplicate_names(targets)
     components = strongly_connected_components(targets, lambda t: t.dependencies)
-    unit_of: dict[str, int] = {}
+    unit_of: dict[Target, int] = {}
     for number, members in enumerate(components):
         if len(members) > 1:
             reason = cycle_reason(members)
@@ -149,14 +149,14 @@ def topological_sort_targets(targets: list[Target]) -> list[Target]:
                 names = [m.qualified_name for m in members]
                 raise DependencyCycleError([*names, names[0]], reason=reason)
         for member in members:
-            unit_of[member.qualified_name] = number
+            unit_of[member] = number
 
     dependents: dict[int, set[int]] = {i: set() for i in range(len(components))}
     in_degree: dict[int, int] = dict.fromkeys(range(len(components)), 0)
     for target in targets:
-        unit = unit_of[target.qualified_name]
+        unit = unit_of[target]
         for dep in target.dependencies:
-            dep_unit = unit_of.get(dep.qualified_name)
+            dep_unit = unit_of.get(dep)
             if dep_unit is None or dep_unit == unit:
                 continue
             if unit not in dependents[dep_unit]:
@@ -194,41 +194,40 @@ def detect_cycles_in_targets(targets: list[Target]) -> list[list[str]]:
     Raises:
         DuplicateTargetError: If two targets share a qualified name.
     """
-    cycles: list[list[str]] = []
-    target_map = _index(targets)
+    refuse_duplicate_names(targets)
+    cycles: list[list[Target]] = []
 
     # Colors: 0=white (unvisited), 1=gray (in progress), 2=black (done)
-    colors: dict[str, int] = dict.fromkeys(target_map, 0)
-    path: list[str] = []
+    colors: dict[Target, int] = dict.fromkeys(targets, 0)
+    path: list[Target] = []
 
-    def dfs(name: str) -> None:
-        colors[name] = 1  # Gray - in progress
-        path.append(name)
+    def dfs(target: Target) -> None:
+        colors[target] = 1  # Gray - in progress
+        path.append(target)
 
-        for dep in target_map[name].dependencies:
-            dep_name = dep.qualified_name
-            if dep_name not in colors:
+        for dep in target.dependencies:
+            if dep not in colors:
                 # External dependency, skip
                 continue
-            if colors[dep_name] == 1:
+            if colors[dep] == 1:
                 # Found a back edge - there's a cycle
-                cycle_start = path.index(dep_name)
-                cycles.append([*path[cycle_start:], dep_name])
-            elif colors[dep_name] == 0:
-                dfs(dep_name)
+                cycle_start = path.index(dep)
+                cycles.append([*path[cycle_start:], dep])
+            elif colors[dep] == 0:
+                dfs(dep)
 
         path.pop()
-        colors[name] = 2  # Black - done
+        colors[target] = 2  # Black - done
 
-    for name in target_map:
-        if colors[name] == 0:
-            dfs(name)
+    for target in targets:
+        if colors[target] == 0:
+            dfs(target)
 
     # A cycle static libraries may form is not a fault; see LINKABLE_IN_A_CYCLE.
     return [
-        cycle
+        [member.qualified_name for member in cycle]
         for cycle in cycles
-        if cycle_reason([target_map[name] for name in cycle]) is not None
+        if cycle_reason(cycle) is not None
     ]
 
 

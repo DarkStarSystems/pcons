@@ -80,7 +80,6 @@ host.build_prefix = "apk"
 host.ANDROID_JAR = str(android_jar)
 
 base = host.Command(
-    name="aapt2-link",
     target="base.apk",
     tool=build_tools / "aapt2",
     source=["AndroidManifest.xml"],
@@ -88,7 +87,6 @@ base = host.Command(
 )
 
 unaligned = host.Command(
-    name="apk-libs",
     target="unaligned.apk",
     tool=sys.executable,
     source=[base, native],
@@ -97,7 +95,6 @@ unaligned = host.Command(
 )
 
 aligned = host.Command(
-    name="apk-align",
     target="aligned.apk",
     tool=build_tools / "zipalign",
     source=[unaligned],
@@ -105,7 +102,6 @@ aligned = host.Command(
 )
 
 keystore = host.Command(
-    name="debug-keystore",
     target="debug.keystore",
     tool="keytool",
     command=[
@@ -131,7 +127,6 @@ keystore = host.Command(
 )
 
 apk = host.Command(
-    name="apk-sign",
     target="app-debug.apk",
     tool=build_tools / "apksigner",
     source=[aligned, keystore],

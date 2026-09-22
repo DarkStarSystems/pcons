@@ -46,7 +46,6 @@ from pcons.toolchains.android import build_tools_program
 from pcons.toolchains.qt.android import (
     _android_preset,
     android_output_dir,
-    application_binary,
     application_library_name,
 )
 
@@ -75,7 +74,7 @@ def stage_application_library(
                 :func:`~pcons.toolchains.qt.android.android_output_dir`.
 
     Returns:
-        The staging target, one copy, named ``<app>-apk-lib``.
+        The staging target, one copy.
 
     Raises:
         ValueError: If the environment is not an Android cross environment.
@@ -83,9 +82,7 @@ def stage_application_library(
     abi = _android_preset(env, what="Staging the application library").arch
     directory = _output_dir(env, app, output)
     staged = directory / "libs" / abi / application_library_name(app, abi)
-    return project.InstallAs(
-        staged, app, env=env, name=f"{app.name}-apk-lib", no_prefix=True
-    )
+    return project.InstallAs(staged, app, env=env, no_prefix=True)
 
 
 def _output_dir(
@@ -186,7 +183,11 @@ def android_apk(
                   mode, not a way to stop before Gradle. It writes no
                   package, so the target is a stamp and is not built by
                   default.
-        name: Target name. Default ``<app>-apk``.
+        name: Optional name for this target. Give one to refer to it by
+              name later: ``get_target()``, ``Default()``, ``pcons build``,
+              and ``sub::name@env`` from another build script. It must then
+              be unique within its environment and project. Leave it out and
+              the target needs no name.
 
     Returns:
         The command target: the package, or the stamp under ``no_build``.
@@ -232,7 +233,7 @@ def android_apk(
         produced = apk_path(env, app, output=directory, release=release)
 
     result = env.Command(
-        name=name or f"{application_binary(app)}-apk",
+        name=name,
         target=produced,
         tool=tool,
         source=[Path(settings), staged],
@@ -333,7 +334,11 @@ def sign_apk(
                 :func:`~pcons.toolchains.qt.android.android_output_dir`.
         apksigner: The apksigner program. Default: the highest build-tools
                    revision installed under the SDK the Android preset names.
-        name: Target name. Default ``<app>-apk-signed``.
+        name: Optional name for this target. Give one to refer to it by
+              name later: ``get_target()``, ``Default()``, ``pcons build``,
+              and ``sub::name@env`` from another build script. It must then
+              be unique within its environment and project. Leave it out and
+              the target needs no name.
 
     Returns:
         The signing target, one package.
@@ -380,7 +385,7 @@ def sign_apk(
     command += ["--out", "$TARGET", "${SOURCES[0]}"]
 
     signed = env.Command(
-        name=name or f"{application_binary(app)}-apk-signed",
+        name=name,
         target=signed_apk_path(env, app, output=output),
         tool=tool,
         source=[apk],

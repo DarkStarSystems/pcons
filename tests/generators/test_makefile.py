@@ -493,7 +493,6 @@ class TestMakefileSrcDir:
             target="output.txt",
             source="input.txt",
             command="python $SRCDIR/scripts/generate.py $SOURCE $TARGET",
-            name="gen",
         )
         project.resolve()
 
@@ -589,9 +588,7 @@ class TestMakefileEmbeddedMarkers:
     def _recipe(self, tmp_path, template, contains, sources=("a.txt", "b.txt")):
         project = Project("test", root_dir=tmp_path, build_dir="build")
         env = project.Environment()
-        env.Command(
-            target="out.txt", source=list(sources), command=template, name="gen"
-        )
+        env.Command(target="out.txt", source=list(sources), command=template)
         project.resolve()
 
         gen = MakefileGenerator()

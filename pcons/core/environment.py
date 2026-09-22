@@ -1566,8 +1566,11 @@ class Environment(_EnvironmentStubs):
                     token that must contain a space goes in the list form,
                     which isn't split on whitespace; one whose quotes really
                     are meant goes in ``Verbatim(...)``.
-            name: Optional target name for `ninja <name>`. Derived from first
-                  target filename if not specified.
+            name: Optional name for this target. Give one to refer to it by
+                  name later: ``get_target()``, ``Default()``, ``pcons
+                  build``, and ``sub::name@env`` from another build script.
+                  It must then be unique within its environment and project.
+                  Leave it out and the target needs no name.
             depends: Extra files that trigger a rebuild when changed, but
                     don't appear in $SOURCE/$SOURCES. These become implicit
                     dependencies (after ``|`` in ninja). Useful for scripts,
@@ -1681,7 +1684,7 @@ class Environment(_EnvironmentStubs):
             # Can be passed to Install() since it's a Target
             project.Install("dist/", [generated])
         """
-        from pcons.core.builder import GenericCommandBuilder
+        from pcons.core.builder import GenericCommandBuilder, output_label
         from pcons.core.errors import PconsError
         from pcons.core.node import FileNode
         from pcons.core.target import Target as TargetClass
@@ -1716,12 +1719,6 @@ class Environment(_EnvironmentStubs):
                 )
         elif deps_style is None:
             deps_style = "gcc"
-
-        # The builder anchors these; the name only needs the file's stem,
-        # which the prefix doesn't change.
-        if name is None:
-            first = target if isinstance(target, (str, Path)) else list(target)[0]
-            name = Path(first).stem
 
         # Normalize source to list, separating Targets from immediate sources.
         # A Target's outputs don't exist until the resolve phase, so it can't
@@ -1796,13 +1793,17 @@ class Environment(_EnvironmentStubs):
             list(normalized),
             defined_at=get_caller_location(),
         )
+        outputs = [node for node in nodes if isinstance(node, FileNode)]
+        # A command that declares no output has no file to be labelled after.
+        label = output_label(self, outputs[0].path) if outputs else "command"
 
         # Create Target object
         cmd_target = TargetClass(
-            name,
+            name or label,
             target_type="command",
             defined_at=get_caller_location(),
             env=self,
+            anonymous=name is None,
         )
         cmd_target._builder_name = "Command"
         # A command makes a product, so a plain `ninja` builds it. A script
@@ -1811,10 +1812,9 @@ class Environment(_EnvironmentStubs):
         cmd_target.place_in_tier("default", by="Command")
 
         # Register nodes with the environment and add to target
-        for node in nodes:
-            if isinstance(node, FileNode):
-                self.register_node(node)
-                cmd_target.output_nodes.append(node)
+        for node in outputs:
+            self.register_node(node)
+            cmd_target.output_nodes.append(node)
 
         if write_if_different:
             import sys
@@ -1853,17 +1853,6 @@ class Environment(_EnvironmentStubs):
                 cmd_target.depends(depends)
             else:
                 cmd_target.depends(*depends)
-
-        # Register target with project if available
-        if self._project is not None:
-            # Handle duplicate target names by appending a suffix
-            base_name = name
-            counter = 1
-            while name in self._project._targets:
-                name = f"{base_name}_{counter}"
-                counter += 1
-            if name != base_name:
-                cmd_target.name = name
 
         return cmd_target
 

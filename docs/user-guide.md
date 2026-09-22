@@ -779,12 +779,16 @@ built:
 |---|---|
 | `"default"` | plain `pcons`, `ninja` or `make`, with no targets named |
 | `"all"` | `pcons all` / `ninja all` / `make all` |
-| `"manual"` | naming the target(s) only |
+| `"manual"` | asking for it only |
+
+Asking for a target means `pcons build <name>` when the script named it (see
+[Named and anonymous targets](#named-and-anonymous-targets)), or its output
+path, or an alias. Any of those builds it whatever its tier.
 
 Whatever a target's tier, anything it depends on gets built along with
 it, as usual. (So just to be clear, marking a target as `manual` but
 having a program depend on it will still build that target whenever
-the program is built.) And naming any target always builds it, no matter its tier.
+the program is built.)
 
 Each builder puts its targets in a sensible tier. Programs, libraries,
 `Command`s, LaTeX documents, bundles, and custom builders' outputs are
@@ -792,14 +796,14 @@ Each builder puts its targets in a sensible tier. Programs, libraries,
 overlays, archives and installers are `all`: they operate on the things you
 built, and you don't usually want them running on every build. Test targets,
 Qt's `lupdate` and `QtDeploy` are `manual`: run them by name (`pcons test`,
-`ninja lupdate`). Where a target sits in the source tree makes no difference
+`ninja lupdate`), which works because each declares an alias. Where a target sits in the source tree makes no difference
 to any of this.
 
 To change a target's tier, just set it:
 
 ```python
 zipfile.build_tier = "default"   # add the zip to the default build
-bench.build_tier = "all"         # `ninja all` or `ninja bench`, not every build
+bench.build_tier = "all"         # `ninja all` or `ninja build/bench`, not every build
 lupdate.build_tier = "manual"    # it rewrites sources: only when asked for
 ```
 
@@ -849,17 +853,53 @@ project.Alias("run-test", test_runner)
 #   ninja test       # Build and run tests
 ```
 
-Aliases are Ninja or Makefile phony targets - they don't produce files but depend on other targets. Target names (like `"myapp"` in `project.Program("myapp", env)`) are also usable with ninja or make:
+Aliases are Ninja or Makefile phony targets: they produce no file of their own, they depend on other targets, and their name is one the build tool knows.
+
+A target's own name is not, but `pcons build <name>` works anyway: pcons translates the name into the output paths before the build tool sees them.
 
 ```bash
-ninja myapp      # Build just the myapp target
-ninja libfoo     # Build just libfoo
-ninja install    # Build the install alias
+pcons build myapp       # the target named myapp, wherever it writes
+pcons build myapp@mcu   # one environment's copy of it
+ninja install           # the install alias, a phony ninja knows
+ninja myapp.exe         # myapp on Windows, by output path
+```
+
+Run `ninja` or `make` yourself and you're back to what they know: output paths and phonies. `ninja myapp` works only where the name and the output path coincide, which a `build_prefix`, an `output_name` or a Windows suffix each break. Make an alias when you want a name that works everywhere.
+
+#### Named and anonymous targets
+
+Name a target when you need to refer to it by name, from another script above all. Otherwise leave the name out and keep the `Target` the builder returned.
+
+**Named targets.** `Program`, `StaticLibrary`, `SharedLibrary`, `ObjectLibrary`, `HeaderOnlyLibrary`, `MetalLibrary`, `CargoBuild` for a library crate, `find_package` and the Qt program and library builders always take a name, because it's also the base name of the file they write. `Command`, `PyBuilder` calls, `Install`, `InstallAs`, `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`, `android_apk()`, `sign_apk()` and `create_universal_binary()` take one as an optional keyword, `name=`. Either way the name is the target's identity, unique within its project and environment, and it does three jobs:
+
+- **It names what the build writes**, or rather the base of it: the toolchain adds the prefix and suffix. `Program("myapp")` writes `myapp`, or `myapp.exe` on Windows; `SharedLibrary("net")` writes `libnet.so`, `libnet.dylib` or `net.dll`. That is why a script names the target rather than the file: the filename differs on every platform. `output_name`, `output_prefix` and `output_suffix` override the parts.
+- **It names the build subdir for that target.** A compiled target's objects go in `obj.<name>/`, a Qt target's generated sources in `qt.<name>/`, a Cargo crate's tree in `cargo/<name>/`.
+- **It's how everything refers to the target.** `get_target()`, `Default("myapp")`, `pcons explain myapp` and `pcons build myapp` all take it, as do `myapp@env` and `sub::myapp@env`, and it's how a script reaches a target another subdirectory declared.
+
+The first two jobs belong to the builders that derive a path from the name. A `name=` on `Command`, `Install` or an archive changes no path, since the call already says what to write; it's there for the third.
+
+**Anonymous targets.** A builder called without a name makes one, as do `Test` and the steps built on `Command` that pass no name through: a `CargoBuild` bin crate, the Qt deploy steps, the installers. Pcons labels each by what it builds: a command or an archive by its first output's path as the build tool writes it, an install by its flattened destination, a `Test` by the test's own name. A label is there to be read, in `pcons info --targets`, `pcons explain`, the build-tiers report and error messages; labels may repeat, and no lookup answers to one.
+
+```python
+header = env.Command(target="gen/config.h", command="...")   # labelled `gen/config.h`
+source = env.Command(target="gen/config.c", command="...")   # labelled `gen/config.c`
+
+project.get_target("gen/config.h")   # KeyError: a label is not a name
+```
+
+Keep the `Target` the call returned, which is what `Default()`, `depends()` and `Install()` want anyway. To build one from the command line, give its output path, or make an alias:
+
+```python
+project.Alias("config", header, source)   # now `ninja config` means something
 ```
 
 Calling `Alias()` multiple times with the same alias name adds targets to that alias, and you can have Aliases that contain (depend on) other Aliases.
 
+`depends()` takes an alias too, and it means every target and file the alias groups, nested aliases included. It's read when the project resolves, so a member some later `Alias()` call adds counts as well.
+
 Pcons defines a few aliases automatically: `all` (every target except the manual tier), and when the project has `Test()` targets, `test` (build and run them) and `test-build` (just build them). With the Makefile generator there's also `clean`; ninja has `ninja -t clean` built in. Some helpers add their own, like `lupdate` and `deploy` from the Qt tools. There's no built-in `install` alias; make one with `Alias("install", ...)` as above.
+
+**Writing your own builder?** Importantly, a builder that puts the target's name into any path has to take that name from the user, the way `Program` does. A label derived by pcons may not be unique, and two targets building into one directory would collide.
 
 ### Multi-Platform Builds
 
@@ -968,6 +1008,30 @@ add_subdirectory("libfoo", env=mcu)    # build/mcu/libfoo/libfoo.a
 
 project.get_target("foo@host")
 ```
+
+#### Reaching a target another script declared
+
+There are two ways across the boundary. `add_subdirectory()`'s return value
+hands you the child's targets as objects, which is the direct route when the
+parent includes the child itself. The other is by name: the child names the
+target, and any script in the build looks it up.
+
+```python
+# libfoo/pcons-build.py
+stamp = env.Command(target="stamp.txt", command="...", name="stamp")
+```
+
+```python
+# the parent, or a sibling subdirectory
+app.depends(project.get_target("libfoo::stamp@host"))
+```
+
+Prefer the return value when the parent includes the child directly; it's one
+less name to keep in step. Prefer the name when threading objects around is
+awkward: a sibling subdirectory the parent hands nothing to, or a loop over
+environments that declares a target per pass, where every pass writes the same
+`name=` and the environment tells the copies apart. `examples/75_multi_env`
+does the latter, with `parity::stamp@host` and `parity::stamp@strict`.
 
 #### Configuring what you include
 
@@ -1784,13 +1848,16 @@ common_host = common_lib(host)  # build/host/lib/libcommon.a
 ```
 
 Two targets may share a name only when both environments are named and the names
-differ. Otherwise the old error stands, and it says so.
+differ. Otherwise the old error stands, and it says so. This is about names: two
+anonymous targets may always share a label (see [Named and anonymous
+targets](#named-and-anonymous-targets)).
 
 #### Naming one of them: `name@env`
 
 `@` selects the environment, `::` selects the project, and `@` binds tighter, so
 `sub::common@mcu` is target `common` of sub-project `sub`, built in `mcu`. It
-works wherever a target can be named:
+works wherever a target can be named, in the script and on the command line
+alike:
 
 ```python
 project.get_target("common@mcu")
@@ -1806,8 +1873,8 @@ $ pcons build common@mcu
 $ pcons explain common@mcu
 ```
 
-An unqualified name that matches two targets raises and prints both spellings
-rather than picking one.
+A plain `common` matches two targets here, so pcons stops and prints both
+qualified names rather than picking one.
 
 See `examples/75_multi_env` for the smallest complete case, and
 `examples/74_bare_metal` for the cross-compiled one.
@@ -2582,25 +2649,22 @@ The function is called as `fn(targets, sources, **kwargs)`. Both path lists are 
 
 | on `env.PyBuilder()` | on the call |
 |---|---|
-| `python=`, `worker=` | `target=`, `source=` |
-| `cwd=`, `launcher=`, `env_vars=` | `name=` |
-| `restat=`, `write_if_different=` | the function's own arguments, as plain keywords |
+| `python=`, `worker=`, `cwd=`, `launcher=` | `target=`, `source=`, `name=` |
+| `env_vars=`, `restat=`, `write_if_different=` | the function's own arguments, as plain keywords |
 | `depends=` | `depends=` |
 
 `depfile=` and `deps_style=` are not supported. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
 
 **Discovered outputs.** `target=` is fixed at the call, so one call cannot declare an output whose name or count only another edge's result decides. [Staged Generation](#staged-generation-targets-discovered-mid-build) still gets there, no new mechanism needed: a first call whose only declared target is a small manifest, and a second call, made from inside a `project.when_generated()` block once ninja has built that manifest and re-run pcons, whose targets come from what it says. `examples/57_staged_generation` is the worked example. It uses `env.Command()` for both calls, and a `PyBuilder()` call plays the same role there.
 
-**Edge names.** An edge is named after its first target's stem, the same rule `env.Command()` uses, and pcons refuses a second target in one environment with the same stem: `out/report.txt` and `tmp/report.txt` both want the edge name `report`, and so do `lorem.txt` and `lorem.c` in a chain. Give one of them `name=`:
+**Edge names and labels.** `name=` on the call is optional and does what it does on `env.Command()`: it makes the edge a named target, which `get_target()`, `Default()` and `pcons build` all answer to. Without one pcons labels the edge by its first target's path, so reports read the way the build file does, and two edges may wear one label without colliding:
 
 ```python
 one = report(target="out/report.txt", source=[src / "a.txt"], title="one")
-two = report(
-    target="tmp/report.txt", name="tmp-report", source=[src / "b.txt"], title="two"
-)
+two = report(target="tmp/report.txt", source=[src / "b.txt"], title="two")
 ```
 
-`name=` is also what `ninja tmp-report` then means. `examples/91_python_builder_pipeline` uses it on every call, because each chain's `.txt` and `.c` share a stem. The argument pickle plays no part in this: it is named after the target's own build-relative path, `build/pybuilder/out/report.txt.args.pkl` and `build/pybuilder/tmp/report.txt.args.pkl` here, so it never collides on its own.
+A label is only there to be read (see [Named and anonymous targets](#named-and-anonymous-targets)). Build an unnamed edge by its output path, or give it an alias with `project.Alias()`.
 
 **Reserved parameter names.** `target`, `source`, `name` and `depends` are refused as parameters of the function, because the call spends them on the edge. Rename them; the error says which ones and what the call does with them.
 
@@ -2666,17 +2730,15 @@ checked = make_report(strict)(
 )
 ```
 
-`build_prefix` is what keeps the two `report.txt` apart, and it gives each environment its own copy of the generated module, `build/pybuilder/report.py` and `build/strict/pybuilder/report.py`, with identical bytes. Two targets may share a name only when their environments are named and different, which is why both environments have a name here. See `examples/75_multi_env` for the multi-environment idiom itself.
+`build_prefix` is what keeps the two `report.txt` apart, and it gives each environment its own copy of the generated module, `build/pybuilder/report.py` and `build/strict/pybuilder/report.py`, with identical bytes. Naming the environments is what lets `report@strict` pick one of a pair of same-named targets later. See `examples/75_multi_env` for the multi-environment idiom itself.
 
 The closure ban and this shape fit each other: the body sits inside `make_report`, where `environment` is in scope, so everything it needs comes through keywords of the call.
 
 **A pipeline.** A builder's `Target` goes into another builder's `source=` like any other, which is how a chain gets its order:
 
 ```python
-text = fetch(target=project.build_dir / f"{name}.txt", name=f"{name}-text",
-             url=url, field="feed.lipsum")
-source = embed(target=project.build_dir / f"{name}.c", name=f"{name}-source",
-               source=[text], symbol=name)
+text = fetch(target=project.build_dir / f"{name}.txt", url=url, field="feed.lipsum")
+source = embed(target=project.build_dir / f"{name}.c", source=[text], symbol=name)
 project.Default(project.Program(name, env, sources=[source]))
 ```
 
@@ -3597,7 +3659,9 @@ Both archive builders support:
 - **`output`**: Path to the output archive file
 - **`sources`**: List of files, directories, or Targets to include
 - **`base_dir`**: Base directory for computing archive paths (default: ".")
-- **`name`**: Optional target name for `ninja <name>` (default: derived from output path)
+- **`name`**: Optional name to refer to the target by later
+
+An archive target takes an optional `name=`, which makes it a named target `get_target()` and `pcons build` answer to. Without one pcons labels it by the archive it writes, `dist/docs.tar.gz`: build it by that path, or give it an alias.
 
 ```python
 # Custom base_dir to strip source paths
@@ -3608,14 +3672,7 @@ archive = project.Tarfile(
     sources=["build/release/bin/", "build/release/lib/"],
     base_dir="build/release",
 )
-
-# Custom target name
-archive = project.Tarfile(
-    env,
-    output="dist/docs.tar.gz",
-    sources=["docs/"],
-    name="package_docs",  # Run with: ninja package_docs
-)
+project.Alias("package", archive)   # `ninja package`
 ```
 
 #### Using Archives with Install
@@ -3884,7 +3941,7 @@ else:
     # Normal install: usual bin/lib conventions.
     dest = install_dir(env, "shared_library")
 
-project.Install(dest, [my_extension], name="install")
+project.Install(dest, [my_extension])
 ```
 
 If your build script ignores `PCONS_BUILD_WHEEL` and installs to `lib/`, the
@@ -4431,7 +4488,6 @@ lib_x86_64 = project.StaticLibrary("mylib_x86", env_x86_64, sources=["lib.c"])
 # Combine into universal binary
 lib_universal = create_universal_binary(
     project,
-    "mylib_universal",
     inputs=[lib_arm64, lib_x86_64],
     output="build/universal/libmylib.a",
 )

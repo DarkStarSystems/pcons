@@ -26,17 +26,15 @@ Three rules follow from the function travelling alone:
 The function is called as ``fn(targets, sources, **kwargs)``, with the paths
 spelled as the build tool sees them.
 
-The edge's name defaults to the first target's stem, and the argument pickle
-is named after it, so two calls whose targets share a stem need ``name=`` to
-tell them apart. Here the three targets are ``report.txt``, ``report2.txt``
-and ``report.txt`` again in a second environment, whose ``build_prefix``
-puts it in its own directory.
-
-Two targets may share a name only when their environments are named and
-different, which is why both environments here have a name.
+Each edge's argument pickle is named after its first target, so two calls
+are parted by what they build. Here the three targets are ``report.txt``,
+``report2.txt`` and ``report.txt`` again in a second environment, whose
+``build_prefix`` puts it in its own directory.
 
 A second environment is served by a plain Python helper that decorates once
-per environment. A builder is bound to the environment that decorated it.
+per environment. A builder is bound to the environment that decorated it,
+and the two environments' ``build_prefix`` settings differ, so their
+generated modules and pickles land in different directories.
 """
 
 from pcons import Project

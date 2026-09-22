@@ -56,7 +56,6 @@ bin_tarball = project.Tarfile(
 install_target = project.Install(
     project.root_dir / "Installers",
     [src_tarball, bin_tarball],
-    name="install-tarballs",
 )
 
 project.Alias("install", install_target)

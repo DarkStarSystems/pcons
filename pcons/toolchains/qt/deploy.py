@@ -66,7 +66,8 @@ class QtDeployBuilder:
 
         Args:
             project: The project.
-            name: Target name (`ninja <name>`; also aliased as `deploy`).
+            name: Alias for the deploy step, so ``ninja <name>`` runs it.
+                  Also aliased as ``deploy``.
             env: Environment with the qt toolchain (via find_qt).
             app: The program target to deploy.
             bundle: macOS only — path of the .app bundle to fix up
@@ -121,7 +122,6 @@ class QtDeployBuilder:
             target=stamp,
             source=[app],
             command=command,
-            name=f"{name}-cmd",
         )
         project.Alias(name, target)
         if name != "deploy":

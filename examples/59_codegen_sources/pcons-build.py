@@ -50,7 +50,6 @@ generated = env.Command(
     target=gen_dir / "entries.c",
     source=[collate, *def_files],
     command=f"{run}${{SOURCES[0]}} $TARGET ${{SOURCES[1:]}}",
-    name="collate_defs",
     write_if_different=True,
 )
 

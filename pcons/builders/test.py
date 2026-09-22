@@ -16,7 +16,6 @@ what makes ``test-build`` work.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,34 +31,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.util.source_location import SourceLocation
-
-
-# Characters that Target name validation accepts. We map anything else
-# to "_" so that user-friendly test names (Catch2 sentences, doctest
-# scenarios with spaces, gtest names with colons) don't crash the build.
-# The user-visible name on the spec is left intact — only the *internal*
-# Ninja-target name is sanitized.
-_TARGET_NAME_BAD_CHARS = re.compile(r"[^\w./+-]")
-
-
-def _make_internal_target_name(project: Project, user_name: str) -> str:
-    """Compute a unique, Ninja-safe target name for a test.
-
-    Steps:
-      1. Replace every char outside ``[\\w./+-]`` with ``_`` so names like
-         ``"server connects"`` or ``"NetSuite::ssl"`` become valid.
-      2. Prefix with ``test_`` so ``project.Test("hello", ...)`` doesn't
-         collide with ``project.Program("hello", ...)`` — the common case.
-      3. Suffix with a counter if needed so duplicates don't crash.
-    """
-    sanitized = _TARGET_NAME_BAD_CHARS.sub("_", user_name)
-    base_name = f"test_{sanitized}"
-    target_name = base_name
-    counter = 1
-    while project.has_target(target_name):
-        target_name = f"{base_name}_{counter}"
-        counter += 1
-    return target_name
 
 
 class TestNodeFactory:
@@ -179,8 +150,9 @@ class TestBuilder:
         Args:
             project: The project to add the target to.
             name: Test name. Shown by the runner, used for ``-R`` filters.
-                Need not be unique with other target names — internally
-                the test target is named ``test_<name>``.
+                It collides with nothing: it is the internal target's
+                label, and labels may repeat. Written for a person to read,
+                so a Catch2 sentence or a gtest name with colons is fine.
             program: The thing to run. A Target (typically from
                 ``project.Program``), a path, or a string command name.
             args: Arguments passed after the program.
@@ -223,12 +195,12 @@ class TestBuilder:
                 "Use 'gtest', 'doctest', or 'catch2' — or None to disable."
             )
 
-        target_name = _make_internal_target_name(project, name)
         target = Target(
-            target_name,
+            name,
             target_type="test",
             defined_at=defined_at or get_caller_location(),
             project=project,
+            anonymous=True,
         )
         target._builder_name = "Test"
 

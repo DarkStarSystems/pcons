@@ -173,10 +173,11 @@ def test_cargo_build_wraps_imported_target(project_env, tmp_path):
     # Depends on the underlying cargo command target so Ninja relinks
     # consumers when the artifact changes.
     dep_names = {d.name for d in target.dependencies}
-    assert "rust_core_cargo" in dep_names
+    staticlib = _artifact_filename("rust_core", "staticlib")
+    assert f"cargo/rust_core/release/{staticlib}" in dep_names
     # No header generation requested -> no include dirs, no cbindgen dep.
     assert not target.public.include_dirs
-    assert "rust_core_cbindgen" not in dep_names
+    assert not any(name.endswith(".h") for name in dep_names)
 
 
 def test_cargo_build_command_includes_options(project_env, tmp_path):
@@ -211,7 +212,10 @@ def test_cargo_build_bin_returns_command_target(project_env, tmp_path):
     # A bin crate has nothing to link: the cargo Command target itself is
     # returned, with the executable as its output — no library usage
     # requirements and no ImportedTarget wrapper.
-    assert target.name == "rust_tool"
+    assert (
+        target.name
+        == f"cargo/rust_tool/release/{_artifact_filename('rust_tool', 'bin')}"
+    )
     assert not getattr(target, "is_imported", False)
     assert not target.public.link_libs
 
@@ -264,5 +268,6 @@ def test_cargo_build_with_cbindgen_adds_header_and_dep(project_env, tmp_path):
     # Header generation adds an include dir and a cbindgen command dep.
     assert target.public.include_dirs
     dep_names = {d.name for d in target.dependencies}
-    assert "rust_core_cargo" in dep_names
-    assert "rust_core_cbindgen" in dep_names
+    staticlib = _artifact_filename("rust_core", "staticlib")
+    assert f"cargo/rust_core/release/{staticlib}" in dep_names
+    assert "cargo/rust_core/include/rust_core.h" in dep_names

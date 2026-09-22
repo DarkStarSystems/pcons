@@ -11,7 +11,7 @@ from pcons.generators.generator import BaseGenerator
 
 
 def _plugin(project: Project, env):
-    return env.Command(target="myplugin.so", source=None, command="true", name="plugin")
+    return env.Command(target="myplugin.so", source=None, command="true")
 
 
 def _outputs(project: Project) -> set[str]:

@@ -360,7 +360,6 @@ class TestBuildersHaveOneDefinition:
         env = project.Environment()
 
         target = project.Command(
-            "gen",
             env,
             target=project.build_dir / "out.txt",
             source=tmp_path / "in.txt",
@@ -368,5 +367,5 @@ class TestBuildersHaveOneDefinition:
             restat=True,
         )
 
-        assert target.name == "gen"
+        assert target.name == "out.txt"
         assert target.output_nodes[0]._build_info["restat"] is True
