@@ -84,6 +84,12 @@ to force invented names on scripts.
 
 ### Fixed
 
+- Swift libraries build again with Swift 6, which refuses to emit a
+  `.swiftinterface` unless the language mode is stated. Swift compiles now
+  always pass `-swift-version`, controlled by `env.swiftc.language_mode`
+  (default `"5"`, swiftc's own default on every version). Set it to `"6"`
+  for Swift 6 language mode, including strict concurrency checking.
+
 - `target.depends(alias)` now means what it says. An alias was accepted and
   silently dropped; it now stands for every target and file the alias groups,
   nested aliases included, and member targets contribute their public usage
