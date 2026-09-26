@@ -7,6 +7,7 @@ from pcons.core.builder import CommandBuilder
 from pcons.core.errors import PconsError
 from pcons.core.node import FileNode
 from pcons.core.project import Project
+from pcons.core.subst import PathToken
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.makefile import MakefileGenerator
@@ -282,6 +283,8 @@ class TestMakefileDepfiles:
             "tool": "cc",
             "command_var": "cmdline",
             "sources": [source_node],
+            "depfile": PathToken(suffix=".d"),
+            "deps_style": "gcc",
         }
         output_node.builder = CommandBuilder(
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
@@ -294,9 +297,27 @@ class TestMakefileDepfiles:
         BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "Makefile").read_text()
-        # Should include .d files for incremental builds
-        assert "-include" in content
-        assert "*.d" in content
+        assert "-include obj/main.o.d\n" in content
+
+    def test_includes_a_depfile_by_its_own_path(self, tmp_path):
+        """A depfile a tool names itself is included as named, whatever its
+        name or directory."""
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+        env.Command(
+            target="out.txt",
+            source="in.txt",
+            command="gen $SOURCE $TARGET",
+            depfile="deps/out.dep",
+        )
+
+        gen = MakefileGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "Makefile").read_text()
+        assert "-include deps/out.dep\n" in content
+        assert "*.d" not in content
 
 
 class TestMakefileImplicitDeps:
