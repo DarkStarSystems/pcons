@@ -3,12 +3,15 @@
 [test]
 description = "Demonstrates platform-specific installer creation (.pkg/.dmg on macOS, .msix on Windows)"
 
-# macOS: expect the program and installers
+# macOS: expect the program, the installers, and the installer UI files
+# staged into the package's Resources directory
 expected_outputs_darwin = [
     "build/obj.hello/src/main.c.o",
     "build/hello",
     "build/HelloApp-1.0.0.pkg",
     "build/HelloApp.dmg",
+    "build/.pkg_staging/HelloApp/resources/welcome.txt",
+    "build/.pkg_staging/HelloApp/resources/readme.txt",
 ]
 
 # Windows: expect the MSIX installer to be built

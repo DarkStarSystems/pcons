@@ -32,7 +32,9 @@ installer_targets = []
 if platform.is_macos():
     from pcons.contrib.installers import macos
 
-    # Create a .pkg installer
+    # Create a .pkg installer. The welcome and readme files are copied into
+    # the package's Resources directory and shown as installer pages; plain
+    # text, RTF and HTML all work.
     pkg = macos.create_pkg(
         project,
         env,
@@ -42,6 +44,8 @@ if platform.is_macos():
         sources=[app],
         install_location="/usr/local/bin",
         min_os_version="10.13",
+        welcome=project.root_dir / "welcome.txt",
+        readme=project.root_dir / "readme.txt",
     )
     installer_targets.append(pkg)
 

@@ -171,6 +171,40 @@ class TestMacOSInstallers:
         assert pkg is not None
         assert pkg.name == "TestApp-1.0.0.pkg"
 
+    def test_create_pkg_stages_ui_resources(self, tmp_path: Path) -> None:
+        """welcome=/readme= are staged into the package's Resources directory."""
+        from pcons.contrib.installers import macos
+
+        for name in ("test.txt", "welcome.txt", "readme.txt"):
+            (tmp_path / name).write_text(name)
+
+        project = Project("test_pkg_res", root_dir=tmp_path, build_dir=tmp_path / "b")
+        env = project.Environment()
+        pkg = macos.create_pkg(
+            project,
+            env,
+            name="TestApp",
+            version="1.0.0",
+            identifier="com.test.app",
+            sources=[tmp_path / "test.txt"],
+            welcome=tmp_path / "welcome.txt",
+            readme=tmp_path / "readme.txt",
+        )
+        # Read before resolving: resolution folds pending sources into nodes.
+        deps = pkg.dependencies
+        project.resolve()
+
+        staged = {
+            str(node.path)
+            for dep in deps
+            for node in dep.output_nodes
+            if "resources" in node.path.parts
+        }
+        assert staged == {
+            "b/.pkg_staging/TestApp/resources/welcome.txt",
+            "b/.pkg_staging/TestApp/resources/readme.txt",
+        }
+
     def test_create_component_pkg_basic(self, tmp_path: Path) -> None:
         """Test basic component PKG creation setup."""
         from pcons.contrib.installers import macos

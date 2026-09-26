@@ -247,11 +247,11 @@ def create_pkg(
         depends: Targets that must be built before the sources are staged,
             for a directory source that other targets populate.
         title: Installer title. Defaults to name.
-        welcome: Path to welcome.rtf or welcome.html.
-        readme: Path to readme file.
-        license: Path to license file.
-        conclusion: Path to conclusion file.
-        background: Path to background image.
+        welcome: Welcome page shown first (.txt, .rtf or .html).
+        readme: Readme page (.txt, .rtf or .html).
+        license: License the user must accept (.txt, .rtf or .html).
+        conclusion: Page shown when the install finishes.
+        background: Background image for the installer window.
         min_os_version: Minimum macOS version (e.g., "10.13").
         scripts_dir: Directory containing preinstall/postinstall scripts.
         sign_identity: Code signing identity.
@@ -276,6 +276,20 @@ def create_pkg(
         output = Path(output)
 
     title = title or name
+
+    # Installer UI files, copied into the package's Resources directory and
+    # referenced there by basename from distribution.xml.
+    ui_resources = {
+        flag: path
+        for flag, path in (
+            ("welcome", welcome),
+            ("readme", readme),
+            ("license", license),
+            ("conclusion", conclusion),
+            ("background", background),
+        )
+        if path is not None
+    }
 
     # All paths below are relative to build_dir, where ninja/make run, and
     # under the environment's build prefix; Command targets are made
@@ -389,6 +403,9 @@ def create_pkg(
     if min_os_version:
         dist_cmd.extend(["--min-os-version", min_os_version])
 
+    for flag, path in ui_resources.items():
+        dist_cmd.extend([f"--{flag}", Path(path).name])
+
     dist_target = as_installer_step(
         env.Command(
             target=project.build_dir / dist_xml_path,
@@ -401,12 +418,10 @@ def create_pkg(
     # Collect all targets that productbuild depends on
     productbuild_deps: list[Target] = [dist_target, component_target]
 
-    # Copy resource files if provided
-    for res_file in (welcome, readme, license, conclusion, background):
-        if res_file is not None:
-            productbuild_deps.append(
-                project.Install(resources_rel, [res_file], no_prefix=True)
-            )
+    productbuild_deps.extend(
+        project.Install(resources_rel, [path], no_prefix=True)
+        for path in ui_resources.values()
+    )
 
     # Build final package with productbuild
     productbuild_args = [
@@ -417,7 +432,7 @@ def create_pkg(
         str(pkg_rel),
     ]
 
-    if any(f is not None for f in [welcome, readme, license, conclusion, background]):
+    if ui_resources:
         productbuild_args.extend(["--resources", str(resources_rel)])
 
     if sign_identity is not None:

@@ -90,6 +90,11 @@ to force invented names on scripts.
   (default `"5"`, swiftc's own default on every version). Set it to `"6"`
   for Swift 6 language mode, including strict concurrency checking.
 
+- `create_pkg(welcome=..., readme=..., license=..., conclusion=...,
+  background=...)` on macOS now shows those pages in the installer. The files
+  were copied into the package's Resources directory, but nothing referenced
+  them from `distribution.xml`, so the installer never displayed them.
+
 - `target.depends(alias)` now means what it says. An alias was accepted and
   silently dropped; it now stands for every target and file the alias groups,
   nested aliases included, and member targets contribute their public usage
