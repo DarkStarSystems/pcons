@@ -96,3 +96,20 @@ def test_a_child_generator_writes_to_the_child_build_dir(run_child, tmp_path):
     BaseGenerator._generate_pending(top)
     assert list((tmp_path / "build").glob("**/*.mmd"))
     assert not (tmp_path / "child" / "build").exists()
+
+
+def test_a_path_in_a_command_is_read_from_the_script(run_child):
+    _, ns = run_child(
+        "from pathlib import Path\n"
+        "cmd = env.Command(target='o', command=[Path('tool.py'), '$TARGET'])\n"
+    )
+    program = ns.cmd.output_nodes[0]._build_info["command"][0]
+    assert Path(program.path) == Path("child/tool.py")
+    assert program.executable
+
+
+def test_build_files_asked_for_in_a_child_come_from_the_top(run_child, tmp_path):
+    top, _ = run_child("from pcons import Generator\nGenerator().generate(project)\n")
+    BaseGenerator._generate_pending(top)
+    assert (tmp_path / "build" / "build.ninja").exists()
+    assert not (tmp_path / "build" / "child" / "build.ninja").exists()

@@ -871,6 +871,55 @@ class TestInstallersInASubdirectory:
     then anchored again as an Install destination, one directory deeper.
     """
 
+    @staticmethod
+    def _after(flag: str, top: Project) -> list[Path]:
+        """The path each pkgbuild command gives after *flag*."""
+        return [
+            Path(cmd[cmd.index(flag) + 1].path)
+            for target in top.targets
+            for node in target.output_nodes
+            if (cmd := list((node._build_info or {}).get("command") or []))
+            and flag in cmd
+        ]
+
+    @pytest.mark.parametrize("function", ["create_component_pkg", "create_pkg"])
+    def test_scripts_and_plists_are_read_from_the_script(
+        self, tmp_path: Path, monkeypatch, function: str
+    ):
+        from pcons.contrib.installers import macos
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        monkeypatch.setattr(macos, "_check_tool", lambda *a, **k: None)
+        monkeypatch.chdir(tmp_path)
+        sub = tmp_path / "pkg"
+        (sub / "Demo.app").mkdir(parents=True)
+        # A component package takes its plist; create_pkg writes one itself
+        # for a bundle source.
+        extra = (
+            "component_plist='comp.plist'"
+            if function == "create_component_pkg"
+            else "name='App'"
+        )
+        (sub / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\n"
+            "from pcons.contrib.installers import macos\n"
+            "project = Project('pkg')\n"
+            "env = project.Environment()\n"
+            f"macos.{function}(project, env, {extra}, version='1.0',\n"
+            "    identifier='com.example.app', sources=['Demo.app'],\n"
+            "    scripts_dir='scripts')\n"
+        )
+        top = Project("top", root_dir=tmp_path, build_dir=tmp_path / "build")
+        add_subdirectory("pkg")
+
+        assert self._after("--scripts", top) == [sub / "scripts"]
+        plists = self._after("--component-plist", top)
+        if function == "create_component_pkg":
+            assert plists == [sub / "comp.plist"]
+        else:
+            assert [p.name for p in plists] == ["component.plist"]
+            assert plists[0].is_relative_to(tmp_path / "build" / "pkg")
+
     @pytest.mark.parametrize("prefix", [None, "release"])
     def test_pkg_paths_agree_in_a_subdirectory(
         self, tmp_path: Path, monkeypatch, prefix: str | None
