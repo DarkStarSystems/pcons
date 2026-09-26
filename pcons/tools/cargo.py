@@ -26,12 +26,14 @@ Example:
 
 from __future__ import annotations
 
+import json
 import sys
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import builder
 from pcons.packages.description import PackageDescription
 from pcons.packages.imported import ImportedTarget
@@ -126,22 +128,6 @@ def _profile_subdir(profile: str) -> str:
     return "debug" if profile == "dev" else profile
 
 
-def _collect_rust_sources(manifest_dir: Path) -> list[Path]:
-    """Best-effort glob of files that should trigger a cargo rerun.
-
-    Picks up .rs files, Cargo.toml, and Cargo.lock under the manifest
-    dir. Workspace members elsewhere on disk won't be tracked — that's
-    cargo's job to detect when it runs.
-    """
-    deps: list[Path] = []
-    for pattern in ("**/*.rs", "Cargo.toml", "Cargo.lock"):
-        for p in manifest_dir.glob(pattern):
-            if "target" in p.parts:
-                continue
-            deps.append(p)
-    return deps
-
-
 @builder(
     "CargoBuild",
     target_type="cargo",
@@ -176,8 +162,8 @@ class CargoBuildBuilder:
             name: Target name (and link library name unless overridden by
                   the crate's [lib] name in Cargo.toml).
             env: Environment used to register the underlying Command rule.
-            manifest: Path to the crate's Cargo.toml (relative to project
-                      root or absolute).
+            manifest: Path to the crate's Cargo.toml, relative to the
+                      build script's directory, or absolute.
             crate_type: "staticlib", "cdylib", or "bin". Library crates
                         return an ImportedTarget that consumers link();
                         "bin" returns the cargo Command target whose
@@ -187,7 +173,8 @@ class CargoBuildBuilder:
                      "dev" → target/debug/, any other profile name maps
                      to the target/ subdirectory of the same name.
             features: Cargo features to enable.
-            generate_header: Path to a cbindgen.toml. If given, runs
+            generate_header: Path to a cbindgen.toml, read like
+                             ``manifest``. If given, runs
                              cbindgen as a second command to produce a C
                              header in the build dir.
             target_triple: Optional target triple for cross-compilation
@@ -212,9 +199,7 @@ class CargoBuildBuilder:
                 "generate_header only applies to library crates, not crate_type='bin'"
             )
 
-        manifest_path = Path(manifest)
-        if not manifest_path.is_absolute():
-            manifest_path = project.root_dir / manifest_path
+        manifest_path = project.current_dir / manifest
         if not manifest_path.is_file():
             raise FileNotFoundError(f"Cargo.toml not found: {manifest_path}")
 
@@ -223,11 +208,12 @@ class CargoBuildBuilder:
 
         # Per-target output directory, kept inside the build dir so it's
         # easy to clean and doesn't collide with a user's own cargo runs.
-        # Two views of the same directory: a project-relative one for the
-        # pcons node graph, and an absolute one for the cargo command
-        # (which runs from ninja's build dir, not project root).
-        target_root = project.build_dir / "cargo" / name
-        target_root_abs = (project.root_dir / target_root).resolve()
+        # It lands where this script's targets do, build/<subdir>/ under
+        # add_subdirectory. Two views of the same directory: the anchored
+        # one for the pcons node graph, and an absolute one for the cargo
+        # command (which runs from ninja's build dir, not project root).
+        target_root = anchor_target_paths(env, [Path("cargo", name)])[0]
+        target_root_abs = project.top_path_resolver.project_root / target_root
         profile_dir = _profile_subdir(profile)
         artifact_dir = target_root / profile_dir
         if target_triple:
@@ -237,12 +223,17 @@ class CargoBuildBuilder:
             crate_name, crate_type, target_triple
         )
 
-        # Build the cargo command line.
+        # Build the cargo command line. The dep-info base directory makes
+        # cargo name the artifact in its dep-info file as the build tool
+        # does, relative to the directory it runs in, which make needs to
+        # match the file to its rule. Sources stay absolute.
+        execution_dir = project.top_path_resolver.execution_dir
         cargo_cmd: list[str] = [
             cargo,
             "build",
             f"--manifest-path={manifest_path}",
             f"--target-dir={target_root_abs}",
+            f"--config=build.dep-info-basedir={json.dumps(str(execution_dir))}",
         ]
         if profile == "release":
             cargo_cmd.append("--release")
@@ -254,7 +245,16 @@ class CargoBuildBuilder:
             cargo_cmd.extend(["--target", target_triple])
         cargo_cmd.extend(extra_args)
 
-        rust_sources = _collect_rust_sources(manifest_dir)
+        # What the crate reads comes from cargo itself: beside the artifact
+        # it writes a dep-info file, named after the artifact, listing every
+        # source file of the crate and its path dependencies, so a module
+        # added or removed later is tracked without rerunning pcons. That
+        # file leaves out the manifest and the lock file, so a change to
+        # either reruns the edge explicitly.
+        lock_file = manifest_dir / "Cargo.lock"
+        manifest_deps = [manifest_path]
+        if lock_file.is_file():
+            manifest_deps.append(lock_file)
 
         # Pass the command as a list so pcons treats each element as a
         # single token. Shell-quoting individual tokens would wrap pcons
@@ -262,10 +262,11 @@ class CargoBuildBuilder:
         cargo_target = env.Command(
             target=artifact_path,
             source=None,
-            depends=rust_sources,
             command=cargo_cmd,
             restat=True,
+            depfile=artifact_path.with_suffix(".d"),
         )
+        cargo_target.depends(*manifest_deps, on_change=True)
 
         if is_bin:
             # A bin crate has nothing to link: return the cargo Command
@@ -276,9 +277,7 @@ class CargoBuildBuilder:
         cbindgen_target: Target | None = None
         include_dir: Path | None = None
         if generate_header is not None:
-            cbindgen_config = Path(generate_header)
-            if not cbindgen_config.is_absolute():
-                cbindgen_config = project.root_dir / cbindgen_config
+            cbindgen_config = project.current_dir / generate_header
             include_dir = target_root / "include"
             header_path = include_dir / f"{crate_name}.h"
 
@@ -290,16 +289,19 @@ class CargoBuildBuilder:
                 crate_name,
                 "--output",
                 "$TARGET",
+                "--depfile",
+                "$TARGET.d",
                 str(manifest_dir),
             ]
 
             cbindgen_target = env.Command(
                 target=header_path,
                 source=None,
-                depends=[cbindgen_config, *rust_sources],
                 command=cbindgen_cmd,
                 restat=True,
+                depfile=".d",
             )
+            cbindgen_target.depends(cbindgen_config, *manifest_deps, on_change=True)
 
         # Wrap as an ImportedTarget so consumers' link() picks up flags.
         # For a Windows cdylib the linker consumes the import library,

@@ -68,6 +68,11 @@ class PathResolver:
         else:
             self._resolved_build_dir = (self.project_root / build_dir).resolve()
 
+    @property
+    def execution_dir(self) -> Path:
+        """The absolute directory build commands run in: the build directory."""
+        return self._resolved_build_dir
+
     def subdir(self, subdir: str | Path) -> PathResolver:
         """Return a new PathResolver with project_root and build_dir in *subdir*."""
         return PathResolver(self.project_root / subdir, self.build_dir / subdir)

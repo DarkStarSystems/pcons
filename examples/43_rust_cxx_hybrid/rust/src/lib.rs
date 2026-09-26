@@ -8,10 +8,12 @@
 
 use std::ffi::c_char;
 
+mod arith;
+
 /// Return the sum of two 32-bit integers. Stays simple on purpose.
 #[no_mangle]
 pub extern "C" fn rust_greet_sum(a: i32, b: i32) -> i32 {
-    a + b
+    arith::add(a, b)
 }
 
 /// Write "Hello from Rust, <name>!" into `out` (capacity `cap` bytes,

@@ -945,7 +945,7 @@ class GenericCommandBuilder(BaseBuilder):
         restat: bool = False,
         cwd: Path | None = None,
         launcher: Sequence[str] | None = None,
-        depfile: str | None = None,
+        depfile: str | Path | None = None,
         deps_style: str | None = None,
     ) -> None:
         """Initialize a generic command builder.
@@ -969,10 +969,12 @@ class GenericCommandBuilder(BaseBuilder):
             launcher: Program to run this command behind, as tokens. Applies
                 to this edge alone, after any launcher on the ``command``
                 tool; see :mod:`pcons.core.launcher`.
-            depfile: Suffix of the make-style dependency file the command
-                writes beside its output (".d" means "<target>.d"), or None.
-                Only one target may be produced, since the generator names
-                the depfile after the output.
+            depfile: The make-style dependency file the command writes: a
+                suffix naming it after the output (".d" means
+                "<target>.d"), or its own anchored path, for a tool that
+                names the file itself. Either way the command may have only
+                one target, since ninja records what a depfile lists against
+                a single output.
             deps_style: How the dependencies arrive: "gcc" (a depfile) or
                 "msvc" (/showIncludes on stdout).
         """
@@ -1093,10 +1095,10 @@ class GenericCommandBuilder(BaseBuilder):
             from pcons.core.errors import PconsError
 
             raise PconsError(
-                f"depfile={self._depfile!r}: the depfile is named after the "
-                f"command's output, so a command writing one may have only "
-                f"one target; this one has {len(targets)}. Split it into one "
-                f"command per output.",
+                f"depfile={str(self._depfile)!r}: what a depfile lists is "
+                f"recorded against one output, so a command writing one may "
+                f"have only one target; this one has {len(targets)}. Split it "
+                f"into one command per output.",
                 location=defined_at,
             )
 
@@ -1121,12 +1123,12 @@ class GenericCommandBuilder(BaseBuilder):
         if result:
             primary = result[0]
             depfile: PathToken | None = None
-            if self._depfile is not None:
+            if isinstance(self._depfile, str):
                 depfile = PathToken(
-                    path=str(primary.path),
-                    path_type="build",
-                    suffix=self._depfile,
+                    path=str(primary.path), path_type="build", suffix=self._depfile
                 )
+            elif self._depfile is not None:
+                depfile = PathToken(path=str(self._depfile), path_type="build")
             primary._build_info = {
                 "tool": "command",
                 "command_var": "cmdline",
