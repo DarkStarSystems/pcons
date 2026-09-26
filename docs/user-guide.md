@@ -878,11 +878,11 @@ Run `ninja` or `make` yourself and you're back to what they know: output paths a
 
 Name a target when you need to refer to it by name, from another script above all. Otherwise leave the name out and keep the `Target` the builder returned.
 
-**Named targets.** `Program`, `StaticLibrary`, `SharedLibrary`, `ObjectLibrary`, `HeaderOnlyLibrary`, `MetalLibrary`, `CargoBuild` for a library crate, `find_package` and the Qt program and library builders always take a name, because it's also the base name of the file they write. `Command`, `PyBuilder` calls, `Install`, `InstallAs`, `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`, `android_apk()`, `sign_apk()` and `create_universal_binary()` take one as an optional keyword, `name=`. Either way the name is the target's identity, unique within its project and environment, and it does three jobs:
+**Named targets.** `Program`, `StaticLibrary`, `SharedLibrary`, `ObjectLibrary`, `HeaderOnlyLibrary`, `MetalLibrary`, `CargoBuild` for a library crate, `find_package` and the Qt program and library builders always take a name, because it's also the base name of the file they write. `Command`, `PyBuilder` calls, `Install`, `InstallAs`, `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`, `android_apk()`, `sign_apk()` and `create_universal_binary()` take one as an optional keyword, `name=`. Either way the name is the target's identity, unique within its project and environment *for its kind of target* — one name may belong to a program and a library at once, since `foo` and `libfoo.so` are different files — and it does three jobs:
 
-- **It names what the build writes**, or rather the base of it: the toolchain adds the prefix and suffix. `Program("myapp")` writes `myapp`, or `myapp.exe` on Windows; `SharedLibrary("net")` writes `libnet.so`, `libnet.dylib` or `net.dll`. That is why a script names the target rather than the file: the filename differs on every platform. `output_name`, `output_prefix` and `output_suffix` override the parts.
-- **It names the build subdir for that target.** A compiled target's objects go in `obj.<name>/`, a Qt target's generated sources in `qt.<name>/`, a Cargo crate's tree in `cargo/<name>/`.
-- **It's how everything refers to the target.** `get_target()`, `Default("myapp")`, `pcons explain myapp` and `pcons build myapp` all take it, as do `myapp@env` and `sub::myapp@env`, and it's how a script reaches a target another subdirectory declared.
+- **It names what the build writes**, or rather the base of it: the toolchain adds the prefix and suffix. `Program("myapp")` writes `myapp`, or `myapp.exe` on Windows; `SharedLibrary("net")` writes `libnet.so`, `libnet.dylib` or `net.dll`. That is why a script names the target rather than the file: the filename differs on every platform. `output_name`, `output_prefix` and `output_suffix` override the parts; `output_filename` replaces the whole name.
+- **It names the build subdir for that target.** A program's objects go in `obj.<name>/`; every other compiled kind adds its own word, so a static library's objects go in `obj.<name>.static/`, a shared library's in `obj.<name>.shared/`, an object library's in `obj.<name>.object/` and a `MetalLibrary`'s in `obj.<name>.metal/`. A Qt target's generated sources sit beside its objects, in `qt.<name>/` or `qt.<name>.shared/`, and a Cargo crate's tree in `cargo/<name>/`.
+- **It's how everything refers to the target.** `get_target()`, `Default("myapp")`, `pcons explain myapp` and `pcons build myapp` all take it, as do `myapp@env` and `sub::myapp@env`, and it's how a script reaches a target another subdirectory declared. Where one name does belong to two kinds, no spelling picks one out, so all of those refuse it and say why: keep the `Target` the builder returned, or give one an alias.
 
 The first two jobs belong to the builders that derive a path from the name. A `name=` on `Command`, `Install` or an archive changes no path, since the call already says what to write; it's there for the third.
 
@@ -1402,10 +1402,11 @@ libplugin = project.SharedLibrary("plugin", env)
 libplugin.add_sources(["src/plugin.c"])
 libplugin.public.include_dirs.append("include")
 
-# Optional: customize output name (overrides platform defaults)
-libplugin.output_name = "myplugin.so"  # Override default libplugin.so
+# Optional: name the file outright, prefix and suffix included
+libplugin.output_filename = "myplugin.ofx"  # instead of libplugin.so
 
-# Output naming defaults (can be overridden with output_name):
+# Output naming defaults (output_name replaces the base name below;
+# output_filename replaces the whole thing):
 #   SharedLibrary "foo":
 #     Linux:   libfoo.so
 #     macOS:   libfoo.dylib
@@ -1880,10 +1881,14 @@ common = common_lib(mcu)        # build/mcu/lib/libcommon.a
 common_host = common_lib(host)  # build/host/lib/libcommon.a
 ```
 
-Two targets may share a name only when both environments are named and the names
-differ. Otherwise the old error stands, and it says so. This is about names: two
-anonymous targets may always share a label (see [Named and anonymous
-targets](#named-and-anonymous-targets)).
+Two targets may share a name when both environments are named and the names
+differ, or when the two are different kinds of target: a `Program` and a
+`SharedLibrary` called `smudge` write `smudge` and `libsmudge.so`. One name for
+one kind in one environment is still refused, and the error says so. Name both
+environments but give neither a `build_prefix` and the artifacts stay apart
+while the objects would not; pcons refuses that collision too, naming both
+targets. This is about names: two anonymous targets may always share a label
+(see [Named and anonymous targets](#named-and-anonymous-targets)).
 
 #### Naming one of them: `name@env`
 
@@ -4703,7 +4708,7 @@ def create_bundle(project, env, plugin_name, sources, *, build_dir, version="1.0
     bundle_dir = build_dir / bundle_name
 
     plugin = project.SharedLibrary(plugin_name, env)
-    plugin.output_name = f"{plugin_name}.ofx"
+    plugin.output_filename = f"{plugin_name}.ofx"
     plugin.add_sources(sources)
 
     # Install to bundle

@@ -260,7 +260,7 @@ class TestQtInstallAcrossSubdirectories:
         add_subdirectory("child")
         generate_ninja(top)
 
-        qt_dir = tmp_path / "build" / "child" / "qt.ui"
+        qt_dir = tmp_path / "build" / "child" / "qt.ui.object"
         qrc = (qt_dir / "ui.qrc").read_text()
         assert f">{child / 'qml' / 'Main.qml'}<" in qrc
         assert "singleton Main 1.0 qml/Main.qml" in (qt_dir / "qmldir").read_text()

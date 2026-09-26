@@ -4,7 +4,7 @@
 description = "A generated C++ source alongside a C++20 module interface: per-target scanning keeps the generator out of the consumer's scan (issue #105)"
 
 expected_outputs = [
-    "build/obj.m/src/mod.cppm.o",
+    "build/obj.m.static/src/mod.cppm.o",
     "build/libm.a",
     "build/obj.gen/src/gen.cpp.o",
     "build/gen",
@@ -36,7 +36,7 @@ expect_no_work = true
 description = "Touching the module interface recompiles it and its consumer, leaving the generator alone"
 touch = "src/mod.cppm"
 expect_rebuild = [
-    "obj.m/src/mod.cppm.o",
+    "obj.m.static/src/mod.cppm.o",
     "libm.a",
     "obj.use/generated.cpp.o",
     "use",
@@ -55,7 +55,7 @@ expect_rebuild = [
 ]
 # generated.cpp is written without write_if_different, so its mtime always
 # moves and the consumer always recompiles. The module library does not.
-expect_no_rebuild = ["obj.m/src/mod.cppm.o", "libm.a"]
+expect_no_rebuild = ["obj.m.static/src/mod.cppm.o", "libm.a"]
 run = "./build/use"
 expect_returncode = 0
 

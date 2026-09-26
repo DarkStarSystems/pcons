@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
-from pcons.core.errors import PconsError
+from pcons.core.errors import OutputCollisionError, PconsError
 from pcons.core.graph import strongly_connected_components
 from pcons.core.node import BuildInfo, FileNode, Node
 from pcons.core.subst import PathToken, TargetPath
@@ -60,6 +60,25 @@ _UNCOMPILED_LINK_SUFFIXES = frozenset({".ld", ".lds", ".res"})
 def _is_linker_passthrough(path: Path) -> bool:
     """True if a source with no compile handler still belongs to the linker."""
     return _is_link_input(path) or path.suffix.lower() in _UNCOMPILED_LINK_SUFFIXES
+
+
+def target_kind_suffix(target_type: str | None) -> str:
+    """The part of a build subdirectory name that says which kind of target
+    owns it: ``".static"``, ``".shared"``, ``".object"``, ``".metal"``.
+
+    A program gets none, so ``obj.myapp/`` stays what it always was. Every
+    other kind takes its target type with ``_library`` dropped, which is
+    what lets one name belong to a program and a library at once: their
+    objects then have nowhere to collide.
+    """
+    if not target_type or target_type == "program":
+        return ""
+    return "." + target_type.removesuffix("_library")
+
+
+def object_dir_name(target: Target) -> str:
+    """The subdirectory of ``target.build_dir`` holding *target*'s objects."""
+    return f"obj.{target.name}{target_kind_suffix(target.target_type)}"
 
 
 def _compilers_by_language_priority(env: Environment) -> list[str]:
@@ -419,10 +438,12 @@ class CompileLinkFactory:
     def _get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
         """Generate target-specific output path for an object file.
 
-        Format: ``<build_dir>/obj.<target>/<relative_dir>/<name>.<src_ext><obj_ext>``
+        Format:
+        ``<build_dir>/obj.<target><.kind>/<relative_dir>/<name>.<src_ext><obj_ext>``
+        (see :func:`object_dir_name`).
         """
         build_dir = target.build_dir
-        obj_dir = build_dir / f"obj.{target.name}"
+        obj_dir = build_dir / object_dir_name(target)
 
         handler = self._get_source_handler(source, env)
         if handler:
@@ -443,6 +464,22 @@ class CompileLinkFactory:
         if parts:
             return obj_dir.joinpath(*parts) / obj_name
         return obj_dir / obj_name
+
+    def _object_node(self, target: Target, obj_path: Path) -> FileNode:
+        """The node for *obj_path*, refusing a second producer.
+
+        Node deduplication maps a path to one node, so two targets compiling
+        into one object path would merge silently: the second compile
+        replaces the first and both link the result (issue #197). Two targets
+        that compile a source *identically* share the object node through
+        ``_object_cache`` and never reach here, so an object already produced
+        by another target is a genuine collision.
+        """
+        node = self.project.node(obj_path)
+        producer = (node._build_info or {}).get("producer")
+        if producer is not None and producer is not target:
+            raise OutputCollisionError(producer, target, obj_path, intermediate=True)
+        return node
 
     def _resolve_depfile(
         self, depfile_spec: TargetPath | None, target_path: Path
@@ -498,7 +535,7 @@ class CompileLinkFactory:
             return self._object_cache[cache_key]
 
         obj_path = self._get_object_path(target, source.path, env)
-        obj_node = self.project.node(obj_path)
+        obj_node = self._object_node(target, obj_path)
         obj_node.add_inputs([source])
 
         depfile = self._resolve_depfile(handler.depfile, obj_path)
@@ -525,6 +562,7 @@ class CompileLinkFactory:
             "deps_style": deps_style,
             "context": context,
             "env": env,
+            "producer": target,
         }
 
         self._object_cache[cache_key] = obj_node
@@ -566,9 +604,9 @@ class CompileLinkFactory:
         if cached is not None:
             return cached
 
-        obj_dir = target.build_dir / f"obj.{target.name}"
+        obj_dir = target.build_dir / object_dir_name(target)
         obj_path = obj_dir / f"{target.name}{handler.object_suffix}"
-        obj_node = self.project.node(obj_path)
+        obj_node = self._object_node(target, obj_path)
         obj_node.add_inputs(list(sources))
 
         depfile = self._resolve_depfile(handler.depfile, obj_path)
@@ -592,6 +630,7 @@ class CompileLinkFactory:
             "deps_style": handler.deps_style,
             "context": context,
             "env": env,
+            "producer": target,
         }
 
         toolchain.setup_group_node(obj_node, target, env)
@@ -618,11 +657,12 @@ class CompileLinkFactory:
         """Compute the output filename for a target.
 
         Always applies prefix and suffix to the base name (output_name or
-        target.name), like CMake's OUTPUT_NAME / PREFIX / SUFFIX.
+        target.name), like CMake's OUTPUT_NAME / PREFIX / SUFFIX, unless
+        ``output_filename`` names the file outright.
 
-        Default prefix/suffix come from the toolchain, which decides how it
-        spells a name for the platform being built for (Emscripten → ".js",
-        mingw → ".dll" with a "lib*.a" import library). Use
+        Default prefix/suffix come from the toolchain, which decides what a
+        name looks like for the platform being built for (Emscripten →
+        ".js", mingw → ".dll" with a "lib*.a" import library). Use
         output_prefix/output_suffix to override (set to "" to suppress).
 
         Args:
@@ -633,6 +673,23 @@ class CompileLinkFactory:
         Returns:
             Output filename (relative, may include subdirectory via prefix).
         """
+        if target.output_filename is not None:
+            conflicting = [
+                attr
+                for attr in ("output_name", "output_prefix", "output_suffix")
+                if getattr(target, attr) is not None
+            ]
+            if conflicting:
+                raise PconsError(
+                    f"Target '{target.name}': output_filename names the file "
+                    f"exactly, so it cannot be combined with "
+                    f"{' and '.join(conflicting)}. Drop "
+                    f"{'them' if len(conflicting) > 1 else 'it'}, or build the "
+                    f"name from the parts instead.",
+                    location=target.defined_at,
+                )
+            return target.output_filename
+
         base_name = target.output_name or target.name
         toolchain = env._toolchain
 

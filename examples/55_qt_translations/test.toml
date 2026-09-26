@@ -4,8 +4,8 @@
 description = "Qt translations: lrelease-compiled .qm catalogs embedded as resources"
 
 expected_outputs = [
-    "build/qt.i18n/app_de.qm",
-    "build/qt.i18n/qrc_i18n.cpp",
+    "build/qt.i18n.object/app_de.qm",
+    "build/qt.i18n.object/qrc_i18n.cpp",
     "build/qt_translations",
 ]
 

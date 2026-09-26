@@ -189,6 +189,57 @@ class DuplicateTargetError(PconsError):
         )
 
 
+class OutputCollisionError(PconsError):
+    """Two targets build one file.
+
+    Always fatal: node deduplication maps a path to one node, so the two
+    would merge silently: the second target's inputs piling onto the
+    first's build edge, or its compile replacing the first's (#96, #197).
+
+    Attributes:
+        path: The file both targets build.
+    """
+
+    fatal = True
+
+    def __init__(
+        self,
+        first: Target,
+        second: Target,
+        path: Path,
+        location: SourceLocation | None = None,
+        *,
+        intermediate: bool = False,
+    ) -> None:
+        self.path = path
+        env_names = {
+            env.name for env in (first.env, second.env) if env is not None and env.name
+        }
+        envs = ""
+        if len(env_names) == 2:
+            envs = (
+                " They build in different environments, so giving each one a "
+                "build_prefix (e.g. env.build_prefix = "
+                f'"{sorted(env_names)[0]}") would keep them apart.'
+            )
+        if intermediate:
+            advice = (
+                "Each object file must have one producer: give one target a "
+                "different name, or build the two in different directories."
+            )
+        else:
+            advice = (
+                "Each output file must have one producer: give one target a "
+                "different name, output_name or output_prefix, or split into "
+                "multiple projects."
+            )
+        super().__init__(
+            f"targets {first.qualified_name!r} and {second.qualified_name!r} "
+            f"both build {path}.\n{advice}{envs}",
+            location,
+        )
+
+
 class MissingSourceError(PconsError):
     """Source file does not exist.
 

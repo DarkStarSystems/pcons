@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.environment import Environment as Env
-from pcons.core.errors import PconsError
+from pcons.core.errors import OutputCollisionError, PconsError
 from pcons.core.graph import (
     collect_all_nodes,
     detect_cycles_in_targets,
@@ -168,29 +168,37 @@ class _PackageKey(NamedTuple):
 
 
 def _refuse_duplicate(existing: Target, new: Target) -> None:
-    """Raise unless *existing* and *new* are told apart by their environments.
+    """Raise unless *existing* and *new* are told apart.
 
-    Two targets may share a name when both environments are named and the names
-    differ: they then write into different directories (Environment.build_prefix)
-    and ``name@env`` says which one is meant.
+    Two targets may share a name when their types differ (a ``Program`` and
+    a ``SharedLibrary`` called ``foo`` write ``foo`` and ``libfoo.so``, and
+    each kind has its own object directory) or when both environments are
+    named and the names differ, which also splits the directories they write
+    into (Environment.build_prefix). What is left is one name for one kind of
+    target in one environment, which nothing can tell apart.
     """
+    if existing.target_type != new.target_type:
+        return
+
     existing_env = existing.env
     new_env = new.env
     existing_name = existing_env.name if existing_env is not None else None
     new_name = new_env.name if new_env is not None else None
     where = f" (defined at {existing.defined_at})"
+    kind = f" ({existing.target_type})" if existing.target_type else ""
 
     if existing_name and new_name and existing_name != new_name:
         return
     if existing_env is not None and existing_env is new_env and existing_name:
         raise ValueError(
-            f"Target '{new.name}' already exists in environment "
+            f"Target '{new.name}'{kind} already exists in environment "
             f"'{existing_name}'{where}."
         )
     raise ValueError(
-        f"Target '{new.name}' already exists{where}. Two targets may share a "
-        f"name only when their environments are named and different. Name the "
-        f"environment: project.Environment(..., name='host')."
+        f"Target '{new.name}'{kind} already exists{where}. Two targets of one "
+        f"type may share a name only when their environments are named and "
+        f"different. Name the environment: "
+        f"project.Environment(..., name='host')."
     )
 
 
@@ -198,12 +206,18 @@ def _ambiguous_target(name: str, where: str, matches: list[Target]) -> KeyError:
     """Build the error for a name several targets answer to.
 
     Advising a qualified spelling only helps when the environments are named:
-    unnamed ones qualify to the same string, so the advice would repeat the
-    spelling it just refused.
+    unnamed ones qualify to the same string, and so do two kinds of target
+    sharing a name, so the advice would repeat the spelling it just refused.
     """
     spellings = [t.qualified_name for t in matches]
+    kinds = [t.target_type or "target" for t in matches]
     if len(set(spellings)) == len(spellings):
         advice = f"Name the environment, e.g. '{spellings[0]}'."
+    elif len(set(zip(spellings, kinds, strict=True))) == len(matches):
+        advice = (
+            f"They are a {' and a '.join(kinds)}, and no spelling tells those "
+            f"apart. Keep the Target the builder returned, or give one an alias."
+        )
     else:
         advice = (
             "Their environments have no name, so no spelling tells them apart. "
@@ -917,8 +931,9 @@ class Project(_ProjectBuilders):
 
         Raises:
             PconsError: If the project tree has already been resolved.
-            ValueError: If a named target of that name is already registered
-                and the two cannot be told apart by their environments.
+            ValueError: If a named target of that name and type is already
+                registered and the two cannot be told apart by their
+                environments.
         """
         if self._resolved or self.top._resolved:
             raise PconsError(
@@ -970,8 +985,9 @@ class Project(_ProjectBuilders):
         Raises:
             KeyError: When no target answers to *name* and *raise_if_missing*
                 is True. Also whenever several targets answer to it, on either
-                setting: two targets may share a name when their environments
-                differ, so such a name is not missing but underspecified. The
+                setting: two targets may share a name when their types or their
+                environments differ, so such a name is not missing but
+                underspecified. The
                 lookup refuses to pick one, and the message names the qualified
                 spellings. A caller asking whether a name is still free should
                 read that KeyError as "taken".
@@ -1517,6 +1533,10 @@ class Project(_ProjectBuilders):
         second's inputs pile onto the first's build edge, and an archive
         ends up holding both environments' objects with no warning
         (issue #96). Raise at the collision instead, naming both targets.
+
+        The objects a compile produces are checked as they are created, by
+        the factory that knows which compiles are genuinely the same; see
+        ``CompileLinkFactory._object_node``.
         """
         producers: dict[int, Target] = {}
         for target in self.targets:
@@ -1527,25 +1547,7 @@ class Project(_ProjectBuilders):
                     continue
                 if other is target:
                     continue
-                env_names = {
-                    env.name
-                    for env in (other._env, target._env)
-                    if env is not None and env.name
-                }
-                envs = ""
-                if len(env_names) == 2:
-                    envs = (
-                        " They build in different environments, so giving each "
-                        "one a build_prefix (e.g. env.build_prefix = "
-                        f'"{sorted(env_names)[0]}") would keep them apart.'
-                    )
-                raise PconsError(
-                    f"targets {other.qualified_name!r} and "
-                    f"{target.qualified_name!r} both build "
-                    f"{node.path}.\n"
-                    "Each output file must have one producer: give one target a "
-                    f"distinct output_name or output_prefix, or split into multiple projects.{envs}"
-                )
+                raise OutputCollisionError(other, target, node.path)
 
     def _check_pending_stages(self) -> None:
         """Verify every skipped staged input is something the build produces.

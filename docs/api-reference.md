@@ -48,6 +48,8 @@ API:
 | `target.pre_build(command)` | Shell command to run before this target is built |
 | `target.post_build(command)` | Shell command to run after this target is built |
 | `target.get_option(key, default=None)` | Read an option set with `set_option()` |
+| `target.output_name` / `output_prefix` / `output_suffix` | Override the parts of the artifact's filename; the toolchain supplies the rest |
+| `target.output_filename` | The artifact's filename exactly, toolchain prefix and suffix bypassed (not with the three above) |
 | `target.public.include_dirs` | Include dirs for consumers |
 | `target.public.system_include_dirs` | Like `include_dirs`, but as system headers (warnings suppressed) |
 | `target.public.make_includes_system()` | Move every include dir to `system_include_dirs`, in place |

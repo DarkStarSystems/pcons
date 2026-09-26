@@ -257,9 +257,15 @@ generated automatically for GCC/Clang).
 | What | Where |
 |---|---|
 | QtProgram("app", ...) codegen | `build/qt.app/<source-relative-dir>/` |
+| QtSharedLibrary("net", ...) codegen | `build/qt.net.shared/<source-relative-dir>/` |
+| QtQmlModule("ui", ...), QtTranslations | `build/qt.ui.object/` |
 | Low-level builders (default) | `build/qt.gen/<source-relative-dir>/` |
 | QtResources | `build/qt.res/` |
 | automoc spec + aggregate TU | `build/qt.app/automoc.json`, `mocs_compilation.cpp` |
+
+The directory carries the kind of target it belongs to, exactly as the
+object directory beside it does, so one name may belong to a program and a
+library at once.
 
 A target declared by an `add_subdirectory` script gets the same layout one
 level down, under that script's directory: a `sub/pcons-build.py` declaring

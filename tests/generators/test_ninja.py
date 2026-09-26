@@ -13,6 +13,7 @@ from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
+from pcons.tools.compile_link import object_dir_name
 
 
 def normalize_path(p: str) -> str:
@@ -1150,10 +1151,10 @@ class TestGeneratedSourcesOfALinkedDep:
         NinjaGenerator().generate(project)
         BaseGenerator._generate_pending(project)
         content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
-        return content.splitlines()
+        return content.splitlines(), app
 
     def test_compiles_are_ordered_after_it_only(self, tmp_path, gcc_toolchain):
-        lines = self._build(tmp_path, gcc_toolchain)
+        lines, _ = self._build(tmp_path, gcc_toolchain)
         obj_line = next(ln for ln in lines if ln.startswith("build obj.app/"))
 
         assert "|| gen.c" in obj_line
@@ -1198,7 +1199,7 @@ class TestGeneratedSourcesOfALinkedDep:
         """The link's wait is the library itself, whose objects wait for the
         generated file; a direct edge would only relink for a change that
         already relinks through the library."""
-        lines = self._build(tmp_path, gcc_toolchain)
+        lines, _ = self._build(tmp_path, gcc_toolchain)
         # "app" on POSIX, "app.exe" on Windows.
         link_line = next(ln for ln in lines if ln.startswith("build app"))
 
@@ -1251,8 +1252,9 @@ class TestGeneratedSourcesOfALinkedDep:
         A static library has no link step to hang it off, but its sources may
         include the generated file just the same.
         """
-        lines = self._build(tmp_path, gcc_toolchain, consumer=consumer)
-        obj_line = next(ln for ln in lines if ln.startswith("build obj.app/"))
+        lines, app = self._build(tmp_path, gcc_toolchain, consumer=consumer)
+        obj_dir = object_dir_name(app)
+        obj_line = next(ln for ln in lines if ln.startswith(f"build {obj_dir}/"))
 
         assert "|| gen.c" in obj_line
 

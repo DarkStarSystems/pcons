@@ -106,6 +106,10 @@ class BuildInfo(TypedDict, total=False):
     # Used by resolver to expand command templates
     env: Any  # Environment, but avoid circular import
 
+    # The target whose resolution declared this edge, where a second one
+    # declaring it would be a collision rather than a merge.
+    producer: Any  # Target, but avoid circular import
+
 
 class Node(ABC):
     """Abstract base class for all nodes in the dependency graph.

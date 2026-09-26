@@ -406,8 +406,8 @@ class UnixToolchain(BaseToolchain):
         macOS takes a symbol list (``-exported_symbols_list``) for either;
         GNU ld a version script for a library and a dynamic list for an
         executable. All accept ``*`` patterns. Names are the C names:
-        the Darwin underscore is added here. The file is written under the
-        target's build directory and, being registered, the link depends
+        the Darwin underscore is added here. The file is written in the
+        target's object directory and, being registered, the link depends
         on it.
         """
         symbols = (

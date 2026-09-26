@@ -264,6 +264,26 @@ class TestTargetIds:
         assert entry["id"] == "demo::app"
         assert entry["anonymous"] is False
 
+    def test_two_kinds_of_one_name_get_two_ids(self, tmp_path):
+        """A program and a library may share a name, so the name alone is
+        not an address; the type completes it."""
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        Target("foo", target_type="program")
+        Target("foo", target_type="shared_library")
+        app = Target("app", target_type="program")
+        app.depends(*project._targets[:2])
+
+        targets = self._generate(tmp_path, project)
+        ids = [t["id"] for t in targets]
+
+        assert ids == ["demo::app", "demo::foo#program", "demo::foo#shared_library"]
+        assert len(set(ids)) == len(ids)
+        by_id = {t["id"]: t for t in targets}
+        assert by_id["demo::app"]["dependencies"] == [
+            "demo::foo#program",
+            "demo::foo#shared_library",
+        ]
+
     def test_two_dependencies_of_one_label_stay_two(self, tmp_path):
         """The bug this replaced: a set of names folded them into one."""
         project = Project("demo", root_dir=tmp_path, build_dir="build")

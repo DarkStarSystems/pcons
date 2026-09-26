@@ -437,6 +437,9 @@ def create_assembly_manifest(
     for dll in dlls:
         if isinstance(dll, str):
             dll_names.append(dll)
+        elif getattr(dll, "output_filename", None):
+            # Target naming its file outright
+            dll_names.append(str(dll.output_filename))
         elif hasattr(dll, "output_name") and dll.output_name:
             # Target with output_name
             dll_names.append(str(dll.output_name))

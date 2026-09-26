@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pcons.core.errors import DependencyCycleError
+from pcons.core.errors import DependencyCycleError, PconsError
 from pcons.core.project import Project
 from pcons.core.resolver import Resolver
 from pcons.core.target import Target
@@ -70,7 +70,9 @@ class TestResolverSingleTarget:
         assert target._resolved
         assert len(target.intermediate_nodes) == 1
         # Objects are placed in obj.<target>/ subdirectory to avoid naming conflicts
-        assert target.intermediate_nodes[0].path == Path("build/obj.mylib/main.c.o")
+        assert target.intermediate_nodes[0].path == Path(
+            "build/obj.mylib.static/main.c.o"
+        )
 
     def test_resolve_sets_object_build_info(self, tmp_path, gcc_toolchain):
         """Test that resolved objects have proper build_info."""
@@ -685,6 +687,74 @@ class TestOutputPrefixSuffix:
             assert target.output_nodes[0].path.name == "fyaml.dll"
         else:
             assert target.output_nodes[0].path.name == "libfyaml.so"
+
+
+class TestOutputFilename:
+    """`output_filename` names the artifact outright (#148).
+
+    For a plugin or bundle whose host dictates the filename, where saying it
+    with output_name + output_prefix + output_suffix takes three lines to say
+    one thing.
+    """
+
+    def _library(self, tmp_path, gcc_toolchain, name="plugin"):
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+        return project, project.SharedLibrary(name, env, sources=[str(src_file)])
+
+    def test_the_library_is_named_exactly(self, tmp_path, gcc_toolchain):
+        project, target = self._library(tmp_path, gcc_toolchain)
+        target.output_filename = "myplugin.ofx"
+
+        project.resolve()
+
+        assert target.output_nodes[0].path.name == "myplugin.ofx"
+
+    def test_a_program_keeps_no_platform_suffix(self, tmp_path, gcc_toolchain):
+        """Not even .exe: the name is the whole answer."""
+        src_file = tmp_path / "main.c"
+        src_file.write_text("int main(void) { return 0; }")
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+        target = project.Program("app", env, sources=[str(src_file)])
+        target.output_filename = "myplugin-ae"
+
+        project.resolve()
+
+        assert target.output_nodes[0].path.name == "myplugin-ae"
+
+    @pytest.mark.parametrize(
+        "attribute", ["output_name", "output_prefix", "output_suffix"]
+    )
+    def test_combining_it_with_a_part_is_refused(
+        self, tmp_path, gcc_toolchain, attribute
+    ):
+        project, target = self._library(tmp_path, gcc_toolchain)
+        target.output_filename = "myplugin.ofx"
+        setattr(target, attribute, "x")
+
+        with pytest.raises(PconsError, match="output_filename") as excinfo:
+            project.resolve()
+
+        assert attribute in str(excinfo.value)
+
+    def test_the_message_names_every_conflict(self, tmp_path, gcc_toolchain):
+        project, target = self._library(tmp_path, gcc_toolchain)
+        target.output_filename = "myplugin.ofx"
+        target.output_prefix = ""
+        target.output_suffix = ".ofx"
+
+        with pytest.raises(PconsError) as excinfo:
+            project.resolve()
+
+        message = str(excinfo.value)
+        assert "output_prefix and output_suffix" in message
 
 
 class TestResolverSharedLibraryCompileFlags:

@@ -1166,7 +1166,11 @@ class TestCrossOutputNamingFollowsTheTarget:
 
         project = Project("p", root_dir=tmp_path)
         host_env = project.Environment(toolchain=gcc_toolchain, name="host")
+        # One name in two environments: each needs its own build directory,
+        # or the two would compile into one object (see test_object_dirs.py).
+        host_env.build_prefix = "host"
         cross_env = project.Environment(toolchain=gcc_toolchain, name="cross")
+        cross_env.build_prefix = "cross"
         cross_env.apply_cross_preset(cross_preset)
 
         host_prog = project.Program("foo", host_env, sources=["src/foo.c"])

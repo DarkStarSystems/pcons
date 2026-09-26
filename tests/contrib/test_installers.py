@@ -10,6 +10,7 @@ import pytest
 
 from pcons import Project
 from pcons.contrib.installers import _helpers
+from pcons.core.target import Target
 
 
 class TestHelpers:
@@ -903,3 +904,64 @@ class TestInstallerDepends:
 
         assert copies
         assert all("filled.stamp" in ln.split("|", 1)[1] for ln in copies), copies
+
+
+class TestFileNamesFromTargets:
+    """A source Target's file name, where an installer derives one, is its
+    output_filename when it has one: the whole name, nothing added."""
+
+    @staticmethod
+    def _commands(project: Project) -> list[list]:
+        return [
+            list(node._build_info.get("command") or [])
+            for target in project.targets
+            for node in target.output_nodes
+            if node._build_info
+        ]
+
+    @staticmethod
+    def _named(name: str, filename: str) -> Target:
+        target = Target(name, target_type="program")
+        target.output_filename = filename
+        return target
+
+    def test_a_pkg_bundle(self, tmp_path: Path, monkeypatch) -> None:
+        from pcons.contrib.installers import macos
+
+        monkeypatch.setattr(macos, "_check_tool", lambda *a, **k: None)
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        macos.create_pkg(
+            project,
+            env,
+            name="App",
+            version="1.0",
+            identifier="com.example.app",
+            sources=[self._named("demo", "Demo.app")],
+            install_location="/Applications",
+        )
+        assert any(
+            cmd[i : i + 2] == ["--bundle", "Demo.app"]
+            for cmd in self._commands(project)
+            for i in range(len(cmd))
+        )
+
+    def test_an_msix_executable(self, tmp_path: Path, monkeypatch) -> None:
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_sdk_tool", lambda tool: f"C:/sdk/{tool}")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        windows.create_msix(
+            project=project,
+            env=env,
+            name="App",
+            version="1.0.0",
+            publisher="CN=Test",
+            sources=[self._named("viewer", "Viewer.exe")],
+        )
+        assert any(
+            cmd[i : i + 2] == ["--executable", "Viewer.exe"]
+            for cmd in self._commands(project)
+            for i in range(len(cmd))
+        )

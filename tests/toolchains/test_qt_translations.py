@@ -30,12 +30,12 @@ class TestQtTranslations:
         content = generate_ninja(tr_project)
 
         assert "/fake/bin/lrelease" in content
-        assert "build qt.i18n/app_de.qm: qt_lreleasecmd" in content
-        assert "build qt.i18n/app_fr.qm: qt_lreleasecmd" in content
+        assert "build qt.i18n.object/app_de.qm: qt_lreleasecmd" in content
+        assert "build qt.i18n.object/app_fr.qm: qt_lreleasecmd" in content
         assert "-qm $out" in content
-        assert "build qt.i18n/qrc_i18n.cpp: qt_rcccmd" in content
+        assert "build qt.i18n.object/qrc_i18n.cpp: qt_rcccmd" in content
 
-        qrc = (tmp_path / "build" / "qt.i18n" / "i18n.qrc").read_text()
+        qrc = (tmp_path / "build" / "qt.i18n.object" / "i18n.qrc").read_text()
         assert '<qresource prefix="/i18n">' in qrc
         assert 'alias="app_de.qm"' in qrc
 
@@ -122,4 +122,4 @@ class TestTranslationsInASubdirectory:
         inputs = edge.split(":", 1)[1].split("|", 1)[0].split()[1:]
         assert len(inputs) == 1
         assert 'alias="app_de.qm"' in (tmp_path / "build" / inputs[0]).read_text()
-        assert inputs == ["child/qt.i18n/i18n.qrc"]
+        assert inputs == ["child/qt.i18n.object/i18n.qrc"]

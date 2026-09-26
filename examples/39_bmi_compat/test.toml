@@ -4,10 +4,10 @@
 description = "C++20 module interface (BMI) reuse across targets, keyed by BMI-sensitive flags"
 
 expected_outputs = [
-    "build/obj.lib1/provider.cppm.o",
-    "build/obj.lib1/consumer.cpp.o",
-    "build/obj.lib3/provider.cppm.o",
-    "build/obj.lib3/consumer.cpp.o",
+    "build/obj.lib1.static/provider.cppm.o",
+    "build/obj.lib1.static/consumer.cpp.o",
+    "build/obj.lib3.static/provider.cppm.o",
+    "build/obj.lib3.static/consumer.cpp.o",
     "build/liblib1.a",
     "build/liblib2.a",
     "build/liblib3.a",

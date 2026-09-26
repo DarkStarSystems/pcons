@@ -97,7 +97,7 @@ class TestBuildPrefix:
             gcc_toolchain, "build/mcu", "common", "static_library"
         )
         assert _object_paths(lib) == _object(
-            gcc_toolchain, "build/mcu/obj.common/src", "common.c"
+            gcc_toolchain, "build/mcu/obj.common.static/src", "common.c"
         )
 
     def test_two_environments_keep_one_name_apart(
@@ -183,7 +183,7 @@ class TestBuildPrefix:
             gcc_toolchain, "build/rel/mcu", "common", "static_library"
         )
         assert _object_paths(lib) == _object(
-            gcc_toolchain, "build/rel/mcu/obj.common/src", "common.c"
+            gcc_toolchain, "build/rel/mcu/obj.common.static/src", "common.c"
         )
 
     def test_a_named_build_dir_keeps_the_subdirectory_offset(
@@ -294,7 +294,7 @@ class TestOutputDirectories:
         project.resolve()
 
         assert _object_paths(lib) == _object(
-            gcc_toolchain, "build/mcu/obj.common/src", "common.c"
+            gcc_toolchain, "build/mcu/obj.common.static/src", "common.c"
         )
 
     def test_unknown_target_type_has_no_directory(self, tmp_path, gcc_toolchain):

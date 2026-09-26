@@ -1,0 +1,29 @@
+# Test configuration for the one_name_two_kinds example
+
+[test]
+description = "A program and a shared library of one name, plus output_filename for an exact artifact name"
+
+# The two targets share a name and a source file, and compile it twice: the
+# object directory carries the kind of target that owns it, so neither
+# overwrites the other. The plugin's filename is output_filename verbatim.
+expected_outputs = [
+    "build/obj.smudge/src/kind.c.o",
+    "build/obj.smudge/src/main.c.o",
+    "build/obj.smudge.shared/src/kind.c.o",
+    "build/obj.smudge.shared/src/plugin.c.o",
+    "build/smudge${BINARY_EXT}",
+    "build/smudge.ofx",
+]
+
+[verify]
+commands = [
+    { run = "./build/smudge", expect_stdout = "program kind 1" },
+]
+
+commands_windows = [
+    { run = "build\\smudge.exe", expect_stdout = "program kind 1" },
+]
+
+[skip]
+# Xcode builds to different output paths.
+generators = ["xcode"]

@@ -26,6 +26,7 @@ This guide maps common CMake patterns to their pcons equivalents. It's designed 
 | `set_target_properties(t PROPERTIES OUTPUT_NAME n)` | `t.output_name = "n"` |
 | `set_target_properties(t PROPERTIES PREFIX "")` | `t.output_prefix = ""` |
 | `set_target_properties(t PROPERTIES SUFFIX ".ofx")` | `t.output_suffix = ".ofx"` |
+| All three at once, for an exact filename | `t.output_filename = "myplugin.ofx"` |
 | `set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)` | `env.runtime_directory = "bin"` |
 | `set(CMAKE_LIBRARY_OUTPUT_DIRECTORY lib)` | `env.library_directory = "lib"` |
 | `set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY lib)` | `env.archive_directory = "lib"` |
@@ -448,6 +449,11 @@ mylib.output_suffix = ".plugin"  # override suffix
 
 - `output_name = "fyaml"` produces `libfyaml.so` (Linux), `libfyaml.dylib` (macOS), `fyaml.dll` (Windows)
 - Adding `output_prefix = ""` produces `fyaml.so`, `fyaml.dylib`, `fyaml.dll`
+
+When all three say one thing — a plugin whose host dictates the filename —
+`output_filename` says it once: `plugin.output_filename = "myplugin.ofx"`
+writes exactly that, on every platform. It cannot be combined with the three
+above.
 
 `output_prefix` is a **filename** prefix, not a directory. Directories belong to
 the environment:

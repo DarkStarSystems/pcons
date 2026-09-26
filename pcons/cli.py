@@ -1521,7 +1521,9 @@ def _cached_target_lookup(build_dir: Path) -> Callable[[str], list[str] | None]:
 
     Raises:
         KeyError: The token was recorded as naming several targets. The
-            message lists the spellings that pick one out.
+            message lists the spellings that pick one out, or says there are
+            none: a program and a library of one name in one environment
+            qualify to the same string.
     """
     recorded = _open_cache(build_dir).get("target_paths")
     recorded = recorded if isinstance(recorded, dict) else {}
@@ -1534,6 +1536,11 @@ def _cached_target_lookup(build_dir: Path) -> Callable[[str], list[str] | None]:
                 for spelling, its_paths in recorded.items()
                 if its_paths and spelling != token and _picks_out(spelling, token)
             )
+            if not choices:
+                raise KeyError(
+                    f"'{token}' names several targets, and no spelling tells "
+                    f"them apart. Give one an alias, or name the file it builds."
+                )
             raise KeyError(
                 f"'{token}' names several targets; pick one: {', '.join(choices)}"
             )

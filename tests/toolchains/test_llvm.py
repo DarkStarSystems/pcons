@@ -443,11 +443,12 @@ class TestMetalLibraryTarget:
 
         lib_rule = re.search(r"rule (metal_metallibcmd_\w+)", content)
         assert lib_rule
-        assert "build obj.shaders/shaders/a.metal.air:" in content
-        assert "build obj.shaders/shaders/b.metal.air:" in content
+        assert "build obj.shaders.metal/shaders/a.metal.air:" in content
+        assert "build obj.shaders.metal/shaders/b.metal.air:" in content
         assert (
             f"build shaders.metallib: {lib_rule.group(1)} "
-            "obj.shaders/shaders/a.metal.air obj.shaders/shaders/b.metal.air" in content
+            "obj.shaders.metal/shaders/a.metal.air obj.shaders.metal/shaders/b.metal.air"
+            in content
         )
 
     def test_output_is_named_verbatim(self, tmp_path):
