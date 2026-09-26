@@ -25,4 +25,4 @@ expect_rebuild = ["cargo/rust_math/include/rust_math.h"]
 
 [skip]
 requires = ["cargo", "cbindgen"]
-generators = ["xcode", "make"]
+generators = ["xcode"]

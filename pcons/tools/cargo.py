@@ -26,12 +26,14 @@ Example:
 
 from __future__ import annotations
 
+import json
 import sys
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import builder
 from pcons.packages.description import PackageDescription
 from pcons.packages.imported import ImportedTarget
@@ -160,8 +162,8 @@ class CargoBuildBuilder:
             name: Target name (and link library name unless overridden by
                   the crate's [lib] name in Cargo.toml).
             env: Environment used to register the underlying Command rule.
-            manifest: Path to the crate's Cargo.toml (relative to project
-                      root or absolute).
+            manifest: Path to the crate's Cargo.toml, relative to the
+                      build script's directory, or absolute.
             crate_type: "staticlib", "cdylib", or "bin". Library crates
                         return an ImportedTarget that consumers link();
                         "bin" returns the cargo Command target whose
@@ -171,7 +173,8 @@ class CargoBuildBuilder:
                      "dev" → target/debug/, any other profile name maps
                      to the target/ subdirectory of the same name.
             features: Cargo features to enable.
-            generate_header: Path to a cbindgen.toml. If given, runs
+            generate_header: Path to a cbindgen.toml, read like
+                             ``manifest``. If given, runs
                              cbindgen as a second command to produce a C
                              header in the build dir.
             target_triple: Optional target triple for cross-compilation
@@ -196,9 +199,7 @@ class CargoBuildBuilder:
                 "generate_header only applies to library crates, not crate_type='bin'"
             )
 
-        manifest_path = Path(manifest)
-        if not manifest_path.is_absolute():
-            manifest_path = project.root_dir / manifest_path
+        manifest_path = project.current_dir / manifest
         if not manifest_path.is_file():
             raise FileNotFoundError(f"Cargo.toml not found: {manifest_path}")
 
@@ -207,11 +208,12 @@ class CargoBuildBuilder:
 
         # Per-target output directory, kept inside the build dir so it's
         # easy to clean and doesn't collide with a user's own cargo runs.
-        # Two views of the same directory: a project-relative one for the
-        # pcons node graph, and an absolute one for the cargo command
-        # (which runs from ninja's build dir, not project root).
-        target_root = project.build_dir / "cargo" / name
-        target_root_abs = (project.root_dir / target_root).resolve()
+        # It lands where this script's targets do, build/<subdir>/ under
+        # add_subdirectory. Two views of the same directory: the anchored
+        # one for the pcons node graph, and an absolute one for the cargo
+        # command (which runs from ninja's build dir, not project root).
+        target_root = anchor_target_paths(env, [Path("cargo", name)])[0]
+        target_root_abs = project.top_path_resolver.project_root / target_root
         profile_dir = _profile_subdir(profile)
         artifact_dir = target_root / profile_dir
         if target_triple:
@@ -221,12 +223,17 @@ class CargoBuildBuilder:
             crate_name, crate_type, target_triple
         )
 
-        # Build the cargo command line.
+        # Build the cargo command line. The dep-info base directory makes
+        # cargo name the artifact in its dep-info file as the build tool
+        # does, relative to the directory it runs in, which make needs to
+        # match the file to its rule. Sources stay absolute.
+        execution_dir = project.top_path_resolver.execution_dir
         cargo_cmd: list[str] = [
             cargo,
             "build",
             f"--manifest-path={manifest_path}",
             f"--target-dir={target_root_abs}",
+            f"--config=build.dep-info-basedir={json.dumps(str(execution_dir))}",
         ]
         if profile == "release":
             cargo_cmd.append("--release")
@@ -270,9 +277,7 @@ class CargoBuildBuilder:
         cbindgen_target: Target | None = None
         include_dir: Path | None = None
         if generate_header is not None:
-            cbindgen_config = Path(generate_header)
-            if not cbindgen_config.is_absolute():
-                cbindgen_config = project.root_dir / cbindgen_config
+            cbindgen_config = project.current_dir / generate_header
             include_dir = target_root / "include"
             header_path = include_dir / f"{crate_name}.h"
 
