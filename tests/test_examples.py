@@ -15,6 +15,7 @@ import functools
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -333,6 +334,7 @@ _SKIP_SECTION_KEYS = {
     "platforms",
     "requires",
     "require_commands",
+    "require_succeeds",
     "requires_any",
     "require_env",
     "requires_cxx_modules",
@@ -511,6 +513,19 @@ def should_skip(config: dict[str, Any]) -> str | None:
     for tool in requires:
         if shutil.which(tool) is None:
             return f"Required tool '{tool}' not found"
+
+    # A tool can be on PATH and still not work: Xcode 26+ ships `xcrun metal`
+    # as a stub until the Metal toolchain component is downloaded. Each of
+    # these commands must succeed; its own first line of complaint is the
+    # reason given.
+    for command in skip_config.get("require_succeeds", []):
+        argv = shlex.split(command)
+        if shutil.which(argv[0]) is None:
+            return f"Required tool '{argv[0]}' not found"
+        probe = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        if probe.returncode != 0:
+            said = (probe.stderr or probe.stdout).strip().splitlines()
+            return f"'{command}' failed" + (f": {said[0]}" if said else "")
 
     # Check requires_any (at least one must be present)
     requires_any = skip_config.get("requires_any", [])

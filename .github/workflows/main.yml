@@ -109,6 +109,11 @@ jobs:
               apple-clang:
                   version: ["17", "18", "19", "20", "21", "22", "23", "24"]
           EOF
+      - name: Install the Metal toolchain if Xcode lacks it (macOS)
+        # Since Xcode 26 the metal compiler is a separate download, and
+        # `xcrun metal` is a stub until it's installed.
+        if: runner.os == 'macOS'
+        run: xcrun metal --version || xcodebuild -downloadComponent MetalToolchain
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
         run: uv run pytest -n auto --cov=pcons --cov-report=xml --ignore=tests/test_examples.py -k "not 21_msvcup_hello"
@@ -119,6 +124,17 @@ jobs:
         # slow under xdist CPU contention and was flaking the cli-variant
         # timeout here.
         run: uv run pytest -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello and not 46_swift and not 47_swift and not 48_swift and not 49_swift"
+      - name: Check that the Metal example ran (macOS)
+        # The example skips itself where Metal can't run, so a green suite is
+        # not on its own evidence that it ran: check that it did.
+        if: runner.os == 'macOS'
+        run: |
+          set -o pipefail
+          uv run pytest tests/test_examples.py -v -k "62_metal_library and ninja" | tee metal.txt
+          if grep -q '62_metal_library-ninja] SKIPPED' metal.txt; then
+            echo "::error::the Metal example skipped instead of running"
+            exit 1
+          fi
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:

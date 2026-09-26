@@ -16,9 +16,11 @@ commands = [
 ]
 
 [skip]
-# Metal is an Apple toolchain, and xcrun ships with Xcode.
+# Metal is an Apple toolchain. Since Xcode 26 the metal compiler is a
+# separate download (xcodebuild -downloadComponent MetalToolchain); until
+# then `xcrun metal` is a stub that refuses to run.
 platforms = ["linux", "windows"]
-requires = ["xcrun"]
+require_succeeds = ["xcrun metal --version"]
 # The xcode generator has no notion of a metallib target, so it emits an
 # empty project. ninja and make both build this correctly.
 generators = ["xcode"]
