@@ -98,6 +98,32 @@ class TestXcodeGeneratorTargets:
         assert "com.apple.product-type.library.dynamic" in content
         assert "libmylib.dylib" in content
 
+    @pytest.mark.parametrize(
+        ("target_type", "attribute", "value", "product"),
+        [
+            # A name already carrying the library prefix and suffix keeps them once.
+            ("static_library", "output_name", "libcustom.a", "libcustom.a"),
+            ("shared_library", "output_name", "libcustom.dylib", "libcustom.dylib"),
+            # output_filename is the whole name: nothing is added.
+            ("static_library", "output_filename", "exact.bin", "exact.bin"),
+        ],
+    )
+    def test_the_product_file_name(
+        self, tmp_path, target_type, attribute, value, product
+    ):
+        project = Project("mylib", root_dir=tmp_path, build_dir=tmp_path)
+        target = Target("mylib", target_type=target_type)
+        setattr(target, attribute, value)
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "mylib.xcodeproj" / "project.pbxproj").read_text()
+        assert product in content
+        assert f"lib{product}" not in content
+        assert f"{product}.a" not in content
+
     def test_interface_target_skipped(self, tmp_path):
         """Test interface-only projects don't create xcodeproj."""
         project = Project("mylib", root_dir=tmp_path, build_dir=tmp_path)

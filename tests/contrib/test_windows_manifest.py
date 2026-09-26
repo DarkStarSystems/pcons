@@ -278,3 +278,22 @@ class TestArchitectureAgreement:
         """An app manifest may leave the dependency's architecture unstated."""
         xml = _create_manifest_xml(assembly_deps=[("MyLib.Assembly", "1.0.0.0")])
         assert "processorArchitecture" not in xml
+
+
+def test_an_assembly_dll_named_by_output_filename(tmp_path) -> None:
+    """A DLL Target's file is its output_filename when it has one."""
+    from pcons.contrib.windows.manifest import create_assembly_manifest
+    from pcons.core.project import Project
+    from pcons.core.target import Target
+
+    project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+    env = project.Environment()
+    dll = Target("plugin", target_type="shared_library")
+    dll.output_filename = "Plugin-x64.dll"
+
+    manifest = create_assembly_manifest(
+        project, env, name="App.Plugins", version="1.0.0.0", dlls=[dll], arch="x64"
+    )
+
+    command = " ".join(str(t) for t in manifest.output_nodes[0]._build_info["command"])
+    assert 'name="Plugin-x64.dll"' in command
