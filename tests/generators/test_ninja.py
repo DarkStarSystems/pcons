@@ -994,7 +994,7 @@ class TestNinjaSrcDir:
         env = project.Environment(toolchain=toolchain)
 
         gen = env.Command(
-            target="build/generated.h",
+            target="generated.h",
             source="spec.yml",
             command="python gen.py $SOURCE $TARGET",
         )
@@ -1059,7 +1059,7 @@ class TestExtraObjectDeps:
         env = project.Environment(toolchain=gcc_toolchain)
         (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
         gen = env.Command(
-            target="build/generated.h",
+            target="generated.h",
             source="spec.yml",
             command="python gen.py $SOURCE $TARGET",
         )
@@ -1067,7 +1067,7 @@ class TestExtraObjectDeps:
 
     def test_node_depends_is_not_an_input(self, tmp_path, gcc_toolchain):
         project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
-        objs = env.cc.Object("build/manual.o", "main.c")
+        objs = env.cc.Object("manual.o", "main.c")
         objs[0].depends([gen.output_nodes[0]])
 
         lines = self._generate(project, tmp_path)
@@ -1080,7 +1080,7 @@ class TestExtraObjectDeps:
     def test_object_builder_depends_kwarg(self, tmp_path, gcc_toolchain):
         """depends= on a single edge is that edge's own input: implicit."""
         project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
-        env.cc.Object("build/manual.o", "main.c", depends=[gen.output_nodes[0]])
+        env.cc.Object("manual.o", "main.c", depends=[gen.output_nodes[0]])
 
         lines = self._generate(project, tmp_path)
         line = next(ln for ln in lines if ln.startswith("build manual.o:"))
@@ -1120,7 +1120,7 @@ class TestExtraObjectDeps:
         (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
 
         with pytest.raises(TypeError, match="depnds"):
-            env.cc.Object("build/manual.o", "main.c", depnds=["x.h"])
+            env.cc.Object("manual.o", "main.c", depnds=["x.h"])
 
 
 class TestGeneratedSourcesOfALinkedDep:

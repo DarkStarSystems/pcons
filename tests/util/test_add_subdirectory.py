@@ -1164,11 +1164,9 @@ class TestSubdirectoryInstallDestinations:
         BaseGenerator._generate_pending(project)
         return (tmp_path / "build" / "build.ninja").read_text()
 
-    #: Three ways to write one destination: relative to the script, with the
-    #: project's build directory written out, and already anchored.
+    #: Three ways to write one destination: relative to the script, and under
+    #: the project's or the environment's (absolute) build directory.
     CHILD = (
-        "from pathlib import Path\n"
-        "from pcons.core.builder import anchor_target_paths\n"
         "from pcons.core.project import Project\n"
         "project = Project.current()\n"
         "env = project.default_environment\n"
@@ -1176,8 +1174,7 @@ class TestSubdirectoryInstallDestinations:
         "project.InstallAs(\n"
         "    project.build_dir / 'bd' / 'as.txt', 'data.txt', no_prefix=True\n"
         ")\n"
-        "anchored = anchor_target_paths(env, [Path('anch')])[0]\n"
-        "project.InstallAs(anchored / 'as.txt', 'data.txt', no_prefix=True)\n"
+        "project.InstallAs(env.build_dir / 'anch' / 'as.txt', 'data.txt', no_prefix=True)\n"
         "project.InstallDir('dir', 'tree', no_prefix=True)\n"
         "env.Command(\n"
         "    target='rel/cmd.txt',\n"
@@ -1212,7 +1209,7 @@ class TestSubdirectoryInstallDestinations:
 
         assert "build child/bd/as.txt: " in text
 
-    def test_an_anchored_destination_keeps_its_offset(
+    def test_an_env_build_dir_destination_keeps_its_offset(
         self, test_project: Project, tmp_path: Path, child: None
     ) -> None:
         add_subdirectory("child")

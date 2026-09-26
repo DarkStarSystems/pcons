@@ -99,11 +99,6 @@ def _find_tool(name: str, extra_dirs: list[Path] | None = None) -> Path | None:
     return Path(which) if which else None
 
 
-def _qt_gen_dir(env: Environment) -> Path:
-    """Default output dir for low-level Qt codegen: <build_dir>/qt.gen."""
-    return Path(env.get("build_dir", "build")) / "qt.gen"
-
-
 def _source_path(source: Node) -> Path:
     """The filesystem path of a source node."""
     if isinstance(source, FileNode):
@@ -144,12 +139,11 @@ class _QtGenBuilder(CommandBuilder):
         raise NotImplementedError
 
     def _default_targets(self, sources: list[Node], env: Environment) -> list[Path]:
-        gen_dir = _qt_gen_dir(env)
-        result: list[Path] = []
-        for src in sources:
-            rel = _source_rel_dir(env, src)
-            result.append(gen_dir.joinpath(*rel) / self._output_name(src))
-        return result
+        # Written like target=, so in the script's build directory.
+        return [
+            Path("qt.gen", *_source_rel_dir(env, src), self._output_name(src))
+            for src in sources
+        ]
 
     def _build(
         self,

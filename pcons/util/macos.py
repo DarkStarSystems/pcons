@@ -163,7 +163,7 @@ def create_universal_binary(
         inputs: List of architecture-specific binaries to combine.
                 Can be Target objects (uses their output files), FileNode objects,
                 or Path/str paths to files.
-        output: Path for the output universal binary.
+        output: Path for the output universal binary, written like ``target=``.
         name: Optional name for this target. Give one to refer to it by
               name later: ``get_target()``, ``Default()``, ``pcons build``,
               and ``sub::name@env`` from another build script. It must then
@@ -195,7 +195,7 @@ def create_universal_binary(
         lib_universal = create_universal_binary(
             project,
             inputs=libs,
-            output="build/universal/libmylib.a",
+            output="universal/libmylib.a",
         )
         project.Default(lib_universal)
     """

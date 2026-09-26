@@ -373,9 +373,8 @@ class InstallNodeFactory(PendingSourceFactory):
 
         A destination is a target path, so it goes through the one rule in
         :func:`~pcons.core.builder.anchor_target_path`: it carries the
-        declaring script's offset, absorbs a written-out build directory
-        prefix once, and passes through when it is rooted (the ordinary
-        install, outside the build tree).
+        declaring script's offset, and passes through when it is rooted (the
+        ordinary install, outside the build tree).
 
         The anchor is the environment's build directory when the caller
         named one, ``build_prefix`` and all, and the project's plain build
@@ -389,7 +388,7 @@ class InstallNodeFactory(PendingSourceFactory):
             if env is not None
             else resolver.build_dir / target._subdir
         )
-        return anchor_target_path(resolver, build_dir, dest, target_name=target.name)
+        return anchor_target_path(resolver, build_dir, dest)
 
     def _destdir(self, dest: Path) -> str:
         """*dest* as the copy command sees it.
@@ -963,7 +962,7 @@ class OverlayDirBuilder:
         """
         dest_dir = Path(dest_dir)
         target_name = name or _install_target_name(project, dest_dir, "overlay")
-        anchored = anchor_target_paths(env, [dest_dir], target_name=target_name)[0]
+        anchored = anchor_target_paths(env, [dest_dir])[0]
 
         return _make_install_target(
             project,

@@ -1,12 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.core.paths - PathResolver."""
 
-import logging
 import warnings
 from pathlib import Path
 
 from pcons.core.paths import PathResolver
-from pcons.util.source_location import SourceLocation
 
 
 class TestPathResolverCreation:
@@ -101,57 +99,28 @@ class TestNormalizeTargetPath:
         result = resolver.normalize_target_path(abs_path)
         assert result == Path("dist/foo.tar.gz")
 
-    def test_normalize_target_absorbs_build_prefix(
-        self, tmp_path: Path, caplog
-    ) -> None:
-        """A leading build_dir prefix is absorbed, once: targets may be
-        written from the project root or the build directory alike."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-        build_dir = project_root / "build"
-        build_dir.mkdir()
-
-        resolver = PathResolver(project_root, Path("build"))
-
-        # Quiet by default: build_dir / "foo" arithmetic is unambiguous.
-        assert resolver.normalize_target_path("build/foo.tar.gz") == Path("foo.tar.gz")
-
-        # A hand-typed string may have meant a literal "build" subdirectory,
-        # so callers pass the location to blame and the absorption is announced.
-        at = SourceLocation("pcons-build.py", 12)
-        with caplog.at_level(logging.WARNING, logger="pcons.core.paths"):
-            result = resolver.normalize_target_path("build/foo.tar.gz", warn_at=at)
-        assert result == Path("foo.tar.gz")
-        assert "read as the build directory prefix" in caplog.text
-        assert "pcons-build.py" in caplog.text
-
-        # The prefix is absorbed once, so doubling it names that literal
-        # subdirectory — quietly, even for a string.
-        caplog.clear()
-        result = resolver.normalize_target_path("build/build/foo.tar.gz", warn_at=at)
-        assert result == Path("build/foo.tar.gz")
-        assert caplog.text == ""
-
-    def test_override_absorbs_either_build_dir(self, tmp_path: Path) -> None:
-        """With a build_dir override, both spellings still mean one file.
-
-        An environment with a build_prefix passes its own build directory as
-        the override, and a script may still write project.build_dir / "x".
-        """
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-        resolver = PathResolver(project_root, Path("build"))
-        override = Path("build/mcu")
-
-        assert resolver.normalize_target_path(
-            "build/mcu/gen/x.h", build_dir=override
-        ) == Path("gen/x.h")
-        assert resolver.normalize_target_path(
-            "build/gen/x.h", build_dir=override
-        ) == Path("gen/x.h")
-        assert resolver.normalize_target_path("gen/x.h", build_dir=override) == Path(
-            "gen/x.h"
+    def test_a_relative_target_is_taken_as_written(self, tmp_path: Path) -> None:
+        """No prefix is guessed at: "build/x" is a build subdirectory of the
+        build directory."""
+        resolver = PathResolver(tmp_path, Path("build"))
+        assert resolver.normalize_target_path("build/foo.tar.gz") == Path(
+            "build/foo.tar.gz"
         )
+        assert resolver.normalize_target_path("foo.tar.gz") == Path("foo.tar.gz")
+
+    def test_an_absolute_target_under_the_build_dir(self, tmp_path: Path) -> None:
+        """An absolute path under the (possibly overridden) build directory
+        comes back relative to it; one outside it stays absolute."""
+        resolver = PathResolver(tmp_path, Path("build"))
+        override = Path("build/mcu")
+        assert resolver.normalize_target_path(tmp_path / "build/foo.tar.gz") == Path(
+            "foo.tar.gz"
+        )
+        assert resolver.normalize_target_path(
+            tmp_path / "build/mcu/gen/x.h", build_dir=override
+        ) == Path("gen/x.h")
+        outside = tmp_path / "elsewhere/x.h"
+        assert resolver.normalize_target_path(outside, build_dir=override) == outside
 
     def test_normalize_target_no_warn_different_prefix(self, tmp_path: Path) -> None:
         """Relative paths not starting with build_dir name should not warn."""

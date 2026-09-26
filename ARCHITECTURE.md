@@ -266,7 +266,7 @@ This avoids the SCons problem where touching an unrelated file in a source direc
 For cases where you only need the directory to exist (e.g., output directories), use order-only dependencies:
 
 ```python
-obj = env.cc.Object("build/obj/foo.o", "foo.c")
+obj = env.cc.Object("obj/foo.o", "foo.c")
 # Generator emits: build build/obj/foo.o: cc foo.c || build/obj
 ```
 

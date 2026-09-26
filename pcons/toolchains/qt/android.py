@@ -126,23 +126,17 @@ def android_output_dir(env: Environment, app: Target | str) -> Path:
     it builds after it. Two applications built in one environment therefore
     cannot share one.
 
-    Anchored by :func:`~pcons.core.builder.anchor_target_paths`, the one
-    place that turns a build-relative name into node-canonical form, so it
-    carries the declaring script's offset exactly once. Passing the path on
-    inside the declaring script is safe, because that function absorbs an
-    offset already there rather than adding a second one. Handing it to a
-    script with another offset is what applies a second one, so pass
-    ``project._node()`` of it across scripts.
+    Absolute, in the declaring script's build directory, so it names one
+    directory wherever it's passed.
 
     Args:
         env: The environment the application is built in.
         app: The application target, or its name.
 
     Returns:
-        The directory, relative to the project root unless the environment's
-        build directory is absolute.
+        The directory.
     """
-    return anchor_target_paths(env, [Path(application_binary(app))])[0]
+    return env.build_dir / application_binary(app)
 
 
 def _library_dirs(project: Project, env: Environment) -> list[Path]:

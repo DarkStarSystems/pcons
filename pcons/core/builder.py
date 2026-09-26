@@ -304,28 +304,19 @@ class BaseBuilder(ABC):
         sources: list[Node],
         env: Environment,
     ) -> list[Path]:
-        """Default target paths: source names in build_dir with the first
-        target suffix. Subclasses can override.
-
-        The build directory is the declaring script's own, the one
-        ``anchor_target_paths`` reads these paths against — the environment's
-        own carries its ``build_prefix`` but not the subdirectory offset, so
-        anchoring a path written with it would repeat the prefix below the
-        offset.
+        """Default target paths: each source's name with the first target
+        suffix, written like ``target=`` (so in the script's build
+        directory). Subclasses can override.
         """
         if not self._target_suffixes:
             raise ValueError(f"Builder {self.name} has no target suffixes")
 
-        build_dir = env.build_dir_for(Project.current()._node_offset)
         suffix = self._target_suffixes[0]
-
-        result: list[Path] = []
-        for src in sources:
-            if isinstance(src, FileNode):
-                # Put in build_dir with new suffix
-                target = build_dir / src.path.with_suffix(suffix).name
-                result.append(target)
-        return result
+        return [
+            Path(src.path.with_suffix(suffix).name)
+            for src in sources
+            if isinstance(src, FileNode)
+        ]
 
     @abstractmethod
     def _build(
@@ -816,47 +807,32 @@ def _tokenize_one(token: Any) -> Any:
 
 
 def anchor_target_path(
-    resolver: PathResolver,
-    build_dir: Path,
-    target: str | Path,
-    *,
-    target_name: str | None = None,
-    warn_at: SourceLocation | None = None,
+    resolver: PathResolver, build_dir: Path, target: str | Path
 ) -> Path:
     """Anchor one target path under *build_dir*, in node-canonical form.
 
     The rule itself, for callers that know their anchors directly rather
-    than through an environment: *resolver* is the top-anchored one, so a
-    path written with either build directory prefix is absorbed once, and
+    than through an environment: *resolver* is the top-anchored one, and
     *build_dir* is where the declaring script's targets land. Absolute
     paths keep their identity; see :func:`anchor_target_paths`, which is
     this call over a builder's target list.
     """
-    p = resolver.normalize_target_path(
-        target, target_name=target_name, warn_at=warn_at, build_dir=build_dir
-    )
+    p = resolver.normalize_target_path(target, build_dir=build_dir)
     return p if p.is_absolute() else build_dir / p
 
 
 def anchor_target_paths(
-    env: Environment | None,
-    targets: Sequence[str | Path | Node],
-    *,
-    target_name: str | None = None,
+    env: Environment | None, targets: Sequence[str | Path | Node]
 ) -> list[Path]:
     """Anchor target paths under the build directory (node-canonical form).
 
-    A relative target path is build-dir-relative; its node path carries the
-    build_dir prefix, so every output node names its file from the project
-    root no matter how the target was written. A path already starting with
-    the prefix is absorbed rather than doubled (targets may be written from
-    the project root or the build directory interchangeably); hand-typed
-    strings get a warning for that case, since the string may have meant a
-    literal subdirectory sharing the build directory's name, written by
-    doubling the prefix. Absolute paths outside the build directory pass
-    through untouched (external outputs), and an existing Node keeps its
-    identity: its path is already canonical, so anchoring it again would
-    name a second file.
+    A relative target path is relative to the declaring script's build
+    directory, taken as written; its node path carries the build_dir prefix,
+    so every output node names its file from the project root. An absolute
+    path under the build directory names that file (``env.build_dir / "x"``
+    is ``"x"``); one outside it is an external output, produced in place. An
+    existing Node keeps its identity: its path is already canonical, so
+    anchoring it again would name a second file.
 
     The build directory is the declaring script's own, so a target written
     in a subdirectory lands under ``<build_dir>/<subdir>`` — the same
@@ -868,22 +844,12 @@ def anchor_target_paths(
         return [Path(t.name) if isinstance(t, Node) else Path(t) for t in targets]
     resolver = project.top_path_resolver
     build_dir = env.build_dir_for(Project.current()._node_offset)
-    at = get_caller_location()
-    anchored: list[Path] = []
-    for t in targets:
-        if isinstance(t, Node):
-            anchored.append(Path(t.name))
-            continue
-        anchored.append(
-            anchor_target_path(
-                resolver,
-                build_dir,
-                t,
-                target_name=target_name,
-                warn_at=at if isinstance(t, str) else None,
-            )
-        )
-    return anchored
+    return [
+        Path(t.name)
+        if isinstance(t, Node)
+        else anchor_target_path(resolver, build_dir, t)
+        for t in targets
+    ]
 
 
 def output_label(env: Environment | None, path: Path | str) -> str:

@@ -210,7 +210,7 @@ class TestMultiOutputBuilder:
         env.link.cmd = "link.exe"
         env.link.sharedcmd = "$link.cmd /DLL /OUT:$$TARGET $$SOURCES"
 
-        result = builder(env, "build/mylib.dll", ["a.obj"])
+        result = builder(env, "mylib.dll", ["a.obj"])
 
         assert isinstance(result, OutputGroup)
         assert result.primary.path == Path("build/mylib.dll")

@@ -366,8 +366,8 @@ class TestMetalCompiler:
         env = _metal_env(project)
         airs = []
         for name in ("a", "b"):
-            airs += env.metal.Object(f"build/{name}.air", f"shaders/{name}.metal")
-        env.metal.Library("build/shaders.metallib", airs)
+            airs += env.metal.Object(f"{name}.air", f"shaders/{name}.metal")
+        env.metal.Library("shaders.metallib", airs)
 
         content = _generate_ninja(project)
 
@@ -392,8 +392,8 @@ class TestMetalCompiler:
         project = _metal_project(tmp_path, "metalflags")
         env = _metal_env(project)
         env.metal.libflags = ["-split-module"]
-        airs = env.metal.Object("build/a.air", "shaders/a.metal")
-        env.metal.Library("build/shaders.metallib", airs)
+        airs = env.metal.Object("a.air", "shaders/a.metal")
+        env.metal.Library("shaders.metallib", airs)
 
         content = _generate_ninja(project)
         lib_command = next(

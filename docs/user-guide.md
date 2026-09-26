@@ -2450,7 +2450,7 @@ project.Program("app", env, sources=["src/main.c", parser])
 
 A target with several outputs hands over all of them — a `.c`/`.h` pair, say. Just slice to get the one(s) you want: `parser.output_nodes[0]`.
 
-Pcons warns when a command token names a path under the build directory (`-Wl,build/libfoo.dylib`), since `project.build_dir` is relative to the project *root* and the command runs *in* the build directory — so that path resolves to `build/build/...`. Set `PCONS_WARN_BUILD_DIR_PATHS=0` on the occasion the path really is right as written.
+Pcons warns when a command token names a path under the build directory (`-Wl,build/libfoo.dylib`): the command runs *in* the build directory, so that path resolves to `build/build/...`. Pass a `Path` built on `env.build_dir` instead. Set `PCONS_WARN_BUILD_DIR_PATHS=0` on the occasion the path really is right as written.
 
 **Don't quote tokens yourself.** pcons keeps a command as a list of tokens and quotes each one for the shell it is writing for, so `command=f'"{tool}" $SOURCE'` reaches the program with the quotes still attached and it reports that no such file exists. Write it bare; a token that must contain a space goes in the list form, which isn't split on whitespace. pcons raises on a token that *starts* with a quote — a trailing one is ordinary, since `-DNAME="value"` wants its quotes delivered. When the quotes really are meant, say so with `Verbatim`:
 
@@ -2896,7 +2896,7 @@ class ProtobufTool(BaseTool):
 # Use the tool
 protoc_tool = ProtobufTool()
 protoc_tool.setup(env)
-env.protoc.Compile("build/message.pb.cc", "proto/message.proto")
+env.protoc.Compile("message.pb.cc", "proto/message.proto")
 ```
 
 **What `depends()` means to the steps you create.** A build script says
@@ -3753,8 +3753,8 @@ Since archive builders return `Target` objects, you can pass them to `Install()`
 
 ```python
 # Create archives
-docs_tar = project.Tarfile(env, output="build/docs.tar.gz", sources=["docs/"])
-release_zip = project.Zipfile(env, output="build/release.zip", sources=["bin/", "lib/"])
+docs_tar = project.Tarfile(env, output="docs.tar.gz", sources=["docs/"])
+release_zip = project.Zipfile(env, output="release.zip", sources=["bin/", "lib/"])
 
 # Install archives to a packages directory
 project.Install("packages/", [docs_tar, release_zip])
@@ -4561,7 +4561,7 @@ lib_x86_64 = project.StaticLibrary("mylib_x86", env_x86_64, sources=["lib.c"])
 lib_universal = create_universal_binary(
     project,
     inputs=[lib_arm64, lib_x86_64],
-    output="build/universal/libmylib.a",
+    output="universal/libmylib.a",
 )
 
 project.Default(lib_universal)
