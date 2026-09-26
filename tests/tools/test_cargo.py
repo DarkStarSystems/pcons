@@ -10,13 +10,13 @@ available).
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
 from pcons import Project
 from pcons.tools.cargo import (
     _artifact_filename,
-    _collect_rust_sources,
     _profile_subdir,
     _read_crate_name,
 )
@@ -118,18 +118,6 @@ def test_artifact_filename_cross_compile(triple, crate_type, expected):
 )
 def test_profile_subdir(profile, expected):
     assert _profile_subdir(profile) == expected
-
-
-def test_collect_rust_sources_globs_and_skips_target(tmp_path):
-    crate = _write_crate(tmp_path)
-    (crate / "src" / "extra.rs").write_text("// more\n")
-    # Anything under target/ is cargo's own output and must be ignored.
-    (crate / "target").mkdir()
-    (crate / "target" / "stale.rs").write_text("// junk\n")
-
-    names = {p.name for p in _collect_rust_sources(crate)}
-    assert {"lib.rs", "extra.rs", "Cargo.toml", "Cargo.lock"} <= names
-    assert not any("target" in p.parts for p in _collect_rust_sources(crate))
 
 
 # ---------------------------------------------------------------------------
@@ -271,3 +259,40 @@ def test_cargo_build_with_cbindgen_adds_header_and_dep(project_env, tmp_path):
     staticlib = _artifact_filename("rust_core", "staticlib")
     assert f"cargo/rust_core/release/{staticlib}" in dep_names
     assert "cargo/rust_core/include/rust_core.h" in dep_names
+
+    # cbindgen reports the sources it read in a depfile of its own.
+    project.resolve()
+    header = _cargo_edges(target)["rust_core.h"]
+    assert header._build_info["depfile"].suffix == ".d"
+    assert "--depfile" in header._build_info["command"]
+
+
+def _cargo_edges(target):
+    """The primary output node of each Command a CargoBuild made, by file name."""
+    return {
+        dep.output_nodes[0].path.name: dep.output_nodes[0]
+        for dep in target.dependencies
+    }
+
+
+def test_cargo_build_takes_its_sources_from_cargos_dep_info(project_env, tmp_path):
+    """#173: the crate's sources come from the dep-info file cargo writes
+    as it builds, not a glob made while describing the build, so a module
+    added afterwards is tracked. Only the manifest and lock file, which that
+    file leaves out, are declared."""
+    project, env = project_env
+    crate = _write_crate(tmp_path, package="rust_core")
+    (crate / "src" / "extra.rs").write_text("// more\n")
+    target = project.CargoBuild("rust_core", env, manifest="rust/Cargo.toml")
+    project.resolve()
+
+    staticlib = Path(_artifact_filename("rust_core", "staticlib"))
+    edge = _cargo_edges(target)[staticlib.name]
+    depfile = edge._build_info["depfile"]
+    assert Path(depfile.path) == Path(
+        "build/cargo/rust_core/release", staticlib.with_suffix(".d")
+    )
+    assert not depfile.suffix
+    # The depfile never lists these, so they rerun the edge themselves
+    # rather than only being built first.
+    assert {d.path.name for d in edge.implicit_deps} == {"Cargo.toml", "Cargo.lock"}

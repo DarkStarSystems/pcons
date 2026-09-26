@@ -18,6 +18,40 @@ commands = [
     { run = "./build/hello_rust", expect_stdout = "2 + 3 = 5" },
 ]
 
+[[rebuild]]
+description = "Nothing changed: no work"
+expect_no_work = true
+
+[[rebuild]]
+description = "A module added after pcons ran is compiled in"
+write = { "rust/src/arith.rs" = """
+mod offset;
+
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b + offset::OFFSET
+}
+""" }
+create = { "rust/src/arith/offset.rs" = "pub const OFFSET: i32 = 0;\n" }
+run = "./build/hello_rust"
+expect_stdout = "2 + 3 = 5"
+
+[[rebuild]]
+description = "Editing only that module reruns cargo, found through its dep-info"
+write = { "rust/src/arith/offset.rs" = "pub const OFFSET: i32 = 10;\n" }
+run = "./build/hello_rust"
+expect_stdout = "2 + 3 = 15"
+
+[[rebuild]]
+description = "Removing it again rebuilds rather than failing on the missing file"
+write = { "rust/src/arith.rs" = """
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+""" }
+remove = ["rust/src/arith/offset.rs"]
+run = "./build/hello_rust"
+expect_stdout = "2 + 3 = 5"
+
 [skip]
 # Need a Rust toolchain. Skip everywhere it's missing.
 requires = ["cargo"]

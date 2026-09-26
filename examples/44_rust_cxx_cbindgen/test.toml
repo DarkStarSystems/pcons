@@ -14,6 +14,15 @@ commands = [
     { run = "./build/stats", expect_stdout = "clamp(7.5, 0, 5) = 5.0" },
 ]
 
+[[rebuild]]
+description = "Nothing changed: no work"
+expect_no_work = true
+
+[[rebuild]]
+description = "A Rust source reruns cargo and cbindgen, found through their depfiles"
+touch = "rust/src/lib.rs"
+expect_rebuild = ["cargo/rust_math/include/rust_math.h"]
+
 [skip]
 requires = ["cargo", "cbindgen"]
 generators = ["xcode", "make"]

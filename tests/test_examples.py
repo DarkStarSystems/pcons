@@ -167,7 +167,7 @@ def run_rebuild_test(
         work_dir: Example directory
         build_dir: Build output directory
         rebuild_config: Dict with keys like 'description', 'touch', 'write',
-                       'expect_rebuild', 'expect_no_rebuild', 'expect_no_work',
+                       'create', 'remove', 'expect_rebuild', 'expect_no_rebuild', 'expect_no_work',
                        'run', 'expect_stdout', 'expect_returncode'
         toolchain: Optional toolchain name (used for platform path adaptation)
     """
@@ -179,6 +179,19 @@ def run_rebuild_test(
         if not target.exists():
             pytest.fail(f"Rebuild test '{description}': write target not found: {rel}")
         target.write_text(content, encoding="utf-8")
+
+    # A new file, or one taken away, which pcons never saw: only ninja runs.
+    for rel, content in rebuild_config.get("create", {}).items():
+        target = work_dir / rel
+        if target.exists():
+            pytest.fail(f"Rebuild test '{description}': create target exists: {rel}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    for rel in rebuild_config.get("remove", []):
+        target = work_dir / rel
+        if not target.is_file():
+            pytest.fail(f"Rebuild test '{description}': remove target not found: {rel}")
+        target.unlink()
 
     # 1. Touch file if 'touch' specified
     touch_file = rebuild_config.get("touch")
@@ -359,6 +372,8 @@ _REBUILD_ENTRY_KEYS = {
     "description",
     "touch",
     "write",
+    "create",
+    "remove",
     "expect_no_work",
     "expect_rebuild",
     "expect_no_rebuild",

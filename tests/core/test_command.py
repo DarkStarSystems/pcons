@@ -395,8 +395,13 @@ class TestCommandDepfile:
 
         assert result.output_nodes[0]._build_info["deps_style"] == "msvc"
 
-    def test_depfile_with_multiple_targets_raises(self, test_project):  # noqa: F811
-        """The depfile is named after the output, so there may be only one."""
+    @pytest.mark.parametrize("depfile", [".d", "gen.d"])
+    def test_depfile_with_multiple_targets_raises(
+        self,
+        test_project,  # noqa: F811
+        depfile,
+    ):
+        """What a depfile lists is recorded against one output."""
         env = Environment()
 
         with pytest.raises(PconsError, match="only one target"):
@@ -404,20 +409,28 @@ class TestCommandDepfile:
                 target=["out.c", "out.h"],
                 source="in.y",
                 command="gen $SOURCE",
-                depfile=".d",
+                depfile=depfile,
             )
 
-    def test_depfile_must_be_a_suffix(self, test_project):  # noqa: F811
-        """A depfile is a suffix appended to the output, not a path."""
+    @pytest.mark.parametrize("depfile", ["gen/out.dep", Path("gen/out.dep")])
+    def test_depfile_path_is_anchored_like_a_target(
+        self,
+        test_project,  # noqa: F811
+        depfile,
+    ):
+        """A tool that names its depfile itself gets a path, which lands
+        under the build directory the way target= does."""
+        from pcons.core.subst import PathToken
+
         env = Environment()
 
-        with pytest.raises(PconsError, match="depfile"):
-            env.Command(
-                target="out.txt",
-                source="in.txt",
-                command="gen $SOURCE",
-                depfile="out.d",
-            )
+        result = env.Command(
+            target="out.txt", source="in.txt", command="gen $SOURCE", depfile=depfile
+        )
+
+        assert result.output_nodes[0]._build_info["depfile"] == PathToken(
+            path=str(Path("build/gen/out.dep")), path_type="build"
+        )
 
     def test_unknown_deps_style_raises(self, test_project):  # noqa: F811
         """Only ninja's two dependency styles are accepted."""
@@ -473,6 +486,35 @@ class TestGenericCommandNinja:
         )
         assert "depfile = $out.d" in rule
         assert "deps = gcc" in rule
+
+    def test_depfile_path_on_the_edge(self, tmp_path):
+        """A depfile with its own path is bound on the edge, so commands
+        that differ only in it still share one rule."""
+        from pcons.core.project import Project
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        for name in ("a", "b"):
+            env.Command(
+                target=f"{name}.lib",
+                source=f"{name}.src",
+                command="gen $SOURCE $TARGET",
+                depfile=f"deps/{name}.d",
+            )
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        (rule,) = [b for b in content.split("\n\n") if "rule command_" in b]
+        assert "deps = gcc" in rule
+        assert "depfile" not in rule
+        for name in ("a", "b"):
+            edge = content.split(f"build {name}.lib:")[1].split("\nbuild ")[0]
+            assert f"  depfile = deps/{name}.d\n" in edge
 
     def test_generates_rule_for_command(self, tmp_path):
         """Ninja generator creates rule for command."""

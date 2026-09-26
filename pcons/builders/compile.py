@@ -309,7 +309,7 @@ class CommandBuilder:
         launcher: Sequence[str] | None = None,
         env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
-        depfile: str | None = None,
+        depfile: str | Path | None = None,
         deps_style: str | None = None,
     ) -> Target:
         """Create a Command target.
@@ -336,8 +336,8 @@ class CommandBuilder:
             cwd: Directory to run the command in.
             launcher: Program to run this command behind, as tokens.
             env_vars: Environment variables for this command alone.
-            depfile: Suffix of the depfile the command writes beside its
-                output, e.g. ".d".
+            depfile: The depfile the command writes: a suffix naming it
+                after the output, e.g. ".d", or its own path.
             deps_style: How those dependencies arrive, "gcc" or "msvc".
 
         Returns:

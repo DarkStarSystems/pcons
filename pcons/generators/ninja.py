@@ -25,7 +25,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
 from pcons.core.node import AliasNode, FileNode, Node
 from pcons.core.paths import PathResolver
-from pcons.core.subst import NodeVar
+from pcons.core.subst import NodeVar, PathToken
 from pcons.generators.generator import BaseGenerator, apply_context_overrides
 
 if TYPE_CHECKING:
@@ -268,8 +268,6 @@ class NinjaGenerator(BaseGenerator):
             if deps_style == "msvc":
                 dep_sig = "msvc"
             elif deps_style == "gcc":
-                from pcons.core.subst import PathToken
-
                 if isinstance(depfile, PathToken):
                     dep_sig = f"gcc:{depfile.suffix}"
                 else:
@@ -341,14 +339,10 @@ class NinjaGenerator(BaseGenerator):
                 # pin it explicitly rather than relying on ninja's default.
                 f.write("  msvc_deps_prefix = Note: including file: \n")
             elif deps_style == "gcc":
-                if depfile:
-                    # depfile is a PathToken - use suffix to create $out.d pattern
-                    # Ninja uses $out (the output variable) + suffix
-                    from pcons.core.subst import PathToken
-
-                    if isinstance(depfile, PathToken):
-                        depfile_ninja = f"$out{depfile.suffix}"
-                        f.write(f"  depfile = {depfile_ninja}\n")
+                # A depfile named after the output is the rule's; one with a
+                # path of its own is bound on the edge.
+                if isinstance(depfile, PathToken) and depfile.suffix:
+                    f.write(f"  depfile = $out{depfile.suffix}\n")
                 f.write("  deps = gcc\n")
 
             if build_info.get("restat"):
@@ -744,6 +738,10 @@ class NinjaGenerator(BaseGenerator):
         dyndep = build_info.get("dyndep")
         if dyndep:
             f.write(f"  dyndep = {self._escape_path(str(dyndep))}\n")
+
+        depfile = build_info.get("depfile")
+        if isinstance(depfile, PathToken) and not depfile.suffix:
+            f.write(f"  depfile = {self._escape_output_path(depfile.path)}\n")
 
         self._write_build_variables(f, node, target, build_info, project)
 
@@ -1316,7 +1314,7 @@ class NinjaGenerator(BaseGenerator):
         So a cwd edge uses the per-edge $source_N/$target_N variables, which
         the build statement writes relative to the same directory.
         """
-        from pcons.core.subst import PathToken, SourcePath, TargetPath
+        from pcons.core.subst import SourcePath, TargetPath
 
         # An explicit index on any marker (even 0) switches all unindexed
         # markers of that type to indexed mode. A slice renders its own indexed
