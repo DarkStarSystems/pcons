@@ -179,7 +179,11 @@ class TestOneNameForTwoKinds:
         project.resolve()
 
         written = {p.as_posix() for p in project._nodes}
-        assert "build/obj.foo.shared/foo.exports" in written
+        # macOS takes a symbol list, GNU ld a version script.
+        assert written & {
+            "build/obj.foo.shared/foo.exports",
+            "build/obj.foo.shared/foo.version",
+        }
 
 
 class TestTwoEnvironmentsOneName:
