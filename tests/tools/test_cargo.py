@@ -9,6 +9,7 @@ available).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -296,3 +297,45 @@ def test_cargo_build_takes_its_sources_from_cargos_dep_info(project_env, tmp_pat
     # The depfile never lists these, so they rerun the edge themselves
     # rather than only being built first.
     assert {d.path.name for d in edge.implicit_deps} == {"Cargo.toml", "Cargo.lock"}
+
+
+@pytest.mark.parametrize(
+    "preamble",
+    [
+        "from pcons.core.project import Project\n"
+        "project = Project('child')\n"
+        "env = project.parent.default_environment\n",
+        "from pcons import context\n"
+        "project = context.current_project\n"
+        "env = project.default_environment\n",
+    ],
+    ids=["own-project", "parent-project"],
+)
+def test_cargo_build_under_add_subdirectory(tmp_path, monkeypatch, preamble):
+    """Declared in a subdirectory, the crate is read from that directory and
+    cargo writes where the artifact node says, build/<subdir>/cargo/."""
+    from pcons.util.add_subdirectory import add_subdirectory
+
+    monkeypatch.chdir(tmp_path)
+    top = Project("top", root_dir=tmp_path, build_dir="build")
+    top.Environment()
+    child = tmp_path / "child"
+    _write_crate(child, package="rust_core")
+    (child / "pcons-build.py").write_text(
+        preamble
+        + "lib = project.CargoBuild('rust_core', env, manifest='rust/Cargo.toml')\n"
+    )
+
+    lib = add_subdirectory("child").lib
+    top.resolve()
+
+    staticlib = _artifact_filename("rust_core", "staticlib")
+    edge = _cargo_edges(lib)[staticlib]
+    target_dir = Path("build/child/cargo/rust_core")
+    assert edge.path == target_dir / "release" / staticlib
+    command = edge._build_info["command"]
+    assert f"--target-dir={tmp_path.resolve() / target_dir}" in command
+    assert f"--manifest-path={child / 'rust' / 'Cargo.toml'}" in command
+    # Cargo names the artifact in its dep-info as the build tool does.
+    basedir = json.dumps(str(tmp_path.resolve() / "build"))
+    assert f"--config=build.dep-info-basedir={basedir}" in command

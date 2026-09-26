@@ -93,6 +93,15 @@ to force invented names on scripts.
   the build until pcons reruns (#173). A generated cbindgen header does the
   same through cbindgen's `--depfile`, which needs cbindgen 0.24 or later.
 
+- `CargoBuild` works in an `add_subdirectory` script. Cargo built into a
+  directory other than the one pcons linked from, and the manifest was read
+  relative to the wrong directory when the script had no `Project` of its
+  own.
+
+- The Makefile generator reads exactly the depfiles the commands write,
+  instead of every `*.d` in each output directory, so one named otherwise
+  or kept elsewhere is no longer ignored.
+
 - Swift libraries build again with Swift 6, which refuses to emit a
   `.swiftinterface` unless the language mode is stated. Swift compiles now
   always pass `-swift-version`, controlled by `env.swiftc.language_mode`

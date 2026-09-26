@@ -55,6 +55,5 @@ expect_stdout = "2 + 3 = 5"
 [skip]
 # Need a Rust toolchain. Skip everywhere it's missing.
 requires = ["cargo"]
-# Xcode and Makefile generators are not tested here — the focus is
-# verifying that pcons → ninja → cargo → ninja relink works.
-generators = ["xcode", "make"]
+# The Xcode generator is not tested here.
+generators = ["xcode"]
