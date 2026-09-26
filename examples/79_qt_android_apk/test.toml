@@ -4,7 +4,7 @@
 description = "A Qt Quick application packaged for Android by androiddeployqt: a QML module cross-compiled with host moc/rcc, one Java class in the package source directory, and the deployment settings file pcons writes"
 
 expected_outputs = [
-    "build/qt.demo_ui/qrc_demo_ui.cpp",
+    "build/qt.demo_ui.object/qrc_demo_ui.cpp",
     "build/libqtapp.so",
     "build/qtapp/android-deployment-settings.json",
     "build/qtapp/libs/arm64-v8a/libqtapp_arm64-v8a.so",

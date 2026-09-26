@@ -26,6 +26,7 @@ from pcons.core.builder_registry import builder
 from pcons.toolchains.qt.builders import (
     _qrc_xml,
     _qt_gen_dir_for,
+    _qt_gen_dir_suffix,
     _require_qt_tool,
     _stamped_command,
     _write_if_changed,
@@ -82,7 +83,10 @@ class QtTranslationsBuilder:
         defined_at = defined_at or get_caller_location()
         if not ts_files:
             raise ValueError(f"QtTranslations '{name}': ts_files is empty")
-        root, qt_dir = _qt_gen_dir_for(project, env, f"qt.{name}")
+        # An ObjectLibrary, so its generated sources sit beside its objects.
+        root, qt_dir = _qt_gen_dir_for(
+            project, env, f"qt.{name}{_qt_gen_dir_suffix('ObjectLibrary')}"
+        )
 
         # lrelease each catalog: .ts -> .qm
         qm_nodes: list[Node] = []

@@ -54,7 +54,7 @@ class TestQmlSingletons:
             qml_files=["qml/Main.qml", "qml/Theme.qml"],
         )
         generate_ninja(project)
-        return (tmp_path / "build" / "qt.ui" / "qmldir").read_text()
+        return (tmp_path / "build" / "qt.ui.object" / "qmldir").read_text()
 
     @pytest.mark.parametrize(
         "body",
@@ -110,7 +110,7 @@ class TestQmlSingletons:
         )
         generate_ninja(qml_project)
 
-        qmldir = (tmp_path / "build" / "qt.ui" / "qmldir").read_text()
+        qmldir = (tmp_path / "build" / "qt.ui.object" / "qmldir").read_text()
         assert "Generated 1.0 qml/Generated.qml" in qmldir
         assert "singleton" not in qmldir
 
@@ -143,29 +143,29 @@ class TestQtQmlModuleUnderABuildPrefix:
 
         content = generate_ninja(qml_project)
 
-        assert "  AUTOMOCSPEC = host/qt.ui/automoc.json\n" in content
+        assert "  AUTOMOCSPEC = host/qt.ui.object/automoc.json\n" in content
         assert (
-            "build host/qt.ui/mocs_compilation.cpp | "
-            "host/qt.ui/automoc.exports.json host/qt.ui/ui_metatypes.json: "
+            "build host/qt.ui.object/mocs_compilation.cpp | "
+            "host/qt.ui.object/automoc.exports.json host/qt.ui.object/ui_metatypes.json: "
             "qt_automoccmd" in content
         )
         registrar = next(
             line
             for line in content.splitlines()
-            if line.startswith("build host/qt.ui/ui_qmltyperegistrations.cpp:")
+            if line.startswith("build host/qt.ui.object/ui_qmltyperegistrations.cpp:")
         )
-        assert registrar.endswith(" host/qt.ui/ui_metatypes.json")
-        assert "  QMLTYPES = host/qt.ui/ui.qmltypes\n" in content
+        assert registrar.endswith(" host/qt.ui.object/ui_metatypes.json")
+        assert "  QMLTYPES = host/qt.ui.object/ui.qmltypes\n" in content
 
         spec = json.loads(
-            (tmp_path / "build" / "host" / "qt.ui" / "automoc.json").read_text()
+            (tmp_path / "build" / "host" / "qt.ui.object" / "automoc.json").read_text()
         )
-        assert spec["gen_dir"] == str(tmp_path / "build" / "host" / "qt.ui")
+        assert spec["gen_dir"] == str(tmp_path / "build" / "host" / "qt.ui.object")
         assert spec["exports"] == str(
-            tmp_path / "build" / "host" / "qt.ui" / "automoc.exports.json"
+            tmp_path / "build" / "host" / "qt.ui.object" / "automoc.exports.json"
         )
         assert spec["metatypes"] == str(
-            tmp_path / "build" / "host" / "qt.ui" / "ui_metatypes.json"
+            tmp_path / "build" / "host" / "qt.ui.object" / "ui_metatypes.json"
         )
 
 
@@ -183,36 +183,40 @@ class TestQtQmlModule:
         content = generate_ninja(qml_project)
 
         # moc runs with JSON sidecar output.
-        spec = json.loads((tmp_path / "build" / "qt.ui" / "automoc.json").read_text())
+        spec = json.loads(
+            (tmp_path / "build" / "qt.ui.object" / "automoc.json").read_text()
+        )
         assert "--output-json" in spec["moc_args"]
         # JSON sidecars merge into metatypes...
         assert (
-            "build qt.ui/mocs_compilation.cpp | qt.ui/automoc.exports.json "
-            "qt.ui/ui_metatypes.json: qt_automoccmd" in content
+            "build qt.ui.object/mocs_compilation.cpp | qt.ui.object/automoc.exports.json "
+            "qt.ui.object/ui_metatypes.json: qt_automoccmd" in content
         )
         # ...which feed qmltyperegistrar with URI and version.
-        assert "build qt.ui/ui_qmltyperegistrations.cpp: qt_typeregcmd" in content
+        assert (
+            "build qt.ui.object/ui_qmltyperegistrations.cpp: qt_typeregcmd" in content
+        )
         # The URI, version and qmltypes path are per-edge variables, so one
         # typeregistrar rule serves every QML module.
         assert "--import-name $QMLURI" in content
         assert "  QMLURI = com.example.demo\n" in content
         assert "  QMLMAJOR = 2\n" in content
         assert "  QMLMINOR = 1\n" in content
-        assert "  QMLTYPES = qt.ui/ui.qmltypes\n" in content
+        assert "  QMLTYPES = qt.ui.object/ui.qmltypes\n" in content
         # The registration TU compiles into the module.
         assert "ui_qmltyperegistrations.cpp.o" in content
         # Resources (qml files + qmldir) compile in via rcc.
-        assert "build qt.ui/qrc_ui.cpp: qt_rcccmd" in content
+        assert "build qt.ui.object/qrc_ui.cpp: qt_rcccmd" in content
 
         # qmldir content.
-        qmldir = (tmp_path / "build" / "qt.ui" / "qmldir").read_text()
+        qmldir = (tmp_path / "build" / "qt.ui.object" / "qmldir").read_text()
         assert "module com.example.demo" in qmldir
         assert "typeinfo ui.qmltypes" in qmldir
         assert "prefer :/qt/qml/com/example/demo/" in qmldir
         assert "Main 2.1 qml/Main.qml" in qmldir
 
         # The synthesized qrc embeds under the engine's default import path.
-        qrc = (tmp_path / "build" / "qt.ui" / "ui.qrc").read_text()
+        qrc = (tmp_path / "build" / "qt.ui.object" / "ui.qrc").read_text()
         assert '<qresource prefix="/qt/qml/com/example/demo">' in qrc
         assert 'alias="qml/Main.qml"' in qrc
         assert 'alias="qmldir"' in qrc
@@ -225,7 +229,7 @@ class TestQtQmlModule:
         content = generate_ninja(qml_project)
         assert "qt_typeregcmd" not in content
         assert "qt_automoccmd" not in content
-        qmldir = (tmp_path / "build" / "qt.puremod" / "qmldir").read_text()
+        qmldir = (tmp_path / "build" / "qt.puremod.object" / "qmldir").read_text()
         assert "module Pure.Ui" in qmldir
         assert "typeinfo" not in qmldir
         assert "Main 1.0 qml/Main.qml" in qmldir
@@ -371,7 +375,7 @@ class TestQmlFilesKeepTheirPath:
         env = cxx_env_with_qt(project)
         project.QtQmlModule("ui", env, uri=uri, qml_files=list(files))
         generate_ninja(project)
-        module_dir = tmp_path / "build" / "qt.ui"
+        module_dir = tmp_path / "build" / "qt.ui.object"
         return (
             (module_dir / "qmldir").read_text(),
             (module_dir / "ui.qrc").read_text(),
@@ -411,7 +415,7 @@ class TestQmlFilesKeepTheirPath:
         )
         generate_ninja(qml_project)
 
-        module_dir = tmp_path / "build" / "qt.ui"
+        module_dir = tmp_path / "build" / "qt.ui.object"
         assert "Main 1.0 qml/Main.qml" in (module_dir / "qmldir").read_text()
         assert 'alias="qml/Main.qml"' in (module_dir / "ui.qrc").read_text()
 
@@ -442,7 +446,7 @@ class TestQmlFilesKeepTheirPath:
         add_subdirectory("tools/widget", env=env)
         generate_ninja(qml_project)
 
-        module_dir = tmp_path / "build" / "tools" / "widget" / "qt.subui"
+        module_dir = tmp_path / "build" / "tools" / "widget" / "qt.subui.object"
         assert (
             "Chip 1.0 qml/Chip.qml" in (module_dir / "qmldir").read_text().splitlines()
         )
@@ -474,7 +478,7 @@ class TestQmldirInEverySubdirectory:
         env = cxx_env_with_qt(project)
         project.QtQmlModule("ui", env, uri=uri, qml_files=list(files))
         generate_ninja(project)
-        return tmp_path / "build" / "qt.ui"
+        return tmp_path / "build" / "qt.ui.object"
 
     def test_each_directory_holding_qml_gets_one(self, qml_project, tmp_path):
         module_dir = self._generate(
@@ -552,7 +556,7 @@ class TestQmldirInEverySubdirectory:
             "ui", env, uri="My.Module", qml_files=["state/Theme.qml"]
         )
         generate_ninja(qml_project)
-        module_dir = tmp_path / "build" / "qt.ui"
+        module_dir = tmp_path / "build" / "qt.ui.object"
 
         assert (module_dir / "state" / "qmldir").read_text() == (
             "prefer :/qt/qml/My/Module/\n"
@@ -588,13 +592,19 @@ class TestQmlEntriesOutsideTheRoot:
         generate_ninja(qml_project)
 
         build = tmp_path / "build"
-        relative_line = (build / "qt.spelled_out" / "qmldir").read_text().splitlines()
-        absolute_line = (build / "qt.absolute" / "qmldir").read_text().splitlines()
+        relative_line = (
+            (build / "qt.spelled_out.object" / "qmldir").read_text().splitlines()
+        )
+        absolute_line = (
+            (build / "qt.absolute.object" / "qmldir").read_text().splitlines()
+        )
         assert "Main 1.0 qml/Main.qml" in relative_line
         assert "Main 1.0 qml/Main.qml" in absolute_line
         assert (
-            _qrc_files(build / "qt.absolute" / "absolute.qrc")["qml/Main.qml"]
-            == _qrc_files(build / "qt.spelled_out" / "spelled_out.qrc")["qml/Main.qml"]
+            _qrc_files(build / "qt.absolute.object" / "absolute.qrc")["qml/Main.qml"]
+            == _qrc_files(build / "qt.spelled_out.object" / "spelled_out.qrc")[
+                "qml/Main.qml"
+            ]
         )
 
     def test_an_absolute_entry_outside_the_root_is_refused(self, qml_project, tmp_path):
@@ -681,6 +691,8 @@ class TestQmlFileCollisions:
         build()
         generate_ninja(qml_project)
 
-        qmldir = (tmp_path / "build" / "qt.ui" / "qmldir").read_text().splitlines()
+        qmldir = (
+            (tmp_path / "build" / "qt.ui.object" / "qmldir").read_text().splitlines()
+        )
         assert "Thing 1.0 sub/Thing.qml" in qmldir
         assert "Other 1.0 sub/Other.qml" in qmldir

@@ -93,8 +93,9 @@ def _display_name_candidates(target: Target) -> Iterator[str]:
     The first is the target's own name, which is what every target in an
     ordinary project gets. The rest only come up when two targets in one
     Xcode project wear one name: two environments each building a ``report``,
-    or two installs into one directory sharing a label (see
-    ``Target.anonymous``).
+    a program and a library both called ``smudge``, or two installs into one
+    directory sharing a label (see ``Target.anonymous``). The output
+    filename settles the last two, since those do differ by file.
     """
     yield target.name
     env_name = target.env.name if target.env is not None else None
@@ -113,7 +114,7 @@ def _display_names(project: Project) -> dict[int, str]:
 
     Xcode tells its targets apart by name, and pcons no longer does: an
     anonymous target's name is a label two targets may share, and two named
-    targets differ by environment. So the name Xcode shows is synthesized
+    targets differ by kind or by environment. So the name Xcode shows is synthesized
     here, in declaration order, and belongs to its UI alone — it never
     reaches a file path.
     """
@@ -440,20 +441,22 @@ class XcodeGenerator(BaseGenerator):
         sources_phase_id = _generate_id()
         frameworks_phase_id = _generate_id()
 
-        output_name = target.output_name or target.name
+        output_name = target.output_filename or target.output_name or target.name
         product_name = output_name
 
-        # Add appropriate prefix/suffix for libraries
-        if target.target_type == "static_library":
-            if not output_name.startswith("lib"):
-                output_name = f"lib{output_name}"
-            if not output_name.endswith(".a"):
-                output_name = f"{output_name}.a"
-        elif target.target_type == "shared_library":
-            if not output_name.startswith("lib"):
-                output_name = f"lib{output_name}"
-            if not output_name.endswith(".dylib"):
-                output_name = f"{output_name}.dylib"
+        # Add the prefix and suffix libraries have, unless output_filename
+        # already named the whole file.
+        if target.output_filename is None:
+            if target.target_type == "static_library":
+                if not output_name.startswith("lib"):
+                    output_name = f"lib{output_name}"
+                if not output_name.endswith(".a"):
+                    output_name = f"{output_name}.a"
+            elif target.target_type == "shared_library":
+                if not output_name.startswith("lib"):
+                    output_name = f"lib{output_name}"
+                if not output_name.endswith(".dylib"):
+                    output_name = f"{output_name}.dylib"
 
         explicit_file_type = EXPLICIT_FILE_TYPE_MAP.get(
             product_type, "compiled.mach-o.executable"

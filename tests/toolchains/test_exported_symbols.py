@@ -177,5 +177,5 @@ class TestTheLinkDependsOnTheList:
             if ln.startswith("build ") and output in ln.split(":", 1)[0].split()
         )
 
-        assert "| plug.exports" in link
+        assert "| obj.plug.shared/plug.exports" in link
         assert "-Wl,-exported_symbols_list," in text

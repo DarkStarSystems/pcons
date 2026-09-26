@@ -19,23 +19,24 @@ if TYPE_CHECKING:
 
 
 def refuse_duplicate_names(targets: list[Target]) -> None:
-    """Refuse two named targets answering to one qualified name.
+    """Refuse two named targets of one type answering to one qualified name.
 
     A project refuses a duplicate as it is registered, but two sibling
-    projects each registering a ``common`` are only in one view here. An
-    anonymous target carries a label rather than a name (see
-    ``Target.anonymous``), so it is skipped: the walks below key on the
-    targets themselves, which is what tells two of them apart.
+    projects each registering a ``common`` are only in one view here. A
+    program and a library may share a name, so the type is part of the key,
+    as it is in the registry. An anonymous target carries a label rather than
+    a name (see ``Target.anonymous``), so it is skipped: the walks below key
+    on the targets themselves, which is what tells two of them apart.
 
     Raises:
-        DuplicateTargetError: Two named targets answer to one qualified name.
-            Nothing that names a target can tell them apart.
+        DuplicateTargetError: Two named targets of one type answer to one
+            qualified name. Nothing that names a target can tell them apart.
     """
-    seen: dict[str, Target] = {}
+    seen: dict[tuple[str, str | None], Target] = {}
     for target in targets:
         if target.anonymous:
             continue
-        first = seen.setdefault(target.qualified_name, target)
+        first = seen.setdefault((target.qualified_name, target.target_type), target)
         if first is not target:
             raise DuplicateTargetError(target.qualified_name, first, target)
 

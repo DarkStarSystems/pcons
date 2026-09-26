@@ -964,6 +964,22 @@ class TestXcodeDisplayNames:
             "common@host",
         ]
 
+    def test_one_name_for_two_kinds(self, tmp_path, gcc_toolchain):
+        """A program and a library of one name: the product filenames differ,
+        so the library takes its own."""
+        project = Project("app", root_dir=tmp_path, build_dir=tmp_path)
+        env = project.Environment(toolchain=gcc_toolchain)
+        program = Target("foo", target_type="program", env=env)
+        program.output_nodes.append(FileNode(tmp_path / "foo"))
+        library = Target("foo", target_type="static_library", env=env)
+        library.output_nodes.append(FileNode(tmp_path / "libfoo.a"))
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert self._generated_target_names(tmp_path, "app") == ["foo", "libfoo.a"]
+
     def test_two_named_targets_of_one_name_are_still_refused(self, tmp_path):
         """One subdirectory included twice: two `child::common` targets."""
         top = Project("t", root_dir=tmp_path, build_dir=tmp_path)

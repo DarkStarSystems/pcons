@@ -15,7 +15,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sibling. Built standalone it gets an empty mapping, so a script that does
   both reads `project.imports.get(...)`.
 
+- `target.output_filename` names the file a target writes, exactly: no
+  toolchain prefix, no platform suffix. For a plugin or a bundle whose host
+  dictates the name, `plugin.output_filename = "myplugin.ofx"` says in one
+  line what `output_name` plus `output_prefix` plus `output_suffix` took
+  three to say. Setting it alongside any of those three is an error. A
+  Windows import library still follows the same stem
+  (`myplugin.lib`). (#148)
+
 ### Changed
+
+**Object directories carry the kind of target** (#197)
+
+A library's objects now go in `obj.<name>.static/`, `obj.<name>.shared/`,
+`obj.<name>.object/` or `obj.<name>.metal/`. A program's stay in
+`obj.<name>/`. A Qt target's generated sources follow its objects, so a
+`QtSharedLibrary` generates into `qt.<name>.shared/` and a `QtQmlModule` or
+`QtTranslations` into `qt.<name>.object/`. Per-target files the link step
+reads, like the `exported_symbols` list, moved into the object directory
+too. Anything pointing at the old paths needs updating: a `.gitignore`
+entry, an IDE search path, a script that reads an object.
+
+That makes one name usable for two kinds of target in one environment:
+`Program("smudge")` and `SharedLibrary("smudge")` write `smudge` and
+`libsmudge.so`, and compile into directories of their own. The name then
+picks out neither, so `get_target("smudge")`, `Default("smudge")` and
+`pcons build smudge` refuse it and say why; keep the `Target` the builder
+returned, or give one an alias. One name for one kind in one environment is
+still refused. In `pcons_metadata.json` each of the two gets an id of
+`name#<type>`, so ids stay unique. See `examples/87_one_name_two_kinds`.
 
 **Named and anonymous targets** (#194)
 
@@ -83,6 +111,15 @@ to force invented names on scripts.
   allows the `-l:libfoo.a` GNU linker format.
 
 ### Fixed
+
+- Two targets no longer share one object file behind your back. A name was
+  all that placed a target's objects, so a static and a shared library of
+  one name, or one name built in two named environments with no
+  `build_prefix`, landed on the same path: one compile ran, with one
+  target's flags, and both linked its result. The per-kind directory above
+  settles the first case. Where a directory still cannot tell two producers
+  apart, pcons now refuses the collision, names both targets and says to
+  give each environment a `build_prefix`. (#197)
 
 - Swift libraries build again with Swift 6, which refuses to emit a
   `.swiftinterface` unless the language mode is stated. Swift compiles now

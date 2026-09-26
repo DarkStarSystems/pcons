@@ -313,7 +313,9 @@ def create_pkg(
     # Bundle sources (.app) need a component plist; pkgbuild requires
     # each bundle's payload-relative path in it.
     def bundle_name(src: Target | FileNode | Path | str) -> str | None:
-        if hasattr(src, "output_name") and src.output_name:
+        if named := getattr(src, "output_filename", None):
+            name_str = str(named)
+        elif hasattr(src, "output_name") and src.output_name:
             name_str = str(src.output_name)
         elif hasattr(src, "name"):
             name_str = str(src.name)

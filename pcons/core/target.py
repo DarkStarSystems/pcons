@@ -490,11 +490,13 @@ class Target:
         "_resolved",
         # For install targets:
         "_install_nodes",
-        # Custom output filename:
+        # Custom output base name:
         "output_name",
         # Override platform prefix/suffix for output naming:
         "output_prefix",
         "output_suffix",
+        # The output's whole filename, prefix and suffix included:
+        "output_filename",
         # Lazy source resolution (for Install, etc.):
         "_pending_sources",
         # Build info for archive and command targets:
@@ -580,11 +582,16 @@ class Target:
         self._resolved: bool = False
         # For install targets:
         self._install_nodes: list[FileNode] = []
-        # Custom output filename (overrides toolchain default naming):
+        # Base name for the output, in place of the target's name; the
+        # toolchain's prefix and suffix still apply:
         self.output_name: str | None = None
         # Override platform prefix/suffix (e.g., output_prefix="" to drop "lib"):
         self.output_prefix: str | None = None
         self.output_suffix: str | None = None
+        # The filename to write, exactly: no prefix, no suffix, and none of
+        # the three above (setting both is an error). For a plugin or a
+        # bundle whose name the host dictates: plugin.ofx, MyPlugin.spark.
+        self.output_filename: str | None = None
         # Sources resolved after the main resolve phase (for Install, etc.)
         self._pending_sources: list[Target | Node | Path | str] | None = None
         # Products build by default; a builder placing a step or a utility

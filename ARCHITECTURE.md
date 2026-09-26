@@ -688,7 +688,11 @@ Placement belongs to the environment, never to the core or to a target:
   toolchain.
 
 Two targets that still resolve to one output path are an error at resolve time,
-naming both.
+naming both. The same holds for the objects along the way: a compiled target's
+objects go in a directory keyed on its name and its kind
+(`pcons.tools.compile_link.object_dir_name`), which tells a program's apart
+from a library's, and a second target reaching one object path is refused
+rather than merged.
 
 ### Target Resolution and Lazy Node Creation
 > **Status: Implemented**
@@ -699,7 +703,7 @@ When you call `project.SharedLibrary("mylib", env)`, it returns a Target object 
 
 ```python
 lib = project.SharedLibrary("mylib", env, sources=["lib.cpp"])
-lib.output_name = "mylib.ofx"  # Customize output filename
+lib.output_filename = "mylib.ofx"  # Name the file outright
 
 # At this point:
 # - lib.sources contains the source FileNodes
@@ -718,12 +722,12 @@ lib.output_name = "mylib.ofx"  # Customize output filename
 project.resolve()
 
 # Now:
-# - lib.intermediate_nodes contains [FileNode("build/obj.mylib/lib.o")]
+# - lib.intermediate_nodes contains [FileNode("build/obj.mylib.shared/lib.o")]
 # - lib.output_nodes contains [FileNode("build/mylib.ofx")]
 ```
 
 **Why this design?** The output filename and build flags depend on:
-- The `output_name` attribute (may be set after target creation)
+- The `output_name` / `output_filename` attributes (may be set after target creation)
 - Toolchain defaults (platform-specific naming like `.dylib` vs `.so`)
 - Effective requirements from dependencies (must be computed in dependency order)
 

@@ -7,11 +7,13 @@ their relationships.
 
 A target is addressed in this file by its ``id``, which is unique within the
 file and the same on every run of an unchanged build. The id is the target's
-qualified name, and for an anonymous one (see ``Target.anonymous``, whose
-name is a label its builder derived) a ``#n`` suffix: its position, in
-declaration order, among the anonymous targets of its project wearing that
-qualified name. ``dependencies`` is a list of ids, in the order the target
-depends on them. ``anonymous`` says which kind of target this is.
+qualified name, plus a ``#`` suffix where that name is not unique on its own:
+its type for a named target (a program and a library may share a name), and
+for an anonymous one (see ``Target.anonymous``, whose name is a label its
+builder derived) its position, in declaration order, among the anonymous
+targets of its project wearing that qualified name. ``dependencies`` is a
+list of ids, in the order the target depends on them. ``anonymous`` says
+which kind of target this is.
 
 ``name`` and ``qualified_name`` are for display. Neither is unique: two
 installs into one directory wear one label, and so do two tests of one name.
@@ -41,11 +43,14 @@ def _project_target_ids(project: Project) -> dict[int, str]:
     """
     ids: dict[int, str] = {}
     ordinals: Counter[str] = Counter()
+    named = Counter(t.qualified_name for t in project._targets if not t.anonymous)
     for target in project._targets:
         qualified = target.qualified_name
         if target.anonymous:
             ordinals[qualified] += 1
             ids[id(target)] = f"{qualified}#{ordinals[qualified]}"
+        elif named[qualified] > 1:
+            ids[id(target)] = f"{qualified}#{target.target_type or 'other'}"
         else:
             ids[id(target)] = qualified
     return ids

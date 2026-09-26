@@ -1348,13 +1348,17 @@ class BaseToolchain(ABC):
     def _write_link_input(self, target: Target, suffix: str, text: str) -> Path:
         """Write a per-target file the link step reads, at configure time.
 
-        Under the target's build directory, so two variants of one target
-        don't share it, and registered with the project by ``write_file``,
-        so the link depends on it and reruns when its content changes.
+        In the target's own object directory, which is unique by
+        construction, so two variants of one target, or a program and a
+        library of one name, don't share it. ``write_file`` registers it
+        with the project, so the link depends on it and reruns when its
+        content changes.
         """
         from pcons.configure.config_file import write_file
+        from pcons.tools.compile_link import object_dir_name
 
-        return write_file(Path(target.build_dir) / f"{target.name}{suffix}", text)
+        directory = Path(target.build_dir) / object_dir_name(target)
+        return write_file(directory / f"{target.name}{suffix}", text)
 
     def _link_input_token(
         self, target: Target, suffix: str, text: str, prefix: str
