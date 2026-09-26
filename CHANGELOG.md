@@ -17,6 +17,12 @@ changes break some existing scripts; the details are below.
 
 ### Added
 
+- `add_subdirectory(..., build_tier="manual")` includes someone else's project
+  as a dependency: nothing it declares goes into a wider tier than that, its
+  own `Default()` included, so its targets build only when something needs them
+  or you ask (CMake's `EXCLUDE_FROM_ALL`). `"all"` keeps them in `ninja all`.
+  A `Default()` of yours can still name them. (#170, raised by Sylvain Garcia)
+
 - `add_subdirectory(..., imports={...})` hands objects down to an included
   script, which reads them as `project.imports["icons"]`: targets,
   environments, paths, anything a directory needs from its parent or from a
@@ -35,6 +41,10 @@ changes break some existing scripts; the details are below.
   (`myplugin.lib`). (#148)
 
 ### Changed
+
+- A `Default()` call in a subdirectory's script trims only that subdirectory's
+  products; it no longer demotes everything else in the tree. A top-level
+  `Default()` still governs the whole project.
 
 - `name=` is optional and keyword-only on `Command`, `PyBuilder` calls,
   `Install`, `InstallAs`, `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`,

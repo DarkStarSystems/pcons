@@ -19,7 +19,8 @@ either way its output path or an alias.
 
 The builder that creates a target places it (:meth:`Target.place_in_tier`);
 a script may move one (``bench.build_tier = "all"``); ``Default()`` names the
-default tier outright. Nothing is decided when those calls happen:
+default tier outright, for the products of its own script's directory and
+below; ``add_subdirectory(..., build_tier=...)`` caps a whole included tree. Nothing is decided when those calls happen:
 :func:`decide_build_tiers` decides once, at generate, from the final state, so
 the answer never depends on the order the build script was written in.
 
@@ -55,6 +56,31 @@ def validate_tier(tier: str, location: SourceLocation | None = None) -> str:
             location=location,
         )
     return tier
+
+
+@dataclass(frozen=True, slots=True)
+class DefaultCall:
+    """Where a ``Default()`` call named a target, and what it governs: the
+    products declared in its script's directory and below (*scope*, an
+    offset from the top-level root)."""
+
+    location: SourceLocation
+    scope: Path
+
+
+@dataclass(frozen=True, slots=True)
+class TierFloor:
+    """``add_subdirectory(..., build_tier=...)``: no target declared in that
+    subtree sits in a wider tier than *tier*, unless a ``Default()`` from
+    outside the subtree names it."""
+
+    tier: str
+    location: SourceLocation
+
+
+def _within(offset: Path, scope: Path) -> bool:
+    """True if *offset* is *scope* or below it."""
+    return offset.parts[: len(scope.parts)] == scope.parts
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,59 +208,86 @@ def decide_build_tiers(project: Project) -> BuildTiers:
     For each target, the first rule that applies:
 
     1. The script set ``build_tier``: that value.
-    2. ``Default()`` named targets somewhere in the tree: ``"default"`` if
-       this target was one of them, else ``"all"`` if its builder placed it
-       in ``"default"`` (naming defaults demotes the unnamed products), else
-       the builder's value (a step or a manual target is untouched).
-    3. The builder's placement.
+    2. ``Default()`` named it: ``"default"``.
+    3. A ``Default()`` call governs it, from its own script's directory or
+       one above: ``"all"`` if its builder placed it in ``"default"``
+       (naming defaults demotes the unnamed products), else the builder's
+       value (a step or a manual target is untouched).
+    4. The builder's placement.
+
+    Then a floor: under ``add_subdirectory(..., build_tier=...)`` the target
+    goes no wider than that tier, unless a ``Default()`` from outside the
+    subtree named it. The deepest such subdirectory decides.
 
     Raises:
         PconsError: A target is both named in ``Default()`` and set by the
             script to ``"all"`` or ``"manual"``, which cannot both be meant.
             The message names both lines.
     """
-    named_at: dict[int, SourceLocation] = {}
+    named: dict[int, DefaultCall] = {}
     for node in project._iter_tree():
-        named_at.update(node._default_at)
-    # Reported as the line that demoted the unnamed products: the first
-    # Default() call in the tree, which is where a reader looks first.
-    first_default_at = next(iter(named_at.values()), None)
+        named.update(node._default_at)
+    # Each call's scope, with the line a reader looks for first: the first
+    # call to govern it.
+    scopes: dict[Path, SourceLocation] = {}
+    for call in named.values():
+        scopes.setdefault(call.scope, call.location)
+    floors = project.top._tier_floors
 
     decisions: list[TierDecision] = []
     for target in project.targets:
-        chosen_at = target._build_tier_at
-        named = named_at.get(id(target))
-        if chosen_at is not None:
-            if named is not None and target.build_tier != "default":
-                raise PconsError(
-                    f"target '{target.name}' is named in Default() at "
-                    f"{named}, and set to build_tier = "
-                    f'"{target.build_tier}" at {chosen_at}. '
-                    "A default target is in the default tier, so these "
-                    "contradict: drop one.",
-                    location=chosen_at,
-                )
-            decisions.append(
-                TierDecision(
+        decision = _decide_one(target, named.get(id(target)), scopes)
+        floor_at = max(
+            (offset for offset in floors if _within(target._subdir, offset)),
+            key=lambda offset: len(offset.parts),
+            default=None,
+        )
+        if floor_at is not None:
+            floor = floors[floor_at]
+            call = named.get(id(target))
+            lifted = call is not None and not _within(call.scope, floor_at)
+            deeper = BUILD_TIERS.index(floor.tier) > BUILD_TIERS.index(decision.tier)
+            if deeper and not lifted:
+                decision = TierDecision(
                     target,
-                    target.build_tier,
-                    f'build_tier = "{target.build_tier}"',
-                    chosen_at,
+                    floor.tier,
+                    f'add_subdirectory(..., build_tier="{floor.tier}")',
+                    floor.location,
                 )
-            )
-        elif named is not None:
-            decisions.append(
-                TierDecision(target, "default", "named in Default()", named)
-            )
-        elif first_default_at is not None and target.build_tier == "default":
-            decisions.append(
-                TierDecision(target, "all", "not named in Default()", first_default_at)
-            )
-        else:
-            decisions.append(
-                TierDecision(target, target.build_tier, _placement_reason(target))
-            )
+        decisions.append(decision)
     return BuildTiers(project, decisions)
+
+
+def _decide_one(
+    target: Target,
+    call: DefaultCall | None,
+    scopes: dict[Path, SourceLocation],
+) -> TierDecision:
+    """Rules 1-4 of :func:`decide_build_tiers` for one target."""
+    chosen_at = target._build_tier_at
+    if chosen_at is not None:
+        if call is not None and target.build_tier != "default":
+            raise PconsError(
+                f"target '{target.name}' is named in Default() at "
+                f"{call.location}, and set to build_tier = "
+                f'"{target.build_tier}" at {chosen_at}. '
+                "A default target is in the default tier, so these "
+                "contradict: drop one.",
+                location=chosen_at,
+            )
+        return TierDecision(
+            target, target.build_tier, f'build_tier = "{target.build_tier}"', chosen_at
+        )
+    if call is not None:
+        return TierDecision(target, "default", "named in Default()", call.location)
+    if target.build_tier == "default":
+        governing = next(
+            (at for scope, at in scopes.items() if _within(target._subdir, scope)),
+            None,
+        )
+        if governing is not None:
+            return TierDecision(target, "all", "not named in Default()", governing)
+    return TierDecision(target, target.build_tier, _placement_reason(target))
 
 
 def _placement_reason(target: Target) -> str:

@@ -1,0 +1,18 @@
+# Test configuration for the vendored-subdirectory example
+
+[test]
+description = "A dependency's source tree pulled in with add_subdirectory(build_tier=\"manual\"): its library builds because the app needs it, its demo doesn't, and its own Default() doesn't decide this project's build"
+# Built on its own, the dependency's Default() builds its demo.
+standalone_subdirs = ["third_party/greet"]
+
+expected_outputs = [
+    "build/app",
+    "build/third_party/greet/libgreet.a",
+]
+
+[verify]
+commands = [
+    { run = "./build/app", expect_stdout = "Hello from greet, app!" },
+    # The demo is in the manual tier, because of the floor, not its own Default().
+    { run = "${PCONS} explain", expect_stdout = 'add_subdirectory(..., build_tier="manual")' },
+]

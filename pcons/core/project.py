@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from pcons._cli_click import UserCommand, UserGroup
     from pcons.core._project_builder_stubs import _ProjectBuilders
     from pcons.core._toolchain_names import KnownToolchain
+    from pcons.core.tiers import DefaultCall, TierFloor
     from pcons.core.vars import VarValue
     from pcons.tools.toolchain import Toolchain
 else:
@@ -338,6 +339,7 @@ class Project(_ProjectBuilders):
         "_aliases",
         "_default_targets",
         "_default_at",
+        "_tier_floors",
         "_config",
         "_resolved",
         "_path_resolver",
@@ -429,9 +431,12 @@ class Project(_ProjectBuilders):
         self._aliases: dict[str, AliasNode] = {}
         self._default_targets: list[Target] = []
         # Where each Default() call named each of its targets, by target
-        # identity. What that means is decided at generate; see
-        # pcons.core.tiers.
-        self._default_at: dict[int, SourceLocation] = {}
+        # identity, and the directory it governs. What that means is decided
+        # at generate; see pcons.core.tiers.
+        self._default_at: dict[int, DefaultCall] = {}
+        # add_subdirectory(..., build_tier=...), by the subtree's offset from
+        # the top-level root. Kept on the top-level project.
+        self._tier_floors: dict[Path, TierFloor] = {}
         self._config = config
         self._resolved = False
         # None caches a negative find_package result for the key.
@@ -778,6 +783,7 @@ class Project(_ProjectBuilders):
         env: Env | None = None,
         vars: Mapping[str, VarValue] | None = None,
         imports: Mapping[str, Any] | None = None,
+        build_tier: str | None = None,
     ) -> Any:
         """Run *subdir*'s pcons-build.py as part of this project.
 
@@ -788,7 +794,13 @@ class Project(_ProjectBuilders):
         from pcons.util.add_subdirectory import add_subdirectory
 
         return add_subdirectory(
-            subdir, pick, project=self, env=env, vars=vars, imports=imports
+            subdir,
+            pick,
+            project=self,
+            env=env,
+            vars=vars,
+            imports=imports,
+            build_tier=build_tier,
         )
 
     @property
@@ -1254,7 +1266,10 @@ class Project(_ProjectBuilders):
 
         Naming any target replaces the products pcons would have built on
         its own, so this is how a project builds a subset by default — the
-        app but not the benchmarks. Calls append: each one adds to the set.
+        app but not the benchmarks. The replacement reaches the products of
+        the calling script's directory and below: the whole project from the
+        top-level script, only its own tree from a subdirectory's. Calls
+        append: each one adds to the set.
         Nothing is decided here. The call is recorded, with its line, and
         the tiers are decided at generate from every call together, so what
         a target's own ``build_tier`` means never depends on the order the
@@ -1305,11 +1320,19 @@ class Project(_ProjectBuilders):
     def _add_default_target(self, target: Target, location: SourceLocation) -> None:
         """Record that a ``Default()`` call at *location* named `target`.
 
-        Deduped by identity: the first call to name it owns the line, since
-        that is the one a reader is looking for.
+        The call governs the products of the script making it: that script's
+        directory and below. Deduped by identity: the first call to name a
+        target owns the line, since that is the one a reader is looking for.
         """
+        from pcons.core.tiers import DefaultCall
+
         if id(target) not in self._default_at:
-            self._default_at[id(target)] = location
+            scope = (
+                Project.current()._node_offset
+                if Project.has_current()
+                else self._node_offset
+            )
+            self._default_at[id(target)] = DefaultCall(location, scope)
             self._default_targets.append(target)
 
     def _find_target_for_node(self, node: Node) -> Target | None:

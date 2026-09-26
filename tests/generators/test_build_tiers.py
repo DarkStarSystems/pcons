@@ -263,20 +263,32 @@ class TestOrderIndependence:
         assert decided["early.txt"] == "manual"
         assert decided["late.txt"] == "manual"
 
-    def test_a_subdirectory_default_governs_the_whole_tree(self, project, env):
-        """Location never matters: a child's Default() demotes the parent's
-        products exactly as a top-level call would."""
+    def test_a_subdirectory_default_governs_its_own_tree(self, project, env):
+        """A child's Default() demotes the child's unnamed products, not the
+        parent's: it governs the script that calls it and what's below."""
         app = command(env, "app.txt")
         with project._enter_subdir("sub"):
             child = Project("sub", root_dir=project.root_dir / "sub")
             child_env = child.Environment()
             tool = command(child_env, "tool.txt")
+            demo = command(child_env, "demo.txt")
             child.Default(tool)
 
         decided = tiers_of(project)
         assert decided[tool.name] == "default"
-        assert decided["app.txt"] == "all"
-        assert decide_build_tiers(project)[app].reason == "not named in Default()"
+        assert decided[demo.name] == "all"
+        assert decided[app.name] == "default"
+
+    def test_a_top_level_default_governs_the_whole_tree(self, project, env):
+        app = command(env, "app.txt")
+        with project._enter_subdir("sub"):
+            child = Project("sub", root_dir=project.root_dir / "sub")
+            tool = command(child.Environment(), "tool.txt")
+        project.Default(app)
+
+        decided = tiers_of(project)
+        assert decided[app.name] == "default"
+        assert decided[tool.name] == "all"
 
 
 class TestContradiction:
@@ -643,3 +655,101 @@ class TestRegisteredHelpersDeclareTheirTier:
         registration = BuilderRegistry.get(name)
         assert registration is not None
         assert registration.build_tier == "default"
+
+
+class TestVendoredSubdirectory:
+    """add_subdirectory(..., build_tier=...): a floor for a dependency's tree."""
+
+    VENDORED = (
+        "from pcons import Project\n"
+        "import sys\n"
+        "project = Project('vendored')\n"
+        "env = project.parent.default_environment\n"
+        "COPY = [sys.executable, '-c', "
+        "'import shutil,sys; shutil.copy(sys.argv[1], sys.argv[2])']\n"
+        "def command(target):\n"
+        "    return env.Command(target=target, source='../in.txt',"
+        " command=[*COPY, '$SOURCE', '$TARGET'])\n"
+        "lib = command('lib.txt')\n"
+        "demo = command('demo.txt')\n"
+        "project.Default(demo)\n"
+    )
+
+    def _vendored(self, project, **kwargs):
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        sub = project.root_dir / "third_party"
+        sub.mkdir(exist_ok=True)
+        (sub / "pcons-build.py").write_text(self.VENDORED)
+        return add_subdirectory("third_party", **kwargs)
+
+    def test_without_a_floor_its_default_governs_only_itself(self, project, env):
+        app = command(env, "app.txt")
+        v = self._vendored(project)
+        decided = tiers_of(project)
+        assert decided[app.name] == "default"
+        assert decided[v.demo.name] == "default"
+        assert decided[v.lib.name] == "all"
+
+    @pytest.mark.parametrize("floor", ["all", "manual"])
+    def test_a_floor_keeps_its_targets_out_of_the_default_build(
+        self, project, env, floor
+    ):
+        app = command(env, "app.txt")
+        v = self._vendored(project, build_tier=floor)
+        decisions = decide_build_tiers(project)
+        assert decisions[app].tier == "default"
+        assert decisions[v.lib].tier == floor
+        # Its own Default() can't lift a target above the floor.
+        assert decisions[v.demo].tier == floor
+        assert decisions[v.demo].reason == (
+            f'add_subdirectory(..., build_tier="{floor}")'
+        )
+        assert "test_build_tiers.py" in str(decisions[v.demo].location)
+
+    def test_a_default_from_outside_lifts_a_target(self, project, env):
+        v = self._vendored(project, build_tier="manual")
+        project.Default(v.lib)
+        decided = tiers_of(project)
+        assert decided[v.lib.name] == "default"
+        assert decided[v.demo.name] == "manual"
+
+    def test_the_deepest_floor_decides(self, project, env):
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        outer = project.root_dir / "outer"
+        (outer / "inner").mkdir(parents=True)
+        (outer / "pcons-build.py").write_text(
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "inner = add_subdirectory('inner', build_tier='manual')\n"
+        )
+        (outer / "inner" / "pcons-build.py").write_text(
+            "import sys\n"
+            "from pcons import context\n"
+            "env = context.current_project.default_environment\n"
+            "t = env.Command(target='t.txt', source='../../in.txt', "
+            "command=[sys.executable, '-c', 'pass', '$SOURCE', '$TARGET'])\n"
+        )
+        ns = add_subdirectory("outer", build_tier="all")
+        assert tiers_of(project)[ns.inner.t.name] == "manual"
+
+    def test_an_unknown_tier_is_refused(self, project, env):
+        with pytest.raises(PconsError, match="build_tier must be one of"):
+            self._vendored(project, build_tier="sometimes")
+
+    def test_ninja_builds_a_floored_dependency_the_app_needs(self, project, env):
+        v = self._vendored(project, build_tier="manual")
+        env.Command(
+            target="app.txt", source=[v.lib], command=[*COPY, "$SOURCE", "$TARGET"]
+        )
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        text = (project.root_dir / "build" / "build.ninja").read_text()
+        default = next(ln for ln in text.splitlines() if ln.startswith("default "))
+        assert "app.txt" in default
+        assert "lib.txt" not in default and "demo.txt" not in default
+        # The app still depends on the vendored output, so ninja builds it.
+        app_edge = next(
+            ln for ln in text.splitlines() if ln.startswith("build app.txt")
+        )
+        assert "lib.txt" in app_edge
