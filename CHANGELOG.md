@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 This version's biggest change is reducing the need to name targets just to avoid identity conflicts. Now unless you specifically give a target a name (e.g. `Program(<name>, ...)` or via a name keyword arg like `Command(name=<name>, ...)`), targets may be left anonymous. You can still name them to look up named targets from another build script with `project.get_target()`.
 
+The other big change is how paths work in a subdirectory script. Every
+relative path a script writes is now read from its own directory, and
+`project.build_dir` and `env.build_dir` are absolute. So a script reached
+through `add_subdirectory` builds the same way it does on its own. Both
+changes break some existing scripts; the details are below.
+
 ### Added
 
 - `add_subdirectory(..., imports={...})` hands objects down to an included
