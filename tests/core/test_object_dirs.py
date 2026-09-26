@@ -9,6 +9,7 @@ the second compile replaces the first and both link the result.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -90,7 +91,9 @@ class TestOneNameForTwoKinds:
 
         assert _object_dirs(program) == {"build/obj.foo/src"}
         assert _object_dirs(library) == {"build/obj.foo.shared/src"}
-        assert [n.path.name for n in program.output_nodes] == ["foo"]
+        assert [n.path.name for n in program.output_nodes] == [
+            "foo" + env.target.exe_suffix
+        ]
         assert [n.path.name for n in library.output_nodes] == [
             env.target.shared_lib_prefix + "foo" + env.target.shared_lib_suffix
         ]
@@ -161,6 +164,9 @@ class TestOneNameForTwoKinds:
         with pytest.raises(KeyError, match="no spelling tells them apart"):
             _cached_target_lookup(build_dir)("foo")
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="the exports list is a Unix linker input"
+    )
     def test_the_link_input_file_lands_in_the_object_directory(
         self, tmp_path, sources, gcc_toolchain
     ):
@@ -198,7 +204,7 @@ class TestTwoEnvironmentsOneName:
             project.resolve()
 
         message = str(excinfo.value)
-        assert "both build build/obj.foo.shared/src/a.c.o" in message
+        assert f"both build {Path('build/obj.foo.shared/src/a.c.o')}" in message
         assert "p::foo@a" in message and "p::foo@b" in message
         assert 'env.build_prefix = "a"' in message
 
