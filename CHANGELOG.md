@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environments, paths, anything a directory needs from its parent or from a
   sibling. Built standalone it gets an empty mapping, so a script that does
   both reads `project.imports.get(...)`.
+- `env.Command(depfile=...)` takes a path as well as a suffix, for a tool
+  that names its depfile itself: `depfile=".d"` still means `<target>.d`,
+  and anything else is the file's own path, written like `target=`.
 
 ### Changed
 
@@ -83,6 +86,12 @@ to force invented names on scripts.
   allows the `-l:libfoo.a` GNU linker format.
 
 ### Fixed
+
+- `CargoBuild` now tracks a crate's sources through the dep-info file cargo
+  writes, instead of a glob taken when the build was described. A module
+  added later is rebuilt when it changes, and deleting one no longer fails
+  the build until pcons reruns (#173). A generated cbindgen header does the
+  same through cbindgen's `--depfile`, which needs cbindgen 0.24 or later.
 
 - Swift libraries build again with Swift 6, which refuses to emit a
   `.swiftinterface` unless the language mode is stated. Swift compiles now

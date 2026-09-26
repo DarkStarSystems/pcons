@@ -58,6 +58,16 @@ _OUTPUT_DIRECTORY_VARS: dict[str, str] = {
 _SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
 
 
+def _is_depfile_suffix(depfile: str | Path) -> bool:
+    """True if *depfile* names the file after the output (".d"), rather
+    than being the file's own path: a string of one leading dot and no
+    directory."""
+    return (
+        isinstance(depfile, str)
+        and re.fullmatch(r"\.[^./\\][^/\\]*", depfile) is not None
+    )
+
+
 def _warn_if_source_reads_as_singular(
     command: str | Sequence[Any], sources: int, at: SourceLocation
 ) -> None:
@@ -1457,7 +1467,7 @@ class Environment(_EnvironmentStubs):
         launcher: Sequence[str] | None = None,
         env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
-        depfile: str | None = None,
+        depfile: str | Path | None = None,
         deps_style: str | None = None,
     ) -> Target:
         """Run an arbitrary shell command to build targets from sources.
@@ -1618,14 +1628,16 @@ class Environment(_EnvironmentStubs):
                    Renders to a launcher, so the generated build file still
                    builds standalone: with no worker listening, the command
                    runs directly. See :mod:`pcons.workers`.
-            depfile: Suffix of the make-style dependency file the command
-                   writes, appended to the output: ".d" promises the command
-                   writes its discovered dependencies to ``<target>.d``.
-                   Whatever that file lists is rebuilt against, so a
-                   generator that reads includes or imports keeps working
-                   after an input it wasn't told about changes. Only for a
-                   command with a single target, since the file is named
-                   after the output.
+            depfile: The make-style dependency file the command writes.
+                   A suffix names it after the output: ".d" promises the
+                   command writes its discovered dependencies to
+                   ``<target>.d``. A path, written like ``target=``, is for
+                   a tool that names the file itself. Whatever that file
+                   lists is rebuilt against, so a generator that reads
+                   includes or imports keeps working after an input it
+                   wasn't told about changes. Only for a command with a
+                   single target. Ninja deletes the file once it has read
+                   it.
             deps_style: How those dependencies arrive: "gcc" (the default),
                    the make-style depfile above, or "msvc", MSVC
                    ``/showIncludes`` lines on stdout. Only meaningful
@@ -1684,7 +1696,11 @@ class Environment(_EnvironmentStubs):
             # Can be passed to Install() since it's a Target
             project.Install("dist/", [generated])
         """
-        from pcons.core.builder import GenericCommandBuilder, output_label
+        from pcons.core.builder import (
+            GenericCommandBuilder,
+            anchor_target_paths,
+            output_label,
+        )
         from pcons.core.errors import PconsError
         from pcons.core.node import FileNode
         from pcons.core.target import Target as TargetClass
@@ -1696,13 +1712,8 @@ class Environment(_EnvironmentStubs):
                 token for token in command if isinstance(token, (TargetClass, FileNode))
             ]
 
-        if depfile is not None and not depfile.startswith("."):
-            raise PconsError(
-                f"depfile={depfile!r}: a depfile is named by the suffix "
-                f'appended to the command\'s output, so it starts with a "." '
-                f'— ".d" for a command writing "<target>.d".',
-                location=get_caller_location(),
-            )
+        if depfile is not None and not _is_depfile_suffix(depfile):
+            depfile = anchor_target_paths(self, [depfile])[0]
         if deps_style is not None and deps_style not in ("gcc", "msvc"):
             raise PconsError(
                 f'deps_style={deps_style!r}: expected "gcc" (a make-style '

@@ -2496,10 +2496,33 @@ rerunning: a step that discovers its dependencies as it runs (like a
 compile, through its depfile, that records all included file paths)
 reruns only when what it discovered changes, so a generated header it
 never included doesn't recompile it, and neither does a linker script;
-a step that doesn't do any discovery (the link step, an `env.Command`)
+a step that doesn't do any discovery (the link step, an `env.Command`
+without `depfile=`)
 reruns whenever the dependency changes. A target given to `depends()`
 also passes its public usage requirements on, as if it were `link()`ed,
 but it is not passed to the linker command line.
+
+**A command discovers its dependencies with `depfile=`.** If the tool
+writes a make-style depfile, name it and ninja rebuilds against whatever
+the file lists. `depfile=".d"` means the tool writes `<target>.d`. A tool
+that names the file itself gets its path instead, written like `target=`:
+
+```python
+env.Command(
+    target="gen/schema.h",
+    source="schema.json",
+    command="python $SRCDIR/tools/codegen.py $SOURCE -o $TARGET",
+    depfile=".d",  # codegen.py writes gen/schema.h.d
+)
+env.Command(
+    target=artifact,
+    command=["cargo", "build", ...],
+    depfile=artifact.with_name("libfoo.d"),  # cargo's own name for it
+)
+```
+
+Either way the command has one target, and ninja deletes the file once it
+has read it.
 
 A step that discovers its dependencies can still miss one: a response
 file, a sanitizer ignore-list, anything the tool reads but never writes

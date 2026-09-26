@@ -126,22 +126,6 @@ def _profile_subdir(profile: str) -> str:
     return "debug" if profile == "dev" else profile
 
 
-def _collect_rust_sources(manifest_dir: Path) -> list[Path]:
-    """Best-effort glob of files that should trigger a cargo rerun.
-
-    Picks up .rs files, Cargo.toml, and Cargo.lock under the manifest
-    dir. Workspace members elsewhere on disk won't be tracked — that's
-    cargo's job to detect when it runs.
-    """
-    deps: list[Path] = []
-    for pattern in ("**/*.rs", "Cargo.toml", "Cargo.lock"):
-        for p in manifest_dir.glob(pattern):
-            if "target" in p.parts:
-                continue
-            deps.append(p)
-    return deps
-
-
 @builder(
     "CargoBuild",
     target_type="cargo",
@@ -254,7 +238,16 @@ class CargoBuildBuilder:
             cargo_cmd.extend(["--target", target_triple])
         cargo_cmd.extend(extra_args)
 
-        rust_sources = _collect_rust_sources(manifest_dir)
+        # What the crate reads comes from cargo itself: beside the artifact
+        # it writes a dep-info file, named after the artifact, listing every
+        # source file of the crate and its path dependencies, so a module
+        # added or removed later is tracked without rerunning pcons. That
+        # file leaves out the manifest and the lock file, so a change to
+        # either reruns the edge explicitly.
+        lock_file = manifest_dir / "Cargo.lock"
+        manifest_deps = [manifest_path]
+        if lock_file.is_file():
+            manifest_deps.append(lock_file)
 
         # Pass the command as a list so pcons treats each element as a
         # single token. Shell-quoting individual tokens would wrap pcons
@@ -262,10 +255,11 @@ class CargoBuildBuilder:
         cargo_target = env.Command(
             target=artifact_path,
             source=None,
-            depends=rust_sources,
             command=cargo_cmd,
             restat=True,
+            depfile=artifact_path.with_suffix(".d"),
         )
+        cargo_target.depends(*manifest_deps, on_change=True)
 
         if is_bin:
             # A bin crate has nothing to link: return the cargo Command
@@ -290,16 +284,19 @@ class CargoBuildBuilder:
                 crate_name,
                 "--output",
                 "$TARGET",
+                "--depfile",
+                "$TARGET.d",
                 str(manifest_dir),
             ]
 
             cbindgen_target = env.Command(
                 target=header_path,
                 source=None,
-                depends=[cbindgen_config, *rust_sources],
                 command=cbindgen_cmd,
                 restat=True,
+                depfile=".d",
             )
+            cbindgen_target.depends(cbindgen_config, *manifest_deps, on_change=True)
 
         # Wrap as an ImportedTarget so consumers' link() picks up flags.
         # For a Windows cdylib the linker consumes the import library,
