@@ -98,6 +98,20 @@ class _ChildNodeIndex:
         return self._by_dir.get(directory, [])
 
 
+def script_srcdir() -> str:
+    """``$SRCDIR`` as the running build script means it: its own directory.
+
+    The generators write ``$SRCDIR`` as the top-level source root, so a script
+    reached through ``add_subdirectory`` gets its directory appended. Outside
+    a build script it stays the root.
+    """
+    if Project.has_current():
+        offset = Project.current()._node_offset
+        if offset.parts:
+            return f"$SRCDIR/{offset.as_posix()}"
+    return "$SRCDIR"
+
+
 def _in_virtualenv(path: Path, root: Path) -> bool:
     """Whether *path* lives inside a virtualenv under *root*.
 
@@ -317,7 +331,7 @@ class Project(_ProjectBuilders):
     __slots__ = (
         "name",
         "root_dir",
-        "build_dir",
+        "_build_dir",
         "_environments",
         "_targets",
         "_nodes",
@@ -460,7 +474,7 @@ class Project(_ProjectBuilders):
 
                 warnings.warn(
                     f"Project '{self.name}': build_dir argument is ignored for sub-projects; "
-                    f"using parent project's build_dir '{self._parent.build_dir}' instead.",
+                    f"using parent project's build_dir '{self._parent._build_dir}' instead.",
                     UserWarning,
                     stacklevel=2,
                 )
@@ -478,7 +492,7 @@ class Project(_ProjectBuilders):
                     f"the top-level project at {top.root_dir}. add_subdirectory() "
                     f"only works for directories under the top-level project."
                 ) from exc
-            self.build_dir = top.build_dir / self._offset
+            self._build_dir = top._build_dir / self._offset
         else:
             first = Project.__top_level
             if build_dir is None:
@@ -509,7 +523,7 @@ class Project(_ProjectBuilders):
                     bd = bd.relative_to(self.root_dir)
                 except ValueError:
                     pass  # Out-of-tree build — keep absolute
-            self.build_dir = bd
+            self._build_dir = bd
 
             if first is not None:
                 mine = self._effective_output_dir()
@@ -532,7 +546,7 @@ class Project(_ProjectBuilders):
         # paths are rooted; `path_resolver` narrows it to this project's
         # directory.
         top = self.top
-        self._path_resolver = PathResolver(top.root_dir, top.build_dir)
+        self._path_resolver = PathResolver(top.root_dir, top._build_dir)
 
         # Register with the global registry (the CLI's iteration source).
         # After validation, to ensure we only register valid projects.
@@ -554,9 +568,9 @@ class Project(_ProjectBuilders):
         top-level projects claiming the same build directory.
         """
         bd = (
-            self.build_dir
-            if self.build_dir.is_absolute()
-            else (self.root_dir / self.build_dir)
+            self._build_dir
+            if self._build_dir.is_absolute()
+            else (self.root_dir / self._build_dir)
         )
         return Path(os.path.normpath(bd))
 
@@ -609,6 +623,19 @@ class Project(_ProjectBuilders):
         if self._subdir:
             return self.root_dir / self._subdir
         return self.root_dir
+
+    @property
+    def build_dir(self) -> Path:
+        """The absolute directory this script's targets build in.
+
+        The build-tree counterpart of :attr:`current_dir`: ``build/`` at the
+        top level, ``build/<subdir>/`` in a script reached through
+        ``add_subdirectory``, before any environment's ``build_prefix`` (see
+        ``env.build_dir`` for that). Absolute, so it names one file wherever
+        it goes: a source, a target, a command, or the disk.
+        """
+        top = self.top
+        return top.root_dir / top._build_dir / self._node_offset
 
     @property
     def _node_offset(self) -> Path:
@@ -855,7 +882,7 @@ class Project(_ProjectBuilders):
             setattr(env, key, value)
 
         # Set build_dir from project
-        env._set_project_build_dir(self.top.build_dir, self.build_dir)
+        env._set_project_build_dir(self.top._build_dir, self._build_dir)
 
         self._environments.append(env)
         return env
@@ -879,15 +906,26 @@ class Project(_ProjectBuilders):
         return Path(os.path.normpath(path))
 
     def node(self, path: Path | str, *, role: PathRole | None = None) -> FileNode:
-        """Get or create a file node for a path.
+        """Get or create the file node for *path*, as a build script means it.
 
-        This provides node deduplication - the same path always
-        returns the same node instance.
+        A relative path is read the way ``sources=`` reads one: from this
+        project's current directory, unless it starts with the build
+        directory (``project.build_dir / "gen/x.c"``). The same file always
+        gives the same node.
 
         Args:
             path: Path to the file.
             role: Optional path role recorded on the node (see PathRole).
         """
+        return self._node(self._script_path(path), role=role)
+
+    def _script_path(self, path: Path | str) -> Path:
+        """*path* as this project's current script wrote it, as a node path."""
+        return self.top_path_resolver.anchor_script_path(path, self._node_offset)
+
+    def _node(self, path: Path | str, *, role: PathRole | None = None) -> FileNode:
+        """Get or create the file node for a node path (top-root-relative or
+        absolute): the same path always returns the same node."""
         path = self._canonicalize_path(Path(path))
 
         if path not in self._nodes:
@@ -905,8 +943,9 @@ class Project(_ProjectBuilders):
         return node
 
     def dir_node(self, path: Path | str, *, role: PathRole | None = None) -> DirNode:
-        """Get or create a directory node for a path (deduplicated)."""
-        path = self._canonicalize_path(Path(path))
+        """Get or create a directory node for a path (deduplicated), read
+        like :meth:`node`."""
+        path = self._canonicalize_path(self._script_path(path))
         if path not in self._nodes:
             self._nodes[path] = DirNode(
                 path, role=role, defined_at=get_caller_location()
@@ -1351,7 +1390,7 @@ class Project(_ProjectBuilders):
         comparison regardless of whether they include the build_dir prefix.
         """
         parts = p.parts
-        bd_parts = self.build_dir.parts
+        bd_parts = self._build_dir.parts
         n = len(bd_parts)
         if bd_parts and parts[:n] == bd_parts:
             return Path(*parts[n:]) if len(parts) > n else Path(".")
@@ -1366,7 +1405,7 @@ class Project(_ProjectBuilders):
 
     def _child_keys(self, path: Path | str) -> list[Path]:
         """Registry keys strictly beneath *path* (see _ChildNodeIndex)."""
-        self._child_index.sync(self._nodes, self._normalize_for_index, self.build_dir)
+        self._child_index.sync(self._nodes, self._normalize_for_index, self._build_dir)
         return self._child_index.children(self._normalize_for_index(Path(path)))
 
     def get_child_nodes(self, path: Path | str) -> list[FileNode]:
@@ -1653,7 +1692,7 @@ class Project(_ProjectBuilders):
         """
         if source_path.is_absolute():
             return None
-        candidate = self.build_dir / source_path
+        candidate = self._build_dir / source_path
         for target in self.top.targets:
             for node in target.output_nodes:
                 if isinstance(node, FileNode) and node.path == candidate:
@@ -2009,15 +2048,7 @@ class Project(_ProjectBuilders):
 
         content = "\n".join(lines) + "\n"
 
-        # Write-if-changed. build_dir may be relative to root_dir (the usual
-        # case), so resolve it to an absolute location independent of the
-        # current working directory.
-        build_dir = (
-            self.build_dir
-            if self.build_dir.is_absolute()
-            else self.root_dir / self.build_dir
-        )
-        pc_path = build_dir / f"{name}.pc"
+        pc_path = self.build_dir / f"{name}.pc"
         pc_path.parent.mkdir(parents=True, exist_ok=True)
         if pc_path.exists() and pc_path.read_text() == content:
             return pc_path

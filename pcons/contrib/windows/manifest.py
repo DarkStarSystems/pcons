@@ -359,7 +359,8 @@ def create_app_manifest(
         command=[
             python_cmd,
             "-c",
-            f"import pathlib; pathlib.Path({str(output_path)!r}).write_text({xml_content!r}, encoding='utf-8')",
+            f"import pathlib, sys; pathlib.Path(sys.argv[1]).write_text({xml_content!r}, encoding='utf-8')",
+            "$TARGET",
         ],
     )
 
@@ -469,7 +470,8 @@ def create_assembly_manifest(
         command=[
             python_cmd,
             "-c",
-            f"import pathlib; pathlib.Path({str(output_path)!r}).write_text({xml_content!r}, encoding='utf-8')",
+            f"import pathlib, sys; pathlib.Path(sys.argv[1]).write_text({xml_content!r}, encoding='utf-8')",
+            "$TARGET",
         ],
     )
 

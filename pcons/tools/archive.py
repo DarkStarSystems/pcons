@@ -124,8 +124,8 @@ class ArchiveNodeFactory(PendingSourceFactory):
         output_path = Path(build_data["output"])
         tool = build_data["tool"]
 
-        # Via project.node() for deduplication
-        archive_node = self.project.node(output_path)
+        # Via project._node() for deduplication
+        archive_node = self.project._node(output_path)
         archive_node.add_inputs(sources)
 
         env = getattr(target, "_env", None)

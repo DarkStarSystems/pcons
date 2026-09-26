@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from pcons.core.node import BuildInfo, FileNode, Node, OutputInfo
-from pcons.core.project import Project
+from pcons.core.project import Project, script_srcdir
 from pcons.core.subst import PathToken, SourcePath, TargetPath, ToolPath
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -171,7 +171,7 @@ def apply_depends(
                 )
             dep_nodes.extend(item.output_nodes)
         elif project is not None:
-            dep_nodes.append(project.node(item))
+            dep_nodes.append(project._node(item))
         else:
             dep_nodes.append(FileNode(item, defined_at=get_caller_location()))
 
@@ -275,7 +275,7 @@ class BaseBuilder(ABC):
         sources: list[str | Path | Node],
         env: Environment | None = None,
     ) -> list[Node]:
-        """Convert sources to nodes, via project.node() (dedup) when available.
+        """Convert sources to nodes, via project._node() (dedup) when available.
 
         A written-out relative source is read from the directory of the
         script that declared it, so it carries that script's offset from
@@ -290,7 +290,11 @@ class BaseBuilder(ABC):
             if isinstance(src, Node):
                 result.append(src)
             elif project is not None:
-                result.append(project.node(offset / src if offset.parts else src))
+                result.append(
+                    project._node(
+                        project.top_path_resolver.anchor_script_path(src, offset)
+                    )
+                )
             else:
                 result.append(FileNode(src, defined_at=get_caller_location()))
         return result
@@ -433,7 +437,7 @@ class CommandBuilder(BaseBuilder):
         """Create a single target node."""
         project = getattr(env, "_project", None)
         node = (
-            project.node(target)
+            project._node(target)
             if project is not None
             else FileNode(target, defined_at=defined_at)
         )
@@ -576,7 +580,7 @@ class MultiOutputBuilder(CommandBuilder):
                 target_path = primary_target.with_suffix(spec.suffix)
 
             node = (
-                project.node(target_path)
+                project._node(target_path)
                 if project is not None
                 else FileNode(target_path, defined_at=defined_at)
             )
@@ -744,6 +748,22 @@ def _reject_hand_quoting(token: str) -> None:
     )
 
 
+def command_path(path: Path | FileNode, *, program: bool = False) -> PathToken:
+    """A file named in a command, which the generator writes as seen from
+    where the command runs.
+
+    A ``Path`` is read like ``sources=``: a relative one from the declaring
+    script's directory. A node is its own file. In the program position the
+    path is written the way the shell runs a program (``./tool``, or
+    backslashes on Windows).
+    """
+    if isinstance(path, FileNode):
+        path = path.path
+    elif not path.is_absolute() and Project.has_current():
+        path = Project.current()._script_path(path)
+    return PathToken(path=path, executable=program)
+
+
 def _tokenize_one(token: Any) -> Any:
     """Turn one command token into a marker, or leave it as it is.
 
@@ -894,7 +914,7 @@ def _output_role(project: Any, target: Path | str) -> str | None:
     if not path.is_absolute():
         return None  # build-dir relative, the ordinary case
 
-    build_dir = Path(project.root_dir) / project.build_dir
+    build_dir = project.top.build_dir
     try:
         path.relative_to(build_dir)
     except ValueError:
@@ -1008,7 +1028,12 @@ class GenericCommandBuilder(BaseBuilder):
         """
         tokens = command.split() if isinstance(command, str) else list(command)
 
-        return [_tokenize_one(token) for token in tokens]
+        return [
+            command_path(token, program=i == 0)
+            if isinstance(token, Path)
+            else _tokenize_one(token)
+            for i, token in enumerate(tokens)
+        ]
 
     @property
     def command(self) -> list:
@@ -1044,8 +1069,11 @@ class GenericCommandBuilder(BaseBuilder):
         alongside its path is substituted like anything else. $SRCDIR is held
         back for the generators, which alone know how to spell the source
         root — held back rather than skipped over, so a token carrying both
-        it and a ``$$`` still gets the escape collapsed.
+        it and a ``$$`` still gets the escape collapsed — and comes back as
+        the declaring script's directory (:func:`script_srcdir`).
         """
+
+        srcdir = script_srcdir()
 
         def expand(text: str) -> str:
             if "$" not in text:
@@ -1057,7 +1085,7 @@ class GenericCommandBuilder(BaseBuilder):
                     f"{text!r} expands to {len(tokens)} arguments, but it is "
                     f"attached to a $SOURCE/$TARGET path."
                 )
-            return tokens[0].replace(_SRCDIR_SENTINEL, "$SRCDIR")
+            return tokens[0].replace(_SRCDIR_SENTINEL, srcdir)
 
         expanded: list = []
         for token in self._command:
@@ -1072,7 +1100,7 @@ class GenericCommandBuilder(BaseBuilder):
                 # whitespace: a quoted argument stays one argument.
                 shielded = token.replace("$SRCDIR", _SRCDIR_SENTINEL)
                 expanded.extend(
-                    t.replace(_SRCDIR_SENTINEL, "$SRCDIR")
+                    t.replace(_SRCDIR_SENTINEL, srcdir)
                     for t in env.subst_list([shielded])
                 )
             else:
@@ -1105,7 +1133,7 @@ class GenericCommandBuilder(BaseBuilder):
         result: list[FileNode] = []
         for target in targets:
             node = (
-                project.node(target, role=_output_role(project, target))
+                project._node(target, role=_output_role(project, target))
                 if project is not None
                 else FileNode(target, defined_at=defined_at)
             )

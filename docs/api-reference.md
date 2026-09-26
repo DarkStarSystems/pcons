@@ -18,7 +18,7 @@ API:
 | `project.Default(*targets)` | Set default build targets |
 | `project.Alias(name, *targets)` | Create a named alias |
 | `project.resolve()` | Resolve all dependencies |
-| `project.node(path)` | Get/create a file node |
+| `project.node(path)` | Get/create a file node; a relative path is read like `sources=` |
 | `project.find_package(name, ...)` | Find external package (returns ImportedTarget) |
 | `project.find_package(name, system=True)` | Same, with the package's headers as system headers (`-isystem`) |
 | `project.find_package(name, env=env)` | Same, searching and caching for that environment only |
@@ -79,7 +79,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.use_clang_tidy(tool=None, args=())` | Run clang-tidy alongside every C/C++ compile |
 | `env.use(package)` | Apply package settings |
 | `env.clone()` | Create a copy |
-| `env.build_relative(path)` | A relative path as a command sees it: under the environment's `build_prefix`, relative to the build directory |
+| `env.build_dir` | Where a relative `target=` lands, absolute: the build directory, `build_prefix` and the script's subdirectory included |
 | `env.override(**kwargs)` | Context manager for temporary overrides |
 | `env.add_toolchain(toolchain)` | Add additional toolchain (e.g., CUDA) |
 | `env.toolchain` | The primary toolchain this environment was created with |

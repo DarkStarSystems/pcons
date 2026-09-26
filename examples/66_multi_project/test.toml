@@ -29,3 +29,4 @@ commands = [
 [skip]
 # The xcode generator builds to different paths.
 generators = ["xcode"]
+nested = "defines sibling top-level projects, each with its own build directory"

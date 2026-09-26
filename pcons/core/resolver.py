@@ -28,6 +28,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.builder import command_path
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.graph import topological_sort_targets
@@ -97,7 +98,11 @@ class PendingSourceFactory:
                 pass
             elif isinstance(source, (Path, str)):
                 resolved.append(
-                    self.project.node(offset / source if offset.parts else source)
+                    self.project._node(
+                        self.project.top_path_resolver.anchor_script_path(
+                            source, offset
+                        )
+                    )
                 )
         return resolved
 
@@ -416,7 +421,7 @@ class Resolver:
                 continue
             path = Path(token.path)
             if token.path_type == "build":
-                path = Path(project.build_dir) / path
+                path = Path(project._build_dir) / path
             dep = project._nodes.get(project._canonicalize_path(path))
             if (
                 not isinstance(dep, FileNode)
@@ -604,7 +609,7 @@ def _command_path(owner: Target, token: Target | FileNode) -> PathToken:
     from pcons.core.target import Target as TargetClass
 
     if not isinstance(token, TargetClass):
-        return PathToken(path=str(token.path), path_type="project")
+        return command_path(token)
 
     outputs = token.output_nodes
     if not outputs:
@@ -622,4 +627,4 @@ def _command_path(owner: Target, token: Target | FileNode) -> PathToken:
             f"one that is meant: {token.name}.output_nodes[0].",
             location=owner.defined_at,
         )
-    return PathToken(path=str(outputs[0].path), path_type="project")
+    return command_path(outputs[0])

@@ -12,7 +12,6 @@ from pathlib import Path
 
 from pcons import Project
 from pcons.core.builder_registry import builder
-from pcons.core.node import FileNode
 from pcons.core.target import Target
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -79,8 +78,7 @@ class GenerateVersionBuilder:
         Returns:
             A Target representing the version header generation.
         """
-        output_path = project.path_resolver.normalize_target_path(output)
-        target_name = name or f"version_{output_path.stem}"
+        target_name = name or f"version_{Path(output).stem}"
 
         # pcons passes `defined_at` to any create_target that accepts it, so a
         # diagnostic about this target points at the project.GenerateVersion()
@@ -93,8 +91,9 @@ class GenerateVersionBuilder:
         target._builder_name = "GenerateVersion"
 
         # Create the output node immediately (not using pending sources)
-        # This allows other targets to depend on the output node
-        output_node = FileNode(output_path, defined_at=get_caller_location())
+        # This allows other targets to depend on the output node. It goes in
+        # this script's build directory, wherever the script sits in the tree.
+        output_node = project.node(project.build_dir / output)
 
         # Generate the header content and build the command.
         # Use a triple-quoted Python string to avoid escaping issues.
@@ -113,8 +112,6 @@ class GenerateVersionBuilder:
             "command": f"\"{python_cmd}\" -c \"import base64; open(__import__('sys').argv[1], 'w').write(base64.b64decode('{encoded}').decode())\" $out",
         }
 
-        # Register the node and add to target
-        project._nodes[output_path] = output_node
         target.output_nodes.append(output_node)
         target.nodes.append(output_node)
 

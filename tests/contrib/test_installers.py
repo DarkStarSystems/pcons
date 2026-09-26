@@ -10,6 +10,7 @@ import pytest
 
 from pcons import Project
 from pcons.contrib.installers import _helpers
+from pcons.core.subst import SourcePath, TargetPath
 from pcons.core.target import Target
 
 
@@ -397,11 +398,10 @@ class TestMsixSigning:
         declared_path = signed.output_nodes[0].path
         assert declared_path == Path("build/TestApp-1.0.0.signed.msix")
 
-        # The command's own output file (the last --output value) must be
-        # the declared ninja target as the command sees it: the command
-        # runs in the build directory, whose prefix the node path carries.
+        # The command writes its own declared target: $TARGET, which the
+        # generator renders as that node's path.
         command = signed.output_nodes[0]._build_info["command"]
-        assert command[command.index("--output") + 1] == "TestApp-1.0.0.signed.msix"
+        assert isinstance(command[command.index("--output") + 1], TargetPath)
 
     def test_signed_target_input_is_unsigned_output(self, monkeypatch) -> None:
         """The sign step must consume the unsigned .msix, not itself."""
@@ -422,8 +422,11 @@ class TestMsixSigning:
             sign_cert=Path("dummy_cert.pfx"),
         )
 
-        command = signed.output_nodes[0]._build_info["command"]
-        assert command[command.index("--input") + 1] == "TestApp-1.0.0.msix"
+        project.resolve()
+        info = signed.output_nodes[0]._build_info
+        command = info["command"]
+        assert isinstance(command[command.index("--input") + 1], SourcePath)
+        assert [s.path for s in info["sources"]] == [Path("build/TestApp-1.0.0.msix")]
 
     def test_signing_password_not_embedded_literally(self, monkeypatch) -> None:
         """The certificate password must never appear literally in the command.
@@ -584,7 +587,7 @@ class TestValidateStagingPath:
         )
 
         with pytest.raises(ValueError, match="conflicts with"):
-            macos._validate_staging_path(project, ".pkg_staging")
+            macos._validate_staging_path(project, project.build_dir / ".pkg_staging")
 
     def test_raises_on_raw_node_conflict(self, tmp_path: Path) -> None:
         from pcons.contrib.installers import macos
@@ -595,7 +598,7 @@ class TestValidateStagingPath:
         project.node(project.build_dir / ".pkg_staging" / "stray_file.txt")
 
         with pytest.raises(ValueError, match="conflicts with"):
-            macos._validate_staging_path(project, ".pkg_staging")
+            macos._validate_staging_path(project, project.build_dir / ".pkg_staging")
 
     def test_no_conflict_for_unrelated_outputs(self, tmp_path: Path) -> None:
         from pcons.contrib.installers import macos
@@ -612,7 +615,7 @@ class TestValidateStagingPath:
         project.node(project.build_dir / "other" / "file.txt")
 
         # Should not raise.
-        macos._validate_staging_path(project, ".pkg_staging")
+        macos._validate_staging_path(project, project.build_dir / ".pkg_staging")
 
     def test_no_conflict_for_sibling_prefix(self, tmp_path: Path) -> None:
         """A staging dir with a matching prefix but different name isn't a conflict."""
@@ -629,7 +632,7 @@ class TestValidateStagingPath:
             command="",
         )
 
-        macos._validate_staging_path(project, ".pkg_staging")
+        macos._validate_staging_path(project, project.build_dir / ".pkg_staging")
 
 
 class TestWindowsInstallersErrors:
@@ -859,6 +862,46 @@ class TestInstallersUnderABuildPrefix:
 
         assert "build release/.pkg_staging/App/payload/t.txt:" in text
         assert "build debug/.pkg_staging/App/payload/t.txt:" in text
+
+
+class TestInstallersInASubdirectory:
+    """An installer declared by an add_subdirectory script stages and
+    writes under build/<subdir>/, and its commands read the same paths.
+    Staging used to be named from the build directory in command text and
+    then anchored again as an Install destination, one directory deeper.
+    """
+
+    @pytest.mark.parametrize("prefix", [None, "release"])
+    def test_pkg_paths_agree_in_a_subdirectory(
+        self, tmp_path: Path, monkeypatch, prefix: str | None
+    ):
+        from pcons.contrib.installers import macos
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        monkeypatch.setattr(macos, "_check_tool", lambda *a, **k: None)
+        monkeypatch.chdir(tmp_path)
+        sub = tmp_path / "pkg"
+        sub.mkdir()
+        (sub / "t.txt").write_text("x")
+        (sub / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\n"
+            "from pcons.contrib.installers import macos\n"
+            "project = Project('pkg')\n"
+            "env = project.Environment(name='rel')\n"
+            f"env.build_prefix = {prefix!r}\n"
+            "pkg = macos.create_pkg(project, env, name='App', version='1.0',\n"
+            "    identifier='com.example.app', sources=['t.txt'],\n"
+            "    install_location='/usr/local')\n"
+        )
+        top = Project("top", root_dir=tmp_path, build_dir=tmp_path / "build")
+        pkg = add_subdirectory("pkg").pkg
+        text = TestInstallersUnderABuildPrefix._ninja(top, tmp_path)
+
+        base = f"{prefix}/pkg" if prefix else "pkg"
+        assert f"build {base}/.pkg_staging/App/payload/t.txt:" in text
+        assert f"--root {base}/.pkg_staging/App/payload" in text
+        assert ".pkg_staging" not in text.replace(f"{base}/.pkg_staging", "")
+        assert pkg.output_nodes[0].path.as_posix().endswith(f"{base}/App-1.0.pkg")
 
 
 class TestInstallerDepends:

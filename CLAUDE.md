@@ -81,6 +81,7 @@ See `ARCHITECTURE.md` for full design documentation.
 - **Source paths**: Relative to project root (use `path_resolver.make_project_relative()`)
 - **Target paths**: Relative to build_dir (use `path_resolver.normalize_target_path()`)
 - **Never check filesystem existence**: Trust node paths, don't use `path.exists()` checks
+- **Path frames under `add_subdirectory`**: a relative path a script writes is read from the script's directory (`project.current_dir`; `project._script_path()` turns it into a node path); node paths are relative to the *top* root; commands run in the top build directory. `project.build_dir` and `env.build_dir` are absolute (the script's build directory; the env's adds `build_prefix`), so paths built on them are safe anywhere. In a command, put the `Path` or node itself in the list and let the generator write it; never render a build path into command text by hand. At the top level all frames coincide, so only `test_example_nested` (every example built as a subdirectory) catches a mix-up; an example that can't be nested says why under `[skip] nested`.
 
 ## Directory Structure
 

@@ -171,7 +171,7 @@ InsertFooterTool().setup(env)
 # Configure pandoc with our template. A PathToken keeps the flag relocatable:
 # the generator relativizes the path for the build file it writes.
 env.pandoc.template = PathToken(
-    prefix="--template=", path="template.html", path_type="project"
+    prefix="--template=", path=project.current_dir / "template.html"
 )
 env.pandoc.metadata = ["--metadata=title:'Widget Manual'"]
 

@@ -286,7 +286,7 @@ class CompileCommandsGenerator(BaseGenerator):
                 result.append(f"{token.prefix}{path}{token.suffix}")
             elif isinstance(token, PathToken):
                 if token.path_type == "build":
-                    path = str(Path(project.build_dir) / token.path)
+                    path = str(Path(project._build_dir) / token.path)
                     result.append(f"{token.prefix}{path}{token.suffix}")
                 else:
                     result.append(

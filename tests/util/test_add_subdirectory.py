@@ -484,7 +484,7 @@ class TestSubprojectDirectories:
 
     def test_top_level_dirs_unchanged(self, test_project: Project) -> None:
         """The top-level project keeps plain root/build directories."""
-        assert test_project.build_dir == Path("build")
+        assert test_project._build_dir == Path("build")
         assert test_project._node_offset.parts == ()
 
     def test_parallel_subdir_targets_get_distinct_paths(

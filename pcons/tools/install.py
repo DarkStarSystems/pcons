@@ -146,7 +146,10 @@ def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path
         return dest
     from pcons import get_var
 
-    prefix = get_var("PCONS_INSTALL_PREFIX", project.root_dir / "dist")
+    # One prefix for the whole build, wherever the install is declared.
+    prefix = get_var(
+        "PCONS_INSTALL_PREFIX", project.top_path_resolver.project_root / "dist"
+    )
     return prefix / dest
 
 
@@ -443,9 +446,11 @@ class InstallNodeFactory(PendingSourceFactory):
 
             dest_path = dest_dir / file_node.path.name
 
-            # Via project.node() for deduplication; install_output role
+            # Via project._node() for deduplication; install_output role
             # only for outside-build destinations (see _install_role).
-            dest_node = self.project.node(dest_path, role=self._install_role(dest_path))
+            dest_node = self.project._node(
+                dest_path, role=self._install_role(dest_path)
+            )
             dest_node.add_inputs([file_node])
 
             dest_node._build_info = {
@@ -484,7 +489,7 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_name = _stamp_name_for(rel_dest)
         stamp_path = stamps_dir / stamp_name
 
-        stamp_node = self.project.node(stamp_path)
+        stamp_node = self.project._node(stamp_path)
         # Source directory is the explicit dep (becomes $in for copytree).
         # Child nodes are implicit deps — they trigger rebuilds but don't
         # appear in $in (ninja's | syntax).
@@ -528,7 +533,7 @@ class InstallNodeFactory(PendingSourceFactory):
         rel_dest = self._destdir(dest_dir)
 
         stamp_path = target.build_dir / ".stamps" / _stamp_name_for(rel_dest)
-        stamp_node = self.project.node(stamp_path)
+        stamp_node = self.project._node(stamp_path)
         stamp_node.add_inputs(sources)
 
         env = self._get_install_env(target)
@@ -573,9 +578,9 @@ class InstallNodeFactory(PendingSourceFactory):
 
         source_node = sources[0]
 
-        # Via project.node() for deduplication; install_output role only
+        # Via project._node() for deduplication; install_output role only
         # for outside-build destinations (see _install_role).
-        dest_node = self.project.node(dest, role=self._install_role(dest))
+        dest_node = self.project._node(dest, role=self._install_role(dest))
         dest_node.add_inputs([source_node])
 
         env = self._get_install_env(target)
@@ -620,7 +625,7 @@ class InstallNodeFactory(PendingSourceFactory):
 
         # The stamp under build/.stamps is what ninja tracks; the copied
         # tree's destination is passed via the copytree command's destdir.
-        stamp_node = self.project.node(stamp_path)
+        stamp_node = self.project._node(stamp_path)
         # Source directory is the explicit dep (becomes $in for copytree).
         # Child nodes are implicit deps — they trigger rebuilds but don't
         # appear in $in (ninja's | syntax).

@@ -108,6 +108,31 @@ class TestGroupedCompile:
         assert outputs["swiftmodule"]["implicit"] is True
         assert str(outputs["swiftmodule"]["path"]).endswith("hello.swiftmodule")
 
+    def test_module_paths_follow_the_target_build_dir(self, swift_project) -> None:
+        """What swiftc is told to write is where the outputs are declared,
+        under a build_prefix too: the paths the command names come from the
+        output nodes, not from a fixed swiftmodules/ under the build dir."""
+        project, env = swift_project
+        env.build_prefix = "release"
+        env.swiftc.library_evolution = True
+        env.swiftc.interop_header = True
+        lib = project.StaticLibrary("Geometry", env, sources=["src/extra.swift"])
+        project.resolve()
+
+        info = lib.intermediate_nodes[0]._build_info
+        seen = project.top_path_resolver.make_execution_relative
+        outputs = info["outputs"]
+        module_flags = info["vars"]["MODULE_FLAGS"]
+        header_flags = info["vars"]["HEADER_FLAGS"]
+        interface_token = module_flags[
+            module_flags.index("-emit-module-interface-path") + 1
+        ]
+        module_path = seen(info["vars"]["MODULE_PATH"].path)
+        assert module_path == seen(outputs["swiftmodule"]["path"])
+        assert seen(interface_token.path) == seen(outputs["swiftinterface"]["path"])
+        assert seen(header_flags[1].path) == seen(outputs["clang_header"]["path"])
+        assert module_path.startswith("release/")
+
     def test_library_parse_as_library_and_propagation(self, swift_project) -> None:
         project, env = swift_project
         lib = project.StaticLibrary("Geometry", env, sources=["src/extra.swift"])
@@ -200,6 +225,31 @@ class TestClangModuleMap:
         assert "export *" in content
         # Header paths are absolute so the map works from any cwd.
         assert str(project.root_dir / "include" / "clib.h") in content
+
+    def test_reads_headers_and_writes_from_a_subdirectory(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Under add_subdirectory, headers are read from the calling script's
+        directory and the map lands in that script's build directory."""
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        monkeypatch.chdir(tmp_path)
+        top = Project("top", root_dir=tmp_path, build_dir="build")
+        child = tmp_path / "child"
+        (child / "include").mkdir(parents=True)
+        (child / "include" / "clib.h").write_text("void f(void);\n")
+        (child / "pcons-build.py").write_text(
+            "from pcons.core.project import Project\n"
+            "from pcons.toolchains.swift import clang_module_map\n"
+            "project = Project('child')\n"
+            "map_dir = clang_module_map(project, 'CLib', ['include/clib.h'])\n"
+        )
+
+        map_dir = add_subdirectory("child", project=top).map_dir
+
+        assert map_dir == tmp_path / "build" / "child" / "modulemaps" / "CLib"
+        content = (map_dir / "module.modulemap").read_text()
+        assert str(child / "include" / "clib.h") in content
 
     def test_write_if_changed(self, swift_project) -> None:
         from pcons.toolchains.swift import clang_module_map

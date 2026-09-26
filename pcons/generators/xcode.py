@@ -1100,7 +1100,7 @@ class XcodeGenerator(BaseGenerator):
         path_str = str(path)
 
         if self._pcons_project is not None:
-            build_dir_name = str(self._pcons_project.build_dir)
+            build_dir_name = str(self._pcons_project._build_dir)
             if path_str.startswith(build_dir_name + "/"):
                 return path_str[len(build_dir_name) + 1 :]
             if path_str.startswith(build_dir_name + "\\"):

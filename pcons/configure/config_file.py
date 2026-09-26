@@ -71,7 +71,7 @@ def configure_file(
         FileNotFoundError: If *template* does not exist.
         ValueError: If *style* is not recognised.
     """
-    template = Path(template)
+    template = _anchor(template)
     output = Path(output)
 
     # The template is an input to the build description, so editing it has to
@@ -153,18 +153,20 @@ def _register(path: Path) -> Path:
     from pcons.core.project import Project
 
     try:
-        Project.current().node(path)
+        Project.current()._node(path)
     except ValueError:
         pass
     return path
 
 
 def _anchor(path: Path | str) -> Path:
-    """A relative path taken from the project root, like every other in pcons.
+    """A relative path read from the build script's directory, as
+    ``sources=`` reads it; one under ``project.build_dir`` is in the build
+    tree.
 
-    Configure-time writes would otherwise land relative to the working
-    directory, which is the source root when the CLI runs a build script but
-    anything at all when a script or a test calls in directly.
+    Configure-time reads and writes would otherwise be relative to the
+    working directory, which is the source root when the CLI runs a build
+    script but anything at all when a script or a test calls in directly.
     """
     path = Path(path)
     if path.is_absolute():
@@ -173,9 +175,10 @@ def _anchor(path: Path | str) -> Path:
     from pcons.core.project import Project
 
     try:
-        return Path(Project.current().root_dir) / path
+        project = Project.current()
     except ValueError:
         return path  # no project: the working directory is all there is
+    return project.top.root_dir / project._script_path(path)
 
 
 def write_file(output: Path | str, content: str | bytes) -> Path:

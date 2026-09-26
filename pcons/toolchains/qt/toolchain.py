@@ -112,17 +112,31 @@ def _source_path(source: Node) -> Path:
 
 
 def _source_rel_dir(env: Environment, source: Node) -> tuple[str, ...]:
-    """Project-relative dir parts of a source, for collision-free layout."""
+    """Dir parts of a source, for a collision-free generated-file layout.
+
+    Taken from the declaring build script's directory when the source is
+    under it, so ``src/main.cpp`` gives ``qt.gen/src/main.moc`` whether the
+    script is the top-level one or reached through ``add_subdirectory``; a
+    source elsewhere keeps its path from the top-level root.
+    """
     project = getattr(env, "_project", None)
     root = None if project is None else project.top_path_resolver.project_root
-    return output_rel_dir(_source_path(source), root)
+    rel = output_rel_dir(_source_path(source), root)
+    from pcons.core.project import Project
+
+    if Project.has_current():
+        offset = Project.current()._node_offset.parts
+        if offset and rel[: len(offset)] == offset:
+            return rel[len(offset) :]
+    return rel
 
 
 class _QtGenBuilder(CommandBuilder):
-    """Shared base: default targets mirror the source's project relpath.
+    """Shared base: default targets mirror the source's directory.
 
-    Layout: ``<build_dir>/qt.gen/<src-rel-dir>/<generated name>``. The
-    relpath keeps same-named files in different directories collision-free.
+    Layout: ``<build_dir>/qt.gen/<src-rel-dir>/<generated name>``, the
+    directory taken from the declaring script's (see _source_rel_dir). It
+    keeps same-named files in different directories collision-free.
     Subclasses define the generated file's name via _output_name().
     """
 

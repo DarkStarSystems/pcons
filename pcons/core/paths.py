@@ -73,6 +73,19 @@ class PathResolver:
         """The absolute directory build commands run in: the build directory."""
         return self._resolved_build_dir
 
+    def anchor_script_path(self, path: Path | str, offset: Path) -> Path:
+        """A path a build script wrote, as a node path.
+
+        *offset* is the script's directory, from the top-level root. A
+        relative path is read from there, as ``sources=`` reads it, unless it
+        starts with the build directory: ``project.build_dir / "gen/x.c"`` is
+        already a path in the build tree. Absolute paths pass through.
+        """
+        p = Path(path)
+        if p.is_absolute() or not offset.parts:
+            return p
+        return offset / p
+
     def subdir(self, subdir: str | Path) -> PathResolver:
         """Return a new PathResolver with project_root and build_dir in *subdir*."""
         return PathResolver(self.project_root / subdir, self.build_dir / subdir)

@@ -94,7 +94,40 @@ returned, or give one an alias. One name for one kind in one environment is
 still refused. In `pcons_metadata.json` each of the two gets an id of
 `name#<type>`, so ids stay unique. See `examples/87_one_name_two_kinds`.
 
+**A subdirectory script's paths mean what they say**
+
+A script reached through `add_subdirectory` now reads every relative path
+from its own directory, and build-directory paths are absolute, so a script
+builds the same standalone and nested. Every example is now also built
+nested in the test suite, which is how the fixes below were found.
+
+**Breaking:**
+
+- `project.build_dir` and `env.build_dir` are absolute: this script's build
+  directory (`build/<subdir>/` when nested), and `env.build_dir` adds the
+  environment's `build_prefix`. `project.build_dir` can no longer be
+  assigned. An absolute `target=` is that file exactly, so
+  `target=project.build_dir / "x"` no longer picks up a `build_prefix`; write
+  `target="x"` or `env.build_dir / "x"`.
+- `$SRCDIR` is the declaring script's directory (was the top-level root).
+- `project.node(path)`, a relative `cwd=`, `configure_file()`'s template,
+  `write_file()` and a scanner's `scan_deps` read relative paths from the
+  script's directory.
+- `env.build_relative()` is gone. Put a `Path` in a list-form command and
+  pcons writes it from wherever the command runs; a relative one is read
+  from the script's directory.
+- Running a program the build made: use `tool=` / `$TOOL`, which writes the
+  path each shell needs. `./${SOURCES[0]}` failed under `cmd.exe` whenever
+  the program sat in a subdirectory.
+
 ### Fixed
+
+- In an `add_subdirectory` script: sources and dependencies written
+  `project.build_dir / ...` had the subdirectory added twice; Swift module
+  paths, installer staging (macOS pkg/dmg, MSIX), Qt deploy bundles, explicit
+  moc/uic/rcc outputs, Windows manifests, `.pc` files and graph generators
+  called on the subdirectory's project all wrote to the wrong place. The
+  default install prefix is one `dist/` for the whole build.
 
 - Two targets no longer share one object file behind your back. A name was
   all that placed a target's objects, so a static and a shared library of

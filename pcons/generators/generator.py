@@ -130,9 +130,15 @@ class BaseGenerator:
                 the last generation to run owns the root link.
         """
 
+        top = project.top
+        if self._is_build_generator and top is not project:
+            # The top-level project writes the build files for its whole
+            # tree, subdirectories included.
+            return
+
         def _generate_later():
-            if not project._resolved:
-                project.resolve()
+            if not top._resolved:
+                top.resolve()
             output_dir = self._resolve_output_dir(project)
             if self._is_build_generator:
                 self._log_build_tiers(project)
@@ -151,7 +157,9 @@ class BaseGenerator:
 
             write_test_manifest(project, output_dir)
 
-        BaseGenerator.__pending.setdefault(id(project), []).append(_generate_later)
+        # Only top-level queues are drained; a subdirectory's own request
+        # (a graph of its part of the tree, say) runs with its top's.
+        BaseGenerator.__pending.setdefault(id(top), []).append(_generate_later)
 
         if self._is_build_generator:
             project._mark_generated()
@@ -226,11 +234,9 @@ class BaseGenerator:
         return frozenset(flags)
 
     def _resolve_output_dir(self, project: Project) -> Path:
-        """Compute the output directory: build_dir, resolved against
-        root_dir if relative."""
-        if project.build_dir.is_absolute():
-            return project.build_dir
-        return project.root_dir / project.build_dir
+        """The project's build directory. ``build_dir`` is written from the
+        top-level root, which a subdirectory's ``root_dir`` is not."""
+        return project.build_dir
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Implementation of generate. Subclasses must override."""

@@ -70,10 +70,10 @@ class QtDeployBuilder:
                   Also aliased as ``deploy``.
             env: Environment with the qt toolchain (via find_qt).
             app: The program target to deploy.
-            bundle: macOS only — path of the .app bundle to fix up
-                (relative to the build dir), required there.
-            deploy_dir: Windows only — directory to deploy into
-                (default: next to the executable).
+            bundle: macOS only — path of the .app bundle to fix up,
+                written like ``target=``; required there.
+            deploy_dir: Windows only — directory to deploy into, written
+                like ``target=`` (default: next to the executable).
             flags: Extra flags for macdeployqt/windeployqt.
 
         Returns:
@@ -82,8 +82,7 @@ class QtDeployBuilder:
         _require_qt_tool(env, "QtDeploy()")
         defined_at = defined_at or get_caller_location()
         platform = get_platform()
-        build_dir = Path(env.get("build_dir", "build"))
-        stamp = build_dir / f"qt.{name}" / "deploy.stamp"
+        stamp = Path(f"qt.{name}", "deploy.stamp")
 
         from pcons.toolchains.qt.finder import qt_install
 
@@ -103,11 +102,13 @@ class QtDeployBuilder:
                     "(macdeployqt operates on app bundles; see "
                     "pcons.contrib.bundle for building one)."
                 )
-            command = _stamped_command(env, qt_tool("macdeployqt"), str(bundle), *flags)
+            command = _stamped_command(
+                env, qt_tool("macdeployqt"), env.build_dir / bundle, *flags
+            )
         elif platform.is_windows:
-            extra: list[str] = []
+            extra: list[str | Path] = []
             if deploy_dir is not None:
-                extra = ["--dir", str(deploy_dir)]
+                extra = ["--dir", env.build_dir / deploy_dir]
             command = _stamped_command(
                 env, qt_tool("windeployqt"), *extra, *flags, "$SOURCE"
             )

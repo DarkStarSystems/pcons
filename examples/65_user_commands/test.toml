@@ -17,9 +17,10 @@ commands = [
     # A command with an option of its own, running what the build produced.
     { run = "${PCONS} run greet --name pcons", expect_stdout = "Hello, pcons!" },
     # The project is resolved, so a command can ask where a target's output went.
-    # Only the directory is checked: the separator and the suffix are the
-    # platform's, and expected_outputs above already pins the path itself.
-    { run = "${PCONS} run where", expect_stdout = "build_dir: build" },
+    # build_dir is absolute, so only its last component is checked: the line
+    # ends there. The separator and the suffix are the platform's, and
+    # expected_outputs above already pins the path itself.
+    { run = "${PCONS} run where", expect_stdout = "build\ngreeter: " },
     # A group reaches its own subcommands, which pcons never sees.
     { run = "${PCONS} run docs list", expect_stdout = "greeter.c" },
     { run = "${PCONS} run docs count --unit files", expect_stdout = "1 files" },

@@ -745,10 +745,8 @@ class LlvmToolchain(UnixToolchain):
             # add dead lines to the build file.
             return {}, None
 
-        build_dir = project.build_dir
-        build_dir_fs = (
-            build_dir if build_dir.is_absolute() else project.root_dir / build_dir
-        )
+        build_dir = project._build_dir
+        build_dir_fs = project.top_path_resolver.execution_dir
         std_moddir = f"cxx_modules/std/{std_key}"
         (build_dir_fs / std_moddir).mkdir(parents=True, exist_ok=True)
 
@@ -773,8 +771,8 @@ class LlvmToolchain(UnixToolchain):
 
             pcm_rel = f"{std_moddir}/{logical}.pcm"
             obj_rel = f"{std_moddir}/{logical}.o"
-            std_obj_node = project.node(build_dir / obj_rel)
-            pcm_node = project.node(build_dir / pcm_rel)
+            std_obj_node = project._node(build_dir / obj_rel)
+            pcm_node = project._node(build_dir / pcm_rel)
             cmd_list: list[str] = [
                 compiler_cmd,
                 *passthrough,
@@ -799,7 +797,7 @@ class LlvmToolchain(UnixToolchain):
                 "tool": "cxx",
                 "command_var": "stdmodcmd",
                 "description": f"CXX {logical} module",
-                "sources": [project.node(cppm_path)],
+                "sources": [project._node(cppm_path)],
                 "command": cmd_list,
                 "outputs": {
                     "obj": {"path": std_obj_node.path, "implicit": False},
@@ -866,7 +864,7 @@ class MetalLibraryFactory(CompileLinkFactory):
         name = self._apply_output_naming(target, env, METAL_LIBRARY_TARGET_TYPE)
         path = target.build_dir / target.path_resolver.normalize_target_path(name)
 
-        node = self.project.node(path)
+        node = self.project._node(path)
         node.add_inputs(target.intermediate_nodes)
         # No link context: metallib takes .air files and nothing else — the
         # compile flags (-I, -std=metal3.0) are not accepted here, which is

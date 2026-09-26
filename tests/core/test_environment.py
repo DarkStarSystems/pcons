@@ -20,7 +20,8 @@ class TestEnvironmentBasic:
 
     def test_default_build_dir(self, test_project):  # noqa: F811
         env = Environment()
-        assert env.build_dir == Path("build")
+        assert env.build_dir_for(Path()) == Path("build")
+        assert env.build_dir == test_project.root_dir / "build"
 
     def test_set_cross_tool_var(self, test_project):  # noqa: F811
         env = Environment()
@@ -642,19 +643,19 @@ class TestBuildDirLayout:
     def test_plain_project(self, test_project):  # noqa: F811
         env = test_project.Environment()
         env.build_prefix = "mcu"
-        assert env.build_dir == Path("build/mcu")
+        assert env.build_dir_for(Path()) == Path("build/mcu")
 
     def test_sub_project_offset_stays_below_the_prefix(self, test_project, tmp_path):  # noqa: F811
         child = self._sub_project(test_project, tmp_path)
         env = child.Environment()
         env.build_prefix = "mcu"
-        assert env.build_dir == Path("build/mcu/sub")
+        assert env.build_dir_for(Path("sub")) == Path("build/mcu/sub")
 
     def test_user_build_dir_takes_the_prefix_below_it(self, test_project):  # noqa: F811
         env = test_project.Environment()
         env.build_dir = "build/rel"
         env.build_prefix = "mcu"
-        assert env.build_dir == Path("build/rel/mcu")
+        assert env.build_dir_for(Path()) == Path("build/rel/mcu")
 
     def test_user_build_dir_in_a_sub_project_drops_the_offset(
         self,
@@ -666,12 +667,12 @@ class TestBuildDirLayout:
         env = child.Environment()
         env.build_dir = "build/rel"
         env.build_prefix = "mcu"
-        assert env.build_dir == Path("build/rel/mcu")
+        assert env.build_dir_for(Path()) == Path("build/rel/mcu")
 
     def test_no_prefix_leaves_the_build_dir_alone(self, test_project):  # noqa: F811
         env = test_project.Environment()
         env.build_dir = "build/rel"
-        assert env.build_dir == Path("build/rel")
+        assert env.build_dir_for(Path()) == Path("build/rel")
 
     def test_setting_order_does_not_matter(self, test_project):  # noqa: F811
         first = test_project.Environment()
@@ -682,7 +683,11 @@ class TestBuildDirLayout:
         second.build_dir = "build/rel"
         second.build_prefix = "mcu"
 
-        assert first.build_dir == second.build_dir == Path("build/rel/mcu")
+        assert (
+            first.build_dir_for(Path())
+            == second.build_dir_for(Path())
+            == Path("build/rel/mcu")
+        )
 
     def test_build_dir_outside_the_top_build_dir(self, test_project, tmp_path):  # noqa: F811
         """A project built out of tree has no offset to split off."""
@@ -690,7 +695,7 @@ class TestBuildDirLayout:
         env = child.Environment()
         env._set_project_build_dir(Path("build"), Path("/elsewhere/out"))
         env.build_prefix = "mcu"
-        assert env.build_dir == Path("/elsewhere/out/mcu")
+        assert env.build_dir_for(Path()) == Path("/elsewhere/out/mcu")
 
 
 class TestCloneBuildDir:
@@ -706,8 +711,8 @@ class TestCloneBuildDir:
         clone = env.clone()
         clone.build_prefix = "x"
 
-        assert clone.build_dir == Path("build/rel/x")
-        assert env.build_dir == Path("build/rel")
+        assert clone.build_dir_for(Path()) == Path("build/rel/x")
+        assert env.build_dir_for(Path()) == Path("build/rel")
 
     def test_clone_keeps_the_sub_project_offset(self, test_project, tmp_path):  # noqa: F811
         (tmp_path / "sub").mkdir(exist_ok=True)
@@ -718,7 +723,7 @@ class TestCloneBuildDir:
         clone = env.clone()
         clone.build_prefix = "mcu"
 
-        assert clone.build_dir == Path("build/mcu/sub")
+        assert clone.build_dir_for(Path("sub")) == Path("build/mcu/sub")
 
 
 class TestEnvironmentName:
@@ -800,24 +805,26 @@ class TestAssignedFlagsKeepGrouping:
         ]
 
 
-class TestBuildRelative:
-    """env.build_relative(): a path as the build tool sees it, under the
-    environment's build_prefix."""
+class TestAbsoluteBuildDir:
+    """env.build_dir: where a relative target= lands, as an absolute path."""
 
-    def test_without_a_prefix_the_path_is_itself(self, test_project):  # noqa: F811
+    def test_it_is_the_build_directory(self, test_project):  # noqa: F811
         env = test_project.Environment()
-        assert env.build_relative("stage/app") == Path("stage/app")
+        assert env.build_dir == test_project.root_dir / "build"
 
-    def test_the_prefix_is_put_in_front(self, test_project):  # noqa: F811
+    def test_the_prefix_is_in_it(self, test_project):  # noqa: F811
         env = test_project.Environment(name="rel")
         env.build_prefix = "release/ae"
-        assert env.build_relative("stage/app") == Path("release/ae/stage/app")
+        assert env.build_dir == test_project.root_dir / "build/release/ae"
 
-    def test_an_absolute_path_is_left_alone(self, test_project):  # noqa: F811
+    def test_a_target_under_it_is_a_relative_target(self, test_project):  # noqa: F811
         env = test_project.Environment(name="rel")
         env.build_prefix = "release"
-        absolute = Path("/opt/out/app.pkg")
-        assert env.build_relative(absolute) == absolute
+        written = env.Command(target=env.build_dir / "a.txt", command="touch $TARGET")
+        relative = env.Command(target="b.txt", command="touch $TARGET")
+        assert (
+            written.output_nodes[0].path.parent == relative.output_nodes[0].path.parent
+        )
 
 
 class TestCloneName:

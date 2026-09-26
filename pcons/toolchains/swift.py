@@ -84,16 +84,16 @@ def clang_module_map(
             clang_module_map(project, "CStats", ["cstats/include/cstats.h"])
         )
 
-    Header paths are resolved to absolute paths inside the map, so the
-    generated file works regardless of where swiftc runs. A hand-written
-    module.modulemap shipped in the include dir works just as well.
+    Header paths are read from the calling script's directory, as
+    ``sources=`` reads them, and written absolute inside the map, so the
+    generated file works regardless of where swiftc runs. The map goes in
+    that script's build directory. A hand-written module.modulemap shipped
+    in the include dir works just as well.
     """
-    map_dir = Path(project.root_dir) / project.build_dir / "modulemaps" / name
+    map_dir = project.build_dir / "modulemaps" / name
     lines = [f"module {name} {{"]
     for header in headers:
-        p = Path(header)
-        if not p.is_absolute():
-            p = Path(project.root_dir) / p
+        p = project.top.root_dir / project._script_path(header)
         lines.append(f'    header "{p}"')
     lines.append("    export *")
     lines.append("}")
@@ -454,7 +454,14 @@ class SwiftToolchain(UnixToolchain):
     def setup_group_node(self, node: Any, target: Target, env: Environment) -> None:
         """Provide per-module template vars and declare the .swiftmodule output."""
         module_name = module_name_for(target.name)
-        module_path = target.build_dir / SWIFTMODULE_DIR / f"{module_name}.swiftmodule"
+        module_dir = target.build_dir / SWIFTMODULE_DIR
+        module_path = module_dir / f"{module_name}.swiftmodule"
+        root = target.project.top.root_dir
+
+        def build_token(path: Path) -> PathToken:
+            # The declared output's own path, which the generator writes as
+            # swiftc, running in the build directory, sees it.
+            return PathToken(path=root / path)
 
         # Programs may contain top-level code (the entry point); library
         # targets must not, and need -parse-as-library.
@@ -469,14 +476,11 @@ class SwiftToolchain(UnixToolchain):
             if target.target_type == "static_library" and get_platform().is_windows:
                 module_flags.append("-static")
             if bool(getattr(env.swiftc, "library_evolution", False)):
-                interface_rel = f"{SWIFTMODULE_DIR}/{module_name}.swiftinterface"
-                interface_path = (
-                    target.build_dir / SWIFTMODULE_DIR / f"{module_name}.swiftinterface"
-                )
+                interface_path = module_dir / f"{module_name}.swiftinterface"
                 module_flags += [
                     "-enable-library-evolution",
                     "-emit-module-interface-path",
-                    PathToken(path=interface_rel, path_type="build"),
+                    build_token(interface_path),
                     # The interface-verify pass runs as an extra frontend job
                     # that inherits our -Xfrontend depfile flags and rejects
                     # them ("this mode does not support emitting dependency
@@ -491,20 +495,12 @@ class SwiftToolchain(UnixToolchain):
         header_path = None
         emit_header = bool(getattr(env.swiftc, "interop_header", False))
         if emit_header and is_library:
-            header_rel = f"{SWIFTMODULE_DIR}/{module_name}-Swift.h"
-            header_path = target.build_dir / SWIFTMODULE_DIR / f"{module_name}-Swift.h"
-            header_flags = [
-                "-emit-clang-header-path",
-                PathToken(path=header_rel, path_type="build"),
-            ]
+            header_path = module_dir / f"{module_name}-Swift.h"
+            header_flags = ["-emit-clang-header-path", build_token(header_path)]
 
         node._build_info["vars"] = {
             "MODULE_NAME": module_name,
-            # path_type="build" paths are given relative to the build dir
-            "MODULE_PATH": PathToken(
-                path=f"{SWIFTMODULE_DIR}/{module_name}.swiftmodule",
-                path_type="build",
-            ),
+            "MODULE_PATH": build_token(module_path),
             "MODULE_FLAGS": module_flags,
             "HEADER_FLAGS": header_flags,
         }
@@ -536,21 +532,22 @@ class SwiftToolchain(UnixToolchain):
             # gain an implicit dep on it (same mechanism as cargo+cbindgen
             # generated headers), so C++ that #includes it builds after it
             # exists.
-            target.output_nodes.append(target.project.node(header_path))
+            target.output_nodes.append(target.project._node(header_path))
 
         # Dependents' compile steps need the module search path and an
         # ordering edge on the .swiftmodule file. Record it on the target;
         # consumed below for this target's dependencies.
-        module_node = target.project.node(module_path)
+        module_node = target.project._node(module_path)
         target._builder_data["swiftmodule_node"] = module_node
 
         # Library targets propagate the shared swiftmodules/ dir so
         # dependents' `import Foo` resolves — ordinary usage requirements
         # carry it to their swiftc.includes.
         if target.target_type != "program":
-            module_search_dir = target.build_dir / SWIFTMODULE_DIR
-            if module_search_dir not in target.public.include_dirs:
-                target.public.include_dirs.append(module_search_dir)
+            if module_dir not in target.public.include_dirs:
+                target.public.include_dirs.append(
+                    target.project.top.root_dir / module_dir
+                )
 
         # Wire this compile against every dependency's .swiftmodule (deps
         # resolve before dependents, so their nodes exist by now).

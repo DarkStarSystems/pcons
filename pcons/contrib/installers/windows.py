@@ -31,7 +31,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.contrib.installers._helpers import as_installer_step, staging_dir
+from pcons.contrib.installers._helpers import (
+    as_installer_step,
+    staging_dir,
+)
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -114,13 +117,15 @@ def create_msix(
             the package root, so an exe inside one needs that prefix
             (e.g. sources=["build/deploy"] -> executable="deploy\\myapp.exe").
             If not specified, defaults to first source file's name.
-        output: Output .msix path. Defaults to build/<name>-<version>.msix.
+        output: Output .msix path, written like ``target=``. Defaults to
+            <name>-<version>.msix in the build directory.
         depends: Targets that must be built before the sources are staged,
             for a directory source that other targets populate.
         display_name: Display name shown to users. Defaults to name.
         description: Package description.
         processor_architecture: Target architecture ("x64", "x86", "arm64").
-        sign_cert: Path to .pfx certificate for signing.
+        sign_cert: Path to .pfx certificate for signing, read from the build
+            script's directory.
         sign_password_env: Name of an environment variable holding the
             certificate password. The password itself is never embedded in
             the generated build file; it is read from the environment when
@@ -175,22 +180,17 @@ def create_msix(
     if not executable.lower().endswith(".exe"):
         executable = f"{executable}.exe"
 
-    # All paths below are relative to build_dir, where ninja/make run, and
-    # under the environment's build prefix; Command targets are made
-    # absolute so the environment doesn't prefix them a second time.
-    output = env.build_relative(output)
-    staging_rel = staging_dir(env, "msix", name)
-    manifest_rel = staging_rel / "AppxManifest.xml"
+    # Absolute, so the path means the same in target= and in a command.
+    output = env.build_dir / output
+    staging = staging_dir(env, "msix", name)
 
-    # Stage source files into build dir
-    stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    stage_target = project.Install(staging, sources, no_prefix=True, env=env)
     if depends:
         stage_target.depends(*depends)
 
-    # Generate AppxManifest.xml (use relative path for target)
     manifest_target = as_installer_step(
         env.Command(
-            target=project.build_dir / manifest_rel,
+            target=staging / "AppxManifest.xml",
             source=None,
             command=[
                 python_cmd,
@@ -198,7 +198,7 @@ def create_msix(
                 "pcons.contrib.installers._helpers",
                 "gen_appx_manifest",
                 "--output",
-                str(manifest_rel),
+                "$TARGET",
                 "--name",
                 name,
                 "--version",
@@ -216,10 +216,9 @@ def create_msix(
 
     # Generate placeholder assets (required for MSIX)
     # Output a stamp file to track that assets were generated
-    assets_stamp = staging_rel / "Assets" / ".stamp"
     assets_target = as_installer_step(
         env.Command(
-            target=project.build_dir / assets_stamp,
+            target=staging / "Assets" / ".stamp",
             source=None,
             command=[
                 python_cmd,
@@ -227,26 +226,26 @@ def create_msix(
                 "pcons.contrib.installers._helpers",
                 "gen_msix_assets",
                 "--output-dir",
-                str(staging_rel),
+                staging,
             ],
         ),
         by="create_msix",
     )
 
-    # Build MSIX with MakeAppx (use relative path for staging dir)
+    # Build MSIX with MakeAppx
     makeappx_cmd = [
         makeappx,
         "pack",
         "/d",
-        str(staging_rel),
+        staging,
         "/p",
-        str(output),
+        "$TARGET",
         "/o",  # Overwrite existing
     ]
 
     msix_target = as_installer_step(
         env.Command(
-            target=project.build_dir / output,
+            target=output,
             source=[stage_target, manifest_target, assets_target],
             command=makeappx_cmd,
         ),
@@ -269,26 +268,25 @@ def create_msix(
         # steps above) so the declared ninja target is the file that's
         # actually written: a copy of the unsigned .msix is made and that
         # copy is signed, leaving the unsigned package intact.
-        signed_output = output.with_suffix(".signed.msix")
         sign_cmd = [
             python_cmd,
             "-m",
             "pcons.contrib.installers._helpers",
             "sign_msix",
             "--input",
-            str(output),
+            "$SOURCE",
             "--output",
-            str(signed_output),
+            "$TARGET",
             "--signtool",
             signtool,
             "--cert",
-            str(sign_cert),
+            str(project.current_dir / sign_cert),
             *(["--password-env", sign_password_env] if sign_password_env else []),
         ]
 
         signed_target = as_installer_step(
             env.Command(
-                target=project.build_dir / signed_output,
+                target=output.with_suffix(".signed.msix"),
                 source=[msix_target],
                 command=sign_cmd,
             ),

@@ -202,7 +202,7 @@ class Environment(_EnvironmentStubs):
         self._project = Project.current()
         if self._project is not None:
             self._set_project_build_dir(
-                self._project.top.build_dir, self._project.build_dir
+                self._project.top._build_dir, self._project._build_dir
             )
 
         self._toolchain = toolchain
@@ -393,28 +393,24 @@ class Environment(_EnvironmentStubs):
         result = base / prefix if prefix else base
         return result / subdir if subdir.parts else result
 
-    def build_relative(self, path: Path | str) -> Path:
-        """*path* as the build tool sees it, under this environment's prefix.
+    @property
+    def build_dir(self) -> Path:
+        """Where a relative ``target=`` of the running script lands, absolute.
 
-        Commands run in the build directory, so a path written into command
-        text is relative to it. A relative *path* is anchored in this
-        environment's build directory, ``build_prefix`` and all, and comes
-        back relative to the build directory: the mirror image of what a
-        relative ``target=`` gets, which anchors the path for the node graph.
-        An absolute path is returned as it is.
-
-        Example:
-            env.build_prefix = "release"
-            env.build_relative("stage/app")   # Path("release/stage/app")
+        This environment's build directory with its ``build_prefix``, below
+        the ``add_subdirectory`` directory of the script asking, so
+        ``target=env.build_dir / "x"`` and ``target="x"`` name one file.
+        Assigning it names the whole directory, from the top-level root.
         """
-        path = Path(path)
-        if path.is_absolute():
-            return path
-        try:
-            prefix = self._effective_build_dir().relative_to(self._build_dir_base)
-        except ValueError:
-            prefix = Path()
-        return prefix / path
+        from pcons.core.project import Project
+
+        offset = (
+            Project.current()._node_offset
+            if Project.has_current()
+            else self._build_dir_offset
+        )
+        path = self.build_dir_for(offset)
+        return self._project.top.root_dir / path if self._project else path
 
     def _effective_build_dir(self) -> Path:
         """This environment's own build directory.
@@ -1333,10 +1329,10 @@ class Environment(_EnvironmentStubs):
         """
         from pcons.core.node import FileNode
 
-        # Use project.node() for deduplication when available
+        # Use project._node() for deduplication when available
         matches = list(Path(".").glob(pattern))
         if self._project is not None:
-            return [self._project.node(p) for p in matches]
+            return [self._project._node(p) for p in matches]
         return [FileNode(p, defined_at=get_caller_location()) for p in matches]
 
     def Framework(self, *names: str, dirs: list[str] | None = None) -> None:
@@ -1439,7 +1435,8 @@ class Environment(_EnvironmentStubs):
         apply_requirements_to_env(self, reqs, origin=getattr(package, "name", None))
 
     def _resolve_cwd(self, cwd: str | Path | None) -> Path | None:
-        """Anchor a ``cwd=`` argument, which is relative to the project root.
+        """Anchor a ``cwd=`` argument, which is relative to the declaring
+        script's directory, as ``sources=`` is.
 
         Absolute at this point, so generators need no notion of where a
         working directory was spelled from.
@@ -1449,6 +1446,10 @@ class Environment(_EnvironmentStubs):
         path = Path(cwd)
         if path.is_absolute():
             return path
+        from pcons.core.project import Project
+
+        if Project.has_current():
+            return Project.current().current_dir / path
         root = getattr(self._project, "root_dir", None) if self._project else None
         return (root or Path.cwd()) / path
 
@@ -1458,7 +1459,7 @@ class Environment(_EnvironmentStubs):
         target: str | Path | list[str | Path],
         tool: Target | str | Path | None = None,
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
-        command: str | Sequence[str | Target | FileNode] = "",
+        command: str | Sequence[str | Path | Target | FileNode] = "",
         name: str | None = None,
         depends: str | Path | Sequence[str | Path] | None = None,
         restat: bool = False,
@@ -1487,9 +1488,11 @@ class Environment(_EnvironmentStubs):
                     ``add_subdirectory``, ``"out.txt"`` is
                     ``<build_dir>/<subdir>/out.txt``, where that script's
                     programs and libraries also build. A leading build-dir
-                    component is absorbed, so a target written from the
-                    project root (``build_dir / "out.txt"``) means the same
-                    file as ``"out.txt"``. For a file in a literal
+                    component is absorbed, so ``"build/out.txt"`` means the
+                    same file as ``"out.txt"``. An absolute path is that file
+                    exactly: ``env.build_dir / "out.txt"`` is ``"out.txt"``
+                    too, since ``env.build_dir`` is where a relative target
+                    lands. For a file in a literal
                     subdirectory sharing the build directory's name, write
                     the prefix explicitly: ``project.build_dir / "build/x.h"``.
                     An absolute path outside the build directory is an
@@ -1525,7 +1528,8 @@ class Environment(_EnvironmentStubs):
                     - ${SOURCES[n]}: Indexed source access (0-based)
                     - ${TARGETS[n]}: Indexed target access (0-based)
                     - ${SOURCES[n:m]}: A range of sources, either end optional
-                    - $SRCDIR: Project source tree root directory. Use this
+                    - $SRCDIR: The declaring script's source directory
+                      (the project root, at the top level). Use this
                       to reference source-tree files that aren't listed as
                       sources (e.g., config files, scripts). Example:
                       "$SRCDIR/scripts/generate.py $SOURCE $TARGET"
@@ -1534,9 +1538,7 @@ class Environment(_EnvironmentStubs):
                       for the command's own environment belongs in
                       ``env_vars=``, not in the command line.
                     Any of these may be part of a larger argument, e.g.
-                    "./${SOURCES[0]}" to run a program this build produced (a
-                    POSIX shell would otherwise look a bare name up on $PATH)
-                    or "--out=$TARGET". Attached to a form that expands to
+                    "--out=$TARGET". Attached to a form that expands to
                     several paths, the text repeats on each of them.
                     Any other $variable is expanded from this environment.
 
@@ -1548,7 +1550,10 @@ class Environment(_EnvironmentStubs):
                     does not join ``$SOURCES``, so the indices a caller
                     already wrote keep their meaning. A ``Target`` with
                     several outputs is ambiguous and raises; name the one
-                    that is meant, ``tool.output_nodes[0]``.
+                    that is meant, ``tool.output_nodes[0]``. A ``Path``
+                    names a file the same way, read like ``sources=`` when
+                    relative, but adds no dependency: it may be a directory
+                    the command only writes to.
 
                     First in the list, such a token is the program the
                     command runs, and is spelled the way the shell will run
@@ -1564,8 +1569,8 @@ class Environment(_EnvironmentStubs):
                     directory). So a path
                     written relative — "tools/gen.pl" — is looked for under
                     the build directory and won't be found. Spell it
-                    "$SRCDIR/tools/gen.pl" (``$SRCDIR`` is the *project*
-                    root, not the subdirectory), pass an absolute path
+                    "$SRCDIR/tools/gen.pl" (``$SRCDIR`` is the declaring
+                    script's directory, like ``sources=``), pass an absolute path
                     (pcons rewrites those to stay relocatable), or move the
                     whole command with ``cwd=``.
 
@@ -1677,15 +1682,8 @@ class Environment(_EnvironmentStubs):
             )
 
             # Run a tool this build produced over a variable-length input
-            # list. Sources keep the order given, so the tool is source 0.
-            atlas = env.Command(
-                target="atlas.bin",
-                source=[packer, *sprites],
-                command="./${SOURCES[0]} --out=$TARGET ${SOURCES[1:]}"
-            )
-
-            # Name the tool that runs it. $SOURCES stays the real inputs,
-            # and nothing writes a "./" or a platform conditional.
+            # list. $SOURCES stays the real inputs, and nothing writes a
+            # "./" or a platform conditional.
             atlas = env.Command(
                 target="atlas.bin",
                 tool=packer,

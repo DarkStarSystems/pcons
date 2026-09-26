@@ -394,7 +394,7 @@ def emit_module(
         way a node path is, and the bytes to write there, or None when this
         function already claimed that path. The path is neither a disk path
         nor what ``env.Command`` takes as a source: write to ``root / path``,
-        and hand the builder ``project.node(path)``, or a subdirectory's
+        and hand the builder ``project._node(path)``, or a subdirectory's
         offset is applied twice.
 
     Raises:
@@ -1336,9 +1336,9 @@ class PyBuilder:
             name=name,
             command=[
                 interpreter,
-                self._project.node(runner_rel),
-                self._project.node(module_rel),
-                self._project.node(args_rel),
+                self._project._node(runner_rel),
+                self._project._node(module_rel),
+                self._project._node(args_rel),
                 "--n-targets",
                 str(len(_as_list(target))),
                 "$TARGETS",

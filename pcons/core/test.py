@@ -225,7 +225,7 @@ def write_test_manifest(project: Project, output_dir: Path) -> Path | None:
     data = {
         "version": MANIFEST_VERSION,
         "project": project.name,
-        "build_dir": str(project.build_dir).replace("\\", "/"),
+        "build_dir": str(project._build_dir).replace("\\", "/"),
         "tests": [spec.to_jsonable() for spec in specs],
     }
 

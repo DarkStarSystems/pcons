@@ -297,7 +297,7 @@ def render_explanation(
     yield style.title(f"## Explanation of Targets and Environments: {subject}")
     yield style.dim(
         f"Commands are shown as the build runs them, from the build "
-        f"directory ({Path(project.build_dir).as_posix()})."
+        f"directory ({Path(project._build_dir).as_posix()})."
     )
     yield ""
 

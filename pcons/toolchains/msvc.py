@@ -1138,10 +1138,8 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         if std_key not in keys:
             return {}, None
 
-        build_dir = project.build_dir
-        build_dir_fs = (
-            build_dir if build_dir.is_absolute() else project.root_dir / build_dir
-        )
+        build_dir = project._build_dir
+        build_dir_fs = project.top_path_resolver.execution_dir
         std_moddir = f"cxx_modules/std/{std_key}"
         (build_dir_fs / std_moddir).mkdir(parents=True, exist_ok=True)
 
@@ -1160,13 +1158,13 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
             ifc_rel = f"{std_moddir}/{logical}.ifc"
             obj_rel = f"{std_moddir}/{logical}.obj"
-            std_obj_node = project.node(build_dir / obj_rel)
-            ifc_node = project.node(build_dir / ifc_rel)
+            std_obj_node = project._node(build_dir / obj_rel)
+            ifc_node = project._node(build_dir / ifc_rel)
             std_obj_node._build_info = {
                 "tool": "cxx",
                 "command_var": "stdmodcmd",
                 "description": f"CXX {logical} module",
-                "sources": [project.node(ixx_path)],
+                "sources": [project._node(ixx_path)],
                 "command": [
                     compiler_cmd,
                     "/nologo",
