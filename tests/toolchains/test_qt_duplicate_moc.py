@@ -118,7 +118,7 @@ class TestTheReportEdge:
         edges = _report_edges(ninja)
         assert len(edges) == 1
         assert "qt.app/automoc.exports.json" in edges[0]
-        assert "qt.mod/automoc.exports.json" in edges[0]
+        assert "qt.mod.object/automoc.exports.json" in edges[0]
 
     def test_a_shared_librarys_private_link_stays_behind_its_own_link(
         self, shared_dir_tree
@@ -148,8 +148,8 @@ class TestTheReportEdge:
         edges = _report_edges(ninja)
         assert len(edges) == 1
         assert "qt.app/automoc.exports.json" in edges[0]
-        assert "qt.shared/automoc.exports.json" in edges[0]
-        assert "qt.mod/automoc.exports.json" not in edges[0]
+        assert "qt.shared.shared/automoc.exports.json" in edges[0]
+        assert "qt.mod.object/automoc.exports.json" not in edges[0]
 
     def test_the_root_link_waits_for_the_report(self, shared_dir_tree):
         project = Project(
@@ -205,7 +205,7 @@ class TestTheReportEdge:
         edge = _report_edges(ninja)[0]
         assert edge.startswith("build host/qt.mocreport.")
         assert "host/qt.app/automoc.exports.json" in edge
-        assert "host/qt.mod/automoc.exports.json" in edge
+        assert "host/qt.mod.object/automoc.exports.json" in edge
         spec = json.loads(
             (shared_dir_tree / "build" / "host" / "qt.app" / "automoc.json").read_text()
         )
@@ -269,7 +269,7 @@ class TestTheReportAcrossSubdirectories:
         edges = _report_edges(ninja)
         assert len(edges) == 1
         assert "child/qt.app/automoc.exports.json" in edges[0]
-        assert "child/qt.mod/automoc.exports.json" in edges[0]
+        assert "child/qt.mod.object/automoc.exports.json" in edges[0]
         spec = json.loads(
             (
                 shared_dir_tree / "build" / "child" / "qt.app" / "automoc.json"

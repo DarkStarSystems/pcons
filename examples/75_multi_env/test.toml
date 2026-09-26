@@ -10,7 +10,7 @@ standalone_subdirs = ["parity"]
 # Paths are Unix-style; automatically adapted for Windows
 expected_outputs = [
     "build/host/lib/libchecksum.a",
-    "build/host/obj.checksum/src/checksum.c.o",
+    "build/host/obj.checksum.static/src/checksum.c.o",
     "build/host/bin/app",
     "build/strict/lib/libchecksum.a",
     "build/strict/bin/app",

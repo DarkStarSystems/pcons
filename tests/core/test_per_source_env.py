@@ -116,7 +116,7 @@ class TestPerSourceEnvironment:
         rules = {
             line.split()[2]  # "build <output>: <rule> <inputs>"
             for line in content.splitlines()
-            if line.startswith("build obj.core/") and ".c.o:" in line
+            if line.startswith("build obj.core.static/") and ".c.o:" in line
         }
         assert len(rules) == 2  # a.c and b.c share one rule, slow.c has its own
 

@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING
 from xml.sax.saxutils import escape
 
 from pcons.core.builder import anchor_target_paths
-from pcons.core.builder_registry import builder
+from pcons.core.builder_registry import BuilderRegistry, builder
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import PathToken
 from pcons.toolchains.qt.scan import _HEADER_SUFFIXES, output_rel_dir
@@ -53,6 +53,7 @@ from pcons.toolchains.qt.toolchain import (
     _source_path,
     _source_rel_dir,
 )
+from pcons.tools.compile_link import target_kind_suffix
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
@@ -138,6 +139,14 @@ def _qt_gen_dir_for(
         project.top_path_resolver.project_root,
         anchor_target_paths(env, [Path(subdir)])[0],
     )
+
+
+def _qt_gen_dir_suffix(kind: str) -> str:
+    """The kind qualifier for the builder *kind* names, so a Qt target's
+    generated sources sit beside its objects: ``qt.app/`` for a program,
+    ``qt.app.shared/`` for a shared library."""
+    registration = BuilderRegistry.get(kind)
+    return target_kind_suffix(registration.target_type if registration else None)
 
 
 def _env_include_dirs(project: Project, env: Environment) -> list[Path]:
@@ -435,7 +444,7 @@ def _qt_make_target(
     """Shared implementation of QtProgram/QtSharedLibrary/QtStaticLibrary."""
     _require_qt_tool(env, f"Qt{kind}()")
     defined_at = defined_at or get_caller_location()
-    root, qt_dir = _qt_gen_dir_for(project, env, f"qt.{name}")
+    root, qt_dir = _qt_gen_dir_for(project, env, f"qt.{name}{_qt_gen_dir_suffix(kind)}")
     build_dir = qt_dir.parent
     qt_env = env.clone()
 

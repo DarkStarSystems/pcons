@@ -82,7 +82,7 @@ class TestAFileNamedInFlagsIsADependency:
         )
 
         text = _ninja(project, tmp_path)
-        compile_ = _edge(text, "obj.a/a.c.o")
+        compile_ = _edge(text, "obj.a.static/a.c.o")
 
         assert "flags.rsp" in compile_.split("|", 1)[1]
 
@@ -96,7 +96,7 @@ class TestAFileNamedInFlagsIsADependency:
         lib.private.include_dirs.append("inc")
 
         text = _ninja(project, tmp_path)
-        compile_ = _edge(text, "obj.a/a.c.o")
+        compile_ = _edge(text, "obj.a.static/a.c.o")
 
         assert "| " not in compile_ or "inc" not in compile_.split("|", 1)[1]
 
@@ -114,6 +114,6 @@ class TestAFileNamedInFlagsIsADependency:
         )
 
         text = _ninja(project, tmp_path)
-        compile_ = _edge(text, "obj.a/a.c.o")
+        compile_ = _edge(text, "obj.a.static/a.c.o")
 
         assert "flags.rsp" in compile_.split("|", 1)[1]

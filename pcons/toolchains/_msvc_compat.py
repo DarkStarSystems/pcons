@@ -124,8 +124,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
 
         The link step writes it (the ``/IMPLIB:`` in ``sharedcmd``), so the
         name follows the DLL's, keeping any directory and any name the target
-        chose with output_prefix/output_name. These toolchains only ever build
-        for Windows, so *target* does not change the answer.
+        chose with output_prefix/output_name/output_filename. These toolchains
+        only ever build for Windows, so *target* does not change the answer.
         """
         return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
 

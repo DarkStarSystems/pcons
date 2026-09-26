@@ -81,8 +81,19 @@ class TestNamesStayUnique:
         env = project.Environment()
         project.Program("app", env, sources=["main.c"])
 
-        with pytest.raises(ValueError, match="Target 'app' already exists"):
-            project.StaticLibrary("app", env, sources=["lib.c"])
+        with pytest.raises(
+            ValueError, match=r"Target 'app' \(program\) already exists"
+        ):
+            project.Program("app", env, sources=["other.c"])
+
+    def test_two_kinds_of_target_may_share_a_name(self, project):
+        """They write `app` and `libapp.a`, and compile into their own
+        object directories (see tests/core/test_object_dirs.py)."""
+        env = project.Environment()
+        program = project.Program("app", env, sources=["main.c"])
+        library = project.StaticLibrary("app", env, sources=["lib.c"])
+
+        assert project.targets == [program, library]
 
     def test_named_environments_still_part_two_names(self, project):
         host = project.Environment(name="host")
@@ -193,7 +204,9 @@ class TestANameMakesTheTargetNamed:
         env = project.Environment()
         env.Command(target="foo.h", command="touch $TARGET", name="gen")
 
-        with pytest.raises(ValueError, match="Target 'gen' already exists"):
+        with pytest.raises(
+            ValueError, match=r"Target 'gen' \(command\) already exists"
+        ):
             env.Command(target="foo.c", command="touch $TARGET", name="gen")
 
     def test_two_environments_part_one_name(self, project):

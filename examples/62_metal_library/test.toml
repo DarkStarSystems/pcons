@@ -4,8 +4,8 @@
 description = "project.MetalLibrary compiles .metal shaders and links them into a loadable .metallib"
 
 expected_outputs = [
-    "build/obj.effects/src/blur.metal.air",
-    "build/obj.effects/src/warp.metal.air",
+    "build/obj.effects.metal/src/blur.metal.air",
+    "build/obj.effects.metal/src/warp.metal.air",
     "build/effects.metallib",
 ]
 

@@ -156,7 +156,9 @@ def create_msix(
         first_source = sources[0] if sources else None
         if first_source is not None:
             # Handle Target, Path, or str
-            if hasattr(first_source, "output_name") and first_source.output_name:
+            if named := getattr(first_source, "output_filename", None):
+                executable = str(named)
+            elif hasattr(first_source, "output_name") and first_source.output_name:
                 executable = str(first_source.output_name)
             elif hasattr(first_source, "name") and first_source.name:
                 executable = str(first_source.name)

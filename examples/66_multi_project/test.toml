@@ -8,12 +8,12 @@ description = "Two independent top-level projects built in one pcons run"
 # once per project, with that project's flags.
 expected_outputs = [
     "build/build.ninja",
-    "build/common/obj.common/common/common.c.o",
+    "build/common/obj.common.static/common/common.c.o",
     "build/common/libcommon.a",
     "build/obj.app/src/main.c.o",
     "build/app",
     "build-host/build.ninja",
-    "build-host/common/obj.common/common/common.c.o",
+    "build-host/common/obj.common.static/common/common.c.o",
     "build-host/common/libcommon.a",
     "build-host/obj.app/src/main.c.o",
     "build-host/app",

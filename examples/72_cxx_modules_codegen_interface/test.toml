@@ -6,7 +6,7 @@ description = "A C++20 module interface unit written by a program the build comp
 expected_outputs = [
     "build/geniface",
     "build/gen/iface.cppm",
-    "build/obj.genmod/gen/iface.cppm.o",
+    "build/obj.genmod.static/gen/iface.cppm.o",
     "build/libgenmod.a",
     "build/obj.app/src/main.cpp.o",
     "build/app",
@@ -36,7 +36,7 @@ expect_rebuild = [
     "obj.geniface/src/geniface.cpp.o",
     "geniface",
     "gen/iface.cppm",
-    "obj.genmod/gen/iface.cppm.o",
+    "obj.genmod.static/gen/iface.cppm.o",
     "libgenmod.a",
     "obj.app/src/main.cpp.o",
     "app",
@@ -48,7 +48,7 @@ expect_returncode = 0
 description = "Touching the consumer recompiles only it, not the generated interface"
 touch = "src/main.cpp"
 expect_rebuild = ["obj.app/src/main.cpp.o", "app"]
-expect_no_rebuild = ["gen/iface.cppm", "obj.genmod/gen/iface.cppm.o", "geniface"]
+expect_no_rebuild = ["gen/iface.cppm", "obj.genmod.static/gen/iface.cppm.o", "geniface"]
 
 [skip]
 # Named modules: MSVC scans natively (cl.exe), GCC via g++, clang via

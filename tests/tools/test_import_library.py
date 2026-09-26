@@ -106,6 +106,22 @@ def test_an_msvc_import_library_follows_the_dlls_name(clang_cl_toolchain):
     assert name == "mcu/libfoo.lib"
 
 
+def test_an_import_library_keeps_the_stem_output_filename_chose(
+    tmp_path, clang_cl_toolchain
+):
+    """A plugin named outright still links against a .lib of that stem."""
+    _sources(tmp_path)
+    project = Project("p", root_dir=tmp_path, build_dir="build")
+    with _target("x86_64-pc-windows-msvc"):
+        env = project.Environment(toolchain=clang_cl_toolchain)
+        shared = project.SharedLibrary("foo", env, sources=["lib.c"])
+        shared.output_filename = "myplugin.ofx"
+        project.resolve()
+
+        assert shared.output_nodes[0].path.as_posix() == "build/myplugin.ofx"
+        assert _outputs(shared)["import_lib"]["path"].as_posix() == "build/myplugin.lib"
+
+
 def test_a_gnu_toolchain_writes_none_for_a_windows_target(gcc_toolchain):
     """The answer is the toolchain's, so a Windows target does not change it."""
     mingw = target_platform_for_triple("x86_64-w64-mingw32")
