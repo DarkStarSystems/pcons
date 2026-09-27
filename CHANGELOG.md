@@ -17,31 +17,20 @@ changes break some existing scripts; the details are below.
 
 ### Added
 
-- `env.Command(target=..., source=...)` also take a callable, called during
-  resolve once the edge's dependencies have resolved, so a command can name
-  its output after another target's real file name: an `objcopy` of a
-  program, say. The edge needs no name; it's labelled by its output. A
-  Target only the `source=` callable names is resolved first. (#196)
-  A token of a list-form command may be a callable too, for a value only
-  resolve knows.
+- **`env.PyBuilder()`** turns a Python function in the build script into a
+  builder: each call makes one build edge that runs the function at build
+  time as `fn(targets, sources, **kwargs)`. A keyword may be a `Target` or a
+  file node, which the function gets as paths (and the edge reruns when it
+  changes), or `Subst("$cc.flags")`, the flags the build settled on.
+  `emitter=` works out an edge's targets at resolve, so a call can leave out
+  `target=`. With `discovers=True` the function returns the files it read,
+  `{"inputs": [...]}`, and the edge reruns when one changes. See "Python
+  Functions as Build Steps" in the user guide, and examples 90 to 92.
+  (#191, #196)
 
-- `env.PyBuilder(emitter=...)` works out each edge's targets and sources at
-  resolve, the way `project.Program` works out its file name:
-  `emitter(targets, sources, env, **kwargs)` gets what the call passed and
-  returns the pair the edge really has. With one, a call may leave out
-  `target=`. `examples/92_python_builder_emitter` names a hex dump after the
-  program it reads. (#196)
-
-- A `PyBuilder` call's keyword may be a `Target` or a node, which arrives as
-  its files' paths and reruns the edge when it changes, or a
-  `Subst("$cc.flags")`, which arrives as the tokens it expands to in the
-  edge's environment. Keywords are now read when the build resolves, like
-  the environment; the call still checks them, so errors point at it. (#196)
-
-- `env.PyBuilder(discovers=True)` lets the function report files it read that
-  its call never named, a manifest's entries or a template's includes, by
-  returning `{"inputs": [...]}`. pcons writes the depfile, and the edge reruns
-  when one of them changes. (#196)
+- `env.Command()`'s `target=`, `source=` and list-form command tokens may be
+  callables, called at resolve, so a command can name its output after
+  another target's real file name. (#196)
 
 - `add_subdirectory(..., build_tier="manual")` includes someone else's project
   as a dependency: nothing it declares goes into a wider tier than that, its
@@ -72,7 +61,7 @@ changes break some existing scripts; the details are below.
   products; it no longer demotes everything else in the tree. A top-level
   `Default()` still governs the whole project.
 
-- `name=` is optional and keyword-only on `Command`, `PyBuilder` calls,
+- `name=` is optional and keyword-only on `Command`,
   `Install`, `InstallAs`, `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`,
   `android_apk()`, `sign_apk()` and `create_universal_binary()`. A name is
   used as the target's identity, like `Program`'s: `get_target()`,
@@ -264,6 +253,10 @@ nested in the test suite, which is how the fixes below were found.
   `InstallDir` tells its copy command the directory the stamp names.
   The three builders take an optional `env=` for a destination that has to
   follow an environment's `build_prefix` as well.
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20): `env.PyBuilder` (#191), and raised #170
 
 ## [0.29.1] - 2026-09-14
 
