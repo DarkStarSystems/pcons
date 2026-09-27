@@ -37,6 +37,11 @@ changes break some existing scripts; the details are below.
   edge's environment. Keywords are now read when the build resolves, like
   the environment; the call still checks them, so errors point at it. (#196)
 
+- `env.PyBuilder(discovers=True)` lets the function report files it read that
+  its call never named, a manifest's entries or a template's includes, by
+  returning `{"inputs": [...]}`. pcons writes the depfile, and the edge reruns
+  when one of them changes. (#196)
+
 - `add_subdirectory(..., build_tier="manual")` includes someone else's project
   as a dependency: nothing it declares goes into a wider tier than that, its
   own `Default()` included, so its targets build only when something needs them

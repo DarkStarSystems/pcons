@@ -1931,6 +1931,7 @@ class Environment(_EnvironmentStubs):
         worker: Any = None,
         depends: Target | str | Path | Sequence[Target | str | Path] | None = None,
         emitter: Callable[..., Any] | None = None,
+        discovers: bool = False,
     ) -> Callable[[Callable[..., object]], pybuilder.PyBuilder]:
         """Turn a Python function of this build script into a builder.
 
@@ -1971,9 +1972,9 @@ class Environment(_EnvironmentStubs):
         ``target``, ``source``, ``name`` and ``depends`` are refused as
         parameter names: the call spends them on the edge.
 
-        ``depfile`` and ``deps_style`` are deliberately absent: a function
-        that discovers its own dependencies has to write a make-style depfile
-        by hand, which deserves its own example.
+        ``depfile`` and ``deps_style`` are absent because ``discovers=True``
+        does their job: the function reports what it read and pcons writes
+        the depfile, so nobody writes depfile syntax.
 
         Args:
             python: The interpreter that runs the function, defaulting to the
@@ -2005,6 +2006,16 @@ class Environment(_EnvironmentStubs):
                     process when pcons resolves the edge, so it's an ordinary
                     callable: it may use anything around it, unlike the
                     function, and read what the edge's dependencies build.
+            discovers: The function reads files its call never named, a
+                    manifest's entries or a template's includes, and reports
+                    them: it may return ``{"inputs": [...]}``, and the build
+                    tool reruns the edge when one of them changes. A
+                    relative path is read from the build directory, where
+                    the function runs. Returning None means it read nothing
+                    more; any key but ``"inputs"`` is an error. The edge may
+                    have one target, which the depfile is named after, and
+                    ``cwd=`` is refused with it. Discovered *outputs* are a
+                    different thing: see ``project.when_generated()``.
 
         Returns:
             A decorator that returns the builder the script calls.
@@ -2022,6 +2033,7 @@ class Environment(_EnvironmentStubs):
             worker=worker,
             depends=depends,
             emitter=emitter,
+            discovers=discovers,
         )
 
     def __str__(self) -> str:

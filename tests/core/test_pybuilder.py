@@ -1516,3 +1516,66 @@ class TestArgumentRefusalsAtResolve:
 
         with pytest.raises(PyBuilderError, match="builds no file"):
             project.resolve()
+
+
+class TestDiscoveredInputs:
+    """``discovers=True``: the function says what it read, pcons declares it."""
+
+    def one(self, project: Project, env: Any, **how: Any) -> Target:
+        @env.PyBuilder(discovers=True, **how)
+        def bundle(targets, sources):
+            return None
+
+        made = bundle(target="bundle.txt", source=["a.txt"])
+        project.resolve()
+        return made
+
+    def test_the_edge_declares_a_depfile(self, project: Project, env: Any) -> None:
+        info = build_info(self.one(project, env))
+
+        assert info["deps_style"] == "gcc"
+        assert isinstance(info["depfile"], PathToken)
+        assert Path(info["depfile"].path).as_posix() == "build/bundle.txt"
+        assert info["depfile"].suffix == ".d"
+
+    def test_the_command_tells_the_runner_where_to_write_it(
+        self, project: Project, env: Any
+    ) -> None:
+        """A marker, not a path: the build tool writes the target's path."""
+        command = tokens(self.one(project, env))
+
+        assert command[command.index("--depfile") + 1] == TargetPath(
+            suffix=".d", start=0
+        )
+
+    def test_ninja_reads_the_depfile(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        self.one(project, env)
+        text = ninja_text(project, tmp_path)
+
+        assert "depfile = $out.d" in text
+        assert "deps = gcc" in text
+
+    def test_without_it_the_edge_declares_none(
+        self, project: Project, env: Any
+    ) -> None:
+        made = one_source(project, env)
+
+        assert build_info(made)["depfile"] is None
+        assert "--depfile" not in tokens(made)
+
+    def test_two_targets_are_refused(self, project: Project, env: Any) -> None:
+        """One depfile is named after one output."""
+
+        @env.PyBuilder(discovers=True)
+        def bundle(targets, sources):
+            return None
+
+        with pytest.raises(PconsError, match="may have only one target"):
+            bundle(target=["one.txt", "two.txt"], source=["a.txt"])
+
+    def test_cwd_is_refused(self, env: Any) -> None:
+        """The build tool would read the reported paths from the wrong place."""
+        with pytest.raises(PyBuilderError, match="discovers=True with cwd="):
+            env.PyBuilder(discovers=True, cwd="work")

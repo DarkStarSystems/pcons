@@ -59,6 +59,9 @@ if TYPE_CHECKING:
     from pcons.util.source_location import SourceLocation
 
 GEN_DIR = "pybuilder"
+#: The runner's depfile is the edge's target plus this, as every pcons
+#: depfile is named, so ``env.Command(depfile=)`` and the command agree.
+DEPFILE_SUFFIX = ".d"
 MODULE_PREFIX = "pcons_pybuilder_"
 RUNNER_DIR = "pcons-runner"
 RUNNER_NAME = "pcons-runner.py"
@@ -1398,8 +1401,9 @@ class _HowToRun:
     decoration. What to build sits on the call, and no option sits on both,
     except ``depends``: the decoration's is a dependency of every edge the
     builder makes, the call's is a dependency of that edge alone. ``emitter``
-    is here for the same reason: how this builder works out what an edge
-    builds is one rule, whatever each call passes it.
+    and ``discovers`` are here for the same reason: how this builder works
+    out what an edge builds, and whether its body reports what it read, are
+    one rule each, whatever a call passes.
     """
 
     python: str | None = None
@@ -1411,10 +1415,11 @@ class _HowToRun:
     worker: Any = None
     depends: Target | str | Path | Sequence[Target | str | Path] | None = None
     emitter: Callable[..., Any] | None = None
+    discovers: bool = False
 
     def command_kwargs(self) -> dict[str, Any]:
-        """The part of this that ``env.Command`` takes verbatim."""
-        return {
+        """What ``env.Command`` takes, as given or, for ``discovers``, derived."""
+        kwargs: dict[str, Any] = {
             "restat": self.restat,
             "write_if_different": self.write_if_different,
             "cwd": self.cwd,
@@ -1422,6 +1427,10 @@ class _HowToRun:
             "env_vars": self.env_vars,
             "worker": self.worker,
         }
+        if self.discovers:
+            kwargs["depfile"] = DEPFILE_SUFFIX
+            kwargs["deps_style"] = "gcc"
+        return kwargs
 
 
 class PyBuilder:
@@ -1625,6 +1634,11 @@ class PyBuilder:
                 project._node(runner_rel),
                 project._node(module_rel),
                 lambda: project._node(args_rel()),
+                *(
+                    ["--depfile", f"$TARGET{DEPFILE_SUFFIX}"]
+                    if self._how.discovers
+                    else []
+                ),
                 "--n-targets",
                 lambda: str(len(made.output_nodes)),
                 "$TARGETS",
@@ -1671,6 +1685,7 @@ def py_builder(
     worker: Any = None,
     depends: Target | str | Path | Sequence[Target | str | Path] | None = None,
     emitter: Callable[..., Any] | None = None,
+    discovers: bool = False,
 ) -> Callable[[Callable[..., object]], PyBuilder]:
     """The decorator ``Environment.PyBuilder`` returns.
 
@@ -1692,18 +1707,29 @@ def py_builder(
             :meth:`PyBuilder.depends`.
         emitter: Names each edge's targets and sources at resolve; see
             ``Environment.PyBuilder``.
+        discovers: The function reports the files it read; see
+            ``Environment.PyBuilder``.
 
     Returns:
         A decorator that returns the ``PyBuilder`` the build script calls.
 
     Raises:
-        PyBuilderError: If *emitter* is given and isn't callable.
+        PyBuilderError: If *emitter* is given and isn't callable, or
+            *discovers* is asked of a function that runs in another *cwd*.
     """
     if emitter is not None and not callable(emitter):
         raise PyBuilderError(
             f"emitter={emitter!r} is not callable. It is a function of the "
             f"build script, called when pcons resolves each edge: "
             f"emitter(targets, sources, env, **kwargs).",
+            get_caller_location(),
+        )
+    if discovers and cwd is not None:
+        raise PyBuilderError(
+            "discovers=True with cwd= isn't supported: the build tool reads "
+            "the paths the function reports from the build directory, and "
+            "the function would report them from cwd. Leave out cwd= and "
+            "change directory inside the function if it needs to.",
             get_caller_location(),
         )
     how = _HowToRun(
@@ -1716,6 +1742,7 @@ def py_builder(
         worker=worker,
         depends=depends,
         emitter=emitter,
+        discovers=discovers,
     )
 
     def decorate(fn: Callable[..., object]) -> PyBuilder:

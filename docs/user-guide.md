@@ -2748,9 +2748,25 @@ Either one expands where it sits: in a list, a dictionary value, or an attribute
 |---|---|
 | `python=`, `worker=`, `cwd=`, `launcher=` | `target=`, `source=`, `name=` |
 | `env_vars=`, `restat=`, `write_if_different=` | the function's own arguments, as plain keywords |
-| `depends=` | `depends=` |
+| `depends=`, `emitter=`, `discovers=` | `depends=` |
 
-`depfile=` and `deps_style=` are not supported. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
+`write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
+
+**Discovered inputs.** A function may read files its call never named: the entries of a manifest, a template's includes. Declare the builder `discovers=True` and the function returns `{"inputs": [...]}`, the files it read, and the build tool reruns the edge when one of them changes. A relative path is read from the build directory, where the function runs, so a path built from one of its `sources` is right as it is. pcons writes the depfile: that's why `depfile=` and `deps_style=` aren't options here. The edge may have one target, which the depfile is named after, and `cwd=` can't be combined with it.
+
+```python
+@env.PyBuilder(discovers=True)
+def bundle(targets, sources):
+    from pathlib import Path
+
+    manifest = Path(sources[0])
+    listed = [manifest.parent / name for name in manifest.read_text().split()]
+    Path(targets[0]).write_text("".join(path.read_text() for path in listed))
+    return {"inputs": listed}
+
+
+bundle(target="bundle.txt", source=["manifest.txt"])
+```
 
 **Discovered outputs.** `target=` is fixed at the call, so one call cannot declare an output whose name or count only another edge's result decides. [Staged Generation](#staged-generation-targets-discovered-mid-build) still gets there, no new mechanism needed: a first call whose only declared target is a small manifest, and a second call, made from inside a `project.when_generated()` block once ninja has built that manifest and re-run pcons, whose targets come from what it says. `examples/57_staged_generation` is the worked example. It uses `env.Command()` for both calls, and a `PyBuilder()` call plays the same role there.
 
