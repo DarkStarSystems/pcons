@@ -9,6 +9,8 @@ available.
 
 from __future__ import annotations
 
+import functools
+
 import pytest
 
 import pcons.toolchains  # noqa: F401 — populate the registry
@@ -120,7 +122,7 @@ class TestGroupedCompile:
         project.resolve()
 
         info = lib.intermediate_nodes[0]._build_info
-        seen = project.top_path_resolver.make_execution_relative
+        seen = functools.partial(project.top_path_resolver.path_text, built=True)
         outputs = info["outputs"]
         module_flags = info["vars"]["MODULE_FLAGS"]
         header_flags = info["vars"]["HEADER_FLAGS"]

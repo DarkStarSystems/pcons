@@ -1363,12 +1363,10 @@ class BaseToolchain(ABC):
     def _link_input_token(
         self, target: Target, suffix: str, text: str, prefix: str
     ) -> PathToken:
-        """A ``_write_link_input`` file as a link flag, build-relative like
-        every other path in the build files, so moving the tree does not
-        rewrite the link rules."""
+        """A ``_write_link_input`` file as a link flag, whose path the
+        generator writes as the link command sees it."""
         path = self._write_link_input(target, suffix, text)
-        rel = target.project.top_path_resolver.make_execution_relative(path)
-        return PathToken(prefix=prefix, path=rel, path_type="build")
+        return PathToken(prefix=prefix, path=path, path_type="project")
 
     def get_link_flags_for_target(
         self,

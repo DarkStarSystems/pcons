@@ -29,7 +29,7 @@ def built_path(project: Project, target: Target) -> str:
     @param target Target whose one output file is wanted.
     @return The output path as the build directory sees it.
     """
-    return project._path_resolver.make_execution_relative(target.output_nodes[0].path)
+    return project._path_resolver.path_text(target.output_nodes[0].path, built=True)
 
 
 def runs_as(path: str) -> str:

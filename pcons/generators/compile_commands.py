@@ -203,9 +203,9 @@ class CompileCommandsGenerator(BaseGenerator):
 
         return {
             "directory": str(project.root_dir.absolute()),
-            "file": str(source.path),
+            "file": self._from_top(project, source.path, built=source.is_built),
             "command": command,
-            "output": str(output.path),
+            "output": self._from_top(project, output.path, built=True),
         }
 
     def _format_command(
@@ -261,8 +261,8 @@ class CompileCommandsGenerator(BaseGenerator):
         """Expand SourcePath/TargetPath markers and PathToken paths to literals.
 
         Entries run with ``directory`` = project root (not the build dir),
-        so project-relative paths pass through and ``"build"``-typed paths
-        get build_dir prepended. For grouped (whole-module) compiles, a bare
+        so every path is written from there, ``"build"``-typed ones with the
+        build directory put back in front. For grouped (whole-module) compiles, a bare
         SourcePath expands to all of ``all_sources`` — each per-file entry
         repeats the whole command, the sourcekit-lsp/CMake Swift convention.
         """
@@ -273,24 +273,34 @@ class CompileCommandsGenerator(BaseGenerator):
             if isinstance(token, SourcePath):
                 if all_sources and len(all_sources) > 1 and token.index is None:
                     for s in all_sources:
-                        result.append(f"{token.prefix}{s.path}{token.suffix}")
+                        path = self._from_top(project, s.path, built=s.is_built)
+                        result.append(f"{token.prefix}{path}{token.suffix}")
                     continue
-                result.append(f"{token.prefix}{source.path}{token.suffix}")
+                path = self._from_top(project, source.path, built=source.is_built)
+                result.append(f"{token.prefix}{path}{token.suffix}")
             elif isinstance(token, NodeVar):
                 # No per-edge variables in a compile_commands entry: inline it.
                 value = (node_vars or {}).get(token.name, "")
                 items = value if isinstance(value, list) else [value]
                 result.extend(str(v) for v in items)
             elif isinstance(token, TargetPath):
-                path = output.path.name if token.basename else output.path
+                path = (
+                    output.path.name
+                    if token.basename
+                    else self._from_top(project, output.path, built=True)
+                )
                 result.append(f"{token.prefix}{path}{token.suffix}")
             elif isinstance(token, PathToken):
                 if token.path_type == "build":
-                    path = str(Path(project._build_dir) / token.path)
+                    built = Path(project._build_dir) / token.path
+                    path = self._from_top(project, built, built=True)
                     result.append(f"{token.prefix}{path}{token.suffix}")
                 else:
                     result.append(
-                        token.relativize(lambda p: p, executable=self._executable_form)
+                        token.relativize(
+                            lambda p: self._from_top(project, p, built=False),
+                            executable=self._executable_form,
+                        )
                     )
             else:
                 result.append(str(token))

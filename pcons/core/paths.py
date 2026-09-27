@@ -12,9 +12,34 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Location:
+    """Where a node path points, in the terms a build script uses.
+
+    A target's file is named relative to the build directory, a source's
+    relative to the project's top, and a file outside both absolutely. That
+    is also what a user types: ``pcons build obj/app.o``, or ``src/main.c``
+    in ``sources=``.
+
+    Attributes:
+        anchor: ``"build"`` for a file in the build directory, ``"top"`` for
+            one elsewhere in the project tree, ``"outside"`` for anything else.
+        path: The path from that anchor: ``.`` for the anchor itself, and
+            absolute when the anchor is ``"outside"``.
+    """
+
+    anchor: Literal["build", "top", "outside"]
+    path: Path
+
+    def __str__(self) -> str:
+        return self.path.as_posix()
 
 
 class PathResolver:
@@ -130,15 +155,6 @@ class PathResolver:
 
         return path_obj
 
-    def make_build_relative(self, path: Path) -> Path:
-        """Make an absolute path under build_dir relative to it."""
-        if path.is_absolute():
-            try:
-                return path.relative_to(self._resolved_build_dir)
-            except ValueError:
-                return path
-        return path
-
     def canonicalize(self, path: Path | str) -> Path:
         """Convert to canonical form: project-root-relative or absolute.
 
@@ -154,126 +170,98 @@ class PathResolver:
                 return path_obj
         return Path(os.path.normpath(str(path_obj)))
 
-    def make_execution_relative(self, path: Path | str) -> str:
-        """Path as seen from the build (execution) directory.
-
-        The path contract for generators that run from the build dir
-        (Ninja, Make); see execution_relative() for the rules.
-        """
-        return execution_relative(
-            path,
-            execution_dir=self._resolved_build_dir,
-            build_dir_parts=self.build_dir.parts
-            if not self.build_dir.is_absolute()
-            else (),
-        )
-
-    def make_command_relative(
-        self, path: Path | str, *, built: bool, cwd: Path | None = None
-    ) -> str:
-        """Path as a running command sees it, from the directory it runs in.
-
-        That's the build directory, or *cwd* for an edge that runs somewhere
-        else. Unlike :meth:`make_execution_relative`, a source path is made
-        relative to that directory too (``../src/a.c`` where a generator
-        writes ``$topdir/src/a.c``), and the project root is ``..`` alone.
-        This is for anything that shows or hands over a path the command
-        opens: ``pcons explain``, and ``env.PyBuilder``'s arguments.
+    def locate(self, path: Path | str, *, built: bool) -> Location:
+        """Where *path* points: in the build directory, elsewhere under the
+        project top, or outside both.
 
         Args:
-            path: A node path, relative or absolute.
-            built: A relative *path* is a file the build writes, anchored in
-                the build directory, rather than a source, anchored at the
-                project root.
-            cwd: The absolute directory the command runs in, when it isn't
-                the build directory.
+            path: A node path. Node paths are either relative to the
+                project top or absolute. With built=True, a relative path without the
+                build directory's prefix is interpreted as relative to the
+                build directory instead of top.
+            built: The build writes this file, so a relative path that
+                doesn't start with the build directory is interpreted as
+                relative to the build directory, rather than a
+                source's, relative to the top.
         """
-        run_dir = self._resolved_build_dir if cwd is None else Path(cwd)
-        prefix = (
-            self.build_dir.parts
-            if cwd is None and not self.build_dir.is_absolute()
-            else ()
+        p = Path(str(path).replace("\\", "/"))
+        # Rooted, even without a drive (Windows' "\\opt\\app"): not relative
+        # to anything of the project's.
+        if p.anchor:
+            # The anchors are resolved; the path may be written through a
+            # symlink (macOS's /var for /private/var, say).
+            for candidate in (p, p.resolve()):
+                for anchor, base in (
+                    ("build", self._resolved_build_dir),
+                    ("top", self.project_root),
+                ):
+                    if candidate.is_relative_to(base):
+                        return Location(anchor, candidate.relative_to(base))
+            return Location("outside", p)
+        prefix = () if self.build_dir.is_absolute() else self.build_dir.parts
+        if prefix and p.parts[: len(prefix)] == prefix:
+            return Location("build", Path(*p.parts[len(prefix) :]))
+        if built:
+            return Location("build", p)
+        normal = Path(os.path.normpath(p))
+        if normal.parts[:1] == ("..",):
+            return Location("outside", self.project_root / normal)
+        return Location("top", normal)
+
+    def path_text(
+        self,
+        path: Path | str,
+        *,
+        built: bool,
+        run_dir: Path | None = None,
+        top: str | None = None,
+    ) -> str:
+        """*path* as a program running in *run_dir* will see it.
+
+        Relative when possible, rooted at *run_dir* or self's build dir.
+        run_dir can be different when using `cwd=`, for instance.
+        When provided, *top* is how the caller wants the top of a relative path
+        represented, e.g. ``$topdir`` for ninja.
+        A file outside the project stays
+        absolute, written as the host platform writes it; everything else has
+        forward slashes.
+
+        Args:
+            path: A node path; see :meth:`locate`.
+            built: The build writes this file; see :meth:`locate`.
+            run_dir: The absolute directory the reader runs in, when it isn't
+                the build directory.
+            top: How the reader writes the project top, for a source's path
+                seen from the build directory: ``"$topdir"`` for ninja, the
+                absolute top for make. Ignored with *run_dir*.
+        """
+        where = self.locate(path, built=built)
+        if where.anchor == "outside":
+            return str(where.path)  # As the platform writes it, as it was given.
+        if run_dir is None and where.anchor == "build":
+            return str(where)
+        if run_dir is None and top is not None:
+            return top if where.path == Path(".") else f"{top}/{where}"
+        base = (
+            self._resolved_build_dir if where.anchor == "build" else self.project_root
         )
-        text = execution_relative(path, execution_dir=run_dir, build_dir_parts=prefix)
-        p = Path(path)
-        if text != p.as_posix() or (built and prefix and not p.is_absolute()):
-            return text  # Under the run directory, or a file the build writes.
-        absolute = p if p.is_absolute() else self.project_root / p
-        if not absolute.is_relative_to(self.project_root):
-            return text
+        absolute = base / where.path
         try:
-            return os.path.relpath(absolute, run_dir).replace(os.sep, "/")
+            text = os.path.relpath(absolute, run_dir or self._resolved_build_dir)
         except ValueError:  # Windows: different drives
             return absolute.as_posix()
-
-    def make_project_relative(self, path: Path) -> str:
-        """Make a path relative to the project root, as a forward-slash string."""
-        if path.is_absolute():
-            try:
-                return str(path.relative_to(self.project_root)).replace("\\", "/")
-            except ValueError:
-                # Not under project root
-                return str(path).replace("\\", "/")
-        return str(path).replace("\\", "/")
-
-
-def execution_relative(
-    path: Path | str,
-    *,
-    execution_dir: Path | None,
-    build_dir_parts: tuple[str, ...],
-) -> str:
-    """Render *path* relative to the directory a build tool executes in.
-
-    The single home of the generator path contract (ninja and make both run
-    from the build directory; see ARCHITECTURE.md "Path handling"):
-
-    - An absolute path under *execution_dir* becomes relative to it.
-    - A relative path carrying the *build_dir_parts* prefix (the canonical
-      node form, e.g. ``build/obj/foo.o``) has the prefix stripped;
-      the build dir itself renders as ``"."``.
-    - Anything else (external absolute paths, project-relative sources —
-      the caller decides how to anchor those, e.g. ninja's ``$topdir``)
-      passes through unchanged.
-
-    Always uses forward slashes, which every supported tool accepts on
-    every platform.
-    """
-    path_obj = Path(path)
-
-    if path_obj.is_absolute():
-        if execution_dir is not None:
-            # The execution directory is resolved; the path may be written
-            # through a symlink (macOS's /var for /private/var, say).
-            for candidate in (path_obj, path_obj.resolve()):
-                try:
-                    return str(candidate.relative_to(execution_dir)).replace("\\", "/")
-                except ValueError:
-                    pass
-        return str(path_obj).replace("\\", "/")
-
-    if build_dir_parts:
-        parts = path_obj.parts
-        n = len(build_dir_parts)
-        if parts[:n] == build_dir_parts:
-            if len(parts) > n:
-                return str(Path(*parts[n:])).replace("\\", "/")
-            return "."
-
-    return str(path_obj).replace("\\", "/")
+        return text.replace(os.sep, "/")
 
 
 def executable_form(path: str, *, windows: bool) -> str:
-    """Spell *path* so the shell running the build will execute it.
+    """Return a form of *path* so the shell running the build will execute it.
 
-    The companion of :func:`execution_relative`, which says where a file is;
-    this says how to run it from there. A POSIX shell looks a bare name up on
+    The companion of :meth:`PathResolver.path_text`, which says where a file
+    is; this says how to run it from there. A POSIX shell looks a bare name up on
     ``$PATH`` and never in the working directory, so a path without a
     directory needs a ``./``. cmd.exe does search the working directory, but
     reads a leading ``/`` as the start of a switch, so it needs the
     separators the other way round.
-
-    Always the same answer for the same input, so both generators agree.
     """
     if os.path.isabs(path):
         return path.replace("/", "\\") if windows else path

@@ -110,9 +110,7 @@ class MetadataGenerator(BaseGenerator):
         return {
             "name": project.name,
             "parent": project.parent.name if not project.is_top_level else None,
-            "root_dir": project.top_path_resolver.make_project_relative(
-                project.root_dir
-            ),
+            "root_dir": self._from_top(project, project.root_dir, built=False),
             "build_dir": project._build_dir.as_posix(),
             "targets": [
                 self._serialize_target(target, project, tiers)
@@ -131,12 +129,12 @@ class MetadataGenerator(BaseGenerator):
     ) -> dict[str, Any]:
         """Serialize one target to metadata."""
         outputs = [
-            project.top_path_resolver.make_project_relative(node.path)
+            self._from_top(project, node.path, built=True)
             for node in target.output_nodes
             if isinstance(node, FileNode)
         ]
         sources = [
-            project.top_path_resolver.make_project_relative(node.path)
+            self._from_top(project, node.path, built=node.is_built)
             for node in target.sources
             if isinstance(node, FileNode)
         ]
@@ -144,9 +142,7 @@ class MetadataGenerator(BaseGenerator):
         decision = tiers.get(target)
 
         location: dict[str, Any] = {
-            "file": project.top_path_resolver.make_project_relative(
-                Path(target.defined_at.filename)
-            ),
+            "file": self._from_top(project, target.defined_at.filename, built=False),
             "line": target.defined_at.lineno,
         }
         if target.defined_at.function is not None:
@@ -182,9 +178,7 @@ class MetadataGenerator(BaseGenerator):
         entries: list[str] = []
         for node in alias.targets:
             if isinstance(node, FileNode):
-                entries.append(
-                    project.top_path_resolver.make_project_relative(node.path)
-                )
+                entries.append(self._from_top(project, node.path, built=node.is_built))
             else:
                 pass  # Ignore for now
 
