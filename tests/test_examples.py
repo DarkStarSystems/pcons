@@ -1681,7 +1681,13 @@ def test_example_nested(example_dir: Path, tmp_path: Path) -> None:
         for f in build_dir.rglob("*")
     }
     expected_outputs = adapt_outputs_for_generator(
-        get_platform_value(test_config, "expected_outputs", [], adapt_for_windows=True),
+        get_platform_value(
+            test_config,
+            "expected_outputs",
+            [],
+            adapt_for_windows=True,
+            gcc_toolchain=toolchain == "gcc",
+        ),
         "ninja",
         "",
     )

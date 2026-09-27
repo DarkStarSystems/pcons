@@ -153,9 +153,10 @@ fw = project.Program(
 fw.link(bsp, common)
 fw.output_suffix = ".elf"
 
-# PathToken paths are relative to the project root, not the build dir.
+# A PathToken's path is written from wherever the link runs. A relative one
+# would be read from the top of the tree, so give it the script's own.
 fw.private.link_flags.append(
-    PathToken(prefix="-T", path="link/lm3s6965evb.ld", path_type="project")
+    PathToken(prefix="-T", path=project.current_dir / "link/lm3s6965evb.ld")
 )
 # Nothing in the program references the reset handler, so the archive member
 # holding it (and the vector table) would never be pulled in. -u forces it.
