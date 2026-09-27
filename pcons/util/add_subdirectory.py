@@ -9,7 +9,9 @@ from typing import Any, overload
 from pcons.core.environment import Environment as Env
 from pcons.core.invocation import RUN_NAME
 from pcons.core.project import Project, _in_virtualenv
+from pcons.core.tiers import TierFloor, validate_tier
 from pcons.core.vars import VarValue, scoped_vars
+from pcons.util.source_location import get_caller_location
 
 
 def _module_origins(module: object) -> list[Path]:
@@ -69,6 +71,7 @@ def add_subdirectory(
     env: Env | None = None,
     vars: Mapping[str, VarValue] | None = None,
     imports: Mapping[str, Any] | None = None,
+    build_tier: str | None = None,
 ) -> tuple: ...
 
 
@@ -81,6 +84,7 @@ def add_subdirectory(
     env: Env | None = None,
     vars: Mapping[str, VarValue] | None = None,
     imports: Mapping[str, Any] | None = None,
+    build_tier: str | None = None,
 ) -> SimpleNamespace: ...
 
 
@@ -92,6 +96,7 @@ def add_subdirectory(
     env: Env | None = None,
     vars: Mapping[str, VarValue] | None = None,
     imports: Mapping[str, Any] | None = None,
+    build_tier: str | None = None,
 ) -> tuple | SimpleNamespace:
     """Adds a subdirectory to the project.
 
@@ -156,6 +161,17 @@ def add_subdirectory(
             sees only what its own parent passed, and a directory included
             twice can get different objects each time. A script that also
             builds standalone reads ``project.imports.get("icons")``.
+        build_tier: The widest tier anything the included tree declares may
+            sit in, for a project that is a dependency rather than part of
+            yours::
+
+                fmt = add_subdirectory("third_party/fmt", build_tier="manual")
+
+            With ``"manual"`` its targets build only when something needs them
+            or they are asked for, like CMake's ``EXCLUDE_FROM_ALL``; with
+            ``"all"``, ``ninja all`` builds them too. The tree's own
+            ``Default()`` calls can't lift a target above it, while a
+            ``Default()`` of yours can. See ``pcons.core.tiers``.
 
     Returns:
         - If ``pick`` is not specified, a ``SimpleNamespace`` whose attributes
@@ -163,6 +179,9 @@ def add_subdirectory(
         - If ``pick`` is specified, a tuple containing only the listed names
           (in order), e.g. ``lib, hdr = add_subdirectory("sub", pick=["lib", "hdr"])``.
     """
+    location = get_caller_location()
+    if build_tier is not None:
+        validate_tier(build_tier, location)
     if project is None:
         project = Project.current()
     subdir_path = project.current_dir / subdir
@@ -175,6 +194,10 @@ def add_subdirectory(
     project.add_configure_dependency(script)
 
     with project._enter_subdir(subdir, env=env, imports=imports):
+        if build_tier is not None:
+            project.top._tier_floors[project._node_offset] = TierFloor(
+                build_tier, location
+            )
         # The script reaches its own neighbours the way a root build script
         # does, which the CLI arranges for that one.
         old_path = sys.path.copy()

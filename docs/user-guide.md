@@ -805,7 +805,7 @@ overlays, archives and installers are `all`: they operate on the things you
 built, and you don't usually want them running on every build. Test targets,
 Qt's `lupdate` and `QtDeploy` are `manual`: run them by name (`pcons test`,
 `ninja lupdate`), which works because each declares an alias. Where a target sits in the source tree makes no difference
-to any of this.
+to any of this, apart from `Default()`'s reach and a subdirectory included as a dependency, both below.
 
 To change a target's tier, just set it:
 
@@ -823,6 +823,11 @@ set), so the script has complete control of the default build:
 project.Default(app)          # only app, whatever else the project can make
 project.Default(lib, tools)   # these too
 ```
+
+A `Default()` call reaches the products of its own script's directory and
+below. In the top-level script that's the whole project. In a subdirectory's
+script it trims that subdirectory's products and leaves the rest of the tree
+alone, so a library's script can't knock your app out of the default build.
 
 Naming a step this way (`project.Default(installed)`) puts it in the default
 build. Most of the time it's simpler to set `build_tier` on the one or two
@@ -990,6 +995,21 @@ Notes:
 - Only the environment needs the `is_top_level` branch, because a standalone
   build has no parent to take a toolchain from. `default_environment` searches
   enclosing projects, so a library nested several levels down still finds it.
+
+**Someone else's project** is included the same way, with the widest tier
+its targets may take:
+
+```python
+fmt = add_subdirectory("third_party/fmt", build_tier="manual")
+app.link(fmt.fmt)
+```
+
+Nothing the included tree declares goes into a wider tier than that, whatever
+its own script chose, including its own `Default()`. With `"manual"` its
+targets build only when something needs them (the app above links `fmt`, so it
+builds) or when you ask for them, like CMake's `EXCLUDE_FROM_ALL`; with
+`"all"`, `ninja all` builds them too. A `Default()` in your script can still
+name any of them. See `examples/93_vendored_subdirectory`.
 
 A subdirectory script imports Python modules sitting next to it, the way a root
 build script does:
