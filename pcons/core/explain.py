@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pcons.core.paths import PathResolver
     from pcons.core.preset import Preset
 
 
@@ -113,120 +114,9 @@ def node_paths(nodes: Sequence[Any], root: Any = None) -> list[str]:
     return paths
 
 
-def spell_path_token(token: Any, topdir: str) -> str:
-    """A ``PathToken`` as a command running *topdir* below the root sees it.
-
-    The generator contract: a relative "project" path gets the topdir prefix;
-    absolutes and "build" paths pass through. Posix separators.
-    """
-    path = Path(token.path).as_posix() if token.path else ""
-    if (
-        token.path_type == "project"
-        and path
-        and not Path(path).is_absolute()
-        and topdir != "."
-    ):
-        path = f"{topdir}/{path}"
-    return token.prefix + path + token.suffix
-
-
-@dataclass(frozen=True)
-class CommandFrame:
-    """The directory commands run in (the build directory), for spelling
-    their paths exactly as the generators do.
-
-    Ninja and make both execute from the build directory, so a command shown
-    in this frame is the one the build actually runs — and the one a user can
-    paste into a shell there. The anchoring rules mirror the generators':
-    built paths are build-relative, plain sources get the ``topdir`` prefix
-    (the relative path back to the project root), external absolutes pass
-    through.
-    """
-
-    root: Any  # absolute Path of the project root
-    build_dir: Any  # absolute Path of the build directory
-    build_dir_parts: tuple[str, ...]  # canonical node-path prefix, if relative
-    topdir: str  # relative path from the build dir back to the project root
-
-    @classmethod
-    def for_project(cls, project: Any) -> CommandFrame:
-        import os
-
-        # resolve(), as the generators do (ninja resolves both dirs), so a
-        # symlinked root or build dir spells the same topdir build.ninja has.
-        root = Path(project.root_dir).resolve()
-        build_dir = Path(project._build_dir)
-        build_abs = (
-            build_dir if build_dir.is_absolute() else root / build_dir
-        ).resolve()
-        parts = () if build_dir.is_absolute() else build_dir.parts
-        try:
-            topdir = os.path.relpath(root, build_abs).replace(os.sep, "/")
-        except ValueError:  # Windows: different drives
-            topdir = root.as_posix()
-        return cls(root, build_abs, parts, topdir)
-
-    def for_cwd(self, cwd: Any) -> CommandFrame:
-        """The frame for an edge that runs in *cwd* rather than the build
-        directory (``env.Command(cwd=...)``); the generators render such an
-        edge's paths as seen from there."""
-        import os
-
-        cwd_abs = Path(cwd)
-        try:
-            topdir = os.path.relpath(self.root, cwd_abs).replace(os.sep, "/")
-        except ValueError:  # Windows: different drives
-            topdir = self.root.as_posix()
-        return CommandFrame(self.root, cwd_abs, (), topdir)
-
-    def _anchored(self, rel: str) -> str:
-        return rel if self.topdir == "." else f"{self.topdir}/{rel}"
-
-    def spell(self, path: Any, *, built: bool) -> str:
-        """One path as the command sees it from this frame's directory."""
-        from pcons.core.paths import execution_relative
-
-        text = execution_relative(
-            path, execution_dir=self.build_dir, build_dir_parts=self.build_dir_parts
-        )
-        p = Path(path)
-        if text != str(p).replace("\\", "/"):
-            # Rewritten: absolute under the execution dir, or carrying the
-            # build-dir prefix (stripped).
-            return text
-        if p.is_absolute():
-            if p.is_relative_to(self.root):
-                return self._anchored(p.relative_to(self.root).as_posix())
-            return text
-        if built and self.build_dir_parts:
-            # Canonical build-anchored node form (a bare name sits at the
-            # build root, as the generators treat it).
-            return text
-        # A root-anchored relative path, as seen from the execution dir.
-        return self._anchored(text)
-
-    def spell_token(self, token: Any) -> str:
-        """A ``PathToken`` as the command sees it from this frame's directory."""
-        return spell_path_token(token, self.topdir)
-
-    def spell_node(self, n: Any) -> str:
-        """A node's path in command spelling.
-
-        The generators' rule: a node something builds (it has build info or
-        is a target) is build-anchored; anything else is a source.
-        """
-        path = getattr(n, "path", None)
-        if path is None:
-            return str(n)
-        built = getattr(n, "_build_info", None) is not None or bool(
-            getattr(n, "is_target", False)
-        )
-        return self.spell(path, built=built)
-
-
 def format_node_command(
     node: Any,
-    frame: CommandFrame | None = None,
+    resolver: PathResolver | None = None,
     fallback_command: list[Any] | None = None,
 ) -> str | None:
     """Render a resolved node's command as one human-readable line.
@@ -234,10 +124,10 @@ def format_node_command(
     The resolver leaves each built node's command in ``_build_info["command"]``
     as a token list with :class:`~pcons.core.subst.SourcePath` /
     :class:`~pcons.core.subst.TargetPath` markers still in place, for the
-    generators to spell in their own syntax (``$in``/``$out`` for ninja).
-    Here the markers become the node's actual paths, spelled in *frame* —
-    the build directory the command runs in — so ``pcons explain`` shows,
-    concretely, what the build tool executes.
+    generators to write in their own syntax (``$in``/``$out`` for ninja).
+    Here the markers become the node's actual paths, as the command sees them
+    from the directory it runs in, when *resolver* is given, so ``pcons
+    explain`` shows, concretely, what the build tool executes.
 
     Returns None for a node that carries no command of its own (a source, or
     a secondary output whose primary node owns the edge). *fallback_command*
@@ -255,28 +145,37 @@ def format_node_command(
         return None
 
     # An edge with a cwd runs there, not in the build dir; the generators
-    # spell its paths from there and wrap the command in a cd. Same here,
+    # write its paths from there and wrap the command in a cd. Same here,
     # so the shown line stays the one that runs (pasteable from build dir).
     cd_prefix: list[str] = []
     cwd = build_info.get("cwd")
-    if frame is not None and cwd is not None:
+    run_in = Path(cwd) if cwd is not None else None
+    if resolver is not None and run_in is not None:
         import os
 
         try:
-            cd_to = os.path.relpath(Path(cwd), frame.build_dir).replace(os.sep, "/")
+            cd_to = os.path.relpath(run_in, resolver.execution_dir)
+            cd_to = cd_to.replace(os.sep, "/")
         except ValueError:  # Windows: different drives
-            cd_to = Path(cwd).as_posix()
+            cd_to = run_in.as_posix()
         cd_prefix = ["cd", cd_to, "&&"]
-        frame = frame.for_cwd(cwd)
 
-    def spell_nodes(nodes: Sequence[Any]) -> list[str]:
-        if frame is None:
+    def as_seen(path: Any, *, built: bool) -> str:
+        if resolver is None:
+            return Path(path).as_posix()
+        return resolver.make_command_relative(path, built=built, cwd=run_in)
+
+    def node_texts(nodes: Sequence[Any]) -> list[str]:
+        if resolver is None:
             return node_paths(nodes)
-        return [frame.spell_node(n) for n in nodes]
+        return [
+            as_seen(n.path, built=n.is_built) if hasattr(n, "path") else str(n)
+            for n in nodes
+        ]
 
-    sources = spell_nodes(build_info.get("sources") or [])
+    sources = node_texts(build_info.get("sources") or [])
     node_vars = build_info.get("vars") or {}
-    self_path = spell_nodes([node])[0]
+    self_path = node_texts([node])[0]
 
     def output_paths() -> list[str]:
         """The edge's outputs, in ``target_N`` order — from whichever key
@@ -291,17 +190,15 @@ def format_node_command(
                 if isinstance(info, dict) and "path" in info
             ]
             if paths:
-                if frame is None:
-                    return [Path(p).as_posix() for p in paths]
-                return [frame.spell(p, built=True) for p in paths]
+                return [as_seen(p, built=True) for p in paths]
         nodes_dict = build_info.get("all_output_nodes")
         node_list = build_info.get("all_targets") or (
             list(nodes_dict.values()) if nodes_dict else []
         )
-        return spell_nodes(node_list) if node_list else [self_path]
+        return node_texts(node_list) if node_list else [self_path]
 
     outputs = output_paths()
-    topdir = frame.topdir if frame is not None else "."
+    topdir = as_seen(resolver.project_root, built=False) if resolver else "."
 
     if isinstance(command, str):
         # A string command is already a shell line; substituting into it and
@@ -324,7 +221,7 @@ def format_node_command(
             # generators expand it, not as its repr.
             return [part for item in token for part in render(item)]
         if isinstance(token, PathToken):
-            return [spell_path_token(token, topdir)]
+            return [token.relativize(lambda p: as_seen(p, built=False))]
         if isinstance(token, (SourcePath, TargetPath)):
             paths = sources if isinstance(token, SourcePath) else outputs
             if getattr(token, "basename", False):
@@ -345,7 +242,7 @@ def format_node_command(
             return list(sources)
         if text == "$out":
             return list(outputs)
-        # $SRCDIR is the project source root, spelled from the build dir.
+        # $SRCDIR is the project source root, as seen from the build dir.
         return [text.replace("$SRCDIR", topdir)]
 
     tokens = command if isinstance(command, list) else [command]

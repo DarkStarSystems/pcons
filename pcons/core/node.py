@@ -228,6 +228,11 @@ class Node(ABC):
         return self.builder is not None
 
     @property
+    def is_built(self) -> bool:
+        """True if the build writes this node."""
+        return self.is_target
+
+    @property
     @abstractmethod
     def name(self) -> str:
         """A human-readable name for this node."""
@@ -320,6 +325,12 @@ class FileNode(Node):
     def exists(self) -> bool:
         """Check if the file exists on disk."""
         return self.path.exists()
+
+    @property
+    def is_built(self) -> bool:
+        """True if the build writes this file: a builder made it, or a tool
+        recorded how to build it, as a compile or an install does."""
+        return self.is_target or self._build_info is not None
 
     @property
     def suffix(self) -> str:

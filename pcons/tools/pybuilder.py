@@ -52,8 +52,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from pcons.core.environment import Environment
-    from pcons.core.explain import CommandFrame
     from pcons.core.node import Node
+    from pcons.core.paths import PathResolver
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.util.source_location import SourceLocation
@@ -444,19 +444,23 @@ class CallArguments:
 
         return tuple(m for m in self.markers if not isinstance(m, Subst))
 
-    def pickle(self, *, env: Environment, frame: CommandFrame) -> bytes:
+    def pickle(
+        self, *, env: Environment, resolver: PathResolver, cwd: Path | None
+    ) -> bytes:
         """The sidecar pickle's bytes, each marker expanded as the edge sees it.
 
         Args:
             env: The edge's environment, which expands a ``Subst``.
-            frame: The directory the function runs in, which the paths are
-                relative to.
+            resolver: The top project's resolver, which makes a path
+                relative to where the function runs.
+            cwd: Where the function runs, when that isn't the build
+                directory.
 
         Raises:
             PyBuilderError: If a marker has nothing to expand to.
         """
         expand = functools.partial(
-            _expansion, env=env, frame=frame, name=self.name, at=self.at
+            _expansion, env=env, resolver=resolver, cwd=cwd, name=self.name, at=self.at
         )
         return _payload_bytes(self.payload, self.name, self.at, expand)
 
@@ -521,7 +525,8 @@ def _expansion(
     marker: object,
     *,
     env: Environment,
-    frame: CommandFrame,
+    resolver: PathResolver,
+    cwd: Path | None,
     name: str,
     at: SourceLocation,
 ) -> str | list[str]:
@@ -540,6 +545,9 @@ def _expansion(
     from pcons.core.subst import PathToken, Subst
     from pcons.core.target import Target as TargetClass
 
+    def seen(path: Path | str, *, built: bool) -> str:
+        return resolver.make_command_relative(path, built=built, cwd=cwd)
+
     if isinstance(marker, Subst):
         try:
             tokens: list[Any] = env.subst_list(marker.template)
@@ -550,10 +558,13 @@ def _expansion(
                 at,
             ) from exc
         return [
-            frame.spell_token(t) if isinstance(t, PathToken) else str(t) for t in tokens
+            t.relativize(lambda p: seen(p, built=False))
+            if isinstance(t, PathToken)
+            else str(t)
+            for t in tokens
         ]
     if isinstance(marker, (FileNode, DirNode)):
-        return frame.spell_node(marker)
+        return seen(marker.path, built=marker.is_built)
     target = cast("TargetClass", marker)
     if not target.output_nodes:
         raise PyBuilderError(
@@ -561,7 +572,7 @@ def _expansion(
             f"which builds no file, so there is no path to pass.",
             at,
         )
-    return [frame.spell_node(node) for node in target.output_nodes]
+    return [seen(node.path, built=True) for node in target.output_nodes]
 
 
 def emit_args(
@@ -1601,7 +1612,10 @@ class PyBuilder:
             files = [(root / runner_rel, _runner_bytes())]
             if module_bytes is not None:
                 files.append((root / module_rel, module_bytes))
-            payload = arguments.pickle(env=env, frame=_frame(project, made))
+            info = made.output_nodes[0]._build_info or {}
+            payload = arguments.pickle(
+                env=env, resolver=project.top_path_resolver, cwd=info.get("cwd")
+            )
             files.append((root / args_rel(), payload))
             return files
 
@@ -1661,16 +1675,6 @@ class PyBuilder:
         self._made.append(made)
         made._builder_data["writes"] = writes
         return made
-
-
-def _frame(project: Project, made: Target) -> CommandFrame:
-    """The directory an edge's command runs in, to render paths as it sees them."""
-    from pcons.core.explain import CommandFrame
-
-    frame = CommandFrame.for_project(project.top)
-    info = made.output_nodes[0]._build_info or {}
-    cwd = info.get("cwd")
-    return frame if cwd is None else frame.for_cwd(cwd)
 
 
 def py_builder(
