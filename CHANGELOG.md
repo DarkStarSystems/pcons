@@ -22,6 +22,8 @@ changes break some existing scripts; the details are below.
   its output after another target's real file name: an `objcopy` of a
   program, say. The edge needs no name; it's labelled by its output. A
   Target only the `source=` callable names is resolved first. (#196)
+  A token of a list-form command may be a callable too, for a value only
+  resolve knows.
 
 - `add_subdirectory(..., build_tier="manual")` includes someone else's project
   as a dependency: nothing it declares goes into a wider tier than that, its

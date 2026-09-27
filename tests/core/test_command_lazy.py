@@ -252,3 +252,41 @@ class TestRefusals:
 
         with pytest.raises(PconsError, match="must return the file"):
             project.resolve()
+
+
+class TestCallableCommandTokens:
+    """A token the script leaves to resolve: called then, taken as written."""
+
+    @staticmethod
+    def _made(tmp_path: Path, token):
+        project = _project(tmp_path)
+        env = project.Environment()
+        made = env.Command(target="out.txt", command=["tool", token, "$TARGET"])
+        project.resolve()
+        return project, made.output_nodes[0]._build_info["command"]
+
+    def test_text(self, tmp_path: Path) -> None:
+        _, command = self._made(tmp_path, lambda: "--count=3")
+        assert "--count=3" in command
+
+    def test_a_path_is_the_file_it_names(self, tmp_path: Path) -> None:
+        from pcons.core.subst import PathToken
+
+        _, command = self._made(tmp_path, lambda: Path("data/in.txt"))
+        (token,) = [t for t in command if isinstance(t, PathToken)]
+        assert Path(token.path) == Path("data/in.txt")
+
+    def test_a_node_is_also_a_dependency(self, tmp_path: Path) -> None:
+        project = _project(tmp_path)
+        env = project.Environment()
+        extra = project.node("in.txt")
+        made = env.Command(target="out.txt", command=["tool", lambda: extra, "$TARGET"])
+
+        text = _ninja(tmp_path, project)
+
+        assert extra in made.output_nodes[0].implicit_deps
+        assert "build out.txt: " in text
+
+    def test_anything_else_is_refused(self, tmp_path: Path) -> None:
+        with pytest.raises(PconsError, match="returns what the script could have"):
+            self._made(tmp_path, lambda: 42)

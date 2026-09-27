@@ -58,6 +58,9 @@ _OUTPUT_DIRECTORY_VARS: dict[str, str] = {
 _SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
 
 
+#: One token of a list-form command, as written.
+CommandToken: TypeAlias = "str | Path | Target | FileNode"
+
 #: What ``env.Command(target=...)`` takes, one file or several.
 CommandTargets: TypeAlias = "str | Path | Sequence[str | Path]"
 
@@ -1478,7 +1481,7 @@ class Environment(_EnvironmentStubs):
         target: CommandTargets | Callable[[], CommandTargets],
         tool: Target | str | Path | None = None,
         source: CommandSources | Callable[[], CommandSources] | None = None,
-        command: str | Sequence[str | Path | Target | FileNode] = "",
+        command: str | Sequence[CommandToken | Callable[[], CommandToken]] = "",
         name: str | None = None,
         depends: Target | str | Path | Sequence[Target | str | Path] | None = None,
         restat: bool = False,
@@ -1584,6 +1587,11 @@ class Environment(_EnvironmentStubs):
                     names a file the same way, read like ``sources=`` when
                     relative, but adds no dependency: it may be a directory
                     the command only writes to.
+
+                    A token may also be a callable taking no arguments, for
+                    something only resolve knows, as ``target=`` takes one:
+                    it's called then, and returns a str, a Path or a file
+                    node, taken as if written there.
 
                     First in the list, such a token is the program the
                     command runs, and is spelled the way the shell will run

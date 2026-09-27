@@ -168,10 +168,17 @@ class CommandNodeFactory(PendingSourceFactory):
         build_info = target.output_nodes[0]._build_info or {}
         command = build_info.get("command")
         if not command or not any(
-            isinstance(token, (TargetClass, FileNode, ToolPath)) for token in command
+            isinstance(token, (TargetClass, FileNode, ToolPath)) or _is_deferred(token)
+            for token in command
         ):
             return
         tool = (getattr(target, "_builder_data", None) or {}).get("tool")
+        # A callable token is called first, and what it returns is then taken
+        # as if the script had written it into the list.
+        command = [
+            _called_command_token(target, token) if _is_deferred(token) else token
+            for token in command
+        ]
         build_info["command"] = [
             _resolved_command_token(target, token, tool, program=index == 0)
             for index, token in enumerate(command)
@@ -563,6 +570,39 @@ class Resolver:
             "  Expanded command: %s",
             command_tokens[:10] if len(command_tokens) > 10 else command_tokens,
         )
+
+
+def _is_deferred(token: Any) -> bool:
+    """True for a command token the script left to be decided at resolve."""
+    from pcons.core.target import Target as TargetClass
+
+    return callable(token) and not isinstance(token, (TargetClass, FileNode, ToolPath))
+
+
+def _called_command_token(owner: Target, token: Any) -> Any:
+    """Call a deferred command token and take what it returns as written.
+
+    Text stays text; a ``Path`` is the file it names, written by the
+    generator; a node is that file too, and also a dependency the edge
+    reruns on, as a node written into the list is.
+    """
+    from pcons.core.builder import command_path
+    from pcons.core.errors import PconsError
+
+    value = token()
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Path):
+        return command_path(value)
+    if isinstance(value, FileNode):
+        owner.depends(value, on_change=True)
+        return value
+    raise PconsError(
+        f"a callable in the command of '{owner.name}' returned {value!r}. It "
+        f"returns what the script could have written there: a str, a Path, "
+        f"or a file node.",
+        location=owner.defined_at,
+    )
 
 
 def _resolved_command_token(
