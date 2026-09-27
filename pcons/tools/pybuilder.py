@@ -1169,7 +1169,7 @@ class _HowToRun:
     launcher: Sequence[str] | None = None
     env_vars: Mapping[str, str] | None = None
     worker: Any = None
-    depends: str | Path | Sequence[str | Path] | None = None
+    depends: Target | str | Path | Sequence[Target | str | Path] | None = None
 
     def command_kwargs(self) -> dict[str, Any]:
         """The part of this that ``env.Command`` takes verbatim."""
@@ -1269,7 +1269,7 @@ class PyBuilder:
         target: str | Path | list[str | Path],
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
         name: str | None = None,
-        depends: str | Path | Sequence[str | Path] | None = None,
+        depends: Target | str | Path | Sequence[Target | str | Path] | None = None,
         **kwargs: Any,
     ) -> Target:
         """Make one build edge that runs the function.
@@ -1363,7 +1363,7 @@ def py_builder(
     launcher: Sequence[str] | None = None,
     env_vars: Mapping[str, str] | None = None,
     worker: Any = None,
-    depends: str | Path | Sequence[str | Path] | None = None,
+    depends: Target | str | Path | Sequence[Target | str | Path] | None = None,
 ) -> Callable[[Callable[..., object]], PyBuilder]:
     """The decorator ``Environment.PyBuilder`` returns.
 

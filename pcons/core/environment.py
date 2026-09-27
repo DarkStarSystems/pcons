@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from difflib import get_close_matches
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias, cast
 
 from pcons.core.debug import trace, trace_value
 from pcons.core.names import validate_name
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from pcons.core._preset_names import KnownFeaturePreset
     from pcons.core._toolchain_names import KnownToolchain
     from pcons.core.explain import Explanation
-    from pcons.core.node import FileNode, Node
+    from pcons.core.node import FileNode
     from pcons.core.preset import Preset, ToolContribution
     from pcons.core.target import Target
     from pcons.tools import pybuilder
@@ -56,6 +56,25 @@ _OUTPUT_DIRECTORY_VARS: dict[str, str] = {
 }
 
 _SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
+
+
+#: What ``env.Command(target=...)`` takes, one file or several.
+CommandTargets: TypeAlias = "str | Path | Sequence[str | Path]"
+
+#: What ``env.Command(source=...)`` takes, one input or several.
+CommandSources: TypeAlias = "Target | str | Path | Sequence[Target | str | Path]"
+
+
+def _as_list(value: Any) -> list[Any]:
+    """One file or several, as a list; nothing at all is an empty list."""
+    from pcons.core.node import Node
+    from pcons.core.target import Target
+
+    if value is None:
+        return []
+    if isinstance(value, (str, Path, Node, Target)):
+        return [value]
+    return list(value)
 
 
 def _is_depfile_suffix(depfile: str | Path) -> bool:
@@ -1456,12 +1475,12 @@ class Environment(_EnvironmentStubs):
     def Command(
         self,
         *,
-        target: str | Path | list[str | Path],
+        target: CommandTargets | Callable[[], CommandTargets],
         tool: Target | str | Path | None = None,
-        source: Target | str | Path | Sequence[Target | str | Path] | None = None,
+        source: CommandSources | Callable[[], CommandSources] | None = None,
         command: str | Sequence[str | Path | Target | FileNode] = "",
         name: str | None = None,
-        depends: str | Path | Sequence[str | Path] | None = None,
+        depends: Target | str | Path | Sequence[Target | str | Path] | None = None,
         restat: bool = False,
         write_if_different: bool = False,
         cwd: str | Path | None = None,
@@ -1494,6 +1513,17 @@ class Environment(_EnvironmentStubs):
                     ``env.build_dir`` is where a relative target lands. An
                     absolute path outside the build directory is an external
                     output, produced in place.
+
+                    A callable taking no arguments stands for a file this
+                    edge's dependencies decide: it's called during resolve,
+                    after they have resolved, and what it returns is anchored
+                    as a written-out target is. So an edge can name its output
+                    after a program's real file name, which only the linker's
+                    naming settles. Whatever the callable reads has to be a
+                    dependency of this edge (``depends=``, ``tool=``, or a
+                    ``source=``), or nothing orders it first. Until then the
+                    target has no ``output_nodes``, and an unnamed one is
+                    labelled by its output only once it has one.
             tool: The program that runs this command, written ``$TOOL`` in
                     *command*. A ``Target`` becomes an implicit dependency,
                     never a source, so ``$SOURCES`` keeps meaning what the
@@ -1517,7 +1547,10 @@ class Environment(_EnvironmentStubs):
             source: Input file(s) that the command depends on. Can be Targets
                    (whose output files become sources), paths, or None. A
                    relative path is read from the directory of the script
-                   that declares it, like a target's ``sources=``.
+                   that declares it, like a target's ``sources=``. A
+                   callable, as ``target=`` takes one, is called during
+                   resolve and returns the whole list; a Target in it is
+                   resolved first, like a written-out one.
             command: The shell command to run. Supports variable substitution:
                     - $SOURCE / $SOURCES: All source files (space-separated);
                       the two spellings mean the same thing
@@ -1700,6 +1733,14 @@ class Environment(_EnvironmentStubs):
         from pcons.core.node import FileNode
         from pcons.core.target import Target as TargetClass
 
+        # Taken once: a callable target= or source= runs during resolve, when
+        # nothing but pcons's own frames is on the stack to blame.
+        defined_at = get_caller_location()
+        # A callable stands for files this edge's dependencies decide, so it
+        # is called during resolve rather than here; see make_nodes below.
+        lazy_target = callable(target)
+        lazy_source = callable(source)
+
         command_deps: list[TargetClass | FileNode] = []
         if not isinstance(command, str):
             command = list(command)
@@ -1713,7 +1754,7 @@ class Environment(_EnvironmentStubs):
             raise PconsError(
                 f'deps_style={deps_style!r}: expected "gcc" (a make-style '
                 f'depfile) or "msvc" (/showIncludes output).',
-                location=get_caller_location(),
+                location=defined_at,
             )
         if depfile is None:
             if deps_style is not None:
@@ -1721,34 +1762,10 @@ class Environment(_EnvironmentStubs):
                     f"deps_style={deps_style!r} needs depfile= as well: it "
                     f"says how the dependencies the command writes arrive, "
                     f"and without a depfile it writes none.",
-                    location=get_caller_location(),
+                    location=defined_at,
                 )
         elif deps_style is None:
             deps_style = "gcc"
-
-        # Normalize source to list, separating Targets from immediate sources.
-        # A Target's outputs don't exist until the resolve phase, so it can't
-        # become a node here — but its *position* has to survive, or $SOURCE
-        # and ${SOURCES[n]} refer to different files than the script wrote.
-        immediate_sources: list[str | Path | Node] = []
-        target_sources: list[TargetClass] = []
-        source_list: list[Any] = []
-
-        if source is not None:
-            source_list = (
-                [source]
-                if isinstance(source, (str, Path, TargetClass))
-                else list(source)
-            )
-            for src in source_list:
-                if isinstance(src, TargetClass):
-                    target_sources.append(src)
-                else:
-                    immediate_sources.append(src)
-
-        _warn_if_source_reads_as_singular(
-            command, len(source_list), get_caller_location()
-        )
 
         # Create the builder
         # A worker is a launcher with a lifecycle; the edge only ever sees
@@ -1778,36 +1795,20 @@ class Environment(_EnvironmentStubs):
             raise PconsError(
                 "$TOOL in a command names the program tool= gives it, and "
                 "this command has no tool=.",
-                location=get_caller_location(),
+                location=defined_at,
             )
         if tool is not None and not names_tool:
             raise PconsError(
                 f"tool={tool!r} is never run: the command has no $TOOL. "
                 f"Write it where the program goes, or drop tool= and list "
                 f"the tool under source= or depends=.",
-                location=get_caller_location(),
+                location=defined_at,
             )
 
-        # Nodes up front, so the declared order below can splice Targets back
-        # into their positions; the builder passes existing nodes through.
-        normalized = builder._normalize_sources(immediate_sources, self)
-        # The ordinary builder entry point, which anchors the targets and
-        # normalizes the sources exactly as it does for every other builder.
-        nodes = builder(
-            self,
-            target,
-            list(normalized),
-            defined_at=get_caller_location(),
-        )
-        outputs = [node for node in nodes if isinstance(node, FileNode)]
-        # A command that declares no output has no file to be labelled after.
-        label = output_label(self, outputs[0].path) if outputs else "command"
-
-        # Create Target object
         cmd_target = TargetClass(
-            name or label,
+            name or "command",
             target_type="command",
-            defined_at=get_caller_location(),
+            defined_at=defined_at,
             env=self,
             anonymous=name is None,
         )
@@ -1817,10 +1818,74 @@ class Environment(_EnvironmentStubs):
         # `cmd.build_tier = "all"` (see pcons.core.tiers).
         cmd_target.place_in_tier("default", by="Command")
 
-        # Register nodes with the environment and add to target
-        for node in outputs:
-            self.register_node(node)
-            cmd_target.output_nodes.append(node)
+        def make_nodes() -> None:
+            """Anchor this edge's targets and make its nodes.
+
+            Runs at the call for an ordinary command, and during resolve when
+            ``target=`` or ``source=`` is a callable, once the resolver has
+            settled this edge's dependencies, so a callable may name a file
+            after what one of them builds. Either way the anchoring, the
+            source normalization and the node registration are the same,
+            done in the directory the command was declared in.
+            """
+            given_target = cast(
+                "CommandTargets", target() if callable(target) else target
+            )
+            given_source = cast(
+                "CommandSources | None", source() if callable(source) else source
+            )
+            if lazy_target and not _as_list(given_target):
+                raise PconsError(
+                    f"the target= callable returned {given_target!r}. It must "
+                    f"return the file, or files, the command writes.",
+                    location=defined_at,
+                )
+
+            # Separate Targets from immediate sources. A Target's outputs
+            # don't exist until it resolves, so it can't become a node here,
+            # but its *position* has to survive, or $SOURCE and ${SOURCES[n]}
+            # refer to different files than the script wrote.
+            source_list: list[Any] = _as_list(given_source)
+            immediate_sources = [
+                src for src in source_list if not isinstance(src, TargetClass)
+            ]
+            target_sources = [
+                src for src in source_list if isinstance(src, TargetClass)
+            ]
+            _warn_if_source_reads_as_singular(command, len(source_list), defined_at)
+
+            # Nodes up front, so the declared order below can splice Targets
+            # back into their positions; the builder passes existing nodes
+            # through. Then the ordinary builder entry point, which anchors the
+            # targets and normalizes the sources as it does for every builder.
+            normalized = builder._normalize_sources(immediate_sources, self)
+            nodes = builder(self, given_target, list(normalized), defined_at=defined_at)
+            outputs = [node for node in nodes if isinstance(node, FileNode)]
+            for node in outputs:
+                self.register_node(node)
+                cmd_target.output_nodes.append(node)
+            # An anonymous command wears its first output's path; one that
+            # declares no output keeps the placeholder.
+            if name is None and outputs:
+                cmd_target.name = output_label(self, outputs[0].path)
+
+            if target_sources:
+                cmd_target._add_pending_sources(target_sources)
+                # The declared sequence, with each Target still a Target: the
+                # factory substitutes its outputs in place once they exist,
+                # so $SOURCES keeps the order the script wrote instead of
+                # listing every Target last.
+                normalized_iter = iter(normalized)
+                cmd_target._builder_data["declared_sources"] = [
+                    src if isinstance(src, TargetClass) else next(normalized_iter)
+                    for src in source_list
+                ]
+
+        if lazy_target or lazy_source:
+            # Called by CommandNodeFactory.resolve; see make_nodes.
+            cmd_target._builder_data["make_nodes"] = make_nodes
+        else:
+            make_nodes()
 
         if write_if_different:
             import sys
@@ -1829,19 +1894,6 @@ class Environment(_EnvironmentStubs):
             stable = f"{python} -m pcons.tools.stable_output"
             cmd_target.pre_build(f"{stable} --pre $out")
             cmd_target.post_build(f"{stable} --post $out")
-
-        # Handle Target sources - store for deferred resolution
-        if target_sources:
-            cmd_target._add_pending_sources(target_sources)
-            # The declared sequence, with each Target still a Target: the
-            # factory substitutes its outputs in place once they exist, so
-            # $SOURCES keeps the order the script wrote instead of listing
-            # every Target last.
-            normalized_iter = iter(normalized)
-            cmd_target._builder_data["declared_sources"] = [
-                src if isinstance(src, TargetClass) else next(normalized_iter)
-                for src in source_list
-            ]
 
         # A program the command runs never appears in the command's own
         # depfile, so it is an implicit dependency whatever the edge records.
@@ -1855,10 +1907,7 @@ class Environment(_EnvironmentStubs):
 
         # Apply extra implicit dependencies
         if depends is not None:
-            if isinstance(depends, (str, Path)):
-                cmd_target.depends(depends)
-            else:
-                cmd_target.depends(*depends)
+            cmd_target.depends(*_as_list(depends))
 
         return cmd_target
 
@@ -1872,7 +1921,7 @@ class Environment(_EnvironmentStubs):
         launcher: Sequence[str] | None = None,
         env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
-        depends: str | Path | Sequence[str | Path] | None = None,
+        depends: Target | str | Path | Sequence[Target | str | Path] | None = None,
     ) -> Callable[[Callable[..., object]], pybuilder.PyBuilder]:
         """Turn a Python function of this build script into a builder.
 

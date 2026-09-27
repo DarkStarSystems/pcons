@@ -117,16 +117,23 @@ class NoOpFactory(PendingSourceFactory):
 class CommandNodeFactory(PendingSourceFactory):
     """Factory for the targets ``env.Command`` declares.
 
-    Command targets already have output_nodes from GenericCommandBuilder,
-    so this factory has two jobs on the build_info those nodes carry:
-    ``resolve`` turns whatever the command line names into paths, and
-    ``resolve_pending`` wires up sources given as Targets.
+    A Command target usually has its output_nodes already, from
+    GenericCommandBuilder, so this factory has two jobs on the build_info
+    those nodes carry: ``resolve`` turns whatever the command line names into
+    paths, and ``resolve_pending`` wires up sources given as Targets.
 
-    Before either, ``resolve`` writes the files the command reads that the
-    build description itself decides, listed in ``_builder_data["writes"]``
-    as ``(absolute path, bytes)`` pairs by whatever made the command. They
-    are written here rather than when the command is declared, so a script
-    that only describes a build, and never resolves it, writes nothing.
+    A command whose ``target=`` or ``source=`` is a callable has no nodes yet:
+    ``_builder_data["make_nodes"]`` holds the rest of the ``env.Command``
+    call, and ``resolve`` runs it first. The resolver has settled this edge's
+    dependencies by then, so the callable may name a file after what one of
+    them builds.
+
+    Then ``resolve`` writes the files the command reads that the build
+    description itself decides, listed in ``_builder_data["writes"]`` as
+    ``(absolute path, bytes)`` pairs by whatever made the command. They are
+    written here rather than when the command is declared, so a script that
+    only describes a build, and never resolves it, writes nothing. After the
+    nodes, so that whatever makes them may add to the list.
     """
 
     def resolve(
@@ -151,6 +158,9 @@ class CommandNodeFactory(PendingSourceFactory):
         from pcons.core.collate import write_bytes_if_changed
         from pcons.core.target import Target as TargetClass
 
+        make_nodes = target._builder_data.pop("make_nodes", None)
+        if make_nodes is not None:
+            make_nodes()
         for path, content in target._builder_data.get("writes", ()):
             write_bytes_if_changed(path, content)
         if not target.output_nodes:
@@ -315,9 +325,7 @@ class Resolver:
         # are its sources. A target reached out of order (a caller resolving
         # one target directly) resolves them here, before its factory reads
         # them.
-        for dep in target.dependencies:
-            if not dep._resolved:
-                self._resolve_target(dep)
+        self._resolve_dependencies(target)
 
         # Dispatch to registered factory via _builder_name
         builder_name = target._builder_name
@@ -337,6 +345,10 @@ class Resolver:
                 builder_name,
             )
 
+        # A factory may learn of a dependency only as it resolves: a lazy
+        # command's source= names its Targets then. Settle those before the
+        # pending sources read their outputs.
+        self._resolve_dependencies(target)
         if target._pending_sources is not None:
             self._resolve_pending_sources(target)
 
@@ -353,6 +365,12 @@ class Resolver:
 
         target._resolved = True
         self._resolving.discard(id(target))
+
+    def _resolve_dependencies(self, target: Target) -> None:
+        """Resolve whatever *target* depends on that hasn't resolved yet."""
+        for dep in target.dependencies:
+            if not dep._resolved:
+                self._resolve_target(dep)
 
     def _resolve_pending_sources(self, target: Target) -> None:
         """Let the target's factory create its nodes from its Target sources,

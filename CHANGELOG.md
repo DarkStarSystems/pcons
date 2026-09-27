@@ -17,6 +17,12 @@ changes break some existing scripts; the details are below.
 
 ### Added
 
+- `env.Command(target=..., source=...)` also take a callable, called during
+  resolve once the edge's dependencies have resolved, so a command can name
+  its output after another target's real file name: an `objcopy` of a
+  program, say. The edge needs no name; it's labelled by its output. A
+  Target only the `source=` callable names is resolved first. (#196)
+
 - `add_subdirectory(..., build_tier="manual")` includes someone else's project
   as a dependency: nothing it declares goes into a wider tier than that, its
   own `Default()` included, so its targets build only when something needs them

@@ -12,7 +12,7 @@ This module provides builders for compiled targets:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,7 +24,7 @@ from pcons.tools.compile_link import CompileLinkFactory
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
-    from pcons.core.environment import Environment
+    from pcons.core.environment import CommandSources, CommandTargets, Environment
     from pcons.core.project import Project
     from pcons.util.source_location import SourceLocation
 
@@ -298,9 +298,9 @@ class CommandBuilder:
         project: Project,
         env: Environment,
         *,
-        target: str | Path | list[str | Path],
+        target: CommandTargets | Callable[[], CommandTargets],
         tool: Target | str | Path | None = None,
-        source: str | Path | list[str | Path] | None = None,
+        source: CommandSources | Callable[[], CommandSources] | None = None,
         command: str | Sequence[Any] = "",
         name: str | None = None,
         restat: bool = False,
