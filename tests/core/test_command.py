@@ -156,37 +156,23 @@ class TestEnvironmentCommand:
         output_node = result.output_nodes[0]
         assert len(output_node.explicit_deps) == 3
 
-    def test_target_written_from_the_project_root(self, test_project, caplog):  # noqa: F811
-        """A leading build-dir component is absorbed: build_dir / "out.txt"
-        and "out.txt" mean the same file, with the same canonical
-        (prefixed) node path. Path arithmetic is unambiguous, so quiet."""
-        env = Environment()
-        result = env.Command(target=Path("build/output.txt"), command="touch $TARGET")
-        assert result.output_nodes[0].path == Path("build/output.txt")
-        assert "build directory prefix" not in caplog.text
-
-    def test_a_hand_typed_prefix_string_warns(self, test_project, caplog):  # noqa: F811
-        """The string may have meant a literal 'build' subdirectory (the
-        ninja-port trap), so the absorption is announced — blamed on the
-        build-script line, not on pcons's own frame."""
-        env = Environment()
-        with caplog.at_level(logging.WARNING, logger="pcons.core.paths"):
-            result = env.Command(target="build/output.txt", command="touch $TARGET")
-        assert result.output_nodes[0].path == Path("build/output.txt")
-        assert "read as the build directory prefix" in caplog.text
-        assert "test_command.py" in caplog.text
-
-    def test_a_literal_build_subdirectory_is_written_explicitly(
-        self, test_project, caplog
-    ):  # noqa: F811
-        """project.build_dir / 'build/x.h' (a doubled prefix) is the quiet
-        escape hatch for a nested dir sharing the build dir's name."""
+    def test_an_absolute_target_under_the_build_dir(self, test_project):  # noqa: F811
+        """An absolute path is that file: env.build_dir / "out.txt" is where
+        a relative "out.txt" lands."""
         env = Environment()
         result = env.Command(
-            target=Path("build/build/browse_py.h"), command="touch $TARGET"
+            target=env.build_dir / "output.txt", command="touch $TARGET"
         )
-        assert result.output_nodes[0].path == Path("build/build/browse_py.h")
-        assert "build directory prefix" not in caplog.text
+        assert result.output_nodes[0].path == Path("build/output.txt")
+
+    def test_a_leading_build_is_a_subdirectory(self, test_project, caplog):  # noqa: F811
+        """A relative target is taken as written, so "build/x" is a build
+        subdirectory of the build directory, with nothing to warn about."""
+        env = Environment()
+        with caplog.at_level(logging.WARNING):
+            result = env.Command(target="build/output.txt", command="touch $TARGET")
+        assert result.output_nodes[0].path == Path("build/build/output.txt")
+        assert caplog.text == ""
 
     def test_a_target_in_sources_is_compiled(self, tmp_path):
         """sources=[gen] means the files that target builds, so a generated
@@ -300,7 +286,7 @@ class TestEnvironmentCommand:
         env = Environment()
 
         result = env.Command(
-            target=Path("build/output.txt"),
+            target=Path("output.txt"),
             source=[Path("src/input.txt")],
             command="process $SOURCE > $TARGET",
         )

@@ -115,6 +115,11 @@ nested in the test suite, which is how the fixes below were found.
   assigned. An absolute `target=` is that file exactly, so
   `target=project.build_dir / "x"` no longer picks up a `build_prefix`; write
   `target="x"` or `env.build_dir / "x"`.
+- A relative `target=` (or `output=`, or install destination) is taken as
+  written: `"build/x"` is a `build` subdirectory of the build directory. A
+  leading build-directory component used to be dropped, with a warning for
+  hand-typed strings, and a literal `build` subdirectory had to be written
+  twice. Write `"x"`, or `env.build_dir / "x"`.
 - `$SRCDIR` is the declaring script's directory (was the top-level root).
 - `project.node(path)`, a relative `cwd=`, `configure_file()`'s template,
   `write_file()` and a scanner's `scan_deps` read relative paths from the

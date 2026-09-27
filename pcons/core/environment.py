@@ -1487,16 +1487,13 @@ class Environment(_EnvironmentStubs):
                     declares them: in a subdirectory reached through
                     ``add_subdirectory``, ``"out.txt"`` is
                     ``<build_dir>/<subdir>/out.txt``, where that script's
-                    programs and libraries also build. A leading build-dir
-                    component is absorbed, so ``"build/out.txt"`` means the
-                    same file as ``"out.txt"``. An absolute path is that file
-                    exactly: ``env.build_dir / "out.txt"`` is ``"out.txt"``
-                    too, since ``env.build_dir`` is where a relative target
-                    lands. For a file in a literal
-                    subdirectory sharing the build directory's name, write
-                    the prefix explicitly: ``project.build_dir / "build/x.h"``.
-                    An absolute path outside the build directory is an
-                    external output, produced in place.
+                    programs and libraries also build. A relative path is
+                    taken as written, so ``"build/out.txt"`` is a ``build``
+                    subdirectory. An absolute path is that file exactly:
+                    ``env.build_dir / "out.txt"`` is ``"out.txt"``, since
+                    ``env.build_dir`` is where a relative target lands. An
+                    absolute path outside the build directory is an external
+                    output, produced in place.
             tool: The program that runs this command, written ``$TOOL`` in
                     *command*. A ``Target`` becomes an implicit dependency,
                     never a source, so ``$SOURCES`` keeps meaning what the

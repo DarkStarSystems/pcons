@@ -863,13 +863,16 @@ class TestWhereTheSignedPackageGoes:
 
         env = android_env()
 
-        assert signed_apk_path(env, "myapp") == Path("build") / SIGNED
+        assert signed_apk_path(env, "myapp") == env.build_dir / SIGNED
 
     def test_an_explicit_output_directory_is_honoured(self, app_project) -> None:
         from pcons.toolchains.qt.apk import signed_apk_path
 
         env = android_env()
 
-        assert signed_apk_path(env, "myapp", output="package") == Path(
-            "package/build/outputs/apk/release/package-release-signed.apk"
+        # Written like target=, so in the build directory, as androiddeployqt's
+        # --output is.
+        assert signed_apk_path(env, "myapp", output="package") == (
+            env.build_dir
+            / "package/build/outputs/apk/release/package-release-signed.apk"
         )

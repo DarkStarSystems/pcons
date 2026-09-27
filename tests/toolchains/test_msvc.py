@@ -218,7 +218,7 @@ class TestMsvcLinker:
             SourcePath(),
         ]
 
-        result = shared_builder(env, "build/mylib.dll", ["a.obj", "b.obj"])
+        result = shared_builder(env, "mylib.dll", ["a.obj", "b.obj"])
 
         assert isinstance(result, OutputGroup)
         assert result.primary.path == Path("build/mylib.dll")

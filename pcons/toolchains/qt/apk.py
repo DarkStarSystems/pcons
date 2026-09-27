@@ -41,7 +41,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.core.builder import anchor_target_paths
 from pcons.toolchains.android import build_tools_program
 from pcons.toolchains.qt.android import (
     _android_preset,
@@ -90,21 +89,16 @@ def _output_dir(
     app: Target | str,
     output: str | Path | None,
 ) -> Path:
-    """The androiddeployqt output directory, anchored like any target path.
+    """The androiddeployqt output directory, absolute; *output* is written
+    like ``target=``.
 
     Every path declared around the package is derived from this one, so the
     edge, the staged library and the tool's own ``--output`` all name one
-    directory; ``_as_written`` renders it for the command line.
+    directory.
     """
     if output is None:
         return android_output_dir(env, app)
-    return anchor_target_paths(env, [Path(output)])[0]
-
-
-def _as_written(project: Project, directory: Path) -> str:
-    """*directory* as androiddeployqt must be told it: the tool runs in the
-    build directory, so its argument is relative to that."""
-    return project.top_path_resolver.make_execution_relative(directory)
+    return env.build_dir / output
 
 
 def apk_path(
@@ -134,10 +128,9 @@ def apk_path(
         release: The release package rather than the debug one.
 
     Returns:
-        The path, relative to the project root unless the environment's
-        build directory is absolute.
+        The path, absolute.
     """
-    directory = Path(output) if output is not None else android_output_dir(env, app)
+    directory = _output_dir(env, app, output)
     variant = "release" if release else "debug"
     stem = (
         f"{directory.name}-release-unsigned" if release else f"{directory.name}-debug"
@@ -217,7 +210,7 @@ def android_apk(
         "--input",
         "${SOURCES[0]}",
         "--output",
-        _as_written(project, directory),
+        directory,
     ]
     if release:
         arguments.append("--release")

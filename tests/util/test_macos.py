@@ -140,7 +140,7 @@ class TestCreateUniversalBinary:
         result = create_universal_binary(
             test_project,
             inputs=[input1, input2],
-            output="build/universal/libtest.a",
+            output="universal/libtest.a",
         )
 
         # Should return a Target
@@ -166,7 +166,7 @@ class TestCreateUniversalBinary:
                 Path("build/arm64/libtest.a"),
                 "build/x86_64/libtest.a",
             ],
-            output="build/universal/libtest.a",
+            output="universal/libtest.a",
         )
 
         assert isinstance(result, Target)
@@ -180,7 +180,7 @@ class TestCreateUniversalBinary:
             create_universal_binary(
                 test_project,
                 inputs=[],
-                output="build/universal/libtest.a",
+                output="universal/libtest.a",
             )
 
     def test_accepts_target_inputs(self, test_project):
@@ -206,7 +206,7 @@ class TestCreateUniversalBinary:
         result = create_universal_binary(
             test_project,
             inputs=[target1, target2],
-            output="build/universal/libtest.a",
+            output="universal/libtest.a",
         )
 
         assert isinstance(result, Target)
@@ -231,9 +231,7 @@ class TestCreateUniversalBinary:
             libs.append(project.StaticLibrary(f"lib-{arch}", env, sources=["lib.c"]))
 
         # No project.resolve() here: that is the point.
-        universal = create_universal_binary(
-            project, inputs=libs, output="build/libtest.a"
-        )
+        universal = create_universal_binary(project, inputs=libs, output="libtest.a")
         project.Default(universal)
 
         NinjaGenerator().generate(project)

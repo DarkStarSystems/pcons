@@ -161,11 +161,11 @@ class TestGeneratedInput:
         project = Project("p", root_dir=tmp_path, build_dir="build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.Command(
-            target=Path("build/gen/list.txt"),
+            target=project.build_dir / "gen/list.txt",
             source=None,
             command="generate $TARGET",
         )
-        project.generated_input(Path("build/gen/list.txt"))
+        project.generated_input(project.build_dir / "gen/list.txt")
 
         project.resolve()  # does not raise
 

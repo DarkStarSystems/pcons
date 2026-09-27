@@ -33,7 +33,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import builder
 from pcons.packages.description import PackageDescription
 from pcons.packages.imported import ImportedTarget
@@ -209,11 +208,9 @@ class CargoBuildBuilder:
         # Per-target output directory, kept inside the build dir so it's
         # easy to clean and doesn't collide with a user's own cargo runs.
         # It lands where this script's targets do, build/<subdir>/ under
-        # add_subdirectory. Two views of the same directory: the anchored
-        # one for the pcons node graph, and an absolute one for the cargo
-        # command (which runs from ninja's build dir, not project root).
-        target_root = anchor_target_paths(env, [Path("cargo", name)])[0]
-        target_root_abs = project.top_path_resolver.project_root / target_root
+        # add_subdirectory. Absolute, so the same path serves the node graph
+        # and the cargo command.
+        target_root = env.build_dir / "cargo" / name
         profile_dir = _profile_subdir(profile)
         artifact_dir = target_root / profile_dir
         if target_triple:
@@ -232,7 +229,7 @@ class CargoBuildBuilder:
             cargo,
             "build",
             f"--manifest-path={manifest_path}",
-            f"--target-dir={target_root_abs}",
+            f"--target-dir={target_root}",
             f"--config=build.dep-info-basedir={json.dumps(str(execution_dir))}",
         ]
         if profile == "release":

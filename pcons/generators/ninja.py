@@ -1254,8 +1254,8 @@ class NinjaGenerator(BaseGenerator):
         logger.warning(
             "Command token names a path under %r, but a command runs *in* the "
             "build directory, so this resolves to %s/%s/...:\n  %s\n"
-            "  Use $SRCDIR/... for a source file, a PathToken for something "
-            "this build produces, or cwd= to move the command. Set "
+            "  Use $SRCDIR/... for a source file, a Path or PathToken for "
+            "something this build produces, or cwd= to move the command. Set "
             "PCONS_WARN_BUILD_DIR_PATHS=0 if the path is right as written.",
             build_dir,
             build_dir,

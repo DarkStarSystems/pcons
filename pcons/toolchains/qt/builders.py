@@ -43,7 +43,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.sax.saxutils import escape
 
-from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import BuilderRegistry, builder
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import PathToken
@@ -123,22 +122,15 @@ def _qt_gen_dir_for(
 ) -> tuple[Path, Path]:
     """Where a Qt builder writes its generated files: ``(root, gen_dir)``.
 
-    *gen_dir* is a builder target path anchored by ``anchor_target_paths``,
-    the one place that turns a build-relative name into node-canonical form,
-    so it carries the declaring script's offset from the top-level root and
-    two subdirectories declaring a target of one name keep their own
-    generated files.
+    *gen_dir* is absolute, in the declaring script's build directory, so two
+    subdirectories declaring a target of one name keep their own generated
+    files, and one path serves ``target=``, the disk, and
+    ``project._node(gen_dir / ...)``.
 
     *root* is the top-level project's root directory, the one node paths are
-    anchored at. A sub-project's own ``root_dir`` names a directory the
-    generated build files never refer to, so a file written there is a file
-    no rule knows how to make. ``root / gen_dir`` is therefore the directory
-    on disk, and ``project._node(gen_dir / ...)`` the node a builder reads.
+    anchored at; ``root / gen_dir`` is ``gen_dir`` itself.
     """
-    return (
-        project.top_path_resolver.project_root,
-        anchor_target_paths(env, [Path(subdir)])[0],
-    )
+    return project.top_path_resolver.project_root, env.build_dir / subdir
 
 
 def _qt_gen_dir_suffix(kind: str) -> str:
