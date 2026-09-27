@@ -7,13 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-This version's biggest change is reducing the need to name targets just to avoid identity conflicts. Now unless you specifically give a target a name (e.g. `Program(<name>, ...)` or via a name keyword arg like `Command(name=<name>, ...)`), targets may be left anonymous. You can still name them to look up named targets from another build script with `project.get_target()`.
+## [0.30.0] - 2026-09-27
 
-The other big change is how paths work in a subdirectory script. Every
-relative path a script writes is now read from its own directory, and
-`project.build_dir` and `env.build_dir` are absolute. So a script reached
-through `add_subdirectory` builds the same way it does on its own. Both
-changes break some existing scripts; the details are below.
+Big release this time! You can write builders as Python functions
+(`env.PyBuilder`), paths in subdirectory scripts work as expected
+(they're relative to the script), and you don't have to name targets
+just to avoid identity conflicts. Plus lots more. A few breaking
+changes though, so read the release notes thoroughly.
 
 ### Added
 
@@ -54,6 +54,9 @@ changes break some existing scripts; the details are below.
   three to say. Setting it alongside any of those three is an error. A
   Windows import library still follows the same stem
   (`myplugin.lib`). (#148)
+
+- `pcons explain` shows a target's frameworks and framework directories in
+  its requirements table, attributed like its libraries.
 
 ### Changed
 
@@ -99,6 +102,14 @@ changes break some existing scripts; the details are below.
   `build/<subdir>/qt.<name>/`. Anything
   naming the old path (a `.gitignore` entry, an install rule, an IDE
   search path) needs updating. (#172)
+
+- An `env.Command(cwd=...)` edge's paths in a Makefile are relative to its
+  cwd, as they already were in `build.ninja`, rather than absolute.
+
+- A destination inside the project but outside the build directory (an
+  install or overlay into `dist/`, say) is written relative to the project
+  top, so the build files stay relocatable. Its stamp is renamed to match,
+  so such a copy runs once more after upgrading. (#210)
 
 - `link()` now errors on a string only when it contains a directory
   separator. Other incorrect lib name strings (e.g. passing full
@@ -228,6 +239,22 @@ nested in the test suite, which is how the fixes below were found.
 - Qt builders now work under `add_subdirectory()`. Generated moc, uic and
   rcc files now get written to the proper subdir. (#172)
 
+- An absolute include directory declared in a subdirectory script no longer
+  loses its subdirectory, so `-I` points at the headers again. (#179)
+
+- `QtQmlModule` keeps each `qml_files` entry's path in the qmldir and the
+  resource alias, so a nested URL like `qrc:/qt/qml/Ui/qml/Main.qml`
+  resolves. Two files with one base name in different directories used to
+  overwrite each other silently; that is now an error. (#184)
+
+- Two linked Qt targets that both run moc on one header now get an error
+  naming the include chain that reached it, instead of a duplicate-symbol
+  link failure in generated files. (#185)
+
+- In `build.ninja`, a source file listed as an extra explicit dependency of
+  a build step is found through `$topdir` instead of being looked for in the
+  build directory. (#210)
+
 - A subdirectory script that creates its own `Environment` no longer
   loses build edges: generators now walk sub-projects' environments too.
 
@@ -256,7 +283,8 @@ nested in the test suite, which is how the fixes below were found.
 
 ### Contributors
 
-- Sylvain Garcia (@Garcia6l20): `env.PyBuilder` (#191), and raised #170
+- Sylvain Garcia (@Garcia6l20): #172, #177, #179, #181, #183, #184, #185,
+  #191 (`env.PyBuilder`) and #193, and raised #170
 
 ## [0.29.1] - 2026-09-14
 
@@ -2588,7 +2616,8 @@ see **Changed** below for each one and what to write instead.
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.29.1...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/DarkStarSystems/pcons/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/DarkStarSystems/pcons/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/DarkStarSystems/pcons/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/DarkStarSystems/pcons/compare/v0.27.0...v0.28.0
