@@ -214,9 +214,9 @@ To create a new release (e.g., `v0.3.0`):
 
 4. Use gh to wait for the CI build to complete successfully. If it does:
 
-5. **Tag and push**:
+5. **Tag and push** (tags are signed, `tag.gpgsign`, so a tag needs a message):
    ```bash
-   git tag v0.3.0
+   git tag -m v0.3.0 v0.3.0
    git push && git push --tags
    ```
 
