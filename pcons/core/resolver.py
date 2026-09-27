@@ -130,7 +130,8 @@ class CommandNodeFactory(PendingSourceFactory):
 
     Then ``resolve`` writes the files the command reads that the build
     description itself decides, listed in ``_builder_data["writes"]`` as
-    ``(absolute path, bytes)`` pairs by whatever made the command. They are
+    ``(absolute path, bytes)`` pairs by whatever made the command, or given
+    as a callable returning that list, for files named after the nodes. They are
     written here rather than when the command is declared, so a script that
     only describes a build, and never resolves it, writes nothing. After the
     nodes, so that whatever makes them may add to the list.
@@ -161,7 +162,10 @@ class CommandNodeFactory(PendingSourceFactory):
         make_nodes = target._builder_data.pop("make_nodes", None)
         if make_nodes is not None:
             make_nodes()
-        for path, content in target._builder_data.get("writes", ()):
+        writes = target._builder_data.get("writes", ())
+        if callable(writes):
+            writes = writes()
+        for path, content in writes:
             write_bytes_if_changed(path, content)
         if not target.output_nodes:
             return

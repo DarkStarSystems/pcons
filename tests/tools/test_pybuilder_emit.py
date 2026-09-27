@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from pcons.core.builder import anchor_target_paths
 from pcons.core.collate import write_bytes_if_changed
 from pcons.core.project import Project
 from pcons.tools.pybuilder import (
@@ -26,13 +27,15 @@ from pcons.tools.pybuilder import (
     _claim,
     _reserved_names,
     check_arguments,
+    check_emitter,
     emit_args,
     emit_module,
     function_source,
+    run_emitter,
     validate,
 )
 from pcons.util.pybuilder import PROTOCOL_VERSION, run
-from pcons.util.source_location import SourceLocation
+from pcons.util.source_location import SourceLocation, get_caller_location
 
 SCRIPT_GLOBAL = "visible from the build script only"
 
@@ -119,6 +122,18 @@ def uses_dunder_file(targets, sources):
     return __file__
 
 
+def claim_args(project: Project, env: Any, name: str, target: object = None) -> Path:
+    """Claim an edge's pickle, as resolving it does once *target* is a node."""
+    (first_output,) = anchor_target_paths(env, [Path(str(target or name))])
+    return emit_args(
+        project=project,
+        env=env,
+        label=name,
+        first_output=first_output,
+        at=get_caller_location(),
+    )
+
+
 def emit_both(
     fn: Any,
     *,
@@ -142,7 +157,7 @@ def emit_both(
     function = validate(fn, project=project)
     payload = check_arguments(function, kwargs=kwargs, sys_path=sys_path)
     module_rel, module_bytes = emit_module(function, project=project, env=env)
-    args_rel = emit_args(project=project, env=env, name=name, target=target or name)
+    args_rel = claim_args(project, env, name, target)
     root = project.top_path_resolver.project_root
     if module_bytes is not None:
         write_bytes_if_changed(root / module_rel, module_bytes)
@@ -549,6 +564,53 @@ class TestEmit:
         assert args_rel == Path("build/host/pybuilder/report.args.pkl")
 
 
+class TestTheEmitterHalf:
+    """check_emitter and run_emitter, the two calls an emitter= makes."""
+
+    def test_an_emitter_is_bound_against_the_calls_keywords(self) -> None:
+        check_emitter(
+            lambda targets, sources, env, n, **kw: (targets, sources),
+            function=takes_arguments,
+            kwargs={"n": 2},
+            at=SourceLocation("build.py", 1),
+        )
+
+    def test_an_emitter_missing_a_keyword_is_refused(self) -> None:
+        with pytest.raises(PyBuilderError, match="cannot be called with n"):
+            check_emitter(
+                lambda targets, sources, env: (targets, sources),
+                function=takes_arguments,
+                kwargs={"n": 2},
+                at=SourceLocation("build.py", 1),
+            )
+
+    def test_run_emitter_returns_two_lists(self, env: Any) -> None:
+        emitted, consumed = run_emitter(
+            lambda targets, sources, env, n, **kw: (f"out{n}.txt", sources),
+            targets=[],
+            sources=["a.txt"],
+            env=env,
+            kwargs={"n": 1},
+            function=takes_arguments,
+            at=SourceLocation("build.py", 1),
+        )
+
+        assert emitted == ["out1.txt"]
+        assert consumed == ["a.txt"]
+
+    def test_run_emitter_refuses_anything_but_a_pair(self, env: Any) -> None:
+        with pytest.raises(PyBuilderError, match="returns the pair"):
+            run_emitter(
+                lambda targets, sources, env, **kw: "out.txt",
+                targets=[],
+                sources=[],
+                env=env,
+                kwargs={},
+                function=takes_arguments,
+                at=SourceLocation("build.py", 1),
+            )
+
+
 class TestDuplicates:
     def test_a_second_decoration_of_one_function_is_refused(
         self, project: Project, env: Any
@@ -596,10 +658,10 @@ class TestDuplicates:
     def test_a_second_edge_of_one_name_collides_on_the_pickle(
         self, project: Project, env: Any
     ) -> None:
-        emit_args(project=project, env=env, name="report", target="report")
+        claim_args(project, env, "report")
 
         with pytest.raises(PyBuilderError, match=r"report\.args\.pkl"):
-            emit_args(project=project, env=env, name="report", target="report")
+            claim_args(project, env, "report")
 
     def test_the_same_name_in_two_environments_is_fine(
         self, project: Project, env: Any
@@ -641,8 +703,8 @@ class TestOneModuleManyEdges:
 
         module_rel, module_bytes = emit_module(function, project=project, env=env)
         again, no_bytes = emit_module(function, project=project, env=env)
-        first = emit_args(project=project, env=env, name="one", target="one")
-        second = emit_args(project=project, env=env, name="two", target="two")
+        first = claim_args(project, env, "one")
+        second = claim_args(project, env, "two")
 
         assert module_bytes is not None
         assert (again, no_bytes) == (module_rel, None)

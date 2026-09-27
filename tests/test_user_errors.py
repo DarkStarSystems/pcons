@@ -885,6 +885,60 @@ class TestEveryPyBuilderRemedyWorks:
 
         assert self.edge_sources(edge) == ["src/main.c"]
 
+    def test_a_missing_target_becomes_an_emitter(self, project_env):
+        """ "An emitter= on the decoration can name them instead"."""
+        project, env = project_env
+
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, stem, **kw: (
+                [f"{stem}.txt"],
+                sources,
+            )
+        )
+        def render(targets, sources, stem):
+            return None
+
+        edge = render(stem="counts", source=["src/main.c"])
+        project.resolve()
+
+        assert edge.output_nodes[0].path.as_posix() == "build/counts.txt"
+
+    def test_an_emitter_takes_kwargs_for_the_rest(self, project_env):
+        """ "it takes the ones it uses and **kwargs for the rest"."""
+        project, env = project_env
+
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, stem, **kw: (
+                [f"{stem}.txt"],
+                sources,
+            )
+        )
+        def render(targets, sources, stem, title):
+            return None
+
+        edge = render(stem="counts", title="Counts")
+        project.resolve()
+
+        assert edge.output_nodes[0].path.as_posix() == "build/counts.txt"
+
+    def test_an_emitter_returns_the_pair(self, project_env):
+        """ "It returns the pair (targets, sources)"."""
+        project, env = project_env
+
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, **kw: (
+                ["out.txt"],
+                [*sources, "src/lib.c"],
+            )
+        )
+        def render(targets, sources):
+            return None
+
+        edge = render(source=["src/main.c"])
+        project.resolve()
+
+        assert self.edge_sources(edge) == ["src/main.c", "src/lib.c"]
+
     def test_the_environment_becomes_a_value_read_here(self, project_env, tmp_path):
         """ "Read what the function needs from it here, and pass that"."""
         project, env = project_env
@@ -1301,17 +1355,18 @@ class TestPyBuilderErrors:
 
     def test_two_edges_to_one_target_collide_on_the_pickle(self, project_env):
         """The pickle follows the target, so two edges to one target collide
-        on it."""
-        _, env = project_env
+        on it when they resolve, and the error shows both calls."""
+        project, env = project_env
 
         @env.PyBuilder()
         def render(targets, sources):
             return 1
 
         render(target="report.txt")
+        render(target="report.txt")
 
         with pytest.raises(PconsError) as caught:
-            render(target="report.txt")
+            project.resolve()
 
         message = str(caught.value)
         assert "PyBuilder edge 'report.txt' would overwrite" in message

@@ -25,6 +25,12 @@ changes break some existing scripts; the details are below.
   A token of a list-form command may be a callable too, for a value only
   resolve knows.
 
+- `env.PyBuilder(emitter=...)` works out each edge's targets and sources at
+  resolve, the way `project.Program` works out its file name:
+  `emitter(targets, sources, env, **kwargs)` gets what the call passed and
+  returns the pair the edge really has. With one, a call may leave out
+  `target=`. (#196)
+
 - `add_subdirectory(..., build_tier="manual")` includes someone else's project
   as a dependency: nothing it declares goes into a wider tier than that, its
   own `Default()` included, so its targets build only when something needs them

@@ -1930,6 +1930,7 @@ class Environment(_EnvironmentStubs):
         env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
         depends: Target | str | Path | Sequence[Target | str | Path] | None = None,
+        emitter: Callable[..., Any] | None = None,
     ) -> Callable[[Callable[..., object]], pybuilder.PyBuilder]:
         """Turn a Python function of this build script into a builder.
 
@@ -1995,6 +1996,15 @@ class Environment(_EnvironmentStubs):
                     whatever a call's own ``depends=`` adds. Equivalent to
                     calling ``.depends()`` on the builder this returns. See
                     :meth:`Command`.
+            emitter: Names each edge's files, for a builder whose outputs
+                    follow from its arguments: ``emitter(targets, sources,
+                    env, **kwargs)`` returns the pair ``(targets, sources)``,
+                    having added to what the call passed or replaced it. A
+                    call may then leave out ``target=``. It gets the same
+                    keywords the function does, and runs in the build script's
+                    process when pcons resolves the edge, so it's an ordinary
+                    callable: it may use anything around it, unlike the
+                    function, and read what the edge's dependencies build.
 
         Returns:
             A decorator that returns the builder the script calls.
@@ -2011,6 +2021,7 @@ class Environment(_EnvironmentStubs):
             env_vars=env_vars,
             worker=worker,
             depends=depends,
+            emitter=emitter,
         )
 
     def __str__(self) -> str:
