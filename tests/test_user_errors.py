@@ -1739,7 +1739,7 @@ class TestPyBuilderErrors:
     def test_a_pcons_function_passed_by_reference_is_refused(self, project_env):
         """A function, not a call: reducer_override still sees it."""
         _, env = project_env
-        from pcons.tools.pybuilder import validate as pcons_validate
+        from pcons.tools.pybuilder.function import validate as pcons_validate
 
         @env.PyBuilder()
         def render(targets, sources, fn):

@@ -24,8 +24,8 @@ from pcons.core.subst import PathToken, ProjectPath, SourcePath, Subst, TargetPa
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
-from pcons.tools import pybuilder as pybuilder_module
 from pcons.tools.pybuilder import PyBuilder, PyBuilderError
+from pcons.tools.pybuilder import arguments as pybuilder_arguments
 from pcons.workers.python import PythonWorker
 from pcons.workers.python_server import script_argv
 from tests.support import REPO_ROOT, subprocess_env
@@ -949,7 +949,7 @@ class TestSysPath:
         launcher = tmp_path / "launcher"
         monkeypatch.setattr(sys, "path", [str(launcher), str(tmp_path)])
         monkeypatch.setattr(
-            pybuilder_module, "launcher_entry", lambda: launcher.as_posix()
+            pybuilder_arguments, "launcher_entry", lambda: launcher.as_posix()
         )
 
         @env.PyBuilder()
@@ -971,7 +971,7 @@ class TestSysPath:
         launcher = tmp_path / "launcher"
         monkeypatch.setattr(sys, "path", [str(launcher), str(launcher)])
         monkeypatch.setattr(
-            pybuilder_module, "launcher_entry", lambda: launcher.as_posix()
+            pybuilder_arguments, "launcher_entry", lambda: launcher.as_posix()
         )
 
         @env.PyBuilder()
@@ -999,7 +999,9 @@ class TestSysPath:
         """
         launcher = tmp_path / "launcher"
         monkeypatch.setattr(sys, "path", [launcher.as_posix(), str(tmp_path)])
-        monkeypatch.setattr(pybuilder_module, "launcher_entry", lambda: str(launcher))
+        monkeypatch.setattr(
+            pybuilder_arguments, "launcher_entry", lambda: str(launcher)
+        )
 
         @env.PyBuilder()
         def report(targets, sources):
@@ -1023,7 +1025,7 @@ class TestSysPath:
         launcher = tmp_path / "launcher"
         monkeypatch.setattr(sys, "path", [str(launcher), str(tmp_path)])
         monkeypatch.setattr(
-            pybuilder_module, "launcher_entry", lambda: str(launcher).upper()
+            pybuilder_arguments, "launcher_entry", lambda: str(launcher).upper()
         )
 
         @env.PyBuilder()
@@ -1044,7 +1046,7 @@ class TestSysPath:
     ) -> None:
         marker = tmp_path / "marker"
         monkeypatch.setattr(sys, "path", [str(marker)])
-        monkeypatch.setattr(pybuilder_module, "launcher_entry", lambda: None)
+        monkeypatch.setattr(pybuilder_arguments, "launcher_entry", lambda: None)
 
         @env.PyBuilder()
         def report(targets, sources):

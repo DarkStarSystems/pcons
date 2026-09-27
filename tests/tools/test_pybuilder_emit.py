@@ -19,19 +19,15 @@ import pytest
 from pcons.core.builder import anchor_target_paths
 from pcons.core.collate import write_bytes_if_changed
 from pcons.core.project import Project
-from pcons.tools.pybuilder import (
-    MODULE_PREFIX,
-    PyBuilder,
-    PyBuilderError,
+from pcons.tools.pybuilder import PyBuilder, PyBuilderError
+from pcons.tools.pybuilder.arguments import check_arguments
+from pcons.tools.pybuilder.builder import check_emitter, run_emitter
+from pcons.tools.pybuilder.files import MODULE_PREFIX, _claim, emit_args
+from pcons.tools.pybuilder.function import (
     ValidatedFunction,
-    _claim,
     _reserved_names,
-    check_arguments,
-    check_emitter,
-    emit_args,
     emit_module,
     function_source,
-    run_emitter,
     validate,
 )
 from pcons.util.pybuilder import PROTOCOL_VERSION, run
@@ -454,7 +450,7 @@ class TestEmit:
             tmp_path,
             "caller",
             """
-            from pcons.tools.pybuilder import emit_module, validate
+            from pcons.tools.pybuilder.function import emit_module, validate
 
 
             def render(targets, sources):
