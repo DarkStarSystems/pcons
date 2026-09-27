@@ -38,6 +38,7 @@ scanned project with a clear error rather than emitting a wrong build.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import sys
@@ -464,7 +465,7 @@ class ScannerResolver:
             return
 
         scope_id = self._scope_id(scanner, target)
-        rel = project.top_path_resolver.make_execution_relative
+        rel = functools.partial(project.top_path_resolver.path_text, built=True)
         base_rel = f"scan/{scanner.name}"
         build_dir = project._build_dir
         # Node identity uses the canonical (possibly relative) build_dir

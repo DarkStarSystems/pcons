@@ -245,7 +245,7 @@ def _expansion(
     from pcons.core.target import Target as TargetClass
 
     def seen(path: Path | str, *, built: bool) -> str:
-        return resolver.make_command_relative(path, built=built, cwd=cwd)
+        return resolver.path_text(path, built=built, run_dir=cwd)
 
     if isinstance(marker, Subst):
         try:

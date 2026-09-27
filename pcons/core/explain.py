@@ -163,7 +163,7 @@ def format_node_command(
     def as_seen(path: Any, *, built: bool) -> str:
         if resolver is None:
             return Path(path).as_posix()
-        return resolver.make_command_relative(path, built=built, cwd=run_in)
+        return resolver.path_text(path, built=built, run_dir=run_in)
 
     def node_texts(nodes: Sequence[Any]) -> list[str]:
         if resolver is None:

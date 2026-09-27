@@ -919,16 +919,19 @@ class TestNinjaSrcDir:
         # PathToken route (usage requirements wrap includes in ProjectPath)
         from pcons.core.subst import PathToken
 
+        def text(path: str) -> str:
+            return gen._text(path, built=False)
+
         token = PathToken("-I", "build/assets", "project")
-        assert token.relativize(gen._relativize_path_for_ninja) == "-Iassets"
-        # The build dir itself, and paths outside it, are unchanged
-        assert gen._relativize_path_for_ninja("build") == "."
-        assert gen._relativize_path_for_ninja("src/inc") == "$topdir/src/inc"
-        # Absolute spellings behave the same way
+        assert token.relativize(text) == "-Iassets"
+        # The build dir itself, and a source through $topdir
+        assert text("build") == "."
+        assert text("src/inc") == "$topdir/src/inc"
+        # Absolute forms behave the same way
         abs_inside = str(tmp_path / "build" / "gen" / "inc")
-        assert gen._relativize_path_for_ninja(abs_inside) == "gen/inc"
-        abs_outside = str(tmp_path.parent / "sdk" / "inc")
-        assert gen._make_build_relative(abs_outside) is None
+        assert text(abs_inside) == "gen/inc"
+        abs_outside = (tmp_path.parent / "sdk" / "inc").resolve()
+        assert text(str(abs_outside)) == str(abs_outside)
 
     def test_restat_in_ninja_rule(self, tmp_path):
         """Command with restat=True generates restat = 1 in the ninja rule."""

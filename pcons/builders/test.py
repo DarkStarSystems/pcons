@@ -105,7 +105,7 @@ class TestNodeFactory:
         from there), so a build-dir-relative path is the natural form
         and works on every platform without further translation.
         """
-        return self.project.top_path_resolver.make_execution_relative(path)
+        return self.project.top_path_resolver.path_text(path, built=True)
 
 
 @builder(

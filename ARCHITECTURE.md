@@ -1216,23 +1216,28 @@ don't have direct xcode equivalents in the test harness.
 ### Generator path contract
 > **Status: Implemented**
 
-Build-file generators that execute from the build directory (Ninja, Make via
-`-C`) share one path contract, implemented once in
-`pcons.core.paths.execution_relative()` (exposed as
-`PathResolver.make_execution_relative()`):
+Every path pcons writes into a build file or a command goes through two
+`PathResolver` methods. A user thinks of a source as named from the project
+top and a target from the build directory, and the two methods say exactly
+that:
 
-- Canonical node paths carry the build_dir prefix (`build/obj/foo.o`) and are
-  emitted relative to the build dir (`obj/foo.o`); the build dir itself is `.`.
-- Absolute paths under the build dir are relativized the same way; external
-  absolute paths pass through.
-- Project-relative source paths pass through unchanged — each generator
-  anchors them itself (Ninja prepends `$topdir/`).
-- Forward slashes always; escaping is per-format and stays in each generator.
+- `locate(path, built=)` says where a node path points: in the build
+  directory, elsewhere under the top, or outside the project. Node paths are
+  top-relative (a target's starting with the build directory,
+  `build/obj/foo.o`) or absolute; `built=` says a relative path without the
+  build prefix is a target's bare, build-relative name. The result's `path` is
+  what a user types: `obj/foo.o`, `src/main.c`.
+- `path_text(path, built=, run_dir=, top=)` writes that location for a reader
+  running in `run_dir` (the build directory unless an edge has `cwd=`). A
+  target's file is relative to it; a source is too (`../src/main.c`) unless
+  `top` names how the reader writes the top: ninja passes `$topdir`, make the
+  absolute top. Outside the project, paths stay absolute, as the platform
+  writes them; everything else has forward slashes.
 
-`compile_commands.json` deliberately uses a different contract (its
-`directory` field is the project root, per the clang tooling spec), and the
-graph generators (dot/mermaid) use display labels — neither goes through
-`execution_relative()`.
+A path stays a `Path` (or a node, or a `PathToken` holding one) until a
+generator writes it; only `path_text` makes text. Escaping is per-format and
+stays in each generator, which also decides a node's `built=` in one place
+(`BaseGenerator._built`: an install's output is named from the top).
 
 `Project` offers two path resolvers, subdir-relative and top-relative.
 `project.path_resolver` follows the live declaring-directory offset,

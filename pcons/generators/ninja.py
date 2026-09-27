@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: How a build statement names the project top: ninja's own variable.
+TOPDIR = "$topdir"
+
 
 class NinjaGenerator(BaseGenerator):
     """Generator that produces Ninja build files.
@@ -57,7 +60,8 @@ class NinjaGenerator(BaseGenerator):
         self._output_dir: Path | None = None  # Set during generate()
         self._project_root: Path | None = None  # Set during generate()
         self._topdir: str = ".."  # Relative path from output_dir to project root
-        self._path_resolver: PathResolver | None = None  # Set during generate()
+        # Anchors of the project's paths, set during generate()
+        self._resolver: PathResolver = PathResolver(Path("."), Path("build"))
         self._build_dir_parts: tuple[str, ...] = ()  # Parts of relative build_dir
         # Path-carrying flags of the project's toolchains (-I, -isystem, /I...)
         self._path_flags: frozenset[str] = frozenset()
@@ -79,19 +83,13 @@ class NinjaGenerator(BaseGenerator):
         self._rule_counter = 0
         self._output_dir = output_dir.resolve()
         self._project_root = project.root_dir.resolve()
-        self._path_resolver = getattr(project, "top_path_resolver", None)
+        self._resolver = PathResolver(self._project_root, Path(project._build_dir))
         self._build_dir_parts = Path(project._build_dir).parts
         self._path_flags = self._collect_path_flags(project)
         self._warned_absolute_paths = set()
         self._warned_build_dir_paths = set()
         self._rule_key_cache = {}
-        try:
-            self._topdir = str(
-                Path(os.path.relpath(self._project_root, self._output_dir))
-            )
-        except ValueError:
-            # On Windows, relpath fails for paths on different drives
-            self._topdir = str(self._project_root)
+        self._topdir = self._resolver.path_text(self._project_root, built=False)
 
         with open(ninja_file, "w", encoding="utf-8") as f:
             self._write_header(f, project)
@@ -433,56 +431,6 @@ class NinjaGenerator(BaseGenerator):
             return escaped
         return f"{quote}{escaped}{quote}"
 
-    def _absolute(self, path: Path | str) -> Path:
-        """The absolute location of a node path (build output or source).
-
-        Node paths are project-root-relative and carry the build_dir prefix
-        for outputs; both spellings resolve here so a path can be re-anchored
-        to an edge's working directory.
-        """
-        path_obj = Path(str(path).replace("\\", "/"))
-        if path_obj.is_absolute():
-            return path_obj
-        if self._is_under_build_dir(path_obj) and self._output_dir is not None:
-            return self._output_dir / self._make_output_relative(path_obj)
-        if self._project_root is not None:
-            return self._project_root / path_obj
-        return path_obj
-
-    def _output_absolute(self, path: Path | str) -> Path:
-        """The absolute location of a *build output*'s node path.
-
-        An output's node path is execution-relative, which it can be either
-        with the build_dir prefix (``build/gen/x.c``) or without it, when the
-        builder was handed a bare name (``env.Command(target="out.txt")``).
-        :meth:`_absolute` can't tell the second spelling from a source path
-        and would anchor it at the project root, so an output resolves here
-        instead: ``_make_output_relative`` normalizes both spellings.
-        """
-        path_obj = Path(str(path).replace("\\", "/"))
-        if path_obj.is_absolute() or self._output_dir is None:
-            return path_obj
-        return self._output_dir / self._make_output_relative(path_obj)
-
-    def _path_at(self, path: Path | str, cwd: Path, *, output: bool = False) -> str:
-        """Render *path* as a command running in *cwd* sees it.
-
-        Separators stay native on Windows. Everywhere else pcons writes
-        forward slashes and ninja passes them through happily, but a moved
-        edge always contains ``&&``, so it is routed through ``cmd.exe`` —
-        which reads ``build/tool.exe`` as the command ``build`` with a
-        ``/tool.exe`` switch. Only a re-anchored path can acquire a directory
-        component it didn't have, so this is the one place it bites.
-        """
-        absolute = self._output_absolute(path) if output else self._absolute(path)
-        try:
-            rendered = os.path.relpath(absolute, cwd)
-        except ValueError:
-            rendered = str(absolute)  # different Windows drive
-        if get_platform().is_windows:
-            return rendered.replace("/", "\\")
-        return rendered.replace("\\", "/")
-
     def _extra_build_commands(
         self,
         node: FileNode,
@@ -646,14 +594,14 @@ class NinjaGenerator(BaseGenerator):
         if all_targets and len(cast(list[Node], all_targets)) > 1:
             # Generic command with multiple outputs
             target_nodes = cast(list[FileNode], all_targets)
-            output = " ".join(self._output_ref(t) for t in target_nodes)
+            output = " ".join(self._ref(t, output=True) for t in target_nodes)
         elif outputs_info:
             # Multi-output build (from MultiOutputBuilder)
             explicit_outputs: list[str] = []
             implicit_outputs: list[str] = []
 
             for _name, info in outputs_info.items():
-                path = self._escape_output_path(info["path"])
+                path = self._ref(info["path"], built=True)
                 if info.get("implicit", False):
                     implicit_outputs.append(path)
                 else:
@@ -664,42 +612,18 @@ class NinjaGenerator(BaseGenerator):
                 output += " | " + " ".join(implicit_outputs)
         else:
             # Single-output build
-            output = self._output_ref(node)
+            output = self._ref(node, output=True)
 
         # Explicit dependencies (sources + library dependencies)
-        def get_dep_path(s: FileNode) -> str:
-            if getattr(s, "role", None) == "install_output":
-                return self._install_output_ref(s)
-
-            # Build outputs are relative to the build dir
-            if getattr(s, "_build_info", None) is not None or s.is_target:
-                return self._escape_output_path(s.path)
-
-            # Files inside the build dir are build artifacts even without
-            # _build_info (e.g., dyndep files written during after_resolve);
-            # they must match the build-relative path used elsewhere.
-            if self._is_under_build_dir(s.path):
-                return self._escape_output_path(s.path)
-
-            # Source file: reference via $topdir when under the project root
-            rel = self._make_source_relative(s.path)
-            if rel is not None:
-                return "$topdir/" + self._escape_path(rel)
-
-            # External file: escape as-is
-            return self._escape_path(s.path)
-
         # Start with sources from build_info
-        explicit_deps_list = [
-            get_dep_path(s) for s in sources if isinstance(s, FileNode)
-        ]
+        explicit_deps_list = [self._ref(s) for s in sources if isinstance(s, FileNode)]
 
         # Add any additional explicit deps (e.g., libraries for linking)
         # that aren't already in sources
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                explicit_deps_list.append(self._output_ref(dep))
+                explicit_deps_list.append(self._ref(dep))
 
         explicit_deps = " ".join(explicit_deps_list)
 
@@ -707,7 +631,7 @@ class NinjaGenerator(BaseGenerator):
         implicit_deps = ""
         if node.implicit_deps:
             implicit = " ".join(
-                get_dep_path(d) for d in node.implicit_deps if isinstance(d, FileNode)
+                self._ref(d) for d in node.implicit_deps if isinstance(d, FileNode)
             )
             if implicit:
                 implicit_deps = f" | {implicit}"
@@ -723,7 +647,7 @@ class NinjaGenerator(BaseGenerator):
                 if isinstance(d, FileNode)
             }
             ordered = " ".join(
-                get_dep_path(d)
+                self._ref(d)
                 for d in node.order_only_deps
                 if isinstance(d, FileNode) and d.path not in stronger
             )
@@ -741,7 +665,7 @@ class NinjaGenerator(BaseGenerator):
 
         depfile = build_info.get("depfile")
         if isinstance(depfile, PathToken) and not depfile.suffix:
-            f.write(f"  depfile = {self._escape_output_path(depfile.path)}\n")
+            f.write(f"  depfile = {self._ref(depfile.path, built=True)}\n")
 
         self._write_build_variables(f, node, target, build_info, project)
 
@@ -765,26 +689,11 @@ class NinjaGenerator(BaseGenerator):
         sources = cast(list[Node], build_info.get("sources", []))
         cwd = cast("Path | None", build_info.get("cwd"))
 
-        def is_build_output(s: FileNode) -> bool:
-            return getattr(s, "_build_info", None) is not None or s.is_target
-
         def get_source_path(s: FileNode) -> str:
-            if cwd is not None:
-                return self._path_at(s.path, cwd, output=is_build_output(s))
-
-            if is_build_output(s):
-                return self._make_output_relative(s.path)
-
-            rel = self._make_source_relative(s.path)
-            if rel is not None:
-                return f"$topdir/{rel}"
-
-            return str(s.path)
+            return self._text(s.path, built=self._built(s), cwd=cwd)
 
         def get_target_path(node: FileNode) -> str:
-            if cwd is None:
-                return self._output_command_path(node)
-            return self._path_at(node.path, cwd, output=True)
+            return self._text(node.path, built=self._built(node, output=True), cwd=cwd)
 
         source_file_nodes = [s for s in sources if isinstance(s, FileNode)]
 
@@ -805,7 +714,7 @@ class NinjaGenerator(BaseGenerator):
                 if isinstance(info, dict):
                     info_dict = cast(dict[str, Any], info)
                     out_path = self._escape_ninja_value(
-                        self._make_output_relative(info_dict["path"])
+                        self._text(info_dict["path"], built=True)
                     )
                     f.write(f"  out_{name} = {out_path}\n")
                     # target_N supports TargetPath(index=N) in commands.
@@ -908,7 +817,7 @@ class NinjaGenerator(BaseGenerator):
             trace("generate", "Invocation not reconstructable; skipping regen rule")
             return
 
-        manifest = self._escape_output_path(ninja_file)
+        manifest = self._ref(ninja_file, built=True)
         dep_refs = " ".join(sorted(self._manifest_dep_ref(d) for d in deps))
 
         f.write("# Re-run pcons when the build description changes\n")
@@ -927,12 +836,7 @@ class NinjaGenerator(BaseGenerator):
         (relative to the build dir); source-tree inputs are referenced through
         ``$topdir`` like any other source.
         """
-        if self._is_under_build_dir(path):
-            return self._escape_output_path(path)
-        rel = self._make_source_relative(path)
-        if rel is not None:
-            return "$topdir/" + self._escape_path(rel)
-        return self._escape_path(path)
+        return self._ref(path, built=False)
 
     def _write_aliases(self, f: TextIO, project: Project) -> None:
         """Write phony rules for aliases, merged across the project tree."""
@@ -949,7 +853,7 @@ class NinjaGenerator(BaseGenerator):
                     # another phony target directly. Alias() rejects cycles.
                     members.append(t.alias_name)
                 elif isinstance(t, FileNode):
-                    members.append(self._output_ref(t))
+                    members.append(self._ref(t, output=True))
             if members:
                 f.write(f"build {name}: phony {' '.join(members)}\n")
         f.write("\n")
@@ -971,7 +875,7 @@ class NinjaGenerator(BaseGenerator):
             for dep in test_target.dependencies:
                 for node in dep.output_nodes:
                     if isinstance(node, FileNode):
-                        out = self._output_ref(node)
+                        out = self._ref(node, output=True)
                         if out not in seen:
                             seen.add(out)
                             program_outputs.append(out)
@@ -1015,7 +919,7 @@ class NinjaGenerator(BaseGenerator):
 
         def outputs(targets: list[Target]) -> list[str]:
             return [
-                self._output_ref(node)
+                self._ref(node, output=True)
                 for target in targets
                 for node in target.output_nodes
                 if isinstance(node, FileNode)
@@ -1041,6 +945,41 @@ class NinjaGenerator(BaseGenerator):
         # writes no default line: ninja then builds every final output,
         # which is what such a build means.
 
+    def _text(self, path: Path | str, *, built: bool, cwd: Path | None = None) -> str:
+        """*path* as a command sees it, unescaped.
+
+        From the build directory, a target's file is relative to it and a
+        source's goes through ``$topdir``. An edge with a *cwd* runs there,
+        so its paths are relative to that instead, with native separators on
+        Windows: such an edge's ``&&`` routes it through cmd.exe, which reads
+        ``build/tool.exe`` as ``build`` with a ``/tool.exe`` switch.
+        """
+        text = self._resolver.path_text(path, built=built, run_dir=cwd, top=TOPDIR)
+        if cwd is not None and get_platform().is_windows:
+            return text.replace("/", "\\")
+        return text
+
+    def _ref(
+        self,
+        node: FileNode | Path | str,
+        *,
+        built: bool | None = None,
+        output: bool = False,
+    ) -> str:
+        """A file as a build statement names it: :meth:`_text`, escaped.
+
+        For a node, *built* is read off it (see :meth:`_built`); a bare path
+        must say.
+        """
+        if isinstance(node, FileNode):
+            text = self._text(node.path, built=self._built(node, output=output))
+        else:
+            assert built is not None
+            text = self._text(node, built=built)
+        if text == TOPDIR or text.startswith(TOPDIR + "/"):
+            return TOPDIR + self._escape_path(text[len(TOPDIR) :])
+        return self._escape_path(text)
+
     def _escape_path(self, path: Path | str) -> str:
         """Escape a path for use in Ninja files.
 
@@ -1052,119 +991,6 @@ class NinjaGenerator(BaseGenerator):
         path_str = path_str.replace("\\", "/")
         # Escape special characters
         return self.ESCAPE_CHARS.sub(r"$\1", path_str)
-
-    def _make_output_relative(self, path: Path | str) -> str:
-        """Make an output path relative to the build dir, where ninja runs
-        (contract: pcons.core.paths.execution_relative)."""
-        if self._path_resolver is not None:
-            return self._path_resolver.make_execution_relative(path)
-        # Resolver-less project (tests with bare stubs)
-        from pcons.core.paths import execution_relative
-
-        return execution_relative(
-            path,
-            execution_dir=self._output_dir,
-            build_dir_parts=self._build_dir_parts or (),
-        )
-
-    def _escape_output_path(self, path: Path | str) -> str:
-        """Make an output path relative to build dir and escape for Ninja."""
-        return self._escape_path(self._make_output_relative(path))
-
-    def _install_output_ref(self, node: FileNode) -> str:
-        """Render an install-output node (``role == "install_output"``).
-
-        Such nodes live outside the build dir (e.g. ``<root>/dist/bin/app``).
-        They are emitted like source files (``$topdir/...``) when under the
-        project root, otherwise absolute.
-        """
-        rel = self._make_source_relative(node.path)
-        if rel is not None:
-            return "$topdir/" + self._escape_path(rel)
-        return self._escape_path(node.path)
-
-    def _output_command_path(self, node: FileNode) -> str:
-        """An output as the command must name it, honouring its role.
-
-        The build statement says ``$topdir/outdir/copy.txt`` for a destination
-        outside the build tree, so a ``$target_N`` naming the same file has to
-        agree — pointing them at different places leaves the edge dirty after
-        every run, or writes the wrong file.
-        """
-        if getattr(node, "role", None) == "install_output":
-            rel = self._make_source_relative(node.path)
-            return f"$topdir/{rel}" if rel is not None else str(node.path)
-        return self._make_output_relative(node.path)
-
-    def _output_ref(self, node: FileNode) -> str:
-        """Render an output-node reference.
-
-        Build outputs are relative to the build dir.
-        For install outputs see _install_output_ref().
-        """
-        if getattr(node, "role", None) == "install_output":
-            return self._install_output_ref(node)
-        return self._escape_output_path(node.path)
-
-    def _make_source_relative(self, path: Path | str) -> str | None:
-        """Make a source path relative to the project root, or None if it
-        can't be (outside project, or different drive on Windows).
-
-        The caller prepends $topdir if needed.
-        """
-        if self._path_resolver is not None:
-            path_obj = Path(path)
-            if not path_obj.is_absolute() and self._project_root is not None:
-                path_obj = self._project_root / path_obj
-            result = self._path_resolver.make_project_relative(path_obj.resolve())
-            # An absolute result means it couldn't be made relative
-            if Path(result).is_absolute():
-                return None
-            return result
-
-        # Fallback for tests without full project context
-        if self._project_root is None or self._output_dir is None:
-            return None
-
-        path_obj = Path(path)
-        if not path_obj.is_absolute():
-            path_obj = self._project_root / path_obj
-        path_obj = path_obj.resolve()
-
-        try:
-            rel_to_root = path_obj.relative_to(self._project_root)
-            return str(rel_to_root).replace("\\", "/")
-        except ValueError:
-            return None
-
-    def _is_build_dir_path(self, path: str) -> bool:
-        """Check if a path resolves to the build directory itself."""
-        if self._output_dir is None:
-            return False
-        path_obj = Path(path)
-        if not path_obj.is_absolute():
-            if self._project_root:
-                path_obj = self._project_root / path_obj
-        try:
-            return path_obj.resolve() == self._output_dir
-        except (OSError, ValueError):
-            return False
-
-    def _is_under_build_dir(self, path: Path | str) -> bool:
-        """Check if a path is inside (or is) the build directory."""
-        if self._output_dir is None:
-            return False
-        path_obj = Path(path)
-        if path_obj.is_absolute():
-            try:
-                path_obj.relative_to(self._output_dir)
-                return True
-            except ValueError:
-                return False
-        if self._build_dir_parts:
-            n = len(self._build_dir_parts)
-            return path_obj.parts[:n] == self._build_dir_parts
-        return False
 
     def _relativize_flag_with_path(
         self, token: str, prefix: str | None = None, *, cwd: Path | None = None
@@ -1201,7 +1027,7 @@ class NinjaGenerator(BaseGenerator):
 
         # Outside the project tree (an SDK, a system prefix), the path comes
         # back absolute — the only thing it can be.
-        return f"{prefix}{self._relativize_path_for_ninja(path, cwd)}"
+        return f"{prefix}{self._text(path, built=False, cwd=cwd)}"
 
     def _path_flag_prefix(self, token: str) -> str | None:
         """The path-flag prefix *token* starts with, if any.
@@ -1391,7 +1217,7 @@ class NinjaGenerator(BaseGenerator):
             elif isinstance(token, PathToken):
                 result.append(
                     token.relativize(
-                        lambda p: self._relativize_path_for_ninja(p, cwd),
+                        lambda p: self._text(p, built=False, cwd=cwd),
                         executable=self._executable_form,
                     )
                 )
@@ -1403,10 +1229,8 @@ class NinjaGenerator(BaseGenerator):
                     # relativization below — which would treat the literal
                     # "$topdir" as a path component and root it a second
                     # time ("-I$topdir/$topdir/...").
-                    srcdir = (
-                        "$topdir"
-                        if cwd is None or self._project_root is None
-                        else self._path_at(self._project_root, cwd)
+                    srcdir = self._text(
+                        self._resolver.project_root, built=False, cwd=cwd
                     )
                     result.append(s.replace("$SRCDIR", srcdir))
                     continue
@@ -1433,48 +1257,6 @@ class NinjaGenerator(BaseGenerator):
         """
         start, stop, _ = slice(token.start, token.stop).indices(count)
         return [f"{token.prefix}${kind}_{i}{token.suffix}" for i in range(start, stop)]
-
-    def _relativize_path_for_ninja(self, path: str, cwd: Path | None = None) -> str:
-        """Transform a path for ninja execution: $topdir/... for project
-        paths, "." for the build dir, unchanged for external paths.
-
-        An edge with a *cwd* runs somewhere else, so its paths are written
-        relative to that directory instead.
-        """
-        if cwd is not None:
-            return self._path_at(path, cwd)
-
-        if self._is_build_dir_path(path):
-            return "."
-
-        # A path inside the build dir is where the command already runs;
-        # $topdir would only route it out of the tree and back in.
-        rel_build = self._make_build_relative(path)
-        if rel_build is not None:
-            return rel_build
-
-        rel = self._make_source_relative(path)
-        if rel is not None:
-            return f"$topdir/{rel}"
-
-        return path
-
-    def _make_build_relative(self, path: Path | str) -> str | None:
-        """The path as seen from the build directory, or None if it isn't
-        inside it. Mirrors get_dep_path's treatment of build-dir files."""
-        path_obj = Path(path)
-        if path_obj.is_absolute():
-            if self._output_dir is None:
-                return None
-            try:
-                rel = path_obj.resolve().relative_to(self._output_dir)
-            except (OSError, ValueError):
-                return None
-            return str(rel).replace("\\", "/")
-        if not self._is_under_build_dir(path_obj):
-            return None
-        parts = path_obj.parts[len(self._build_dir_parts) :]
-        return "/".join(parts) if parts else "."
 
     def _escape_ninja_value(self, token: str) -> str:
         """Escape a token for a Ninja variable value, separators untouched.

@@ -864,7 +864,7 @@ def output_label(env: Environment | None, path: Path | str) -> str:
     project = getattr(env, "_project", None) if env is not None else None
     if project is None:
         return Path(path).as_posix()
-    return cast(str, project.top_path_resolver.make_execution_relative(path))
+    return project.top_path_resolver.locate(path, built=True).path.as_posix()
 
 
 def _output_role(project: Any, target: Path | str) -> str | None:

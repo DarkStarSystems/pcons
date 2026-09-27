@@ -46,7 +46,10 @@ class MakefileGenerator(BaseGenerator):
         self._project_root: Path | None = None
         self._build_dir: Path | None = None
         self._relative_build_dir: Path | None = None
-        self._path_resolver: PathResolver | None = None  # Set during generate()
+        # Anchors of the project's paths, and how make writes its top: sources
+        # are absolute, so they work from any directory. Set during generate().
+        self._resolver: PathResolver = PathResolver(Path("."), Path("build"))
+        self._top: str = ""
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate Makefile in output_dir."""
@@ -61,7 +64,8 @@ class MakefileGenerator(BaseGenerator):
         self._project_root = project.root_dir.resolve()
         self._build_dir = output_dir
         self._relative_build_dir = project._build_dir
-        self._path_resolver = getattr(project, "top_path_resolver", None)
+        self._resolver = PathResolver(self._project_root, Path(project._build_dir))
+        self._top = self._project_root.as_posix()
 
         with open(makefile_path, "w", encoding="utf-8") as f:
             self._write_header(f, project)
@@ -131,7 +135,7 @@ class MakefileGenerator(BaseGenerator):
 
         f.write("# Directory creation\n")
         for directory in sorted(self._directories):
-            escaped = self._make_build_relative_path(directory)
+            escaped = self._ref(directory, built=True)
             f.write(f"{escaped}:\n")
             f.write('\tmkdir -p "$@"\n')
             f.write("\n")
@@ -193,31 +197,21 @@ class MakefileGenerator(BaseGenerator):
         all_targets = build_info.get("all_targets")
         if outputs_info:
             all_outputs = [
-                self._make_build_relative_path(info["path"])
-                for info in outputs_info.values()
+                self._ref(info["path"], built=True) for info in outputs_info.values()
             ]
             output = " ".join(all_outputs)
         elif all_targets and len(all_targets) > 1:
             # A command with several declared outputs (e.g. a code generator):
             # name them all, or the extra ones have no rule at all.
             output = " ".join(
-                self._node_path(n) for n in all_targets if isinstance(n, FileNode)
+                self._ref(n, output=True)
+                for n in all_targets
+                if isinstance(n, FileNode)
             )
         else:
-            output = self._node_path(node)
+            output = self._ref(node, output=True)
 
-        # Build outputs are build-dir-relative; source files are absolute so
-        # they work from any directory.
-        def get_source_path(s: FileNode) -> str:
-            if getattr(s, "role", None) == "install_output":
-                return self._node_path(s)
-            if getattr(s, "_build_info", None) is not None or s.is_target:
-                return self._make_build_relative_path(s.path)
-
-            path_obj = s.path
-            if not path_obj.is_absolute() and self._project_root is not None:
-                path_obj = self._project_root / path_obj
-            return self._escape_path(path_obj)
+        get_source_path = self._ref
 
         prereqs: list[str] = []
 
@@ -243,7 +237,7 @@ class MakefileGenerator(BaseGenerator):
             and output_dir != Path("")
             and node.role != "install_output"
         ):
-            order_only.append(self._make_build_relative_path(output_dir))
+            order_only.append(self._ref(output_dir, built=True))
         prereq_set = set(prereqs)
         for dep in node.order_only_deps:
             if isinstance(dep, FileNode):
@@ -420,7 +414,7 @@ class MakefileGenerator(BaseGenerator):
         if argv is None:
             return
 
-        dep_refs = " ".join(sorted(self._escape_path(self._regen_dep(d)) for d in deps))
+        dep_refs = " ".join(sorted(self._ref(d, built=False) for d in deps))
         command = self._escape_dollar_for_recipe(to_shell_command(argv, shell="bash"))
 
         f.write("# Re-run pcons when the build description changes\n")
@@ -428,18 +422,6 @@ class MakefileGenerator(BaseGenerator):
         f.write('\t@echo "Regenerating $@"\n')
         f.write(f"\t{command}\n")
         f.write("\n")
-
-    def _regen_dep(self, path: Path) -> str:
-        """Render a configure dependency for the makefile-remake rule.
-
-        Build-tree inputs must match how their producing rule names them
-        (relative to the build dir, where make runs); source-tree inputs are
-        absolute, like every other source path in the makefile.
-        """
-        build_parts = self._relative_build_dir.parts if self._relative_build_dir else ()
-        if build_parts and path.parts[: len(build_parts)] == build_parts:
-            return self._strip_build_dir_prefix(path)
-        return self._relativize_path_for_make(str(path))
 
     def _wrap_build_commands(
         self,
@@ -467,9 +449,9 @@ class MakefileGenerator(BaseGenerator):
         if not pre_build_cmds and not post_build_cmds:
             return command
 
-        out_path = self._node_out_raw(node)
+        out_path = self._text(node.path, built=self._built(node, output=True))
         in_paths = " ".join(
-            self._relativize_path_for_make(str(s.path))
+            self._text(s.path, built=self._built(s))
             for s in sources
             if isinstance(s, FileNode)
         )
@@ -509,19 +491,20 @@ class MakefileGenerator(BaseGenerator):
 
         for s in sources:
             if isinstance(s, FileNode):
-                in_paths.append(self._input_path(s))
+                in_paths.append(self._text(s.path, built=self._built(s)))
 
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                in_paths.append(self._input_path(dep))
+                in_paths.append(self._text(dep.path, built=self._built(dep)))
 
         source_paths = " ".join(in_paths)
 
         # $out is role-aware so the recipe writes exactly where the rule
         # target points.
         command = command.replace("$in", source_paths)
-        command = command.replace("$out", self._node_out_raw(node))
+        out = self._text(node.path, built=self._built(node, output=True))
+        command = command.replace("$out", out)
 
         return command
 
@@ -540,7 +523,7 @@ class MakefileGenerator(BaseGenerator):
                     # already declared .PHONY, so it works as a prerequisite.
                     members.append(t.alias_name)
                 elif isinstance(t, FileNode):
-                    members.append(self._node_path(t))
+                    members.append(self._ref(t, output=True))
             if members:
                 f.write(f"{name}: {' '.join(members)}\n")
         f.write("\n")
@@ -562,7 +545,7 @@ class MakefileGenerator(BaseGenerator):
             for dep in test_target.dependencies:
                 for node in dep.output_nodes:
                     if isinstance(node, FileNode):
-                        out = self._make_build_relative_path(node.path)
+                        out = self._ref(node, output=True)
                         if out not in seen:
                             seen.add(out)
                             program_outputs.append(out)
@@ -591,7 +574,7 @@ class MakefileGenerator(BaseGenerator):
 
         def outputs(targets: list[Target]) -> list[str]:
             return [
-                self._node_path(node)
+                self._ref(node, output=True)
                 for target in targets
                 if target._resolved
                 for node in target.output_nodes
@@ -639,7 +622,7 @@ class MakefileGenerator(BaseGenerator):
                             dependency_nodes.add(dep.path)
 
         final_nodes = output_nodes - dependency_nodes
-        return [self._make_build_relative_path(path) for path in sorted(final_nodes)]
+        return [self._ref(path, built=True) for path in sorted(final_nodes)]
 
     def _write_depfile_includes(self, f: TextIO) -> None:
         """Include every depfile a rule's command writes: what it lists,
@@ -652,15 +635,17 @@ class MakefileGenerator(BaseGenerator):
             f.write(f"-include {self._escape_path(depfile)}\n")
         f.write("\n")
 
-    def _depfile_path(self, node: FileNode, depfile: PathToken) -> str:
-        """Where *node*'s command writes *depfile*, from the build dir.
+    def _depfile_path(
+        self, node: FileNode, depfile: PathToken, cwd: Path | None = None
+    ) -> str:
+        """Where *node*'s command writes *depfile*, from where it runs.
 
         As in ninja: a suffix names it after the output (``$out.d``), and a
         token without one carries the file's own path.
         """
         if depfile.suffix:
-            return self._strip_build_dir_prefix(node.path) + depfile.suffix
-        return self._strip_build_dir_prefix(depfile.path)
+            return self._text(node.path, built=True, cwd=cwd) + depfile.suffix
+        return self._text(depfile.path, built=True, cwd=cwd)
 
     def _write_clean_target(self, f: TextIO, output_dir: Path) -> None:
         """Write the clean target."""
@@ -668,36 +653,34 @@ class MakefileGenerator(BaseGenerator):
         f.write("clean:\n")
         f.write(f"\trm -rf {self._escape_path(output_dir)}\n")
 
-    def _input_path(self, s: FileNode) -> str:
-        """Render an input node for a recipe command line.
+    def _text(self, path: Path | str, *, built: bool, cwd: Path | None = None) -> str:
+        """*path* as a command sees it, unescaped.
 
-        Build artifacts are build-dir-relative; sources are absolute so they
-        work from any directory. Must classify nodes the same way as the
-        prerequisite list in _write_build_rule, or a recipe would name a
-        file its rule doesn't depend on.
+        From the build directory, where make runs, a target's file is
+        relative to it and a source's is absolute, so it works from any
+        directory. An edge with a *cwd* runs there, so its paths are relative
+        to that instead.
         """
-        if getattr(s, "_build_info", None) is not None or s.is_target:
-            return self._strip_build_dir_prefix(s.path)
-        path_obj = s.path
-        if not path_obj.is_absolute() and self._project_root is not None:
-            path_obj = self._project_root / path_obj
-        return str(path_obj)
+        return self._resolver.path_text(path, built=built, run_dir=cwd, top=self._top)
 
-    def _strip_build_dir_prefix(self, path: Path | str) -> str:
-        """Strip the build_dir prefix from a path, since make runs from the
-        build dir (contract: pcons.core.paths.execution_relative)."""
-        if self._path_resolver is not None:
-            return self._path_resolver.make_execution_relative(path)
-        # Resolver-less project (tests with bare stubs)
-        from pcons.core.paths import execution_relative
+    def _ref(
+        self,
+        node: FileNode | Path | str,
+        *,
+        built: bool | None = None,
+        output: bool = False,
+    ) -> str:
+        """A file as a rule names it: :meth:`_text`, escaped.
 
-        return execution_relative(
-            path,
-            execution_dir=self._build_dir,
-            build_dir_parts=self._relative_build_dir.parts
-            if self._relative_build_dir
-            else (),
-        )
+        For a node, *built* is read off it (see :meth:`_built`); a bare path
+        must say.
+        """
+        if isinstance(node, FileNode):
+            return self._escape_path(
+                self._text(node.path, built=self._built(node, output=output))
+            )
+        assert built is not None
+        return self._escape_path(self._text(node, built=built))
 
     def _escape_path(self, path: Path | str) -> str:
         """Escape a path for a position where make parses names.
@@ -711,28 +694,6 @@ class MakefileGenerator(BaseGenerator):
         path_str = self.ESCAPE_DOLLAR.sub("$$", str(path))
         return path_str.replace(" ", "\\ ")
 
-    def _make_build_relative_path(self, path: Path | str) -> str:
-        """Strip the build_dir prefix and escape for a make name position."""
-        return self._escape_path(self._strip_build_dir_prefix(path))
-
-    def _node_out_raw(self, node: FileNode) -> str:
-        """Return the unescaped output path for *node*, honoring its role.
-
-        Install outputs live outside the build dir and are emitted absolute;
-        other nodes are build-dir-relative. Returned unescaped so rule
-        targets and recipe tokens (escaped separately) agree on the path.
-        """
-        if node.role == "install_output":
-            p = node.path
-            if not p.is_absolute() and self._project_root is not None:
-                p = self._project_root / p
-            return str(p)
-        return self._strip_build_dir_prefix(node.path)
-
-    def _node_path(self, node: FileNode) -> str:
-        """Render a Makefile rule-target path for *node*, escaped for make."""
-        return self._escape_path(self._node_out_raw(node))
-
     def _run_in_dir(self, command: str, cwd: Path) -> str:
         """Wrap *command* so it runs in *cwd*, and come back afterwards.
 
@@ -743,17 +704,6 @@ class MakefileGenerator(BaseGenerator):
         paths absolutely, so there is no relocatability left to protect.
         """
         return f"cd {shlex.quote(str(cwd))} && {command} && cd {shlex.quote(str(self._build_dir))}"
-
-    def _at_build_dir(self, path: str) -> str:
-        """A recipe path made absolute, for a command that runs elsewhere.
-
-        Recipe paths are either build-dir-relative (build artifacts) or
-        already absolute (source-tree files).
-        """
-        path_obj = Path(path)
-        if path_obj.is_absolute() or self._build_dir is None:
-            return str(path_obj)
-        return str(self._build_dir / path_obj)
 
     def _process_path_tokens(
         self,
@@ -785,8 +735,7 @@ class MakefileGenerator(BaseGenerator):
         tokens = expanded
 
         def relativize(path: str) -> str:
-            rendered = self._relativize_path_for_make(path)
-            return self._at_build_dir(rendered) if cwd is not None else rendered
+            return self._text(path, built=False, cwd=cwd)
 
         result: list = []
         for token in tokens:
@@ -798,32 +747,12 @@ class MakefileGenerator(BaseGenerator):
                 )
             else:
                 s = str(token)
-                # $SRCDIR becomes the absolute project root (make runs from
-                # the build dir)
-                if "$SRCDIR" in s and self._project_root:
-                    s = s.replace("$SRCDIR", str(self._project_root))
+                # $SRCDIR is the project top, as the command sees it
+                if "$SRCDIR" in s:
+                    top = self._text(self._resolver.project_root, built=False, cwd=cwd)
+                    s = s.replace("$SRCDIR", top)
                 result.append(s)
         return result
-
-    def _relativize_path_for_make(self, path: str) -> str:
-        """Transform a path for make's execution context: "." for the build
-        dir, build-relative below it, absolute for project paths."""
-        path_obj = Path(path)
-
-        if path_obj.is_absolute():
-            return path
-
-        if self._build_dir:
-            build_dir_str = str(self._build_dir)
-            if path == build_dir_str:
-                return "."
-            if path.startswith(build_dir_str + "/"):
-                return path[len(build_dir_str) + 1 :]
-
-        if self._project_root:
-            return str(self._project_root / path)
-
-        return path
 
     def _expand_source_target_tokens(
         self,
@@ -841,29 +770,34 @@ class MakefileGenerator(BaseGenerator):
         separate, individually quoted token — critical for commands like
         linkers where $SOURCES expands to multiple files.
 
-        With *cwd*, the command runs somewhere other than the build directory,
-        so build-relative paths are made absolute — the one spelling that
-        means the same thing from every directory.
+        With *cwd*, the command runs somewhere other than the build
+        directory, and every path is written from there.
         """
         from pcons.core.subst import SourcePath, TargetPath
 
         # All input paths (sources + explicit_deps)
         in_paths: list[str] = []
+
+        def text(n: FileNode, *, output: bool = False) -> str:
+            return self._text(n.path, built=self._built(n, output=output), cwd=cwd)
+
         for s in sources:
             if isinstance(s, FileNode):
-                in_paths.append(self._input_path(s))
+                in_paths.append(text(s))
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                in_paths.append(self._input_path(dep))
+                in_paths.append(text(dep))
 
-        # Role-aware so install outputs resolve to their absolute
-        # destination, matching the rule target.
-        out_path = self._node_out_raw(node)
+        # Role-aware so an install's output is its destination, matching the
+        # rule target.
+        out_path = text(node, output=True)
 
         depfile = build_info.get("depfile")
         depfile_path = (
-            self._depfile_path(node, depfile) if isinstance(depfile, PathToken) else ""
+            self._depfile_path(node, depfile, cwd)
+            if isinstance(depfile, PathToken)
+            else ""
         )
 
         # All target paths for multi-output commands: all_targets (generic
@@ -873,22 +807,15 @@ class MakefileGenerator(BaseGenerator):
         out_paths: list[str] = []
         if all_targets and isinstance(all_targets, list):
             for t in all_targets:
-                path = getattr(t, "path", None)
-                if path is not None:
-                    out_paths.append(self._strip_build_dir_prefix(path))
+                if isinstance(t, FileNode):
+                    out_paths.append(text(t, output=True))
         elif outputs_info and isinstance(outputs_info, dict):
             for _name, info in outputs_info.items():
                 if isinstance(info, dict) and "path" in info:
                     info_dict = cast(dict[str, Any], info)
-                    out_paths.append(self._strip_build_dir_prefix(info_dict["path"]))
+                    out_paths.append(self._text(info_dict["path"], built=True, cwd=cwd))
         if not out_paths:
             out_paths = [out_path]
-
-        if cwd is not None:
-            in_paths = [self._at_build_dir(p) for p in in_paths]
-            out_paths = [self._at_build_dir(p) for p in out_paths]
-            out_path = self._at_build_dir(out_path)
-            depfile_path = self._at_build_dir(depfile_path) if depfile_path else ""
 
         # An explicit index on any marker (even 0) switches all unindexed
         # markers of that type to indexed mode. A slice expands independently

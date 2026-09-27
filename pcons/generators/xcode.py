@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pcons.core.errors import PconsError
 from pcons.core.graph import refuse_duplicate_names, strongly_connected_components
 from pcons.core.node import FileNode
+from pcons.core.paths import PathResolver
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
@@ -151,7 +152,8 @@ class XcodeGenerator(BaseGenerator):
         self._main_group_id: str = ""
         self._products_group_id: str = ""
         self._sources_group_id: str = ""
-        self._topdir: str = ".."  # Relative path from output_dir to project root
+        # Anchors of the project's paths, set during generate()
+        self._resolver: PathResolver = PathResolver(Path("."), Path("build"))
         self._frameworks_phase_ids: dict[int, str] = {}  # -> frameworks phase id
         self._product_ref_ids: dict[int, str] = {}  # -> product file ref id
 
@@ -232,14 +234,7 @@ class XcodeGenerator(BaseGenerator):
         self._product_ref_ids = {}
         self._cycle_unit: dict[int, int] = {}
 
-        # Relative path from output_dir to project root, for source file paths
-        import os
-
-        try:
-            self._topdir = os.path.relpath(self._project_root, self._output_dir)
-        except ValueError:
-            # On Windows, relpath fails for paths on different drives
-            self._topdir = str(self._project_root)
+        self._resolver = PathResolver(self._project_root, Path(project._build_dir))
 
         xcodeproj_path = output_dir / f"{project.name}.xcodeproj"
         xcodeproj_path.mkdir(parents=True, exist_ok=True)
@@ -619,7 +614,7 @@ class XcodeGenerator(BaseGenerator):
 
             source_node = sources[0]
             source_path = self._get_xcode_source_path(source_node.path)
-            dest_path = self._make_build_output_path(node.path)
+            dest_path = self._text(node.path, built=True)
 
             script = (
                 f'mkdir -p "$(dirname "{dest_path}")"\ncp "{source_path}" "{dest_path}"'
@@ -650,14 +645,14 @@ class XcodeGenerator(BaseGenerator):
             if hasattr(node, "_build_info") and node._build_info is not None:
                 sources = node._build_info.get("sources", [])
 
-        dest_dir_str = self._make_build_output_path(dest_dir)
+        dest_dir_str = self._text(dest_dir, built=True)
 
         for source in sources:
             if hasattr(source, "path"):
-                source_path = str(self._make_relative_path(source.path))
+                source_path = self._text(source.path, built=False)
                 source_name = source.path.name
             elif isinstance(source, (str, Path)):
-                source_path = str(self._make_relative_path(Path(source)))
+                source_path = self._text(Path(source), built=False)
                 source_name = Path(source).name
             else:
                 continue
@@ -684,7 +679,7 @@ class XcodeGenerator(BaseGenerator):
         ordinary sources are relative to the xcodeproj location.
         """
         if self._pcons_project is None:
-            return str(self._make_relative_path(source_path))
+            return self._text(source_path, built=False)
 
         native_target_types = {"program", "static_library", "shared_library"}
         aggregate_target_types = {"interface", "archive"}
@@ -707,9 +702,9 @@ class XcodeGenerator(BaseGenerator):
                         if target_type in native_target_types:
                             return f"Release/{source_path.name}"
                         elif target_type in aggregate_target_types:
-                            return self._make_build_output_path(source_path)
+                            return self._text(source_path, built=True)
 
-        return str(self._make_relative_path(source_path))
+        return self._text(source_path, built=False)
 
     def _create_archive_script_phases(
         self, target: Target, objects: dict[str, dict[str, Any]]
@@ -734,7 +729,7 @@ class XcodeGenerator(BaseGenerator):
         if not source_paths:
             return phases
 
-        output_rel = self._make_build_output_path(output_path)
+        output_rel = self._text(output_path, built=True)
 
         if builder_name == "Tarfile":
             if compression == "gzip":
@@ -834,7 +829,7 @@ class XcodeGenerator(BaseGenerator):
 
                 from pbxproj.pbxextensions.ProjectFiles import FileOptions
 
-                source_path = self._make_relative_path(src_path)
+                source_path = self._text(src_path, built=False)
                 file_options = FileOptions(create_build_files=True)
                 self._xcode_project.add_file(
                     str(source_path),
@@ -860,6 +855,12 @@ class XcodeGenerator(BaseGenerator):
 
         return sorted(set(headers))
 
+    def _text(self, path: Path | str, *, built: bool) -> str:
+        """*path* as Xcode's project and scripts see it, from the build
+        directory the xcodeproj sits in: a target's file relative to it, a
+        source's too (``../src/a.c``), anything outside the project absolute."""
+        return self._resolver.path_text(path, built=built)
+
     def _configure_build_settings(self, target: Target) -> None:
         """Configure Xcode build settings from a pcons target."""
         if self._xcode_project is None:
@@ -879,24 +880,20 @@ class XcodeGenerator(BaseGenerator):
 
             eff = compute_effective_requirements(target, env)
             for inc_path in eff.includes:
-                include_dirs.append(str(self._make_relative_path(inc_path)))
+                include_dirs.append(self._text(inc_path, built=False))
         else:
             # Fallback: apply _subdir resolution manually
             path_resolver = target.path_resolver
             for inc_dir in target.public.include_dirs:
                 include_dirs.append(
-                    str(
-                        self._make_relative_path(
-                            path_resolver.normalize_source_path(inc_dir)
-                        )
+                    self._text(
+                        path_resolver.normalize_source_path(inc_dir), built=False
                     )
                 )
             for inc_dir in target.private.include_dirs:
                 include_dirs.append(
-                    str(
-                        self._make_relative_path(
-                            path_resolver.normalize_source_path(inc_dir)
-                        )
+                    self._text(
+                        path_resolver.normalize_source_path(inc_dir), built=False
                     )
                 )
 
@@ -1084,51 +1081,3 @@ class XcodeGenerator(BaseGenerator):
                         seen.add(id(dep))
 
         return dep_targets
-
-    def _make_build_output_path(self, path: Path) -> str:
-        """Make a build-output path relative to build_dir, where Xcode runs
-        shell scripts. Paths without the build_dir prefix pass through."""
-        if self._output_dir is None:
-            return str(path)
-
-        if path.is_absolute():
-            try:
-                return str(path.relative_to(self._output_dir))
-            except ValueError:
-                pass
-
-        path_str = str(path)
-
-        if self._pcons_project is not None:
-            build_dir_name = str(self._pcons_project._build_dir)
-            if path_str.startswith(build_dir_name + "/"):
-                return path_str[len(build_dir_name) + 1 :]
-            if path_str.startswith(build_dir_name + "\\"):
-                return path_str[len(build_dir_name) + 1 :]
-
-        return path_str
-
-    def _make_relative_path(self, path: Path) -> Path:
-        """Make a path relative to the xcodeproj location (the build dir):
-        build-dir paths become relative, project paths go via _topdir
-        ("../src/file.c"), external paths stay absolute."""
-        if self._project_root is None or self._output_dir is None:
-            return path
-
-        if not path.is_absolute():
-            path = self._project_root / path
-
-        path = path.resolve()
-
-        try:
-            return path.relative_to(self._output_dir)
-        except ValueError:
-            pass
-
-        try:
-            rel_to_root = path.relative_to(self._project_root)
-            return Path(self._topdir) / rel_to_root
-        except ValueError:
-            pass
-
-        return path

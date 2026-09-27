@@ -322,7 +322,6 @@ class QtQmlModuleBuilder:
         # ---- C++ type registration (only when there are moc'ed types) ----
         registrar_node: Node | None = None
         qmltypes_name = f"{name}.qmltypes"
-        resolver = project.top_path_resolver
         metatypes = info.metatypes_node
         if metatypes is not None:
             foreign = _qt_metatypes(project, env, link)
@@ -336,8 +335,7 @@ class QtQmlModuleBuilder:
                     "QMLMAJOR": major,
                     "QMLMINOR": minor,
                     "QMLTYPES": PathToken(
-                        path=resolver.make_execution_relative(qt_dir / qmltypes_name),
-                        path_type="build",
+                        path=qt_dir / qmltypes_name, path_type="project"
                     ),
                     "QMLFOREIGN": (
                         ["--foreign-types", ",".join(str(p) for p in foreign)]

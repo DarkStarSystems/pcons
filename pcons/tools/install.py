@@ -37,16 +37,18 @@ class InstallContext:
     """Context for install operations (copy, copytree).
 
     Attributes:
-        destdir: Destination directory for InstallDir operations.
+        destdir: Destination directory for InstallDir operations: the
+            destination's own path, which the generator writes as its command
+            sees it, or text an environment gave.
         install_type: Type of install ("copy" or "copytree").
     """
 
-    destdir: str = ""
+    destdir: str | PathToken = ""
     install_type: str = "copy"
 
-    def get_env_overrides(self) -> dict[str, str]:
+    def get_env_overrides(self) -> dict[str, object]:
         """Return values to set on env.install.* before subst()."""
-        result: dict[str, str] = {}
+        result: dict[str, object] = {}
 
         if self.destdir:
             result["destdir"] = self.destdir
@@ -55,7 +57,10 @@ class InstallContext:
 
     @classmethod
     def from_target(
-        cls, target: Target, env: Environment | None = None, destdir: str = ""
+        cls,
+        target: Target,
+        env: Environment | None = None,
+        destdir: str | PathToken = "",
     ) -> InstallContext:
         """Create an InstallContext from a target and optional environment.
 
@@ -390,14 +395,18 @@ class InstallNodeFactory(PendingSourceFactory):
         )
         return anchor_target_path(resolver, build_dir, dest)
 
-    def _destdir(self, dest: Path) -> str:
-        """*dest* as the copy command sees it.
+    def _dest_token(self, dest: Path) -> PathToken:
+        """*dest* for the copy command, which the generator writes as that
+        command sees it: from the top-level build directory, whichever
+        subdirectory declared the install."""
+        return PathToken(path=dest, path_type="project")
 
-        The command runs in the top-level build directory whichever
-        subdirectory declared the install, so the offset an anchored
-        destination carries belongs in the argument too.
-        """
-        return self.project.top_path_resolver.make_execution_relative(dest)
+    def _stamp_path(self, target: Target, dest: Path) -> Path:
+        """The stamp that stands for copying to *dest*, named after it as a
+        user would name it, so its name doesn't depend on where the build
+        runs."""
+        where = self.project.top_path_resolver.locate(dest, built=True)
+        return target.build_dir / ".stamps" / _stamp_name_for(where.path)
 
     def _install_role(self, dest: Path) -> PathRole | None:
         """The node role for an anchored install destination.
@@ -408,7 +417,8 @@ class InstallNodeFactory(PendingSourceFactory):
         is an ordinary build output, staging directories included (e.g. the
         ``no_prefix`` installers in ``pcons.contrib.installers``).
         """
-        return "install_output" if Path(self._destdir(dest)).anchor else None
+        where = self.project.top_path_resolver.locate(dest, built=True)
+        return "install_output" if where.anchor != "build" else None
 
     def _get_install_env(self, target: Target) -> Environment | None:
         """Get the target's env, or any project env with the install tool."""
@@ -481,12 +491,7 @@ class InstallNodeFactory(PendingSourceFactory):
         source_path = source_node.path
         dest_path = dest_dir / source_path.name
 
-        # Dest as the command sees it, which is also a platform-neutral stamp name
-        rel_dest = self._destdir(dest_path)
-
-        stamps_dir = target.build_dir / ".stamps"
-        stamp_name = _stamp_name_for(rel_dest)
-        stamp_path = stamps_dir / stamp_name
+        stamp_path = self._stamp_path(target, dest_path)
 
         stamp_node = self.project._node(stamp_path)
         # Source directory is the explicit dep (becomes $in for copytree).
@@ -496,7 +501,9 @@ class InstallNodeFactory(PendingSourceFactory):
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
 
-        context = InstallContext.from_target(target, env, destdir=rel_dest)
+        context = InstallContext.from_target(
+            target, env, destdir=self._dest_token(dest_path)
+        )
 
         stamp_node._build_info = cast(
             BuildInfo,
@@ -529,14 +536,14 @@ class InstallNodeFactory(PendingSourceFactory):
         the overlay command when it runs, so a file another edge generates
         into a source tree is staged by the build that writes it.
         """
-        rel_dest = self._destdir(dest_dir)
-
-        stamp_path = target.build_dir / ".stamps" / _stamp_name_for(rel_dest)
+        stamp_path = self._stamp_path(target, dest_dir)
         stamp_node = self.project._node(stamp_path)
         stamp_node.add_inputs(sources)
 
         env = self._get_install_env(target)
-        context = InstallContext.from_target(target, env, destdir=rel_dest)
+        context = InstallContext.from_target(
+            target, env, destdir=self._dest_token(dest_dir)
+        )
 
         stamp_node._build_info = cast(
             BuildInfo,
@@ -615,12 +622,7 @@ class InstallNodeFactory(PendingSourceFactory):
 
         dest_path = dest_dir / source_path.name
 
-        # Dest as the command sees it, which is also a platform-neutral stamp name
-        rel_dest = self._destdir(dest_path)
-
-        stamps_dir = target.build_dir / ".stamps"
-        stamp_name = _stamp_name_for(rel_dest)
-        stamp_path = stamps_dir / stamp_name
+        stamp_path = self._stamp_path(target, dest_path)
 
         # The stamp under build/.stamps is what ninja tracks; the copied
         # tree's destination is passed via the copytree command's destdir.
@@ -633,7 +635,9 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_node.implicit_deps.extend(child_nodes)
 
         env = self._get_install_env(target)
-        context = InstallContext.from_target(target, env, destdir=rel_dest)
+        context = InstallContext.from_target(
+            target, env, destdir=self._dest_token(dest_path)
+        )
 
         stamp_node._build_info = cast(
             BuildInfo,

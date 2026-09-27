@@ -373,7 +373,7 @@ def _buildable_names(project: Project) -> list[str]:
     for target in project.targets:
         for node in target.output_nodes:
             if isinstance(node, FileNode):
-                names.add(resolver.make_execution_relative(node.path))
+                names.add(resolver.locate(node.path, built=True).path.as_posix())
     return sorted(names)
 
 
@@ -402,7 +402,7 @@ def _named_target_paths(project: Project) -> dict[str, list[str]]:
         if target.anonymous:
             continue
         paths = [
-            resolver.make_execution_relative(node.path)
+            resolver.locate(node.path, built=True).path.as_posix()
             for node in target.output_nodes
             if isinstance(node, FileNode)
         ]
@@ -1495,7 +1495,7 @@ def _project_target_lookup(project: Project) -> Callable[[str], list[str] | None
             return None
         resolver = project.top_path_resolver
         paths = [
-            resolver.make_execution_relative(node.path)
+            resolver.locate(node.path, built=True).path.as_posix()
             for node in target.output_nodes
             if isinstance(node, FileNode)
         ]
@@ -1999,7 +1999,7 @@ def _info_targets(
         for target in project.targets:
             type_name = target.target_type or "other"
             paths = [
-                _build_relative(n.path, project._build_dir)
+                project.top_path_resolver.locate(n.path, built=True).path.as_posix()
                 for n in target.output_nodes
                 if isinstance(n, FileNode)
             ]
@@ -2032,14 +2032,6 @@ def _info_targets(
         print_group(anonymous)
 
     return 0
-
-
-def _build_relative(path: Path, build_dir: Path) -> str:
-    """A node path as the build directory sees it, or whole if it sits outside."""
-    try:
-        return str(path.relative_to(build_dir))
-    except ValueError:
-        return str(path)
 
 
 def _targets_written_as(project: Project, name: str) -> list[Target]:
@@ -3105,7 +3097,9 @@ class RunGroup(MergingGroup):
         may declare several, and only the target's own knows its root.
         """
         return [
-            target.project.top_path_resolver.make_execution_relative(node.path)
+            target.project.top_path_resolver.locate(
+                node.path, built=True
+            ).path.as_posix()
             for target in targets
             for node in target.output_nodes
         ]

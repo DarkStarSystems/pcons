@@ -517,12 +517,7 @@ def _qt_make_target(
         predefs_path = root / qt_dir / "moc_predefs.h"
         qt_env.qt.mocpredefs = [
             "--include",
-            PathToken(
-                path=project.top_path_resolver.make_execution_relative(
-                    qt_dir / "moc_predefs.h"
-                ),
-                path_type="build",
-            ),
+            PathToken(path=qt_dir / "moc_predefs.h", path_type="project"),
         ]
 
     # ---- uic / rcc edges -------------------------------------------------
@@ -582,12 +577,7 @@ def _qt_make_target(
         )[0]
         _set_node_vars(
             edge,
-            {
-                "AUTOMOCSPEC": PathToken(
-                    path=project.top_path_resolver.make_execution_relative(spec_rel),
-                    path_type="build",
-                )
-            },
+            {"AUTOMOCSPEC": PathToken(path=spec_rel, path_type="project")},
         )
         if predefs_node is not None:
             edge.implicit_deps.append(predefs_node)

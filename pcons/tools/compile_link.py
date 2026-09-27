@@ -989,8 +989,7 @@ class CompileLinkFactory:
         first, last = span[0], span[-1]
 
         def tokens(nodes: list[FileNode]) -> list[PathToken]:
-            rel = self.project.top_path_resolver.make_execution_relative
-            return [PathToken(path=rel(n.path), path_type="build") for n in nodes]
+            return [PathToken(path=n.path, path_type="project") for n in nodes]
 
         group = toolchain.link_group_tokens(tokens(dep_libs[first : last + 1]), env=env)
         if group is None:

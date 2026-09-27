@@ -101,7 +101,9 @@ class TestRegenEdge:
 
         content = (tmp_path / "build" / "Makefile").read_text()
         assert "Makefile: " in content
-        assert str(tmp_path / "plugins.def") in content
+        # Make writes a source absolutely, with forward slashes: a backslash
+        # is make's escape character.
+        assert (tmp_path.resolve() / "plugins.def").as_posix() in content
 
 
 class TestGeneratedInput:

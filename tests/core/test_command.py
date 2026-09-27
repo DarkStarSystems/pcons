@@ -1609,18 +1609,15 @@ class TestWorkingDirectory:
         assert recipe.startswith(f"cd {shlex.quote(str(tmp_path))} && ")
         assert recipe.endswith(f"&& cd {shlex.quote(str(tmp_path / 'build'))}")
 
-    def test_makefile_paths_are_absolute_in_a_moved_command(
+    def test_makefile_paths_are_relative_to_a_moved_command(
         self, tmp_path, gcc_toolchain
     ):
+        """Make writes a moved command's paths from its cwd, as ninja does."""
         content = self._makefile(
             tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd=tmp_path
         )
 
-        # A Makefile already spells sources absolutely; the output has to
-        # follow, or it lands wherever the command was told to run.
-        source = shlex.quote(str(tmp_path / "in.txt"))
-        output = shlex.quote(str(tmp_path / "build" / "gen" / "out.txt"))
-        assert f"gen {source} {output}" in content
+        assert "gen in.txt build/gen/out.txt" in content
 
     def test_write_if_different_wrapper_is_not_moved(self, tmp_path, gcc_toolchain):
         content = self._ninja(

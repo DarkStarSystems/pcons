@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -339,7 +340,7 @@ class GccToolchain(UnixToolchain):
         if not scopes:
             return
         flag_spec = _gcc_std_module_flag_spec()
-        rel = project.top_path_resolver.make_execution_relative
+        rel = functools.partial(project.top_path_resolver.path_text, built=True)
 
         edge_facts: dict[int, dict[str, object]] = {}
         by_compiler: dict[str, list[object]] = {}

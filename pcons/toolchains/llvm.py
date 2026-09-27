@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import subprocess
@@ -507,7 +508,7 @@ class LlvmToolchain(UnixToolchain):
         if not scopes:
             return
         flag_spec = _clang_std_module_flag_spec()
-        rel = project.top_path_resolver.make_execution_relative
+        rel = functools.partial(project.top_path_resolver.path_text, built=True)
 
         # Per-object facts the scanner callbacks read. Keys are id(obj_node);
         # the callbacks run later in the same resolve pass.

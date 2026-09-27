@@ -218,79 +218,6 @@ class TestNormalizeSourcePath:
         assert result.parts == ("src", "subdir", "main.c")
 
 
-class TestMakeBuildRelative:
-    def test_absolute_under_build(self, tmp_path: Path) -> None:
-        """Absolute paths under build_dir should be made relative."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-        build_dir = project_root / "build"
-        build_dir.mkdir()
-
-        resolver = PathResolver(project_root, Path("build"))
-
-        abs_path = build_dir / "output" / "file.o"
-        result = resolver.make_build_relative(abs_path)
-        assert result == Path("output/file.o")
-
-    def test_already_relative(self, tmp_path: Path) -> None:
-        """Already relative paths should pass through."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-
-        resolver = PathResolver(project_root, Path("build"))
-
-        rel_path = Path("output/file.o")
-        result = resolver.make_build_relative(rel_path)
-        assert result == rel_path
-
-    def test_absolute_outside_build(self, tmp_path: Path) -> None:
-        """Absolute paths outside build_dir should pass through."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-
-        resolver = PathResolver(project_root, Path("build"))
-
-        external_path = Path("/external/path")
-        result = resolver.make_build_relative(external_path)
-        assert result == external_path
-
-
-class TestMakeProjectRelative:
-    def test_absolute_under_project(self, tmp_path: Path) -> None:
-        """Absolute paths under project root should be made relative."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-
-        resolver = PathResolver(project_root, Path("build"))
-
-        abs_path = project_root / "src" / "main.c"
-        result = resolver.make_project_relative(abs_path)
-        assert result == "src/main.c"
-
-    def test_returns_forward_slashes(self, tmp_path: Path) -> None:
-        """Result should use forward slashes."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-
-        resolver = PathResolver(project_root, Path("build"))
-
-        abs_path = project_root / "src" / "subdir" / "main.c"
-        result = resolver.make_project_relative(abs_path)
-        assert "\\" not in result
-        assert "/" in result
-
-    def test_already_relative(self, tmp_path: Path) -> None:
-        """Already relative paths should pass through as strings."""
-        project_root = tmp_path / "project"
-        project_root.mkdir()
-
-        resolver = PathResolver(project_root, Path("build"))
-
-        rel_path = Path("src/main.c")
-        result = resolver.make_project_relative(rel_path)
-        assert result == "src/main.c"
-
-
 class TestCanonicalize:
     def test_canonicalize_relative_unchanged(self, tmp_path: Path) -> None:
         """Relative paths pass through (with normpath normalization)."""
@@ -360,47 +287,85 @@ class TestCanonicalize:
         assert first == second
 
 
-class TestMakeCommandRelative:
-    """A path as the running command sees it: from the build directory, or
-    from its cwd=, sources included."""
+class TestLocate:
+    """Where a node path points, as a user names it: a target from the build
+    directory, a source from the project top."""
 
     def resolver(self, tmp_path: Path) -> PathResolver:
         return PathResolver(tmp_path, Path("build"))
 
-    def test_a_built_file_is_build_relative(self, tmp_path: Path) -> None:
-        resolver = self.resolver(tmp_path)
-        assert resolver.make_command_relative("build/obj/a.o", built=True) == "obj/a.o"
+    def test_a_target_is_named_from_the_build_directory(self, tmp_path: Path) -> None:
+        where = self.resolver(tmp_path).locate("build/obj/a.o", built=True)
+        assert (where.anchor, str(where)) == ("build", "obj/a.o")
 
-    def test_a_bare_built_name_sits_in_the_build_dir(self, tmp_path: Path) -> None:
-        resolver = self.resolver(tmp_path)
-        assert resolver.make_command_relative("out.txt", built=True) == "out.txt"
+    def test_a_bare_target_name_is_in_the_build_directory(self, tmp_path: Path) -> None:
+        where = self.resolver(tmp_path).locate("out.txt", built=True)
+        assert (where.anchor, str(where)) == ("build", "out.txt")
 
-    def test_a_source_climbs_out_of_the_build_dir(self, tmp_path: Path) -> None:
-        resolver = self.resolver(tmp_path)
-        assert resolver.make_command_relative("src/a.c", built=False) == "../src/a.c"
+    def test_the_build_directory_itself(self, tmp_path: Path) -> None:
+        where = self.resolver(tmp_path).locate("build", built=True)
+        assert (where.anchor, str(where)) == ("build", ".")
 
-    def test_the_project_root_is_the_climb_alone(self, tmp_path: Path) -> None:
-        resolver = self.resolver(tmp_path)
-        assert resolver.make_command_relative(tmp_path, built=False) == ".."
+    def test_a_source_is_named_from_the_top(self, tmp_path: Path) -> None:
+        where = self.resolver(tmp_path).locate("src/../src/a.c", built=False)
+        assert (where.anchor, str(where)) == ("top", "src/a.c")
 
-    def test_an_absolute_path_in_the_tree(self, tmp_path: Path) -> None:
+    def test_an_absolute_path_is_located_too(self, tmp_path: Path) -> None:
         resolver = self.resolver(tmp_path)
-        assert (
-            resolver.make_command_relative(tmp_path / "src" / "a.c", built=False)
-            == "../src/a.c"
-        )
+        top = tmp_path.resolve()
+        assert resolver.locate(top / "build" / "a.o", built=False).anchor == "build"
+        assert resolver.locate(top / "src" / "a.c", built=True).path == Path("src/a.c")
 
-    def test_a_path_outside_the_tree_stays_absolute(self, tmp_path: Path) -> None:
-        resolver = self.resolver(tmp_path / "proj")
-        outside = (tmp_path / "elsewhere" / "a.c").resolve()
-        assert (
-            resolver.make_command_relative(outside, built=False) == outside.as_posix()
-        )
+    def test_a_path_outside_the_project(self, tmp_path: Path) -> None:
+        resolver = PathResolver(tmp_path / "proj", Path("build"))
+        outside = (tmp_path / "sdk" / "a.h").resolve()
+        where = resolver.locate(outside, built=False)
+        assert (where.anchor, str(where)) == ("outside", outside.as_posix())
 
-    def test_a_cwd_moves_every_path(self, tmp_path: Path) -> None:
-        resolver = self.resolver(tmp_path)
+    def test_a_source_climbing_out_of_the_top_is_outside(self, tmp_path: Path) -> None:
+        resolver = PathResolver(tmp_path / "proj", Path("build"))
+        where = resolver.locate("../sdk/a.h", built=False)
+        assert where.anchor == "outside"
+        assert str(where) == ((tmp_path / "proj").resolve() / "../sdk/a.h").as_posix()
+
+    def test_an_absolute_build_directory_has_no_prefix(self, tmp_path: Path) -> None:
+        resolver = PathResolver(tmp_path / "proj", tmp_path / "out")
+        assert resolver.locate("obj/a.o", built=True).anchor == "build"
+        assert resolver.locate("src/a.c", built=False).anchor == "top"
+
+
+class TestPathText:
+    """A path as a program running in some directory must write it."""
+
+    def resolver(self, tmp_path: Path) -> PathResolver:
+        return PathResolver(tmp_path, Path("build"))
+
+    def test_from_the_build_directory(self, tmp_path: Path) -> None:
+        text = self.resolver(tmp_path).path_text
+        assert text("build/obj/a.o", built=True) == "obj/a.o"
+        assert text("src/a.c", built=False) == "../src/a.c"
+        assert text(tmp_path, built=False) == ".."
+
+    def test_the_reader_names_the_top(self, tmp_path: Path) -> None:
+        text = self.resolver(tmp_path).path_text
+        assert text("src/a.c", built=False, top="$topdir") == "$topdir/src/a.c"
+        assert text(tmp_path, built=False, top="$topdir") == "$topdir"
+        assert text("build/a.o", built=True, top="$topdir") == "a.o"
+
+    def test_from_another_directory(self, tmp_path: Path) -> None:
+        text = self.resolver(tmp_path).path_text
         work = tmp_path.resolve() / "work"
-        seen = resolver.make_command_relative
-        assert seen("build/out.txt", built=True, cwd=work) == "../build/out.txt"
-        assert seen("src/a.c", built=False, cwd=work) == "../src/a.c"
-        assert seen("work/in.txt", built=False, cwd=work) == "in.txt"
+        assert text("build/out.txt", built=True, run_dir=work) == "../build/out.txt"
+        assert text("src/a.c", built=False, run_dir=work) == "../src/a.c"
+        assert text("work/in.txt", built=False, run_dir=work) == "in.txt"
+
+    def test_from_the_top(self, tmp_path: Path) -> None:
+        text = self.resolver(tmp_path).path_text
+        top = tmp_path.resolve()
+        assert text("build/obj/a.o", built=True, run_dir=top) == "build/obj/a.o"
+        assert text("src/a.c", built=False, run_dir=top) == "src/a.c"
+
+    def test_outside_the_project_stays_absolute(self, tmp_path: Path) -> None:
+        resolver = PathResolver(tmp_path / "proj", Path("build"))
+        outside = (tmp_path / "sdk" / "a.h").resolve()
+        assert resolver.path_text(outside, built=False) == str(outside)

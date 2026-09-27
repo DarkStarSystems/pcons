@@ -39,13 +39,22 @@ def apply_context_overrides(
     where the tool's context supplies the values subst() would otherwise have.
     Has to run on the tokens: once they are quoted for a shell, the dollar
     these patterns match on has been escaped.
-    """
-    from pcons.core.subst import SourcePath, TargetPath
 
+    A marker (a ``PathToken``, say) that is the whole token stays a marker,
+    as it does through ``subst()``, so the generator writes its path as its
+    command sees it.
+    """
+    from pcons.core.subst import PathToken, SourcePath, TargetPath
+
+    markers = (PathToken, SourcePath, TargetPath)
     result: list = []
     for token in tokens:
-        if isinstance(token, (SourcePath, TargetPath)) or not isinstance(token, str):
+        if isinstance(token, markers) or not isinstance(token, str):
             result.append(token)
+            continue
+        whole = context_overrides.get(token.removeprefix(f"${tool_name}."))
+        if token.startswith(f"${tool_name}.") and isinstance(whole, markers):
+            result.append(whole)
             continue
 
         modified = token
@@ -96,6 +105,25 @@ class BaseGenerator:
     @property
     def name(self) -> str:
         return self._name
+
+    @staticmethod
+    def _built(node: FileNode, *, output: bool = False) -> bool:
+        """Whether *node*'s path is named from the build directory.
+
+        A file the build writes is, which an *output* of the edge being
+        written is by definition, except an install's output: that lands in
+        the project tree outside the build directory (``dist/bin/app``) and
+        is named from the top, like a source.
+        """
+        return (output or node.is_built) and node.role != "install_output"
+
+    @staticmethod
+    def _from_top(project: Project, path: Path | str, *, built: bool) -> str:
+        """*path* as written in a file read from the project top, as
+        metadata and ``compile_commands.json`` are: a target's with its
+        build directory in front, anything outside the project absolute."""
+        resolver = project.top_path_resolver
+        return resolver.path_text(path, built=built, run_dir=resolver.project_root)
 
     @staticmethod
     def _executable_form(path: str) -> str:
