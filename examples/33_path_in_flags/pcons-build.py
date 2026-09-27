@@ -34,13 +34,13 @@ prog.add_sources([src_dir / "main.c"])
 
 # Instead of plain string: prog.public.link_flags.append(f"-Wl,-force_load,{lib_path}")
 # Use PathToken so the path gets properly relativized in the generated build file.
-# The library output path is relative to build_dir.
+# Its path is written from the top of the tree, which project.build_dir is.
 lib_output = "libmylib.a"
 if sys.platform == "win32":
     lib_output = "mylib.lib"
 
 prog.private.link_flags.append(
-    PathToken(prefix="-Wl,-force_load,", path=lib_output, path_type="build")
+    PathToken(prefix="-Wl,-force_load,", path=project.build_dir / lib_output)
 )
 
 # Also link normally so the linker finds the symbols

@@ -235,7 +235,7 @@ class GraphGenerator(BaseGenerator):
 
         Shows all files: sources, objects, libraries, programs.
         """
-        ctx = _Emitter(f=f, build_dir=project.build_dir, root_dir=project.root_dir)
+        ctx = _Emitter(f=f, build_dir=project._build_dir, root_dir=project.root_dir)
         scan = self._scan_view(project)
 
         # Track output node paths and source dep paths for containment edges
@@ -465,9 +465,7 @@ class GraphGenerator(BaseGenerator):
         """
         from pcons.core.collate import read_dyndep_entries
 
-        build_dir = project.build_dir
-        if not build_dir.is_absolute():
-            build_dir = project.root_dir / build_dir
+        build_dir = project.top_path_resolver.execution_dir
         for scope in scan.scopes:
             if scope.dyndep_rel is None:
                 continue

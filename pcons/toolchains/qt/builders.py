@@ -101,7 +101,7 @@ def _qrc_xml(prefix: str, entries: Sequence[tuple[str, Path]]) -> str:
     return "\n".join(lines)
 
 
-def _stamped_command(env: Environment, *command: str) -> list[str]:
+def _stamped_command(env: Environment, *command: str | Path) -> list[str | Path]:
     """A build command wrapped in the run-then-touch-stamp helper.
 
     For tools with no declarable output of their own (lupdate,
@@ -133,7 +133,7 @@ def _qt_gen_dir_for(
     anchored at. A sub-project's own ``root_dir`` names a directory the
     generated build files never refer to, so a file written there is a file
     no rule knows how to make. ``root / gen_dir`` is therefore the directory
-    on disk, and ``project.node(gen_dir / ...)`` the node a builder reads.
+    on disk, and ``project._node(gen_dir / ...)`` the node a builder reads.
     """
     return (
         project.top_path_resolver.project_root,
@@ -150,15 +150,17 @@ def _qt_gen_dir_suffix(kind: str) -> str:
 
 
 def _env_include_dirs(project: Project, env: Environment) -> list[Path]:
-    """The environment's compiler include dirs, anchored at project root."""
+    """The environment's compiler include dirs, as absolute paths.
+
+    A relative one is read from the top-level root, as the generators read
+    it; a subdirectory's own ``root_dir`` is not that.
+    """
+    root = project.top_path_resolver.project_root
     dirs: list[Path] = []
     for tool in ("cxx", "cc"):
         if env.has_tool(tool):
             for entry in getattr(env, tool).get("includes", []) or []:
-                path = Path(str(entry))
-                if not path.is_absolute():
-                    path = project.root_dir / path
-                dirs.append(path)
+                dirs.append(root / Path(str(entry)))
     return dirs
 
 
@@ -242,11 +244,13 @@ def _scan_include_dirs(
             return
         seen.add(id(target))
         if not getattr(target, "is_imported", False):
+            # Written from the target's own script, like its sources.
+            resolver = project.top_path_resolver
             for inc in target.public.include_dirs:
-                path = Path(str(inc))
-                if not path.is_absolute():
-                    path = project.root_dir / path
-                dirs.append(path)
+                dirs.append(
+                    resolver.project_root
+                    / resolver.anchor_script_path(str(inc), target._subdir)
+                )
         for dep in target.public.link_libs:
             if not isinstance(dep, str):
                 add_target(dep)
@@ -467,6 +471,12 @@ def _qt_make_target(
         path = Path(entry)
         return path if path.is_absolute() else project.current_dir / path
 
+    def node_path(entry: str | Path | FileNode) -> Path:
+        """A source entry as a node path, anchored at the top-level root."""
+        if isinstance(entry, FileNode):
+            return _source_path(entry)
+        return project._script_path(entry)
+
     for entry in sources or []:
         suffix = None
         if isinstance(entry, (str, Path)):
@@ -474,14 +484,10 @@ def _qt_make_target(
         elif isinstance(entry, FileNode):
             suffix = entry.path.suffix
         if suffix == ".ui" and autouic and isinstance(entry, (str, Path, FileNode)):
-            ui_files.append(
-                _source_path(entry) if isinstance(entry, FileNode) else Path(entry)
-            )
+            ui_files.append(node_path(entry))
             continue
         if suffix == ".qrc" and autorcc and isinstance(entry, (str, Path, FileNode)):
-            qrc_files.append(
-                _source_path(entry) if isinstance(entry, FileNode) else Path(entry)
-            )
+            qrc_files.append(node_path(entry))
             continue
         if suffix in _HEADER_SUFFIXES and isinstance(entry, (str, Path, FileNode)):
             # Headers listed in sources (the CMake/qmake convention):
@@ -531,16 +537,18 @@ def _qt_make_target(
     gen_header_dirs: list[Path] = [qt_dir]
     ui_nodes: list[Node] = []
     for ui in ui_files:
-        rel = _source_rel_dir(qt_env, project.node(ui))
+        ui_node = project._node(ui)
+        rel = _source_rel_dir(qt_env, ui_node)
         target_path = qt_dir.joinpath(*rel) / f"ui_{ui.stem}.h"
-        ui_nodes.append(qt_env.qt.Uic(target_path, str(ui))[0])
+        ui_nodes.append(qt_env.qt.Uic(target_path, ui_node)[0])
         gen_header_dirs.append(target_path.parent)
 
     qrc_nodes: list[Node] = []
     for qrc in qrc_files:
-        rel = _source_rel_dir(qt_env, project.node(qrc))
+        qrc_node = project._node(qrc)
+        rel = _source_rel_dir(qt_env, qrc_node)
         target_path = qt_dir.joinpath(*rel) / f"qrc_{qrc.stem}.cpp"
-        qrc_nodes.append(qt_env.qt.Rcc(target_path, str(qrc))[0])
+        qrc_nodes.append(qt_env.qt.Rcc(target_path, qrc_node)[0])
 
     # ---- automoc ---------------------------------------------------------
     automoc_node: Node | None = None
@@ -578,7 +586,7 @@ def _qt_make_target(
             ),
         )
         edge = qt_env.qt.Automoc(
-            qt_dir / "mocs_compilation.cpp", [project.node(spec_rel), *cpp_paths]
+            qt_dir / "mocs_compilation.cpp", [project._node(spec_rel), *cpp_paths]
         )[0]
         _set_node_vars(
             edge,
@@ -591,10 +599,10 @@ def _qt_make_target(
         )
         if predefs_node is not None:
             edge.implicit_deps.append(predefs_node)
-        exports_node = project.node(exports_rel)
+        exports_node = project._node(exports_rel)
         _declare_implicit_output(edge, exports_node)
         if metatypes_rel is not None:
-            metatypes_node = project.node(metatypes_rel)
+            metatypes_node = project._node(metatypes_rel)
             _declare_implicit_output(edge, metatypes_node)
         automoc_node = edge
 
@@ -612,7 +620,7 @@ def _qt_make_target(
     if link:
         target.link(*link)
     for directory in dict.fromkeys(gen_header_dirs):
-        target.private.include_dirs.append(directory)
+        target.private.include_dirs.append(project.top.root_dir / directory)
     for node in (predefs_node, automoc_node, *ui_nodes):
         if node is not None:
             target.depends(node)
@@ -810,14 +818,14 @@ class QtResourcesBuilder:
             name: Resource name (also the Q_INIT_RESOURCE name).
             env: Environment; must have the qt toolchain.
             files: Files to embed; globs are expanded (sorted) relative
-                to the project root.
+                to the build script's directory.
             prefix: Resource prefix (the ``:/...`` root).
             base_dir: Directory aliases are computed relative to
-                (default: the project root).
+                (default: the build script's directory).
         """
         _require_qt_tool(env, "QtResources()")
         defined_at = defined_at or get_caller_location()
-        root = project.root_dir
+        root = project.current_dir
         base = root / base_dir if base_dir is not None else root
 
         expanded: list[Path] = []
@@ -847,7 +855,7 @@ class QtResourcesBuilder:
         _write_if_changed(top_root / qrc_rel, _qrc_xml(prefix, entries))
 
         cpp_node = env.qt.Rcc(
-            res_dir / f"qrc_{name}.cpp", project.node(qrc_rel), name=name
+            res_dir / f"qrc_{name}.cpp", project._node(qrc_rel), name=name
         )[0]
         # getattr: the generated builder stubs omit the internal
         # defined_at parameter, but passing it keeps "defined at"

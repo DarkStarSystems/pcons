@@ -12,8 +12,9 @@ project = Project("nested_child")
 if project.is_top_level:
     env = project.Environment(toolchain="c")
 else:
-    # Reuse the top-level toolchain rather than re-detecting one per level.
-    env = Project.top_level().default_environment
+    # Reuse the enclosing project's environment rather than detecting a
+    # toolchain again at every level.
+    env = project.parent.default_environment
 
 child_app = project.Program("child_app", env, sources=["src/child.c"])
 

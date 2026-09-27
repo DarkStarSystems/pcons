@@ -13,7 +13,6 @@ Usage:
 """
 
 import os
-from pathlib import Path
 
 from pcons import Project, find_c_toolchain, get_variant
 from pcons.configure.config import Configure
@@ -25,22 +24,19 @@ from pcons.packages.finders import ConanFinder
 
 VARIANT = get_variant("release")
 
-project_dir = Path(os.environ.get("PCONS_SOURCE_DIR", Path(__file__).parent))
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", project_dir / "build"))
-
 # =============================================================================
 # Setup
 # =============================================================================
 
-config = Configure(build_dir=build_dir)
+project = Project("conan_example")
+
+config = Configure(build_dir=project.build_dir)
 toolchain = find_c_toolchain()
 
 if not config.get("configured") or os.environ.get("PCONS_RECONFIGURE"):
     toolchain.configure(config)
     config.set("configured", True)
     config.save()
-
-project = Project("conan_example", root_dir=project_dir, build_dir=build_dir)
 
 # =============================================================================
 # Find Conan packages
@@ -49,8 +45,8 @@ project = Project("conan_example", root_dir=project_dir, build_dir=build_dir)
 # Create finder - compiler version is auto-detected
 conan = ConanFinder(
     config,
-    conanfile=project_dir / "conanfile.txt",
-    output_folder=build_dir / "conan",
+    conanfile=project.current_dir / "conanfile.txt",
+    output_folder=project.build_dir / "conan",
 )
 
 # Sync profile with toolchain - this generates the Conan profile file
@@ -89,7 +85,7 @@ env.use(fmt_pkg)
 # Build target
 # =============================================================================
 hello = project.Program("hello_fmt", env)
-hello.add_sources([project_dir / "src" / "main.cpp"])
+hello.add_sources(["src/main.cpp"])
 
 project.Default(hello)
 

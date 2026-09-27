@@ -401,7 +401,7 @@ env.Command(
 | `$SOURCES` | All source files |
 | `$TARGET` | First target file |
 | `$TARGETS` | All target files |
-| `$SRCDIR` | Project source tree root |
+| `$SRCDIR` | The declaring script's source directory (the project root, at the top level) |
 | `$$` | Literal `$` |
 
 Compare with Make's automatic variables:

@@ -969,6 +969,17 @@ it sits. Built directly, `build_dir` is `build/`; embedded one level
 down, it is `build/libfoo/`. The same holds several levels deep, and
 sibling subdirectories stay in separate build directories.
 
+Every relative path a script writes is read from the script's own
+directory: `sources=`, `depends=`, include directories, `project.node()`,
+`configure_file()`, `cwd=`, a `Path` in a command, and `$SRCDIR`.
+`project.build_dir` and `env.build_dir` are absolute, so a path built on
+them names one file wherever it goes: `project.build_dir / "config.h"`
+works as a source, a target, a command argument, or a file on disk.
+`env.build_dir` includes the environment's `build_prefix`, where a relative
+`target=` lands; `project.build_dir` doesn't. The one exception to the
+rule is a `PathToken`, whose relative `path` is read from the top of the
+tree; give it an absolute one.
+
 Notes:
 
 - The subdirectory must live under the top-level project. Pointing
@@ -2356,7 +2367,7 @@ env.Command(
 | `${SOURCES[n:m]}` | A range of sources — either end may be omitted |
 | `${TARGETS[n:m]}` | A range of targets |
 | `$TOOL` | The program `tool=` names, spelled so the shell will run it |
-| `$SRCDIR` | Project source tree root directory |
+| `$SRCDIR` | The source directory of the script declaring the command (the project root, at the top level) |
 | `$$` | Literal `$` (escaped) |
 
 Anything else inside `${...}` is an error. An unrecognized form would otherwise reach `build.ninja` as a shell-escaped literal and run as nonsense.
@@ -2364,23 +2375,21 @@ Anything else inside `${...}` is an error. An unrecognized form would otherwise 
 **Sources keep the order you wrote them in.** `${SOURCES[0]}` is the first source declared, whether or not it's another target's output:
 
 ```python
-# ${SOURCES[0]} is the tool; ${SOURCES[1:]} is however many .def files there are
+# ${SOURCES[0]} is the template; ${SOURCES[1:]} is however many .def files there are
 env.Command(
     target=gen_dir / "entries.c",
-    source=[collate_tool, *def_files],
-    command="./${SOURCES[0]} $TARGET ${SOURCES[1:]}",
+    source=[template, *def_files],
+    command="python $SRCDIR/tools/fill.py ${SOURCES[0]} $TARGET ${SOURCES[1:]}",
 )
 ```
 
 **A substitution can be part of an argument** rather than all of it — the text around it comes along:
 
 ```python
-command = "./${SOURCES[0]} --out=$TARGET -i${SOURCES[1:]}"
+command = "$TOOL --out=$TARGET -i$SOURCES"
 ```
 
-The `./` above is not decoration: `${SOURCES[0]}` expands to a plain build-directory name like `collate`, and a POSIX shell reads a bare name as something to look up on `$PATH`, where it will not find it. `cmd.exe` searches the current directory instead, and does not take `./`, so this spelling needs a per-platform prefix — see `examples/61_command_substitution`.
-
-**`tool=` writes it for you.** The program that runs a command is not one of its inputs, so it has its own argument, and pcons spells it the way the shell it is writing for will execute it:
+**Run a program the build made with `tool=`.** The program that runs a command is not one of its inputs, so it has its own argument, and pcons writes it the way the shell running the build executes it: `./collate` for a POSIX shell, which looks a bare name up on `$PATH` rather than in the build directory, and a backslashed path for `cmd.exe`, which reads a `/` as a switch. Don't write `./${SOURCES[0]}` by hand; it gets one of those wrong. See `examples/59_codegen_sources`.
 
 ```python
 env.Command(
@@ -2405,6 +2414,8 @@ env.Command(
 )
 ```
 
+A `Path` in the list names a file the same way (read from the script's directory when relative, like `sources=`) but adds no dependency, since it may be a directory the command only writes to. Pass the `Path` itself, not `str()` of it, and pcons writes it from wherever the command runs.
+
 First in the list, that token is the program, spelled to run just as `$TOOL` is. Anywhere else it is an argument and stays a plain path, which is what a wrapper reading the file wants. Where a command gives both, index 0 is what runs and `$TOOL` is one more path on the line. A `Target` that builds several files is ambiguous and raises: name the one that is meant, `parser.output_nodes[0]`.
 
 Text attached to a form that expands to *several* paths repeats on each of them, which is what such a flag always means: `-i${SOURCES[1:]}` becomes `-ione.def -itwo.def`, not one `-i` welded to the first path.
@@ -2424,7 +2435,7 @@ env.Command(
 )
 ```
 
-Each of the three kinds of path has its own base. `sources=` and `depends=` are relative to the directory of the script that declares the command; in a subdirectory reached through `add_subdirectory` that is the subdirectory, not the project root. `target=` is relative to the build directory of that same script — `build/<subdir>/`, where its programs and libraries also build — and a leading build-dir component is absorbed: `target=project.build_dir / "out.txt"` and `target="out.txt"` mean the same file, so targets may be written either way. (For a file in a literal subdirectory that shares the build directory's name, write the prefix twice: `project.build_dir / "build/browse_py.h"`.) The command's own tokens are the third kind, and worth stating plainly: a *relative* path inside a command is looked for under the build directory, where the command runs. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below. A build-directory path you write into a command yourself, an output directory a tool takes as an argument say, should go through `env.build_relative()`, which puts it under the environment's `build_prefix` the way `target=` is.
+Each of the three kinds of path has its own base. `sources=` and `depends=` are relative to the directory of the script that declares the command; in a subdirectory reached through `add_subdirectory` that is the subdirectory, not the project root. `target=` is relative to the build directory of that same script — `build/<subdir>/`, where its programs and libraries also build, under the environment's `build_prefix` — so `target=env.build_dir / "out.txt"` and `target="out.txt"` name the same file. The command's own tokens are the third kind, and worth stating plainly: a *relative string* inside a command is looked for under the build directory, where the command runs, so `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, pass a `Path` in the list form (`project.current_dir / "tools/gen.pl"`, which pcons writes from wherever the command runs), or move the whole command with `cwd=` below. A build-directory path a tool takes as an argument, an output directory say, is the same: pass `env.build_dir / "stage"` as a `Path`.
 
 **To use a generated file as a source, pass the target.** `sources=` names files in the source tree, so a generated file passed the way its `target=` was — `sources=["gen/parser.c"]` — would erroneously look in the source tree. Using the proper build path works fine: `sources=[project.build_dir / "gen/parser.c"]`. That will also correctly add the dependency. Passing the target is even better; no path to keep in sync:
 
@@ -2455,7 +2466,7 @@ env.Command(
 
 **Running somewhere else: `cwd=`**
 
-Build tools run from the build directory, and pcons writes every path in a command relative to it. Some tools can't live with that — they open an input by a path relative to the source root, or write beside their inputs. `cwd=` moves the command, and moves its paths with it: `$SOURCE`, `$TARGET` and `$SRCDIR` all come out relative to the directory you named, so nothing else in the rule changes. A relative `cwd` is taken from the project root.
+Build tools run from the build directory, and pcons writes every path in a command relative to it. Some tools can't live with that — they open an input by a path relative to the source root, or write beside their inputs. `cwd=` moves the command, and moves its paths with it: `$SOURCE`, `$TARGET` and `$SRCDIR` all come out relative to the directory you named, so nothing else in the rule changes. A relative `cwd` is read from the script's directory, as `sources=` is.
 
 ```python
 # The tool finds its input at "data/items.txt" -- relative to the source root
@@ -4074,9 +4085,9 @@ manifest_path = project.build_dir / "gen/plugins-list.txt"
 lister = project.Program("list-plugins", env, sources=["src/list-plugins.c"])
 manifest = env.Command(
     target=manifest_path,
-    source=[lister],
+    tool=lister,
     depends=["plugins.def"],
-    command="./$SOURCE $SRCDIR/plugins.def $TARGET",  # ./ so /bin/sh finds it
+    command="$TOOL $SRCDIR/plugins.def $TARGET",
     write_if_different=True,
 )
 

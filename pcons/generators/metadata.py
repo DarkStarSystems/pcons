@@ -113,7 +113,7 @@ class MetadataGenerator(BaseGenerator):
             "root_dir": project.top_path_resolver.make_project_relative(
                 project.root_dir
             ),
-            "build_dir": project.build_dir.as_posix(),
+            "build_dir": project._build_dir.as_posix(),
             "targets": [
                 self._serialize_target(target, project, tiers)
                 for target in sorted(project._targets, key=lambda t: t.name)

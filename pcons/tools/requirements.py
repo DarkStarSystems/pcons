@@ -301,25 +301,12 @@ def _anchor_dir_lists_for(reqs: UsageRequirements, owner: Target) -> UsageRequir
     """
     result = reqs.clone()
 
-    top = owner.project.top
-    build_parts = () if top.build_dir.is_absolute() else top.build_dir.parts
-    root_anchored_resolver = top.top_path_resolver
+    resolver = owner.project.top_path_resolver
 
     def _anchor(entry: str | Path) -> Path:
-        p = Path(entry) if not isinstance(entry, Path) else entry
-        # A relative dir is relative to the owner's source directory, so it
-        # picks up the subproject offset — unless it already carries the
-        # build-dir prefix, which makes it a generated directory that is
-        # anchored at the build tree instead (e.g. project.build_dir).
-        is_build_relative = bool(build_parts) and p.parts[: len(build_parts)] == (
-            build_parts
-        )
-        if owner._subdir.parts and not p.is_absolute() and not is_build_relative:
-            p = owner._subdir / p
-        # Canonicalize relative to the top-level project's resolver so
-        # generators (which use the top-level resolver) see consistent
-        # project-relative paths for dirs coming from subprojects.
-        return root_anchored_resolver.canonicalize(p)
+        # Read from the owner's source directory, as sources are; the
+        # generators take the canonical top-relative form.
+        return resolver.canonicalize(resolver.anchor_script_path(entry, owner._subdir))
 
     for list_name in _ANCHORED_DIR_LISTS:
         setattr(

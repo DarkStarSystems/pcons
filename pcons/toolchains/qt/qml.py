@@ -349,7 +349,9 @@ class QtQmlModuleBuilder:
             # The generated registration code includes the user's
             # headers via #include <header.h>.
             for directory in info.moc_header_dirs:
-                target.private.include_dirs.append(directory)
+                target.private.include_dirs.append(
+                    target.project.top.root_dir / directory
+                )
             target.add_sources([registrar_node])
 
         # ---- qmldir ----------------------------------------------------
@@ -381,7 +383,7 @@ class QtQmlModuleBuilder:
         _write_if_changed(root / qrc_rel, _qrc_xml(f"/qt/qml/{uri_path}", entries))
 
         rcc_node = qt_env.qt.Rcc(
-            qt_dir / f"qrc_{name}.cpp", project.node(qrc_rel), name=f"qml_{name}"
+            qt_dir / f"qrc_{name}.cpp", project._node(qrc_rel), name=f"qml_{name}"
         )[0]
         if registrar_node is not None:
             # rcc embeds the .qmltypes the registrar writes.

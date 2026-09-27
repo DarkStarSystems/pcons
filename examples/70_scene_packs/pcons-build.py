@@ -125,7 +125,7 @@ def pack_of_edge(env: Any, scenes: Any, governed: Any) -> dict[str, str]:
     module's BMI, say. Here they share one.) `scan_vars` puts the value on the
     build statement, so all the scan edges still share a single ninja rule.
     """
-    return {"PACK": f"{packs_dir.name}/{governed.path.name}"}
+    return {"PACK": governed}
 
 
 scene_refs = Scanner(

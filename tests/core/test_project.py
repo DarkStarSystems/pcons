@@ -17,7 +17,7 @@ class TestProjectCreation:
         assert project.name == "myproject"
         # root_dir defaults to directory containing the calling script
         assert project.root_dir == Path(__file__).parent
-        assert project.build_dir == Path("build")
+        assert project._build_dir == Path("build")
 
     def test_custom_directories(self, tmp_path):
         project = Project(
@@ -26,7 +26,8 @@ class TestProjectCreation:
             build_dir="out",
         )
         assert project.root_dir == tmp_path
-        assert project.build_dir == Path("out")
+        assert project._build_dir == Path("out")
+        assert project.build_dir == tmp_path / "out"
 
     def test_tracks_source_location(self):
         project = Project("myproject")
@@ -310,8 +311,8 @@ class TestSiblingProjects:
         assert second not in first._children
         assert Project.current() is second
         assert Project.top_level() is first  # the run's default anchor
-        assert first.build_dir == Path("build-a")
-        assert second.build_dir == Path("build-b")
+        assert first._build_dir == Path("build-a")
+        assert second._build_dir == Path("build-b")
 
     def test_siblings_keep_separate_node_namespaces(self, tmp_path):
         first = Project("first", root_dir=tmp_path, build_dir="build-a")
@@ -395,8 +396,8 @@ class TestSiblingProjects:
 
         assert lib1._parent is first
         assert lib2._parent is second
-        assert lib1.build_dir == Path("build-a") / "lib"
-        assert lib2.build_dir == Path("build-b") / "lib"
+        assert lib1._build_dir == Path("build-a") / "lib"
+        assert lib2._build_dir == Path("build-b") / "lib"
 
 
 class TestExplicitBinding:
@@ -649,12 +650,13 @@ class TestNodeCanonicalization:
         assert node_rel is node_abs
 
     def test_build_dir_absolute_normalized_to_relative(self, tmp_path):
-        """Absolute build_dir under root_dir is normalized to relative."""
+        """An absolute build_dir under root_dir gives the same nodes as a
+        relative one: node paths stay relative to the root."""
         abs_build = tmp_path / "build"
         project = Project("myproject", root_dir=tmp_path, build_dir=abs_build)
 
-        assert not project.build_dir.is_absolute()
-        assert project.build_dir == Path("build")
+        assert project._build_dir == Path("build")
+        assert project.build_dir == abs_build
 
     def test_build_dir_out_of_tree_stays_absolute(self, tmp_path):
         """Out-of-tree absolute build_dir stays absolute."""
@@ -934,15 +936,3 @@ class TestChildNodeIndex:
         project._nodes[Path("build/gen/smuggled.c")] = smuggled
 
         assert smuggled in project.get_child_nodes("build/gen")
-
-    def test_index_survives_build_dir_reassignment(self, tmp_path):
-        """build_dir is a public attribute and normalization depends on it."""
-        project = Project("test", root_dir=tmp_path, build_dir="build")
-        node = project.node("build/gen/thing.c")
-        assert project.get_child_nodes("gen") == [node]
-
-        project.build_dir = Path("other")
-
-        # "build/gen" is no longer stripped, so it is a plain path now.
-        assert project.get_child_nodes("build/gen") == [node]
-        assert project.get_child_nodes("gen") == []

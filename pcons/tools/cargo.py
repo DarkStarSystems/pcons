@@ -316,8 +316,10 @@ class CargoBuildBuilder:
         pkg = PackageDescription(
             name=name,
             libraries=[link_name],
-            library_dirs=[str(artifact_dir)],
-            include_dirs=[str(include_dir)] if include_dir else [],
+            library_dirs=[str(env._project.top.root_dir / artifact_dir)],
+            include_dirs=[str(env._project.top.root_dir / include_dir)]
+            if include_dir
+            else [],
             found_by="cargo",
         )
         # from_package() creates the target, which auto-registers with the

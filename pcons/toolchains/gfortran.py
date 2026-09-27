@@ -288,10 +288,7 @@ class GfortranToolchain(UnixToolchain):
         # The compile writes modules with `-J $fc.moddir`; gfortran does not
         # create that directory, and a consuming-only compile never has it as
         # an output for ninja to create. Make it at configure time.
-        build_dir = project.build_dir
-        build_dir_fs = (
-            build_dir if build_dir.is_absolute() else project.root_dir / build_dir
-        )
+        build_dir_fs = project.top_path_resolver.execution_dir
         for target in targets:
             (build_dir_fs / _moddir_of(target._env)).mkdir(parents=True, exist_ok=True)
 

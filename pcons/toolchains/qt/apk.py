@@ -224,7 +224,7 @@ def android_apk(
     if no_build:
         arguments.append("--no-build")
 
-    command: list[str] = ["$TOOL", *arguments]
+    command: list[str | Path] = ["$TOOL", *arguments]
     if no_build:
         _require_qt_tool(env, "android_apk(no_build=True)")
         command = _stamped_command(env, *command)

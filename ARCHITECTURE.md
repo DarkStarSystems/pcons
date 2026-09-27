@@ -1244,7 +1244,7 @@ canonical.
 ### Project
 > **Status: Implemented**
 
-The top-level container for the entire build specification. The Project serves as the **virtual filesystem** for the build: it maintains a registry of all nodes keyed by canonical path, ensuring that the same path always yields the same node object. All production code must create nodes through `project.node(path)` (or `project.dir_node(path)`), never via bare `FileNode(path)` — this guarantees that metadata like `_build_info` and dependencies are never split across duplicate objects for the same file.
+The top-level container for the entire build specification. The Project serves as the **virtual filesystem** for the build: it maintains a registry of all nodes keyed by canonical path, ensuring that the same path always yields the same node object. All production code must create nodes through `project._node(path)` for a canonical path, or the public `project.node(path)` for a path a build script wrote, which reads it from the script's directory; never via bare `FileNode(path)` — this guarantees that metadata like `_build_info` and dependencies are never split across duplicate objects for the same file.
 
 ```python
 class Project:

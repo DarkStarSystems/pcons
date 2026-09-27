@@ -132,7 +132,7 @@ def android_output_dir(env: Environment, app: Target | str) -> Path:
     inside the declaring script is safe, because that function absorbs an
     offset already there rather than adding a second one. Handing it to a
     script with another offset is what applies a second one, so pass
-    ``project.node()`` of it across scripts.
+    ``project._node()`` of it across scripts.
 
     Args:
         env: The environment the application is built in.
@@ -434,6 +434,6 @@ def android_deployment_settings(
         settings["sdkBuildToolsRevision"] = _build_tools_revision(env, build_tools)
         return json.dumps(settings, indent=3) + "\n"
 
-    project.node(output)
+    project._node(output)
     _SettingsFile(output, content).generate(project.top)
     return output

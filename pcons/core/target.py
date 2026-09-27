@@ -789,7 +789,7 @@ class Target:
         if env is not None:
             return env.build_dir_for(self._subdir)
         top = self.__project.top
-        return top.build_dir / self._subdir if self._subdir.parts else top.build_dir
+        return top._build_dir / self._subdir if self._subdir.parts else top._build_dir
 
     @property
     def source_dir(self) -> Path:
@@ -1018,10 +1018,12 @@ class Target:
                     raise ValueError(f"Target '{self.name}' cannot depend on itself.")
                 self._check_same_tree(item, "depend on")
             elif not isinstance(item, Node):
-                # str or Path: a FileNode via the project
-                if self._subdir.parts:
-                    item = self._subdir / item
-                item = self.project.node(item)
+                # str or Path: a FileNode, read from this target's script
+                item = self.project._node(
+                    self.project.top_path_resolver.anchor_script_path(
+                        item, self._subdir
+                    )
+                )
             if item not in self._dependencies:
                 self._dependencies.append(item)
             if on_change is not None:
@@ -1207,10 +1209,12 @@ class Target:
                     path = Path(source)
                     if not path.is_absolute():
                         source = base_path / path
-                # Only join subdir when source is a string or Path. If it's
-                # already a Node, leave it alone.
-                if self._subdir and isinstance(source, (str, Path)):
-                    source = Path(self._subdir) / source
+                # A written path is read from this target's script; a Node
+                # is already canonical.
+                if isinstance(source, (str, Path)):
+                    source = self.project.top_path_resolver.anchor_script_path(
+                        source, self._subdir
+                    )
                 self._add_source_node(self._to_node(source), env)
         return self
 
@@ -1292,7 +1296,7 @@ class Target:
         if isinstance(source, NodeClass):
             return source
         path = Path(source)
-        return self.project.node(path)
+        return self.project._node(path)
 
     def set_option(self, key: str, value: Any) -> Target:
         """Set a builder/toolchain option on this target (fluent API).

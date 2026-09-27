@@ -105,11 +105,7 @@ class TestNodeFactory:
         from there), so a build-dir-relative path is the natural form
         and works on every platform without further translation.
         """
-        try:
-            rel = path.resolve().relative_to(self.project.build_dir.resolve())
-            return str(rel).replace("\\", "/")
-        except ValueError:
-            return str(path).replace("\\", "/")
+        return self.project.top_path_resolver.make_execution_relative(path)
 
 
 @builder(

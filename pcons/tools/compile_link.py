@@ -475,7 +475,7 @@ class CompileLinkFactory:
         ``_object_cache`` and never reach here, so an object already produced
         by another target is a genuine collision.
         """
-        node = self.project.node(obj_path)
+        node = self.project._node(obj_path)
         producer = (node._build_info or {}).get("producer")
         if producer is not None and producer is not target:
             raise OutputCollisionError(producer, target, obj_path, intermediate=True)
@@ -739,7 +739,7 @@ class CompileLinkFactory:
         lib_name = self._apply_output_naming(target, env, "static_library")
         lib_path = self._output_path(target, env, lib_name, "static_library")
 
-        lib_node = self.project.node(lib_path)
+        lib_node = self.project._node(lib_path)
         lib_node.add_inputs(target.intermediate_nodes)
 
         archiver_tool = "ar"
@@ -771,7 +771,7 @@ class CompileLinkFactory:
         lib_name = self._apply_output_naming(target, env, "shared_library")
         lib_path = self._output_path(target, env, lib_name, "shared_library")
 
-        lib_node = self.project.node(lib_path)
+        lib_node = self.project._node(lib_path)
         lib_node.add_inputs(target.intermediate_nodes)
         info = self._setup_link_node(target, env, lib_node, "sharedcmd")
 
@@ -819,7 +819,7 @@ class CompileLinkFactory:
         prog_name = self._apply_output_naming(target, env, "program")
         prog_path = self._output_path(target, env, prog_name, "program")
 
-        prog_node = self.project.node(prog_path)
+        prog_node = self.project._node(prog_path)
         prog_node.add_inputs(target.intermediate_nodes)
         info = self._setup_link_node(target, env, prog_node, "progcmd")
 
@@ -845,7 +845,7 @@ class CompileLinkFactory:
                         suffix=spec.suffix,
                         implicit=spec.implicit,
                     )
-                    sec_node = self.project.node(secondary_path)
+                    sec_node = self.project._node(secondary_path)
                     sec_node._build_info = {
                         "primary_node": prog_node,
                         "output_name": spec.name,
@@ -1064,7 +1064,7 @@ class CompileLinkFactory:
                     import_lib_info = outputs.get("import_lib")
                     if import_lib_info and "path" in import_lib_info:
                         import_lib_path = import_lib_info["path"]
-                        result.append(self.project.node(import_lib_path))
+                        result.append(self.project._node(import_lib_path))
                         continue
                 result.append(node)
         return result

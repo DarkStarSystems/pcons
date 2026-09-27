@@ -41,7 +41,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.contrib.installers._helpers import as_installer_step, staging_dir
+from pcons.contrib.installers._helpers import (
+    as_installer_step,
+    staging_dir,
+)
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -77,13 +80,13 @@ def _validate_staging_path(project: Project, staging_dir: Path | str) -> None:
 
     Args:
         project: The project to check for conflicts.
-        staging_dir: The installer's staging directory, relative to the
-            build directory (e.g., ".pkg_staging/MyApp").
+        staging_dir: The installer's staging directory, as a node path
+            (see :func:`staging_dir`).
 
     Raises:
         ValueError: If a conflict is detected with existing build outputs.
     """
-    staging_path = project.build_dir / staging_dir
+    staging_path = Path(staging_dir)
 
     # Check for conflicts with existing targets' output nodes
     for target in project.targets:
@@ -136,11 +139,14 @@ def create_component_pkg(
             Directory sources are automatically detected and copied with
             depfile tracking after resolve().
         install_location: Where files install (e.g., "/Applications").
-        output: Output .pkg path. Defaults to build/<identifier>-<version>.pkg.
+        output: Output .pkg path, written like ``target=``. Defaults to
+            <identifier>-<version>.pkg in the build directory.
         depends: Targets that must be built before the sources are staged,
             for a directory source that other targets populate.
-        scripts_dir: Directory containing preinstall/postinstall scripts.
-        component_plist: Path to component plist file for bundle settings.
+        scripts_dir: Directory containing preinstall/postinstall scripts,
+            read from the build script's directory.
+        component_plist: Path to component plist file for bundle settings,
+            read from the build script's directory.
         ownership: File ownership ("recommended", "preserve", "preserve-other").
         sign_identity: Code signing identity (e.g., "Developer ID Installer: Name").
 
@@ -158,24 +164,20 @@ def create_component_pkg(
     else:
         output = Path(output)
 
-    # All paths below are relative to build_dir, where ninja/make run, and
-    # under the environment's build prefix; Command targets are made
-    # absolute so the environment doesn't prefix them a second time.
-    output = env.build_relative(output)
+    # Absolute, so the path means the same in target= and in a command.
+    output = env.build_dir / output
     staging_base = staging_dir(env, "pkg", identifier)
     _validate_staging_path(project, staging_base)
-    staging_rel = staging_base / "payload"
+    payload = staging_base / "payload"
 
-    # Stage source files into build dir
-    stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    stage_target = project.Install(payload, sources, no_prefix=True, env=env)
     if depends:
         stage_target.depends(*depends)
 
-    # Build pkgbuild command (paths relative to build_dir where ninja/make run)
     pkgbuild_args = [
         "pkgbuild",
         "--root",
-        str(staging_rel),
+        payload,
         "--identifier",
         identifier,
         "--version",
@@ -187,22 +189,20 @@ def create_component_pkg(
     ]
 
     if scripts_dir is not None:
-        pkgbuild_args.extend(["--scripts", str(scripts_dir)])
+        pkgbuild_args.extend(["--scripts", project.current_dir / scripts_dir])
 
     if component_plist is not None:
-        pkgbuild_args.extend(["--component-plist", str(component_plist)])
+        pkgbuild_args.extend(
+            ["--component-plist", project.current_dir / component_plist]
+        )
 
     if sign_identity is not None:
         pkgbuild_args.extend(["--sign", sign_identity])
 
-    pkgbuild_args.append(str(output))
+    pkgbuild_args.append("$TARGET")
 
     return as_installer_step(
-        env.Command(
-            target=project.build_dir / output,
-            source=[stage_target],
-            command=pkgbuild_args,
-        ),
+        env.Command(target=output, source=[stage_target], command=pkgbuild_args),
         by="create_component_pkg",
     )
 
@@ -243,7 +243,8 @@ def create_pkg(
             Directory sources are automatically detected and copied with
             depfile tracking after resolve().
         install_location: Where files install (e.g., "/Applications").
-        output: Output .pkg path. Defaults to build/<name>-<version>.pkg.
+        output: Output .pkg path, written like ``target=``. Defaults to
+            <name>-<version>.pkg in the build directory.
         depends: Targets that must be built before the sources are staged,
             for a directory source that other targets populate.
         title: Installer title. Defaults to name.
@@ -253,7 +254,8 @@ def create_pkg(
         conclusion: Page shown when the install finishes.
         background: Background image for the installer window.
         min_os_version: Minimum macOS version (e.g., "10.13").
-        scripts_dir: Directory containing preinstall/postinstall scripts.
+        scripts_dir: Directory containing preinstall/postinstall scripts,
+            read from the build script's directory.
         sign_identity: Code signing identity.
 
     Returns:
@@ -291,22 +293,15 @@ def create_pkg(
         if path is not None
     }
 
-    # All paths below are relative to build_dir, where ninja/make run, and
-    # under the environment's build prefix; Command targets are made
-    # absolute so the environment doesn't prefix them a second time.
-    output = env.build_relative(output)
-    staging_base_rel = staging_dir(env, "pkg", name)
-    _validate_staging_path(project, staging_base_rel)
-    payload_rel = staging_base_rel / "payload"
-    pkg_rel = staging_base_rel / "packages"
-    resources_rel = staging_base_rel / "resources"
+    # Absolute, so the path means the same in target= and in a command.
+    output = env.build_dir / output
+    staging_base = staging_dir(env, "pkg", name)
+    _validate_staging_path(project, staging_base)
+    payload = staging_base / "payload"
+    packages = staging_base / "packages"
+    resources = staging_base / "resources"
 
-    # Stage source files into build dir
-    stage_target = project.Install(
-        payload_rel,
-        sources,
-        no_prefix=True,
-    )
+    stage_target = project.Install(payload, sources, no_prefix=True, env=env)
     if depends:
         stage_target.depends(*depends)
 
@@ -326,11 +321,10 @@ def create_pkg(
     bundle_names = [b for b in (bundle_name(src) for src in sources) if b]
 
     # Create component package with pkgbuild
-    component_pkg_path = pkg_rel / f"{name}.pkg"
     pkgbuild_args = [
         "pkgbuild",
         "--root",
-        str(payload_rel),
+        payload,
         "--identifier",
         identifier,
         "--version",
@@ -345,13 +339,13 @@ def create_pkg(
     # Non-bundle files (CLI tools, libraries) don't need it
     component_deps: list[Target] = [stage_target]
     if bundle_names:
-        component_plist_path = staging_base_rel / "component.plist"
+        component_plist = staging_base / "component.plist"
         bundle_args: list[str] = []
         for bundle in bundle_names:
             bundle_args.extend(["--bundle", bundle])
         plist_target = as_installer_step(
             env.Command(
-                target=project.build_dir / component_plist_path,
+                target=component_plist,
                 source=None,
                 command=[
                     python_cmd,
@@ -359,24 +353,24 @@ def create_pkg(
                     "pcons.contrib.installers._helpers",
                     "gen_plist",
                     "--output",
-                    str(component_plist_path),
+                    "$TARGET",
                     *bundle_args,
                 ],
             ),
             by="create_pkg",
         )
-        pkgbuild_args.extend(["--component-plist", str(component_plist_path)])
+        pkgbuild_args.extend(["--component-plist", component_plist])
         component_deps.append(plist_target)
 
     if scripts_dir is not None:
-        pkgbuild_args.extend(["--scripts", str(scripts_dir)])
+        pkgbuild_args.extend(["--scripts", project.current_dir / scripts_dir])
 
-    pkgbuild_args.append(str(component_pkg_path))
+    pkgbuild_args.append("$TARGET")
 
     # Pass Targets directly as sources
     component_target = as_installer_step(
         env.Command(
-            target=project.build_dir / component_pkg_path,
+            target=packages / f"{name}.pkg",
             source=component_deps,
             command=pkgbuild_args,
         ),
@@ -384,14 +378,14 @@ def create_pkg(
     )
 
     # Generate distribution.xml
-    dist_xml_path = staging_base_rel / "distribution.xml"
+    dist_xml = staging_base / "distribution.xml"
     dist_cmd = [
         python_cmd,
         "-m",
         "pcons.contrib.installers._helpers",
         "gen_distribution",
         "--output",
-        str(dist_xml_path),
+        "$TARGET",
         "--title",
         title,
         "--identifier",
@@ -409,11 +403,7 @@ def create_pkg(
         dist_cmd.extend([f"--{flag}", Path(path).name])
 
     dist_target = as_installer_step(
-        env.Command(
-            target=project.build_dir / dist_xml_path,
-            source=[component_target],
-            command=dist_cmd,
-        ),
+        env.Command(target=dist_xml, source=[component_target], command=dist_cmd),
         by="create_pkg",
     )
 
@@ -421,7 +411,7 @@ def create_pkg(
     productbuild_deps: list[Target] = [dist_target, component_target]
 
     productbuild_deps.extend(
-        project.Install(resources_rel, [path], no_prefix=True)
+        project.Install(resources, [path], no_prefix=True, env=env)
         for path in ui_resources.values()
     )
 
@@ -429,25 +419,21 @@ def create_pkg(
     productbuild_args = [
         "productbuild",
         "--distribution",
-        str(dist_xml_path),
+        dist_xml,
         "--package-path",
-        str(pkg_rel),
+        packages,
     ]
 
     if ui_resources:
-        productbuild_args.extend(["--resources", str(resources_rel)])
+        productbuild_args.extend(["--resources", resources])
 
     if sign_identity is not None:
         productbuild_args.extend(["--sign", sign_identity])
 
-    productbuild_args.append(str(output))
+    productbuild_args.append("$TARGET")
 
     return as_installer_step(
-        env.Command(
-            target=project.build_dir / output,
-            source=productbuild_deps,
-            command=productbuild_args,
-        ),
+        env.Command(target=output, source=productbuild_deps, command=productbuild_args),
         by="create_pkg",
     )
 
@@ -478,7 +464,8 @@ def create_dmg(
             Directory sources are automatically detected and copied with
             depfile tracking after resolve().
         volume_name: Volume name. Defaults to name.
-        output: Output .dmg path. Defaults to build/<name>.dmg.
+        output: Output .dmg path, written like ``target=``. Defaults to
+            <name>.dmg in the build directory.
         depends: Targets that must be built before the sources are staged,
             for a directory source that other targets populate.
         format: DMG format:
@@ -503,45 +490,29 @@ def create_dmg(
     else:
         output = Path(output)
 
-    # Paths are relative to build_dir, where ninja/make run, and under the
-    # environment's build prefix; the Command target is made absolute so
-    # the environment doesn't prefix it a second time.
-    output = env.build_relative(output)
-    staging_rel = staging_dir(env, "dmg", name)
-    _validate_staging_path(project, staging_rel)
+    output = env.build_dir / output
+    staging = staging_dir(env, "dmg", name)
+    _validate_staging_path(project, staging)
 
-    # Stage source files into build dir
-    stage_target = project.Install(staging_rel, sources, no_prefix=True)
+    stage_target = project.Install(staging, sources, no_prefix=True, env=env)
     if depends:
         stage_target.depends(*depends)
 
-    # Build hdiutil command (with optional symlink creation)
-    # Paths are relative to build_dir where ninja/make run
-    if applications_symlink:
-        hdiutil_cmd = [
-            "bash",
-            "-c",
-            f'rm -f "{staging_rel}/Applications" && '
-            f'ln -sf /Applications "{staging_rel}/Applications" && '
-            f'rm -f "{output}" && '
-            f'hdiutil create -volname "{volume_name}" '
-            f'-srcfolder "{staging_rel}" -format {format} -ov "{output}"',
-        ]
-    else:
-        hdiutil_cmd = [
-            "bash",
-            "-c",
-            f'rm -f "{output}" && '
-            f'hdiutil create -volname "{volume_name}" '
-            f'-srcfolder "{staging_rel}" -format {format} -ov "{output}"',
-        ]
+    # The paths go to the script as arguments ($1 the staging directory, $2
+    # the image), so pcons writes and quotes them rather than this string.
+    script = (
+        'rm -f "$$1/Applications" && ln -sf /Applications "$$1/Applications" && '
+        if applications_symlink
+        else ""
+    )
+    script += (
+        f'rm -f "$$2" && hdiutil create -volname "$$3" '
+        f'-srcfolder "$$1" -format {format} -ov "$$2"'
+    )
+    hdiutil_cmd = ["bash", "-c", script, "bash", staging, "$TARGET", volume_name]
 
     return as_installer_step(
-        env.Command(
-            target=project.build_dir / output,
-            source=[stage_target],
-            command=hdiutil_cmd,
-        ),
+        env.Command(target=output, source=[stage_target], command=hdiutil_cmd),
         by="create_dmg",
     )
 

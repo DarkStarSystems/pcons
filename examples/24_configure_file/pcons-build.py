@@ -33,7 +33,7 @@ config.save()  # persist check results for the next run
 # Generate config.h from template at configure time
 configure_file(
     "src/config.h.in",
-    "build/config.h",
+    project.build_dir / "config.h",
     {
         "VERSION": "1.2.3",
         "HAVE_STDINT_H": "1" if have_stdint else "",

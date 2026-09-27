@@ -138,7 +138,7 @@ class CommandFrame:
         # resolve(), as the generators do (ninja resolves both dirs), so a
         # symlinked root or build dir spells the same topdir build.ninja has.
         root = Path(project.root_dir).resolve()
-        build_dir = Path(project.build_dir)
+        build_dir = Path(project._build_dir)
         build_abs = (
             build_dir if build_dir.is_absolute() else root / build_dir
         ).resolve()

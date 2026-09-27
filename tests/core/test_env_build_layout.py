@@ -129,7 +129,7 @@ class TestBuildPrefix:
         env = project.Environment(toolchain=gcc_toolchain, name="mcu")
         env.build_prefix = "mcu"
 
-        assert env.build_dir == Path("build/mcu")
+        assert env.build_dir == tmp_path / "build/mcu"
 
     def test_setting_order_does_not_matter(self, tmp_path, gcc_toolchain):
         project = Project("p", root_dir=tmp_path)
@@ -141,7 +141,7 @@ class TestBuildPrefix:
         second.build_dir = Path("build")
         second.build_prefix = "slice"
 
-        assert first.build_dir == second.build_dir == Path("build/slice")
+        assert first.build_dir == second.build_dir == tmp_path / "build/slice"
 
     def test_clearing_it_restores_the_build_dir(self, tmp_path, gcc_toolchain):
         project = Project("p", root_dir=tmp_path)
@@ -149,7 +149,7 @@ class TestBuildPrefix:
         env.build_prefix = "mcu"
         env.build_prefix = None
 
-        assert env.build_dir == Path("build")
+        assert env.build_dir == tmp_path / "build"
 
     def test_subdirectory_offset_stays_inside_the_prefix(
         self, tmp_path, source, gcc_toolchain
@@ -177,7 +177,7 @@ class TestBuildPrefix:
 
         project.resolve()
 
-        assert env.build_dir == Path("build/rel/mcu")
+        assert env.build_dir == tmp_path / "build/rel/mcu"
         assert lib.build_dir == Path("build/rel/mcu")
         assert _paths(lib) == _artifact(
             gcc_toolchain, "build/rel/mcu", "common", "static_library"
@@ -230,7 +230,7 @@ class TestBuildPrefix:
             command=["cp", "$SOURCE", "$TARGET"],
         )
         prefixed = env.Command(
-            target=project.build_dir / "gen/other.h",
+            target=env.build_dir / "gen/other.h",
             source="in.txt",
             command=["cp", "$SOURCE", "$TARGET"],
         )

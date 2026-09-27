@@ -137,10 +137,21 @@ pcons_hello_ext.private.link_libs.extend([python, nanobind, hello_lib])
 subgen = Path(nanobind.package.prefix) / "nanobind" / "stubgen.py"
 assert subgen.is_file(), f"Stub generator not found at {subgen}"
 
+# stubgen imports the extension from where it was built and writes the stubs
+# beside it; both are named for it rather than left to the working directory.
 cmd = project.Command(
     env,
     target=f"{pcons_hello_ext.name}.pyi",
-    command=[sys.executable, str(subgen), "--module", pcons_hello_ext.name],
+    command=[
+        sys.executable,
+        str(subgen),
+        "-i",
+        env.build_dir,
+        "--module",
+        pcons_hello_ext.name,
+        "-o",
+        "$TARGET",
+    ],
 ).depends(pcons_hello_ext)
 
 # Stage the extension and its stubs for packaging. The pyproject build backend

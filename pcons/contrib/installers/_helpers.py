@@ -21,14 +21,11 @@ import plistlib
 import shutil
 import subprocess
 import sys
-from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
-    from pcons.core.node import FileNode
-    from pcons.core.project import Project
     from pcons.core.target import Target
 
 
@@ -68,39 +65,13 @@ def check_tool(tool: str, hint: str | None = None) -> str:
 
 
 def staging_dir(env: Environment, kind: str, name: str) -> Path:
-    """The build-relative staging directory for one installer.
+    """The staging directory for one installer, absolute.
 
-    ``<prefix>/.<kind>_staging/<name>``: under the environment's build
-    prefix, so two environments packaging the same name don't share it,
-    and per installer, so one project can hold several.
+    ``.<kind>_staging/<name>`` in the environment's build directory: under
+    its build prefix, so two environments packaging the same name don't
+    share it, and per installer, so one project can hold several.
     """
-    return env.build_relative(Path(f".{kind}_staging") / name)
-
-
-def stage_files(
-    project: Project,
-    env: Environment,  # noqa: ARG001 - kept for API consistency
-    sources: Sequence[Target | FileNode | Path | str],
-    staging_dir: Path,
-    install_prefix: str = "",
-) -> Target:
-    """Create a target to stage files for packaging.
-
-    This creates an Install target that copies source files to a staging
-    directory, preserving their basenames.
-
-    Args:
-        project: Pcons project.
-        env: Configured environment.
-        sources: Files to stage (Targets, FileNodes, or paths).
-        staging_dir: Directory to stage files to.
-        install_prefix: Optional subdirectory within staging_dir.
-
-    Returns:
-        Target representing the staging operation.
-    """
-    dest_dir = staging_dir / install_prefix if install_prefix else staging_dir
-    return project.Install(dest_dir, sources)
+    return env.build_dir / f".{kind}_staging" / name
 
 
 def as_installer_step(target: Target, *, by: str) -> Target:

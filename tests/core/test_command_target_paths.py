@@ -124,7 +124,7 @@ def test_a_tool_from_another_environment_carries_its_prefix(
     gen = project.Program("gen", host, sources=["gen.c"])
     app = project.Program("app", tgt, sources=["gen.c"])
     tgt.Command(
-        target=project.build_dir / "out.txt",
+        target="out.txt",
         source=[app],
         command=[gen, "$SOURCE", "$TARGET"],
     )

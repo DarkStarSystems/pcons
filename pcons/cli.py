@@ -1999,7 +1999,7 @@ def _info_targets(
         for target in project.targets:
             type_name = target.target_type or "other"
             paths = [
-                _build_relative(n.path, project.build_dir)
+                _build_relative(n.path, project._build_dir)
                 for n in target.output_nodes
                 if isinstance(n, FileNode)
             ]

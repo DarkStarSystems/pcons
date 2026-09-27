@@ -21,9 +21,7 @@ env = project.Environment(toolchain="c++")
 env.use_clang_tidy(
     args=[
         "--export-fixes="
-        + str(project.root_dir / project.build_dir / "tidy-fixes.yaml").replace(
-            "\\", "/"
-        ),
+        + str(project.build_dir / "tidy-fixes.yaml").replace("\\", "/"),
     ]
 )
 

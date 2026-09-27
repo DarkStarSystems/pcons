@@ -393,7 +393,7 @@ class GccToolchain(UnixToolchain):
                     # Header tracking without a compile depfile (#102): the
                     # scan output's mtime moves exactly when this TU's
                     # source or an included header changed.
-                    ddi_node = project.node(
+                    ddi_node = project._node(
                         obj_node.path.with_name(obj_node.path.name + ".ddi")
                     )
                     if ddi_node not in obj_node.implicit_deps:
@@ -574,10 +574,8 @@ class GccToolchain(UnixToolchain):
                 f"On Ubuntu/Debian: apt install gcc g++ libstdc++-15-dev"
             )
 
-        build_dir = project.build_dir
-        build_dir_fs = (
-            build_dir if build_dir.is_absolute() else project.root_dir / build_dir
-        )
+        build_dir = project._build_dir
+        build_dir_fs = project.top_path_resolver.execution_dir
         std_moddir = f"cxx_modules/std/{std_key}"
         (build_dir_fs / std_moddir).mkdir(parents=True, exist_ok=True)
 
@@ -597,8 +595,8 @@ class GccToolchain(UnixToolchain):
                 continue
             gcm_rel = f"{std_moddir}/{logical}.gcm"
             obj_rel = f"{std_moddir}/{logical}.o"
-            std_obj_node = project.node(build_dir / obj_rel)
-            gcm_node = project.node(build_dir / gcm_rel)
+            std_obj_node = project._node(build_dir / obj_rel)
+            gcm_node = project._node(build_dir / gcm_rel)
             cmd_list: list[str] = [
                 compiler_cmd,
                 *passthrough,
@@ -615,7 +613,7 @@ class GccToolchain(UnixToolchain):
                 "tool": "cxx",
                 "command_var": "stdmodcmd",
                 "description": f"CXX {logical} module",
-                "sources": [project.node(src_path)],
+                "sources": [project._node(src_path)],
                 "command": cmd_list,
                 "outputs": {
                     "obj": {"path": std_obj_node.path, "implicit": False},

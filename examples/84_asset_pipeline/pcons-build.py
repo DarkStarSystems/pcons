@@ -79,7 +79,7 @@ class AssetBundleFactory:
                 "--depfile",
                 "$TARGET.d",
                 "--palette",
-                "palette.txt",
+                env.build_dir / "palette.txt",
                 "--options",
                 f"$SRCDIR/{options}",
             ],
@@ -90,7 +90,9 @@ class AssetBundleFactory:
         for scene in target.sources:
             (abin,) = compile_scene(env, f"abin/{Path(scene.name).stem}.abin", [scene])
             assert isinstance(abin, FileNode)
-            abin.depends(self.project.node(options))
+            # target.project reads the path from the script that declared
+            # the bundle, as sources= are read.
+            abin.depends(target.project.node(options))
             compiled.append(abin)
 
         # Steps 2 and 3: pack everything, then write the manifest, the

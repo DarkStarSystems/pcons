@@ -18,14 +18,13 @@ Usage:
 """
 
 import sys
-from pathlib import Path
 
 from pcons import Project
 
 project = Project("generated_public_headers")
 env = project.Environment(toolchain="c")
 
-gen_dir = Path(project.root_dir) / project.build_dir / "gen"
+gen_dir = project.build_dir / "gen"
 
 limits = env.Command(
     target="gen/metrics_limits.h",

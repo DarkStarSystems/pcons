@@ -144,7 +144,8 @@ class Scanner:
             ``scan_depfile``) or ``"msvc"`` (``/showIncludes`` lines on the
             scan's output, no file — ``scan_depfile`` may then stay None).
         scan_deps: Extra implicit deps of every scan edge — typically the
-            scan tool script itself, as a project-relative path.
+            scan tool script itself, read from the declaring script's
+            directory like ``sources=``.
         scan_vars: Optional callable ``(env, scanned_sources, governed_node)
             -> dict[str, str]`` supplying per-edge ninja variables for the
             scan command, so edges with differing values still share one
@@ -223,18 +224,42 @@ class Scanner:
         # A hand-written __init__ (rather than the dataclass one) so sequence
         # arguments of any kind arrive as tuples and the instance stays
         # hashable/frozen.
+        # $SRCDIR and scan_deps are read from the script declaring the
+        # scanner, as a command's are.
+        from pcons.core.builder import command_path
+        from pcons.core.project import Project, script_srcdir
+
+        srcdir = script_srcdir()
+
+        def _script_node_path(path: str) -> str:
+            if not Project.has_current():
+                return path
+            return Project.current()._script_path(path).as_posix()
+
+        def _srcdir(tokens: Sequence[Any]) -> tuple[Any, ...]:
+            return tuple(
+                command_path(t, program=i == 0)
+                if isinstance(t, Path)
+                else t.replace("$SRCDIR", srcdir)
+                if isinstance(t, str)
+                else t
+                for i, t in enumerate(tokens)
+            )
+
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "source_suffixes", tuple(source_suffixes))
-        object.__setattr__(self, "scan_command", tuple(scan_command))
+        object.__setattr__(self, "scan_command", _srcdir(scan_command))
         object.__setattr__(self, "info_suffix", info_suffix)
         object.__setattr__(self, "scan_depfile", scan_depfile)
         object.__setattr__(self, "scan_deps_style", scan_deps_style)
-        object.__setattr__(self, "scan_deps", tuple(scan_deps))
+        object.__setattr__(
+            self, "scan_deps", tuple(_script_node_path(d) for d in scan_deps)
+        )
         object.__setattr__(self, "scan_vars", scan_vars)
         object.__setattr__(
             self,
             "collate_command",
-            tuple(collate_command) if collate_command is not None else None,
+            _srcdir(collate_command) if collate_command is not None else None,
         )
         object.__setattr__(self, "manifest_extra", manifest_extra)
         object.__setattr__(self, "edge_extra", edge_extra)
@@ -441,13 +466,10 @@ class ScannerResolver:
         scope_id = self._scope_id(scanner, target)
         rel = project.top_path_resolver.make_execution_relative
         base_rel = f"scan/{scanner.name}"
-        build_dir = project.build_dir
+        build_dir = project._build_dir
         # Node identity uses the canonical (possibly relative) build_dir
-        # form; filesystem writes resolve it against the project root so
-        # configure-time output doesn't depend on the process cwd.
-        build_dir_fs = (
-            build_dir if build_dir.is_absolute() else project.root_dir / build_dir
-        )
+        # form; filesystem writes go to where the build runs.
+        build_dir_fs = project.top_path_resolver.execution_dir
         (build_dir_fs / base_rel).mkdir(parents=True, exist_ok=True)
 
         manifest_rel = f"{base_rel}/{scope_id}.manifest.json"
@@ -523,14 +545,14 @@ class ScannerResolver:
         )
 
         # --- collate edge ------------------------------------------------
-        collate_node = project.node(build_dir / dyndep_rel)
-        exports_node = project.node(build_dir / exports_rel)
+        collate_node = project._node(build_dir / dyndep_rel)
+        exports_node = project._node(build_dir / exports_rel)
         if collate_node._build_info is not None:
             raise PconsError(
                 f"Scanner '{scanner.name}': collate output {dyndep_rel} "
                 f"already has a producer."
             )
-        manifest_node = project.node(build_dir / manifest_rel)
+        manifest_node = project._node(build_dir / manifest_rel)
         collate_inputs: list[FileNode] = [
             *info_nodes,
             manifest_node,
@@ -545,7 +567,7 @@ class ScannerResolver:
         link_args_node: FileNode | None = None
         if link_args_rel is not None:
             assert isinstance(link_args_rel, str)
-            link_args_node = project.node(build_dir / link_args_rel)
+            link_args_node = project._node(build_dir / link_args_rel)
             link_args_node._build_info = {"primary_node": collate_node}
             outputs["link_args"] = {"path": link_args_node.path, "implicit": True}
         if scanner.edge_args:
@@ -699,7 +721,7 @@ class ScannerResolver:
 
         project = self.project
         info_path = governed.path.with_name(governed.path.name + scanner.info_suffix)
-        info_node = project.node(info_path)
+        info_node = project._node(info_path)
         if info_node._build_info is not None:
             raise PconsError(
                 f"Scanner '{scanner.name}': scan output "
@@ -708,7 +730,7 @@ class ScannerResolver:
             )
         info_node.add_inputs(scanned)
         if scanner.scan_deps:
-            info_node.depends([project.node(d) for d in scanner.scan_deps])
+            info_node.depends([project._node(d) for d in scanner.scan_deps])
 
         tokens = [_tokenize_one(t) for t in scanner.scan_command]
         info_node._build_info = {
@@ -730,7 +752,12 @@ class ScannerResolver:
             # /showIncludes lines and ninja stores them in its deps log.
             info_node._build_info["deps_style"] = "msvc"
         if scanner.scan_vars is not None:
-            info_node._build_info["vars"] = scanner.scan_vars(env, scanned, governed)
+            from pcons.core.builder import command_path
+
+            info_node._build_info["vars"] = {
+                name: command_path(value) if isinstance(value, FileNode) else value
+                for name, value in scanner.scan_vars(env, scanned, governed).items()
+            }
         env.register_node(info_node)
         # The scan reads what the governed command reads (a module scanner
         # runs a real compiler front end), so it waits for whatever the

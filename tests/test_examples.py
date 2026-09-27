@@ -358,6 +358,7 @@ _SKIP_SECTION_KEYS = {
     "require_qt_version",
     "generators",
     "rebuild_on_windows",
+    "nested",
 }
 _VERIFY_SECTION_PLATFORM_KEYS = {"commands"}
 _TOOLCHAINS_SECTION_KEYS = {"linux", "darwin", "windows"}
@@ -1593,6 +1594,111 @@ def test_example(
     - Toolchains: from each example's test configuration
     """
     run_example(example_dir, tmp_path, generator, toolchain)
+
+
+@pytest.mark.parametrize("example_dir", EXAMPLES, ids=lambda p: p.name)
+def test_example_nested(example_dir: Path, tmp_path: Path) -> None:
+    """Build the example as a subdirectory of another project.
+
+    ``add_subdirectory`` puts a script somewhere every path frame differs:
+    its ``root_dir`` is its own directory, its outputs land under
+    ``build/<subdir>/``, and the build tool runs in the parent's build
+    directory. Code that mixes those frames still passes when the example
+    is the top-level project, where they coincide. Nested, it builds in the
+    wrong place or never converges, so the outputs must turn up where they
+    should and a second build must find nothing to do.
+
+    An example that can't be nested says why under ``[skip] nested``.
+    """
+    config = load_test_config(example_dir)
+    test_config = config.get("test", {})
+    skip_config = config.get("skip", {})
+    reason = should_skip(config) or skip_config.get("nested")
+    if reason:
+        pytest.skip(reason)
+    if "ninja" in [g.lower() for g in skip_config.get("generators", [])]:
+        pytest.skip("Skipped for ninja generator")
+    if test_config.get("variants") or test_config.get("build_command"):
+        pytest.skip("variants and custom build commands run only top-level")
+    ninja_cmd = _find_ninja()
+    if ninja_cmd is None:
+        pytest.skip("ninja not available")
+
+    outer = tmp_path / "outer"
+    shutil.copytree(
+        example_dir,
+        outer / example_dir.name,
+        ignore=shutil.ignore_patterns(
+            "build", "compile_commands.json", ".venv", "dist", "__pycache__"
+        ),
+    )
+    (outer / "pcons-build.py").write_text(
+        "from pcons import Project, add_subdirectory\n"
+        "project = Project('outer')\n"
+        f"add_subdirectory({example_dir.name!r})\n",
+        encoding="utf-8",
+    )
+    build_dir = outer / "build"
+    # The first requested toolchain this host has, as the top-level run uses.
+    current_platform = platform.system().lower()
+    toolchain = next(
+        (
+            tc
+            for tc in get_requested_toolchains(config)
+            if tc is None or _toolchain_is_available(tc, current_platform)
+        ),
+        None,
+    )
+    _run_generate(
+        outer,
+        build_dir,
+        "ninja",
+        test_config,
+        variables={"TOOLCHAIN": toolchain} if toolchain else None,
+    )
+
+    def ninja(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [*ninja_cmd, "-C", str(build_dir), *args],
+            cwd=outer,
+            capture_output=True,
+            text=True,
+            timeout=test_config.get("build_timeout", 120),
+        )
+
+    result = ninja(*get_platform_value(test_config, "build_targets", []))
+    if result.returncode != 0:
+        print(f"Ninja stdout:\n{result.stdout}\nNinja stderr:\n{result.stderr}")
+        pytest.fail(f"ninja failed nested, with code {result.returncode}")
+
+    # Nested, a product sits below a directory named for the example:
+    # build/<ex>/app, build/<prefix>/<ex>/lib, obj.app/<ex>/src/... Whole-build
+    # files (build.ninja) stay at the top. So a file matches an expected path
+    # once the example's name is dropped from its own.
+    name = example_dir.name
+    built = {
+        Path(*(part for part in f.relative_to(outer).parts if part != name)).as_posix()
+        for f in build_dir.rglob("*")
+    }
+    expected_outputs = adapt_outputs_for_generator(
+        get_platform_value(
+            test_config,
+            "expected_outputs",
+            [],
+            adapt_for_windows=True,
+            gcc_toolchain=toolchain == "gcc",
+        ),
+        "ninja",
+        "",
+    )
+    for output in expected_outputs:
+        output = Path(_substitute_variables(output)).as_posix()
+        if output.startswith("build/") and not fnmatch.filter(built, output):
+            pytest.fail(f"Expected output not found nested: {output}")
+
+    result = ninja("-n")
+    if "no work to do" not in result.stdout:
+        pytest.fail(f"A nested build left work to do:\n{result.stdout}")
 
 
 # If no examples found, create a placeholder test
