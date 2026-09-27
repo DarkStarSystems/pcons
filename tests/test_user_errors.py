@@ -11,7 +11,6 @@ roadmap for future error handling improvements.
 """
 
 import functools
-import inspect
 import textwrap
 import warnings
 from pathlib import Path
@@ -854,37 +853,6 @@ class TestEveryPyBuilderRemedyWorks:
             render(target="out.txt", title="typed from the message").name == "out.txt"
         )
 
-    def test_a_target_moves_to_source(self, project_env):
-        """ "List it in source= instead, and the function receives its output paths"."""
-        project, env = project_env
-        made = env.Command(
-            target="made.txt",
-            source=["src/main.c"],
-            command=["cp", "$SOURCE", "$TARGET"],
-        )
-
-        @env.PyBuilder()
-        def render(targets, sources):
-            return sources
-
-        edge = render(target="out.txt", source=[made])
-        project.resolve()
-
-        assert self.edge_sources(edge) == ["build/made.txt"]
-
-    def test_a_node_moves_to_source(self, project_env):
-        """The same remedy, for a node."""
-        project, env = project_env
-
-        @env.PyBuilder()
-        def render(targets, sources):
-            return sources
-
-        edge = render(target="out.txt", source=[project.node("src/main.c")])
-        project.resolve()
-
-        assert self.edge_sources(edge) == ["src/main.c"]
-
     def test_a_missing_target_becomes_an_emitter(self, project_env):
         """ "An emitter= on the decoration can name them instead"."""
         project, env = project_env
@@ -1132,8 +1100,10 @@ class TestEveryPyBuilderRemedyWorks:
 
         assert out.read_text(encoding="utf-8") == "-O2"
 
-    def test_a_pcons_value_becomes_a_substituted_list(self, project_env, tmp_path):
-        """ "env.subst_list(...) to substitute and list them"."""
+    def test_a_pcons_value_becomes_a_subst(self, project_env, tmp_path):
+        """ "Subst("$tool.name") for the value the build settles on"."""
+        from pcons import Subst
+
         project, env = project_env
         env.cc.flags.append("-O2")
 
@@ -1148,7 +1118,7 @@ class TestEveryPyBuilderRemedyWorks:
             render,
             tmp_path,
             target="out.txt",
-            flags=env.subst_list("$cc.flags"),
+            flags=Subst("$cc.flags"),
         )
 
         assert out.read_text(encoding="utf-8") == "-O2"
@@ -1227,47 +1197,22 @@ class TestPyBuilderErrors:
             "render(target=..., PYBUILDER_DEFAULT=PYBUILDER_DEFAULT)." in message
         )
 
-    def test_a_target_in_kwargs_points_at_source(self, project_env):
-        """The first mistake: passing a target the way it reads naturally."""
+    def test_a_subst_in_a_set_is_refused(self, project_env):
+        """Its expansion is a list, which a set cannot hold."""
+        from pcons import Subst
+
         _, env = project_env
-        made = env.Command(
-            target="made.txt",
-            source=["src/main.c"],
-            command=["cp", "$SOURCE", "$TARGET"],
-        )
 
         @env.PyBuilder()
-        def render(targets, sources, t):
-            return t
+        def render(targets, sources, s):
+            return s
 
         with pytest.raises(PconsError) as caught:
-            call_line = inspect.currentframe().f_lineno + 1
-            render(target="out.txt", t=made)
+            render(target="out.txt", s={Subst("$cc.flags")})
 
         message = str(caught.value)
-        assert "argument t is the target 'made.txt'" in message
-        assert "the build description does not exist when the function runs" in message
-        assert "List it in source= instead" in message
-        assert caught.value.location.lineno == call_line
-
-    def test_a_target_nested_in_kwargs_is_found_and_located(self, project_env):
-        _, env = project_env
-        made = env.Command(
-            target="made.txt",
-            source=["src/main.c"],
-            command=["cp", "$SOURCE", "$TARGET"],
-        )
-
-        @env.PyBuilder()
-        def render(targets, sources, inputs):
-            return inputs
-
-        with pytest.raises(PconsError) as caught:
-            render(target="out.txt", inputs={"first": [made]})
-
-        assert "argument inputs['first'][0] is the target 'made.txt'" in str(
-            caught.value
-        )
+        assert "an element of argument s is Subst('$cc.flags')" in message
+        assert "Put it in a list, a tuple, or a dictionary value." in message
 
     def test_the_environment_in_kwargs_says_to_read_it_here(self, project_env):
         _, env = project_env
@@ -1776,7 +1721,7 @@ class TestPyBuilderErrors:
         assert "argument flags holds a pcons FlagList" in message
         assert "unpickling it at build time would import pcons" in message
         assert "list(...)" in message
-        assert "env.subst_list(...)" in message
+        assert 'Subst("$tool.name")' in message
 
     def test_a_pcons_class_passed_by_reference_is_refused(self, project_env):
         """A class, not an instance: reducer_override still sees it."""
@@ -1888,40 +1833,20 @@ class TestPyBuilderErrors:
 
         assert "an element of argument s is the target 'made.txt'" in str(caught.value)
 
-    def test_a_node_in_kwargs_points_at_source(self, project_env):
-        """A node is the fifth build-description type, and reads as a path."""
-        project, env = project_env
-
-        @env.PyBuilder()
-        def render(targets, sources, n):
-            return n
-
-        with pytest.raises(PconsError) as caught:
-            render(target="out.txt", n=project.node("src/main.c"))
-
-        message = str(caught.value)
-        assert "argument n is the build graph's file 'src/main.c'" in message
-        assert "List it in source= instead" in message
-
     def test_a_structure_that_contains_itself_is_refused_not_walked_forever(
         self, project_env
     ):
         """The walk's seen set is what makes this return instead of recursing."""
         _, env = project_env
-        made = env.Command(
-            target="made.txt",
-            source=["src/main.c"],
-            command=["cp", "$SOURCE", "$TARGET"],
-        )
         looping: dict[str, object] = {}
         looping["self"] = looping
-        looping["t"] = made
+        looping["e"] = env
 
         @env.PyBuilder()
         def render(targets, sources, loop):
             return loop
 
-        with pytest.raises(PconsError, match="is the target 'made.txt'"):
+        with pytest.raises(PconsError, match="is the environment itself"):
             render(target="out.txt", loop=looping)
 
     def test_a_renamed_lambda_says_its_source_is_not_a_def(self, project_env):

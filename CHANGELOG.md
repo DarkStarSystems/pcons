@@ -31,6 +31,12 @@ changes break some existing scripts; the details are below.
   returns the pair the edge really has. With one, a call may leave out
   `target=`. (#196)
 
+- A `PyBuilder` call's keyword may be a `Target` or a node, which arrives as
+  its files' paths and reruns the edge when it changes, or a
+  `Subst("$cc.flags")`, which arrives as the tokens it expands to in the
+  edge's environment. Keywords are now read when the build resolves, like
+  the environment; the call still checks them, so errors point at it. (#196)
+
 - `add_subdirectory(..., build_tier="manual")` includes someone else's project
   as a dependency: nothing it declares goes into a wider tier than that, its
   own `Default()` included, so its targets build only when something needs them

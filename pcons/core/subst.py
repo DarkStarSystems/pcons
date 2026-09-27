@@ -177,6 +177,27 @@ class PathToken:
         return self.prefix + str(self.path) + self.suffix
 
 
+@dataclass(frozen=True)
+class Subst:
+    """A template to expand later, where a plain value would be data.
+
+    pcons substitutes command templates. Everything else a build script
+    passes around is data, dollar signs and all, so nothing is rewritten
+    behind the script's back. This marker is how a value asks for the other
+    treatment, in one place a reader can see.
+
+    Whoever holds one decides when it expands. ``env.PyBuilder`` expands one
+    in a keyword argument when the edge resolves, in that edge's environment:
+    ``Subst("$cc.flags")`` arrives as ``["-O2", "-Wall"]``, the flags the
+    build settled on, with any path in them as the function sees it.
+
+    Attributes:
+        template: The text to expand, written as a command token is.
+    """
+
+    template: str
+
+
 @dataclass
 class ProjectPath:
     """Marker for a path relative to project root; the prefix() function

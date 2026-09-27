@@ -113,6 +113,23 @@ def node_paths(nodes: Sequence[Any], root: Any = None) -> list[str]:
     return paths
 
 
+def spell_path_token(token: Any, topdir: str) -> str:
+    """A ``PathToken`` as a command running *topdir* below the root sees it.
+
+    The generator contract: a relative "project" path gets the topdir prefix;
+    absolutes and "build" paths pass through. Posix separators.
+    """
+    path = Path(token.path).as_posix() if token.path else ""
+    if (
+        token.path_type == "project"
+        and path
+        and not Path(path).is_absolute()
+        and topdir != "."
+    ):
+        path = f"{topdir}/{path}"
+    return token.prefix + path + token.suffix
+
+
 @dataclass(frozen=True)
 class CommandFrame:
     """The directory commands run in (the build directory), for spelling
@@ -187,6 +204,10 @@ class CommandFrame:
             return text
         # A root-anchored relative path, as seen from the execution dir.
         return self._anchored(text)
+
+    def spell_token(self, token: Any) -> str:
+        """A ``PathToken`` as the command sees it from this frame's directory."""
+        return spell_path_token(token, self.topdir)
 
     def spell_node(self, n: Any) -> str:
         """A node's path in command spelling.
@@ -303,18 +324,7 @@ def format_node_command(
             # generators expand it, not as its repr.
             return [part for item in token for part in render(item)]
         if isinstance(token, PathToken):
-            # The generator contract: relative "project" paths get the topdir
-            # prefix; absolutes and "build" paths pass through. Posix
-            # separators throughout, as everywhere in this display.
-            path = Path(token.path).as_posix() if token.path else ""
-            if (
-                token.path_type == "project"
-                and path
-                and not Path(path).is_absolute()
-                and topdir != "."
-            ):
-                path = f"{topdir}/{path}"
-            return [token.prefix + path + token.suffix]
+            return [spell_path_token(token, topdir)]
         if isinstance(token, (SourcePath, TargetPath)):
             paths = sources if isinstance(token, SourcePath) else outputs
             if getattr(token, "basename", False):

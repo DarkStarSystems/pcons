@@ -18,6 +18,7 @@ import pytest
 
 from pcons.core.builder import anchor_target_paths
 from pcons.core.collate import write_bytes_if_changed
+from pcons.core.explain import CommandFrame
 from pcons.core.project import Project
 from pcons.tools.pybuilder import (
     MODULE_PREFIX,
@@ -155,7 +156,8 @@ def emit_both(
     decoration would capture, only ``env.PyBuilder()`` itself does that.
     """
     function = validate(fn, project=project)
-    payload = check_arguments(function, kwargs=kwargs, sys_path=sys_path)
+    arguments = check_arguments(function, kwargs=kwargs, sys_path=sys_path)
+    payload = arguments.pickle(env=env, frame=CommandFrame.for_project(project))
     module_rel, module_bytes = emit_module(function, project=project, env=env)
     args_rel = claim_args(project, env, name, target)
     root = project.top_path_resolver.project_root

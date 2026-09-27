@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import pickle
 import re
@@ -10,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +20,7 @@ import pytest
 from pcons.configure.platform import get_platform
 from pcons.core.errors import PconsError
 from pcons.core.project import Project
-from pcons.core.subst import PathToken, SourcePath, TargetPath
+from pcons.core.subst import PathToken, ProjectPath, SourcePath, Subst, TargetPath
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
@@ -1310,4 +1312,207 @@ class TestEmitterRefusals:
         report(source=["a.txt"])
 
         with pytest.raises(PconsError, match="must return the file"):
+            project.resolve()
+
+
+@dataclass
+class Settings:
+    """A user's own object holding a target, which expands where it sits."""
+
+    program: Any
+    level: int
+
+
+class TestArgumentsNameTheBuild:
+    """A keyword may hold a target, a node or a Subst, read at resolve."""
+
+    def test_a_target_arrives_as_its_files(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """Its outputs, as the function opens them from where it runs; it's
+        named lazily here, so only resolve has the path."""
+        program = env.Command(
+            target=lambda: "firmware.elf",
+            source=["a.txt"],
+            command=["link", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources, program):
+            return None
+
+        made = report(target="out.txt", program=program)
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {"program": ["firmware.elf"]}
+
+    def test_a_target_is_a_dependency_that_reruns_the_edge(
+        self, project: Project, env: Any
+    ) -> None:
+        """The function reads it, so a change to it reruns the function."""
+        program = env.Command(
+            target="firmware.elf", source=["a.txt"], command=["link", "$TARGET"]
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources, program):
+            return None
+
+        made = report(target="out.txt", program=program)
+        assert program in made.dependencies
+        project.resolve()
+
+        assert "build/firmware.elf" in implicit_deps(made)
+
+    def test_a_source_node_is_seen_from_the_build_directory(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """The function runs in the build directory, so a source's path climbs
+        out of it, as its own sources' paths do."""
+
+        @env.PyBuilder()
+        def report(targets, sources, data):
+            return None
+
+        made = report(target="out.txt", data=project.node("a.txt"))
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {"data": "../a.txt"}
+        assert "a.txt" in implicit_deps(made)
+
+    def test_a_marker_expands_where_it_sits(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """In a list, a dictionary value, or an object's attribute alike."""
+        program = env.Command(
+            target="firmware.elf", source=["a.txt"], command=["link", "$TARGET"]
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources, nested, settings):
+            return None
+
+        made = report(
+            target="out.txt",
+            nested={"programs": [program, 3]},
+            settings=Settings(program, 2),
+        )
+        project.resolve()
+
+        kwargs = payload_of(made, tmp_path)["kwargs"]
+        assert kwargs["nested"] == {"programs": [["firmware.elf"], 3]}
+        assert kwargs["settings"] == Settings(["firmware.elf"], 2)
+
+    def test_a_subst_is_the_value_resolve_settled(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """Expanded in the edge's environment when it resolves, so a flag set
+        after the call is there, as it is for a compile."""
+        env.add_tool("tool")
+        env.tool.flags = ["-O1"]
+
+        @env.PyBuilder()
+        def report(targets, sources, flags, literal):
+            return None
+
+        made = report(target="out.txt", flags=Subst("$tool.flags"), literal="$x")
+        env.tool.flags = ["-O2", "-Wall"]
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {
+            "flags": ["-O2", "-Wall"],
+            "literal": "$x",
+        }
+
+    def test_a_path_in_a_subst_is_seen_from_the_build_directory(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        env.add_tool("tool")
+        env.tool.iprefix = "-I"
+        env.tool.includes = [ProjectPath("inc")]
+
+        @env.PyBuilder()
+        def report(targets, sources, flags):
+            return None
+
+        made = report(
+            target="out.txt", flags=Subst("${prefix(tool.iprefix, tool.includes)}")
+        )
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {"flags": ["-I../inc"]}
+
+    def test_paths_follow_the_edges_cwd(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """The function runs where cwd= says, so its paths start there."""
+        (tmp_path / "work").mkdir()
+        program = env.Command(
+            target="firmware.elf", source=["a.txt"], command=["link", "$TARGET"]
+        )
+
+        @env.PyBuilder(cwd="work")
+        def report(targets, sources, program, data):
+            return None
+
+        made = report(target="out.txt", program=program, data=project.node("a.txt"))
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {
+            "program": ["../build/firmware.elf"],
+            "data": "../a.txt",
+        }
+
+
+class TestArgumentRefusalsAtTheCall:
+    """What the call can settle, it settles, before a marker has a value."""
+
+    def test_an_unpicklable_argument_beside_a_marker(
+        self, project: Project, env: Any
+    ) -> None:
+        @env.PyBuilder()
+        def report(targets, sources, data, handle):
+            return None
+
+        with pytest.raises(PyBuilderError, match="cannot pickle argument handle"):
+            report(target="out.txt", data=project.node("a.txt"), handle=lambda: 1)
+
+    def test_an_alias_says_to_pass_its_targets(
+        self, project: Project, env: Any
+    ) -> None:
+        @env.PyBuilder()
+        def report(targets, sources, group):
+            return None
+
+        with pytest.raises(PyBuilderError, match="Pass the targets it groups"):
+            report(target="out.txt", group=project.Alias("everything"))
+
+
+class TestArgumentRefusalsAtResolve:
+    """What only resolve can see, blamed on the call that passed it."""
+
+    def test_a_subst_that_does_not_expand(self, project: Project, env: Any) -> None:
+        @env.PyBuilder()
+        def report(targets, sources, flags):
+            return None
+
+        call_line = inspect.currentframe().f_lineno + 1  # ty: ignore[possibly-missing-attribute]
+        report(target="out.txt", flags=Subst("$nosuch.flags"))
+
+        with pytest.raises(PyBuilderError) as caught:
+            project.resolve()
+
+        assert "Subst('$nosuch.flags') does not expand" in str(caught.value)
+        assert caught.value.location.lineno == call_line
+
+    def test_a_target_that_builds_no_file(self, project: Project, env: Any) -> None:
+        headers = project.HeaderOnlyLibrary("headers")
+
+        @env.PyBuilder()
+        def report(targets, sources, lib):
+            return None
+
+        report(target="out.txt", lib=headers)
+
+        with pytest.raises(PyBuilderError, match="builds no file"):
             project.resolve()

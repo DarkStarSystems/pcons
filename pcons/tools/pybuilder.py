@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from pcons.core.environment import Environment
+    from pcons.core.explain import CommandFrame
     from pcons.core.node import Node
     from pcons.core.project import Project
     from pcons.core.target import Target
@@ -414,16 +415,62 @@ def emit_module(
     return module_rel, function.module_text.encode("utf-8")
 
 
+@dataclass(frozen=True)
+class CallArguments:
+    """One call's arguments, checked, and pickled when the edge resolves.
+
+    They're read then, as the environment is, so a keyword may name what
+    only resolve knows: a target's files, or the flags the build settled on.
+
+    Attributes:
+        payload: What the runner unpickles, markers and all.
+        markers: The targets, nodes and ``Subst`` templates in the payload.
+        name: The function's name, for messages.
+        at: The call, blamed by any message.
+    """
+
+    payload: dict[str, Any]
+    markers: tuple[Any, ...]
+    name: str
+    at: SourceLocation
+
+    @property
+    def inputs(self) -> tuple[Any, ...]:
+        """The targets and nodes the arguments name, which the function reads."""
+        from pcons.core.subst import Subst
+
+        return tuple(m for m in self.markers if not isinstance(m, Subst))
+
+    def pickle(self, *, env: Environment, frame: CommandFrame) -> bytes:
+        """The sidecar pickle's bytes, each marker expanded as the edge sees it.
+
+        Args:
+            env: The edge's environment, which expands a ``Subst``.
+            frame: The directory the function runs in, which the paths are
+                relative to.
+
+        Raises:
+            PyBuilderError: If a marker has nothing to expand to.
+        """
+        expand = functools.partial(
+            _expansion, env=env, frame=frame, name=self.name, at=self.at
+        )
+        return _payload_bytes(self.payload, self.name, self.at, expand)
+
+
 def check_arguments(
     function: ValidatedFunction,
     *,
     kwargs: Mapping[str, Any],
     sys_path: list[str] | None,
-) -> bytes:
+) -> CallArguments:
     """Everything about one call's arguments, settled before anything is written.
 
     Nothing reaches the build directory until this has returned, so a refused
-    argument leaves no generated file behind and claims no path.
+    argument leaves no generated file behind and claims no path. That
+    includes pickling them, although the pickle the runner reads is made at
+    resolve: here, with a placeholder where each marker will be, is where a
+    bad argument can still be blamed on the line that passed it.
 
     The arguments belong to the call rather than to the function, so the
     location is taken here rather than at decoration, and every message names
@@ -437,7 +484,7 @@ def check_arguments(
             another interpreter whose own path applies instead.
 
     Returns:
-        The sidecar pickle's bytes, ready for :func:`emit_args`.
+        The checked arguments, ready to pickle once the edge resolves.
 
     Raises:
         PyBuilderError: If the arguments do not fit the function's signature,
@@ -450,17 +497,68 @@ def check_arguments(
     _bind_arguments(function.function, kwargs, at)
     _reject_description_objects(kwargs, name, at)
     _reject_pcons_references(kwargs, name, at)
-    return _payload_bytes(
-        {
-            "version": runner.PROTOCOL_VERSION,
-            "module": f"{MODULE_PREFIX}{function.module_stem}",
-            "function": name,
-            "kwargs": dict(kwargs),
-            "path": sys_path,
-        },
-        name,
-        at,
-    )
+    payload = {
+        "version": runner.PROTOCOL_VERSION,
+        "module": f"{MODULE_PREFIX}{function.module_stem}",
+        "function": name,
+        "kwargs": dict(kwargs),
+        "path": sys_path,
+    }
+    markers: list[Any] = []
+
+    def probe(marker: object) -> str:
+        markers.append(marker)
+        return _placeholder(marker)
+
+    _payload_bytes(payload, name, at, probe)
+    return CallArguments(payload, tuple(markers), name, at)
+
+
+def _expansion(
+    marker: object,
+    *,
+    env: Environment,
+    frame: CommandFrame,
+    name: str,
+    at: SourceLocation,
+) -> str | list[str]:
+    """What one marker becomes in the pickle, once the edge has resolved.
+
+    A node is its path and a target the list of its files' paths, each as
+    the function opens it from the directory it runs in, the way its own
+    sources arrive. A ``Subst`` is its template's tokens in the edge's
+    environment, with any path in them seen from there too.
+
+    Raises:
+        PyBuilderError: If a template does not expand, or a target builds no
+            file to name.
+    """
+    from pcons.core.node import DirNode, FileNode
+    from pcons.core.subst import PathToken, Subst
+    from pcons.core.target import Target as TargetClass
+
+    if isinstance(marker, Subst):
+        try:
+            tokens: list[Any] = env.subst_list(marker.template)
+        except PconsError as exc:
+            raise PyBuilderError(
+                f"PyBuilder {name}(): Subst({marker.template!r}) does not "
+                f"expand in this environment: {exc}",
+                at,
+            ) from exc
+        return [
+            frame.spell_token(t) if isinstance(t, PathToken) else str(t) for t in tokens
+        ]
+    if isinstance(marker, (FileNode, DirNode)):
+        return frame.spell_node(marker)
+    target = cast("TargetClass", marker)
+    if not target.output_nodes:
+        raise PyBuilderError(
+            f"PyBuilder {name}(): an argument is the target {target.name!r}, "
+            f"which builds no file, so there is no path to pass.",
+            at,
+        )
+    return [frame.spell_node(node) for node in target.output_nodes]
 
 
 def emit_args(
@@ -910,27 +1008,22 @@ def _describe_description_object(value: object) -> tuple[str, str] | None:
     """What *value* is and what to do with it, when it cannot cross into a build.
 
     Nothing of the build description exists when the function runs, and most
-    of it pickles without complaining, so a target passed through ``kwargs``
-    would arrive at build time as a stale copy of the graph with no edge
-    behind it. That is worse than an error, so it is one.
+    of it pickles without complaining, so one of these passed through
+    ``kwargs`` would arrive at build time as a stale copy of the graph. That
+    is worse than an error, so it is one.
+
+    A target or a node is not on this list: the call turns those into the
+    paths the function can open, when the build resolves.
     """
     from pcons.core.environment import Environment
-    from pcons.core.node import Node
+    from pcons.core.node import AliasNode
     from pcons.core.project import Project as ProjectClass
-    from pcons.core.target import Target as TargetClass
     from pcons.core.toolconfig import ToolConfig
 
-    if isinstance(value, TargetClass):
+    if isinstance(value, AliasNode):
         return (
-            f"the target {value.name!r}",
-            "List it in source= instead, and the function receives its "
-            "output paths in sources.",
-        )
-    if isinstance(value, Node):
-        return (
-            f"the build graph's file {Path(value.name).as_posix()!r}",
-            "List it in source= instead, and the function receives its path "
-            "in sources.",
+            f"the alias {value.name!r}, which groups targets rather than naming a file",
+            "Pass the targets it groups, and the function receives their files' paths.",
         )
     if isinstance(value, ToolConfig):
         return (
@@ -954,12 +1047,18 @@ def _reject_description_objects(
 ) -> None:
     """Refuse a kwarg holding a piece of the build description.
 
+    Also refuse one holding a target or a ``Subst`` where its expansion, a
+    list, cannot go: a set, or a dictionary key.
+
     Raises:
         PyBuilderError: Naming where it sits and what to write instead.
     """
+    from pcons.core.subst import Subst
+    from pcons.core.target import Target as TargetClass
+
     seen: set[int] = set()
 
-    def walk(value: object, where: str) -> None:
+    def walk(value: object, where: str, hashed: bool = False) -> None:
         if id(value) in seen:
             return
         seen.add(id(value))
@@ -971,22 +1070,82 @@ def _reject_description_objects(
                 f"description does not exist when the function runs. {remedy}",
                 at,
             )
+        if hashed and isinstance(value, (TargetClass, Subst)):
+            what = (
+                f"Subst({value.template!r})"
+                if isinstance(value, Subst)
+                else f"the target {value.name!r}"
+            )
+            raise PyBuilderError(
+                f"PyBuilder {name}(): {where} is {what}, which becomes a "
+                f"list when the build resolves, and a list cannot be a set "
+                f"element or a dictionary key. Put it in a list, a tuple, or "
+                f"a dictionary value.",
+                at,
+            )
         if isinstance(value, Mapping):
             for key, item in value.items():
-                walk(key, f"a key of {where}")
+                walk(key, f"a key of {where}", hashed=True)
                 walk(item, f"{where}[{key!r}]")
         elif isinstance(value, (list, tuple)):
             for index, item in enumerate(value):
-                walk(item, f"{where}[{index}]")
+                walk(item, f"{where}[{index}]", hashed)
         elif isinstance(value, (set, frozenset)):
             for item in value:
-                walk(item, f"an element of {where}")
+                walk(item, f"an element of {where}", hashed=True)
 
     for key, value in kwargs.items():
         walk(value, f"argument {key}")
 
 
-class _PconsReferenceFinder(pickle.Pickler):
+def _expands(value: object) -> bool:
+    """Whether *value* is pickled as what it expands to when the edge resolves.
+
+    A target or a node becomes the paths it names, a ``Subst`` the tokens its
+    template makes in the edge's environment.
+    """
+    from pcons.core.node import DirNode, FileNode
+    from pcons.core.subst import Subst
+    from pcons.core.target import Target as TargetClass
+
+    return isinstance(value, (TargetClass, FileNode, DirNode, Subst))
+
+
+def _placeholder(marker: object) -> str:  # noqa: ARG001
+    """What a marker pickles as before the build has resolved it."""
+    return ""
+
+
+class _ExpandingPickler(pickle.Pickler):
+    """Pickles a call's arguments with each marker replaced by *expand*'s result.
+
+    ``reducer_override`` sees every object pickle does not write itself,
+    wherever it sits, so a marker expands in place in a list, a dictionary
+    value or an object's attribute alike, and nothing here rebuilds a
+    container. An expansion is a string or a list of them, which pickle then
+    writes as usual. The protocol is pinned so an interpreter upgrade doesn't
+    rewrite every sidecar and rebuild the world once for nothing.
+    """
+
+    def __init__(self, file: io.BytesIO, expand: Callable[[Any], Any]) -> None:
+        super().__init__(file, protocol=5)
+        self._expand = expand
+
+    def reducer_override(self, obj: object) -> Any:
+        if _expands(obj):
+            value = self._expand(obj)
+            return type(value), (value,)
+        return NotImplemented
+
+
+def _pickled(value: object, expand: Callable[[Any], Any] = _placeholder) -> bytes:
+    """*value*'s pickle, with each marker in it expanded by *expand*."""
+    buffer = io.BytesIO()
+    _ExpandingPickler(buffer, expand).dump(value)
+    return buffer.getvalue()
+
+
+class _PconsReferenceFinder(_ExpandingPickler):
     """A pickler that records the first pcons object it would write.
 
     ``reducer_override`` runs for every object pickle does not special-case
@@ -997,11 +1156,13 @@ class _PconsReferenceFinder(pickle.Pickler):
     it, which the opcodes alone do not carry.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, file: io.BytesIO) -> None:
+        super().__init__(file, _placeholder)
         self.found: str | None = None
 
     def reducer_override(self, obj: object) -> Any:
+        if _expands(obj):
+            return super().reducer_override(obj)
         if self.found is None:
             by_reference = isinstance(obj, (type, types.FunctionType))
             module = obj.__module__ if by_reference else type(obj).__module__
@@ -1043,23 +1204,25 @@ def _reject_pcons_references(
         raise PyBuilderError(
             f"PyBuilder {name}(): argument {key} holds a pcons {found}, and "
             f"unpickling it at build time would import pcons. Pass "
-            f"list(...) to copy the values out, or env.subst_list(...) to "
-            f"substitute and list them.",
+            f'Subst("$tool.name") for the value the build settles on, or '
+            f"list(...) to copy the values out now.",
             at,
         )
 
 
-def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> bytes:
-    """The sidecar pickle's bytes, at a fixed protocol.
-
-    The protocol is pinned so an interpreter upgrade does not rewrite every
-    sidecar and rebuild the world once for nothing.
+def _payload_bytes(
+    payload: dict[str, Any],
+    name: str,
+    at: SourceLocation,
+    expand: Callable[[Any], Any] = _placeholder,
+) -> bytes:
+    """The sidecar pickle's bytes, each marker expanded by *expand*.
 
     Raises:
         PyBuilderError: Naming the arguments that cannot be pickled.
     """
     try:
-        return pickle.dumps(payload, protocol=5)
+        return _pickled(payload, expand)
     except (pickle.PicklingError, TypeError, AttributeError) as exc:
         bad = _unpicklable(payload["kwargs"])
         label = (
@@ -1081,7 +1244,7 @@ def _unpicklable(kwargs: dict[str, Any]) -> list[str]:
     bad: list[str] = []
     for key, value in kwargs.items():
         try:
-            pickle.dumps(value, protocol=5)
+            _pickled(value)
         except Exception:  # noqa: BLE001
             bad.append(key)
     return bad
@@ -1406,7 +1569,7 @@ class PyBuilder:
             )
         if emitter is not None:
             check_emitter(emitter, function=function, kwargs=kwargs, at=at)
-        payload = check_arguments(
+        arguments = check_arguments(
             self._function, kwargs=kwargs, sys_path=self._sys_path
         )
         module_rel, module_bytes = emit_module(
@@ -1429,6 +1592,7 @@ class PyBuilder:
             files = [(root / runner_rel, _runner_bytes())]
             if module_bytes is not None:
                 files.append((root / module_rel, module_bytes))
+            payload = arguments.pickle(env=env, frame=_frame(project, made))
             files.append((root / args_rel(), payload))
             return files
 
@@ -1476,10 +1640,23 @@ class PyBuilder:
             # the ones it keeps are sources too, and rerun the edge as such.
             called = [s for s in _as_list(source) if isinstance(s, TargetClass)]
             made.depends(*called, on_change=False)
+        # The function reads what an argument names, so the edge reruns
+        # when it changes, as env.Command(tool=) does for its program.
+        made.depends(*arguments.inputs, on_change=True)
         made.depends(*self._depends)
         self._made.append(made)
         made._builder_data["writes"] = writes
         return made
+
+
+def _frame(project: Project, made: Target) -> CommandFrame:
+    """The directory an edge's command runs in, to render paths as it sees them."""
+    from pcons.core.explain import CommandFrame
+
+    frame = CommandFrame.for_project(project.top)
+    info = made.output_nodes[0]._build_info or {}
+    cwd = info.get("cwd")
+    return frame if cwd is None else frame.for_cwd(cwd)
 
 
 def py_builder(
