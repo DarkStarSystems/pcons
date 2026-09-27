@@ -145,6 +145,8 @@ def test_a_snippet_builds(body: str, tmp_path: Path) -> None:
         (tmp_path / "src" / f"{letter}.txt").write_text(" ".join(["w"] * words) + "\n")
     if "wordcount.py" in body:
         (tmp_path / "wordcount.py").write_text("def count(text):\n    return 0\n")
+    if "main.c" in body:
+        (tmp_path / "src" / "main.c").write_text("int main(void) { return 0; }\n")
     if "manifest.txt" in body:
         (tmp_path / "manifest.txt").write_text("src/a.txt\nsrc/b.txt\n")
     (tmp_path / "pcons-build.py").write_text(preamble(body) + "\n" + body)

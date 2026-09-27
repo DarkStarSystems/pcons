@@ -29,7 +29,8 @@ changes break some existing scripts; the details are below.
   resolve, the way `project.Program` works out its file name:
   `emitter(targets, sources, env, **kwargs)` gets what the call passed and
   returns the pair the edge really has. With one, a call may leave out
-  `target=`. (#196)
+  `target=`. `examples/92_python_builder_emitter` names a hex dump after the
+  program it reads. (#196)
 
 - A `PyBuilder` call's keyword may be a `Target` or a node, which arrives as
   its files' paths and reruns the edge when it changes, or a

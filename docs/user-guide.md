@@ -2472,6 +2472,19 @@ A target with several outputs hands over all of them — a `.c`/`.h` pair, say. 
 
 Pcons warns when a command token names a path under the build directory (`-Wl,build/libfoo.dylib`): the command runs *in* the build directory, so that path resolves to `build/build/...`. Pass a `Path` built on `env.build_dir` instead. Set `PCONS_WARN_BUILD_DIR_PATHS=0` on the occasion the path really is right as written.
 
+**A file named when the build resolves.** `target=` and `source=` also take a callable, and so does a token of a list-form command. pcons calls it when the edge resolves, after the edge's dependencies have, so it can read what they settled. That's how a command names its output after a program, whose file name is the toolchain's business: `firmware` here, `firmware.exe` on Windows.
+
+```python
+firmware = project.Program("firmware", env, sources=["src/main.c"])
+env.Command(
+    target=lambda: f"{firmware.output_nodes[0].path.stem}.hex",
+    source=[firmware],
+    command=["objcopy", "-O", "ihex", "$SOURCE", "$TARGET"],
+)
+```
+
+A callable returns what the script could have written in its place: files for `target=` and `source=`, and text, a `Path` or a node for a token, where a node becomes a dependency as it does above. What it reads must have resolved by then: a target in `source=` or `depends=` has, and so has one the `source=` callable returns. The edge needs no name; it's labelled by its output once it has one. `env.PyBuilder()`'s `emitter=` is the same idea, packaged with a builder.
+
 **Don't quote tokens yourself.** pcons keeps a command as a list of tokens and quotes each one for the shell it is writing for, so `command=f'"{tool}" $SOURCE'` reaches the program with the quotes still attached and it reports that no such file exists. Write it bare; a token that must contain a space goes in the list form, which isn't split on whitespace. pcons raises on a token that *starts* with a quote — a trailing one is ordinary, since `-DNAME="value"` wants its quotes delivered. When the quotes really are meant, say so with `Verbatim`:
 
 ```python
@@ -2768,7 +2781,32 @@ def bundle(targets, sources):
 bundle(target="bundle.txt", source=["manifest.txt"])
 ```
 
-**Discovered outputs.** `target=` is fixed at the call, so one call cannot declare an output whose name or count only another edge's result decides. [Staged Generation](#staged-generation-targets-discovered-mid-build) still gets there, no new mechanism needed: a first call whose only declared target is a small manifest, and a second call, made from inside a `project.when_generated()` block once ninja has built that manifest and re-run pcons, whose targets come from what it says. `examples/57_staged_generation` is the worked example. It uses `env.Command()` for both calls, and a `PyBuilder()` call plays the same role there.
+**A builder that names its own targets: `emitter=`.** `project.Program` works out a program's file name from what it was given; a `PyBuilder` does the same with an emitter. pcons calls it when the edge resolves, after the edge's dependencies have, so it may read what they settled:
+
+```python
+firmware = project.Program("firmware", env, sources=[src / "main.c"])
+
+
+def named_after_the_program(targets, sources, env, **kwargs):
+    program = sources[0].output_nodes[0].path
+    return [*targets, f"{program.stem}.hex"], sources
+
+
+@env.PyBuilder(emitter=named_after_the_program)
+def to_hex(targets, sources):
+    from pathlib import Path
+
+    Path(targets[0]).write_bytes(Path(sources[0]).read_bytes()[:16].hex().encode())
+
+
+dump = to_hex(source=[firmware])
+```
+
+It's called as `emitter(targets, sources, env, **kwargs)` and returns the pair `(targets, sources)` the edge really has. The lists are what the call passed, either possibly empty, so an emitter may add to them or replace them; the targets `source=` holds are still `Target`s, resolved by now. The keywords are the call's own, the ones the function gets, so an emitter that names a file after one declares that parameter and takes `**kwargs` for the rest. With an emitter the call may leave out `target=`, and needs no `name=`: the edge is labelled by its output, and its argument pickle is named after it too, `build/pybuilder/firmware.hex.args.pkl`. `examples/92_python_builder_emitter` is this, built end to end.
+
+The emitter is an ordinary function of the build script, unlike the decorated one: it runs in this process while pcons resolves, so it may use anything around it. A target it reads has to be one the call passed in `source=`, or one the edge otherwise depends on; nothing else is resolved in time.
+
+**Discovered outputs.** An emitter decides names from what the build description knows at resolve. An output whose name or count only a *built* file decides is out of its reach. [Staged Generation](#staged-generation-targets-discovered-mid-build) still gets there, no new mechanism needed: a first call whose only declared target is a small manifest, and a second call, made from inside a `project.when_generated()` block once ninja has built that manifest and re-run pcons, whose targets come from what it says. `examples/57_staged_generation` is the worked example. It uses `env.Command()` for both calls, and a `PyBuilder()` call plays the same role there.
 
 **Edge names and labels.** `name=` on the call is optional and does what it does on `env.Command()`: it makes the edge a named target, which `get_target()`, `Default()` and `pcons build` all answer to. Without one pcons labels the edge by its first target's path, so reports read the way the build file does, and two edges may wear one label without colliding:
 

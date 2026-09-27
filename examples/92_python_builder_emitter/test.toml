@@ -1,0 +1,30 @@
+# Test configuration for the PyBuilder emitter example
+
+[test]
+description = "A PyBuilder emitter names the edge's output after a program's real file name, which only resolve knows"
+
+expected_outputs = [
+    "build/firmware",
+    "build/firmware.hex",
+    "build/pybuilder/to_hex.py",
+    "build/pybuilder/firmware.hex.args.pkl",
+]
+
+[verify]
+commands = [
+    { run = "uv run python -c \"print(open('build/firmware.hex').readline())\"", expect_stdout = "; pcons hex dump" },
+]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "The program's source changed: it relinks, and the dump follows"
+touch = "src/main.c"
+expect_rebuild = ["firmware", "firmware.hex"]
+
+[skip]
+# The xcode generator has no build phase for an edge that reads a program it
+# builds, so it never writes the dump. Same reason as 91_python_builder_pipeline.
+generators = ["xcode"]
