@@ -358,3 +358,49 @@ class TestCanonicalize:
         first = resolver.canonicalize(path)
         second = resolver.canonicalize(first)
         assert first == second
+
+
+class TestMakeCommandRelative:
+    """A path as the running command sees it: from the build directory, or
+    from its cwd=, sources included."""
+
+    def resolver(self, tmp_path: Path) -> PathResolver:
+        return PathResolver(tmp_path, Path("build"))
+
+    def test_a_built_file_is_build_relative(self, tmp_path: Path) -> None:
+        resolver = self.resolver(tmp_path)
+        assert resolver.make_command_relative("build/obj/a.o", built=True) == "obj/a.o"
+
+    def test_a_bare_built_name_sits_in_the_build_dir(self, tmp_path: Path) -> None:
+        resolver = self.resolver(tmp_path)
+        assert resolver.make_command_relative("out.txt", built=True) == "out.txt"
+
+    def test_a_source_climbs_out_of_the_build_dir(self, tmp_path: Path) -> None:
+        resolver = self.resolver(tmp_path)
+        assert resolver.make_command_relative("src/a.c", built=False) == "../src/a.c"
+
+    def test_the_project_root_is_the_climb_alone(self, tmp_path: Path) -> None:
+        resolver = self.resolver(tmp_path)
+        assert resolver.make_command_relative(tmp_path, built=False) == ".."
+
+    def test_an_absolute_path_in_the_tree(self, tmp_path: Path) -> None:
+        resolver = self.resolver(tmp_path)
+        assert (
+            resolver.make_command_relative(tmp_path / "src" / "a.c", built=False)
+            == "../src/a.c"
+        )
+
+    def test_a_path_outside_the_tree_stays_absolute(self, tmp_path: Path) -> None:
+        resolver = self.resolver(tmp_path / "proj")
+        outside = (tmp_path / "elsewhere" / "a.c").resolve()
+        assert (
+            resolver.make_command_relative(outside, built=False) == outside.as_posix()
+        )
+
+    def test_a_cwd_moves_every_path(self, tmp_path: Path) -> None:
+        resolver = self.resolver(tmp_path)
+        work = tmp_path.resolve() / "work"
+        seen = resolver.make_command_relative
+        assert seen("build/out.txt", built=True, cwd=work) == "../build/out.txt"
+        assert seen("src/a.c", built=False, cwd=work) == "../src/a.c"
+        assert seen("work/in.txt", built=False, cwd=work) == "in.txt"

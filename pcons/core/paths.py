@@ -168,6 +168,44 @@ class PathResolver:
             else (),
         )
 
+    def make_command_relative(
+        self, path: Path | str, *, built: bool, cwd: Path | None = None
+    ) -> str:
+        """Path as a running command sees it, from the directory it runs in.
+
+        That's the build directory, or *cwd* for an edge that runs somewhere
+        else. Unlike :meth:`make_execution_relative`, a source path is made
+        relative to that directory too (``../src/a.c`` where a generator
+        writes ``$topdir/src/a.c``), and the project root is ``..`` alone.
+        This is for anything that shows or hands over a path the command
+        opens: ``pcons explain``, and ``env.PyBuilder``'s arguments.
+
+        Args:
+            path: A node path, relative or absolute.
+            built: A relative *path* is a file the build writes, anchored in
+                the build directory, rather than a source, anchored at the
+                project root.
+            cwd: The absolute directory the command runs in, when it isn't
+                the build directory.
+        """
+        run_dir = self._resolved_build_dir if cwd is None else Path(cwd)
+        prefix = (
+            self.build_dir.parts
+            if cwd is None and not self.build_dir.is_absolute()
+            else ()
+        )
+        text = execution_relative(path, execution_dir=run_dir, build_dir_parts=prefix)
+        p = Path(path)
+        if text != p.as_posix() or (built and prefix and not p.is_absolute()):
+            return text  # Under the run directory, or a file the build writes.
+        absolute = p if p.is_absolute() else self.project_root / p
+        if not absolute.is_relative_to(self.project_root):
+            return text
+        try:
+            return os.path.relpath(absolute, run_dir).replace(os.sep, "/")
+        except ValueError:  # Windows: different drives
+            return absolute.as_posix()
+
     def make_project_relative(self, path: Path) -> str:
         """Make a path relative to the project root, as a forward-slash string."""
         if path.is_absolute():

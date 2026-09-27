@@ -247,7 +247,6 @@ def render_explanation(
             the sections would otherwise be told apart only by build dir.
     """
     from pcons.core.explain import (
-        CommandFrame,
         Explanation,
         format_node_command,
         node_paths,
@@ -257,7 +256,7 @@ def render_explanation(
 
     style = _Style(color)
     root = project.root_dir.absolute()
-    frame = CommandFrame.for_project(project)
+    resolver = project.top_path_resolver
 
     def fallback_command(build_info: Mapping[str, object]) -> list | None:
         """The standalone install/archive template for an env-less node.
@@ -283,7 +282,7 @@ def render_explanation(
 
     def node_command(node: FileNode) -> str | None:
         build_info = node._build_info or {}
-        return format_node_command(node, frame, fallback_command(build_info))
+        return format_node_command(node, resolver, fallback_command(build_info))
 
     # The project's root, in full: -C means the cwd is not where the user is
     # sitting, so a relative spelling would usually just say ".".

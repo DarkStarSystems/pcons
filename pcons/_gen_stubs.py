@@ -251,11 +251,12 @@ type checkers see the declarations, runtime never executes them.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pcons.core.environment import CommandSources, CommandTargets
     from pcons.core.environment import Environment as Env
     from pcons.core.node import FileNode, Node
     from pcons.core.target import Target

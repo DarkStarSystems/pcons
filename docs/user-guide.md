@@ -2472,6 +2472,19 @@ A target with several outputs hands over all of them — a `.c`/`.h` pair, say. 
 
 Pcons warns when a command token names a path under the build directory (`-Wl,build/libfoo.dylib`): the command runs *in* the build directory, so that path resolves to `build/build/...`. Pass a `Path` built on `env.build_dir` instead. Set `PCONS_WARN_BUILD_DIR_PATHS=0` on the occasion the path really is right as written.
 
+**A file named when the build resolves.** `target=` and `source=` also take a callable, and so does a token of a list-form command. pcons calls it when the edge resolves, after the edge's dependencies have, so it can read what they settled. That's how a command names its output after a program, whose file name is the toolchain's business: `firmware` here, `firmware.exe` on Windows.
+
+```python
+firmware = project.Program("firmware", env, sources=["src/main.c"])
+env.Command(
+    target=lambda: f"{firmware.output_nodes[0].path.stem}.hex",
+    source=[firmware],
+    command=["objcopy", "-O", "ihex", "$SOURCE", "$TARGET"],
+)
+```
+
+A callable returns what the script could have written in its place: files for `target=` and `source=`, and text, a `Path` or a node for a token, where a node becomes a dependency as it does above. What it reads must have resolved by then: a target in `source=` or `depends=` has, and so has one the `source=` callable returns. The edge needs no name; it's labelled by its output once it has one. `env.PyBuilder()`'s `emitter=` is the same idea, packaged with a builder.
+
 **Don't quote tokens yourself.** pcons keeps a command as a list of tokens and quotes each one for the shell it is writing for, so `command=f'"{tool}" $SOURCE'` reaches the program with the quotes still attached and it reports that no such file exists. Write it bare; a token that must contain a space goes in the list form, which isn't split on whitespace. pcons raises on a token that *starts* with a quote — a trailing one is ordinary, since `-DNAME="value"` wants its quotes delivered. When the quotes really are meant, say so with `Verbatim`:
 
 ```python
@@ -2735,7 +2748,12 @@ The function is called as `fn(targets, sources, **kwargs)`. Both path lists are 
 
 **What the function sees.** `targets`, `sources`, and the call's own keywords, and nothing else. No context object, no implicit handle on the build script, the environment or the project: the closure ban and the script-global ban below are exactly what keeps a function from reaching past its own parameters. A file the function opens without naming it in `source=` is not a declared input of the edge.
 
-**When the keywords are fixed.** At the call, while the build is described, not at resolve and not at build time. So the call can pass anything the script already has by then: a plain value, `env.cc.cmd`, or an already-expanded `env.subst_list("$cc.flags")`. It cannot pass a `Target` or a `Node`: both are refused as keywords, for the reason given below. Put it in `source=` instead, and the function receives its output paths in `sources`. A pcons value is refused too, because unpickling it at build time would import pcons: `list(env.cc.flags)` or `env.subst_list("$cc.flags")` works, `env.cc.flags` itself does not.
+**When the keywords are read.** When the build resolves, as the environment is: not at the call, and not at build time. The call still checks them at once, pickling them with a placeholder for anything resolve fills in, so a bad one is blamed on the line that passed it. Most keywords are plain data, pickled as written, dollar signs and all. Two kinds of value aren't:
+
+- A `Target` arrives as the list of paths of the files it builds, and a node, `project.node("data.csv")`, as its path. Both open as written from where the function runs, as `sources` do. The edge depends on them, so a change to one reruns the function.
+- A `Subst("$cc.flags")` arrives as `env.subst_list()` expands it in the edge's environment: `["-O2", "-Wall"]`, the flags the build settled on rather than the ones in force at the call.
+
+Either one expands where it sits: in a list, a dictionary value, or an attribute of your own object. A set element or a dictionary key can't hold a list, so a `Target` or `Subst` there is refused. So is anything else of pcons's, because unpickling it at build time would import pcons: `Subst("$cc.flags")` works, `env.cc.flags` itself doesn't. The environment, the project and an alias are refused too, for the reason given below.
 
 **The decoration says how the function runs, the call says what to build.** No option sits at both levels, except `depends=`: on the decoration it is a dependency of every edge the builder makes, on the call it is a dependency of that edge alone. Two edges that must otherwise run differently are two decorations.
 
@@ -2743,11 +2761,52 @@ The function is called as `fn(targets, sources, **kwargs)`. Both path lists are 
 |---|---|
 | `python=`, `worker=`, `cwd=`, `launcher=` | `target=`, `source=`, `name=` |
 | `env_vars=`, `restat=`, `write_if_different=` | the function's own arguments, as plain keywords |
-| `depends=` | `depends=` |
+| `depends=`, `emitter=`, `discovers=` | `depends=` |
 
-`depfile=` and `deps_style=` are not supported. `write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
+`write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
 
-**Discovered outputs.** `target=` is fixed at the call, so one call cannot declare an output whose name or count only another edge's result decides. [Staged Generation](#staged-generation-targets-discovered-mid-build) still gets there, no new mechanism needed: a first call whose only declared target is a small manifest, and a second call, made from inside a `project.when_generated()` block once ninja has built that manifest and re-run pcons, whose targets come from what it says. `examples/57_staged_generation` is the worked example. It uses `env.Command()` for both calls, and a `PyBuilder()` call plays the same role there.
+**Discovered inputs.** A function may read files its call never named: the entries of a manifest, a template's includes. Declare the builder `discovers=True` and the function returns `{"inputs": [...]}`, the files it read, and the build tool reruns the edge when one of them changes. A relative path is read from the build directory, where the function runs, so a path built from one of its `sources` is right as it is. pcons writes the depfile: that's why `depfile=` and `deps_style=` aren't options here. The edge may have one target, which the depfile is named after, and `cwd=` can't be combined with it.
+
+```python
+@env.PyBuilder(discovers=True)
+def bundle(targets, sources):
+    from pathlib import Path
+
+    manifest = Path(sources[0])
+    listed = [manifest.parent / name for name in manifest.read_text().split()]
+    Path(targets[0]).write_text("".join(path.read_text() for path in listed))
+    return {"inputs": listed}
+
+
+bundle(target="bundle.txt", source=["manifest.txt"])
+```
+
+**A builder that names its own targets: `emitter=`.** `project.Program` works out a program's file name from what it was given; a `PyBuilder` does the same with an emitter. pcons calls it when the edge resolves, after the edge's dependencies have, so it may read what they settled:
+
+```python
+firmware = project.Program("firmware", env, sources=[src / "main.c"])
+
+
+def named_after_the_program(targets, sources, env, **kwargs):
+    program = sources[0].output_nodes[0].path
+    return [*targets, f"{program.stem}.hex"], sources
+
+
+@env.PyBuilder(emitter=named_after_the_program)
+def to_hex(targets, sources):
+    from pathlib import Path
+
+    Path(targets[0]).write_bytes(Path(sources[0]).read_bytes()[:16].hex().encode())
+
+
+dump = to_hex(source=[firmware])
+```
+
+It's called as `emitter(targets, sources, env, **kwargs)` and returns the pair `(targets, sources)` the edge really has. The lists are what the call passed, either possibly empty, so an emitter may add to them or replace them; the targets `source=` holds are still `Target`s, resolved by now. The keywords are the call's own, the ones the function gets, so an emitter that names a file after one declares that parameter and takes `**kwargs` for the rest. With an emitter the call may leave out `target=`, and needs no `name=`: the edge is labelled by its output, and its argument pickle is named after it too, `build/pybuilder/firmware.hex.args.pkl`. `examples/92_python_builder_emitter` is this, built end to end.
+
+The emitter is an ordinary function of the build script, unlike the decorated one: it runs in this process while pcons resolves, so it may use anything around it. A target it reads has to be one the call passed in `source=`, or one the edge otherwise depends on; nothing else is resolved in time.
+
+**Discovered outputs.** An emitter decides names from what the build description knows at resolve. An output whose name or count only a *built* file decides is out of its reach. [Staged Generation](#staged-generation-targets-discovered-mid-build) still gets there, no new mechanism needed: a first call whose only declared target is a small manifest, and a second call, made from inside a `project.when_generated()` block once ninja has built that manifest and re-run pcons, whose targets come from what it says. `examples/57_staged_generation` is the worked example. It uses `env.Command()` for both calls, and a `PyBuilder()` call plays the same role there.
 
 **Edge names and labels.** `name=` on the call is optional and does what it does on `env.Command()`: it makes the edge a named target, which `get_target()`, `Default()` and `pcons build` all answer to. Without one pcons labels the edge by its first target's path, so reports read the way the build file does, and two edges may wear one label without colliding:
 
@@ -2763,7 +2822,7 @@ A label is only there to be read (see [Named and anonymous targets](#named-and-a
 **Three rules follow from the function travelling alone.**
 
 1. *It imports what it needs inside its own body.* The generated module holds the function and nothing else, so a name this script imported does not exist there. pcons refuses a body that reads one, naming it, rather than letting the build fail later with `NameError`. The function runs with the `sys.path` its script had when it was decorated, so it imports what the script itself could, a module beside the script included. `python=` names another interpreter instead, and the function then runs with that interpreter's own path. Editing such a module does not re-run the edge on its own: it is a dependency of the function, not of one call, so it belongs on the decoration or on `.depends()`, both below, rather than repeated in every call's own `depends=`.
-2. *It reads nothing from around it.* A function that closes over a variable of an enclosing function is refused for the same reason. Take the value as a parameter and pass it at the call, where it travels in the pickle, so every value there must be picklable. Some that pickle are refused anyway: a target, a node, an environment, a project and a tool namespace all belong to the build description, which does not exist when the function runs. A target goes in `source=`, and the function receives its output paths in `sources`; from an environment, read the values you want here and pass those, `env.cc.flags` rather than `env.cc`.
+2. *It reads nothing from around it.* A function that closes over a variable of an enclosing function is refused for the same reason. Take the value as a parameter and pass it at the call, where it travels in the pickle, so every value there must be picklable. Some that pickle are refused anyway: an environment, a project, an alias and a tool namespace all belong to the build description, which does not exist when the function runs. From an environment, read the values you want here and pass those, `Subst("$cc.flags")` rather than `env.cc`. A target or a node is fine: it arrives as its files' paths, as described above.
 3. *The call returns the `Target`.* `first` above is a target, like everything else a pcons builder returns. It goes to `project.Default()`, to `project.Install()`, or into another target's `source=`.
 
 A lambda, a `functools.partial`, a method and a builtin are all refused: only a plain `def` written out in a build script has source to extract. So is a signature the build-time call could not satisfy, such as one whose first two parameters are keyword-only.

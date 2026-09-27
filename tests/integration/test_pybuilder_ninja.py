@@ -483,3 +483,63 @@ class TestTheLauncherEntry:
 
         assert "probe" not in rebuild
         assert _probe_sys_path(build_dir) == first_path
+
+
+class TestDiscoveredInputs:
+    """A function that reads files its call never named, and says so."""
+
+    def project(self, tmp_path: Path) -> Project:
+        (tmp_path / "manifest.txt").write_text("a.txt\nb c.txt\n", encoding="utf-8")
+        (tmp_path / "a.txt").write_text("first\n", encoding="utf-8")
+        (tmp_path / "b c.txt").write_text("second\n", encoding="utf-8")
+        project = Project("e2e", root_dir=tmp_path)
+        env: Any = project.Environment()
+
+        @env.PyBuilder(discovers=True)
+        def bundle(targets, sources):
+            from pathlib import Path
+
+            manifest = Path(sources[0])
+            names = manifest.read_text(encoding="utf-8").splitlines()
+            listed = [manifest.parent / name for name in names]
+            Path(targets[0]).write_text(
+                "".join(path.read_text(encoding="utf-8") for path in listed),
+                encoding="utf-8",
+            )
+            return {"inputs": listed}
+
+        bundle(target="bundle.txt", source=["manifest.txt"])
+        generate(project)
+        return project
+
+    @needs_ninja
+    def test_a_listed_file_reruns_the_edge(self, tmp_path: Path) -> None:
+        self.project(tmp_path)
+        build(tmp_path)
+        bundle = tmp_path / "build" / "bundle.txt"
+
+        assert bundle.read_text(encoding="utf-8") == "first\nsecond\n"
+        assert "no work to do" in build(tmp_path)
+
+        (tmp_path / "b c.txt").write_text("changed\n", encoding="utf-8")
+        rerun = build(tmp_path)
+
+        assert "bundle.txt" in rerun
+        assert bundle.read_text(encoding="utf-8") == "first\nchanged\n"
+        assert "no work to do" in build(tmp_path)
+
+    @needs_ninja
+    def test_a_file_the_manifest_drops_stops_mattering(self, tmp_path: Path) -> None:
+        """The depfile is rewritten each run, so the dependencies follow it."""
+        self.project(tmp_path)
+        build(tmp_path)
+
+        (tmp_path / "manifest.txt").write_text("a.txt\n", encoding="utf-8")
+        build(tmp_path)
+
+        (tmp_path / "b c.txt").write_text("ignored\n", encoding="utf-8")
+
+        assert "no work to do" in build(tmp_path)
+        assert (tmp_path / "build" / "bundle.txt").read_text(
+            encoding="utf-8"
+        ) == "first\n"

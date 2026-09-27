@@ -17,6 +17,21 @@ changes break some existing scripts; the details are below.
 
 ### Added
 
+- **`env.PyBuilder()`** turns a Python function in the build script into a
+  builder: each call makes one build edge that runs the function at build
+  time as `fn(targets, sources, **kwargs)`. A keyword may be a `Target` or a
+  file node, which the function gets as paths (and the edge reruns when it
+  changes), or `Subst("$cc.flags")`, the flags the build settled on.
+  `emitter=` works out an edge's targets at resolve, so a call can leave out
+  `target=`. With `discovers=True` the function returns the files it read,
+  `{"inputs": [...]}`, and the edge reruns when one changes. See "Python
+  Functions as Build Steps" in the user guide, and examples 90 to 92.
+  (#191, #196)
+
+- `env.Command()`'s `target=`, `source=` and list-form command tokens may be
+  callables, called at resolve, so a command can name its output after
+  another target's real file name. (#196)
+
 - `add_subdirectory(..., build_tier="manual")` includes someone else's project
   as a dependency: nothing it declares goes into a wider tier than that, its
   own `Default()` included, so its targets build only when something needs them
@@ -46,7 +61,7 @@ changes break some existing scripts; the details are below.
   products; it no longer demotes everything else in the tree. A top-level
   `Default()` still governs the whole project.
 
-- `name=` is optional and keyword-only on `Command`, `PyBuilder` calls,
+- `name=` is optional and keyword-only on `Command`,
   `Install`, `InstallAs`, `InstallDir`, `OverlayDir`, `Tarfile`, `Zipfile`,
   `android_apk()`, `sign_apk()` and `create_universal_binary()`. A name is
   used as the target's identity, like `Program`'s: `get_target()`,
@@ -238,6 +253,10 @@ nested in the test suite, which is how the fixes below were found.
   `InstallDir` tells its copy command the directory the stamp names.
   The three builders take an optional `env=` for a destination that has to
   follow an environment's `build_prefix` as well.
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20): `env.PyBuilder` (#191), and raised #170
 
 ## [0.29.1] - 2026-09-14
 

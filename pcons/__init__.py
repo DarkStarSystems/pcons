@@ -58,7 +58,7 @@ from pcons.core.preset import (  # noqa: E402
 )
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.core.scan import ArgsFormat, EdgeArgsSpec, Scanner  # noqa: E402
-from pcons.core.subst import NodeVar, PathToken, Verbatim  # noqa: E402
+from pcons.core.subst import NodeVar, PathToken, Subst, Verbatim  # noqa: E402
 from pcons.core.target import Target  # noqa: E402
 from pcons.core.test import set_test_properties, set_test_property  # noqa: E402
 from pcons.core.vars import get_var, get_variant  # noqa: E402
@@ -182,6 +182,7 @@ __all__ = [
     "PathToken",
     "NodeVar",
     "Verbatim",
+    "Subst",
     "Platform",
     "get_platform",
     "ImportedTarget",

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import pickle
 import re
@@ -10,19 +11,21 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from pcons.configure.platform import get_platform
+from pcons.core.errors import PconsError
 from pcons.core.project import Project
-from pcons.core.subst import PathToken, SourcePath, TargetPath
+from pcons.core.subst import PathToken, ProjectPath, SourcePath, Subst, TargetPath
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
-from pcons.tools import pybuilder as pybuilder_module
 from pcons.tools.pybuilder import PyBuilder, PyBuilderError
+from pcons.tools.pybuilder import arguments as pybuilder_arguments
 from pcons.workers.python import PythonWorker
 from pcons.workers.python_server import script_argv
 from tests.support import REPO_ROOT, subprocess_env
@@ -946,7 +949,7 @@ class TestSysPath:
         launcher = tmp_path / "launcher"
         monkeypatch.setattr(sys, "path", [str(launcher), str(tmp_path)])
         monkeypatch.setattr(
-            pybuilder_module, "launcher_entry", lambda: launcher.as_posix()
+            pybuilder_arguments, "launcher_entry", lambda: launcher.as_posix()
         )
 
         @env.PyBuilder()
@@ -968,7 +971,7 @@ class TestSysPath:
         launcher = tmp_path / "launcher"
         monkeypatch.setattr(sys, "path", [str(launcher), str(launcher)])
         monkeypatch.setattr(
-            pybuilder_module, "launcher_entry", lambda: launcher.as_posix()
+            pybuilder_arguments, "launcher_entry", lambda: launcher.as_posix()
         )
 
         @env.PyBuilder()
@@ -996,7 +999,9 @@ class TestSysPath:
         """
         launcher = tmp_path / "launcher"
         monkeypatch.setattr(sys, "path", [launcher.as_posix(), str(tmp_path)])
-        monkeypatch.setattr(pybuilder_module, "launcher_entry", lambda: str(launcher))
+        monkeypatch.setattr(
+            pybuilder_arguments, "launcher_entry", lambda: str(launcher)
+        )
 
         @env.PyBuilder()
         def report(targets, sources):
@@ -1020,7 +1025,7 @@ class TestSysPath:
         launcher = tmp_path / "launcher"
         monkeypatch.setattr(sys, "path", [str(launcher), str(tmp_path)])
         monkeypatch.setattr(
-            pybuilder_module, "launcher_entry", lambda: str(launcher).upper()
+            pybuilder_arguments, "launcher_entry", lambda: str(launcher).upper()
         )
 
         @env.PyBuilder()
@@ -1041,7 +1046,7 @@ class TestSysPath:
     ) -> None:
         marker = tmp_path / "marker"
         monkeypatch.setattr(sys, "path", [str(marker)])
-        monkeypatch.setattr(pybuilder_module, "launcher_entry", lambda: None)
+        monkeypatch.setattr(pybuilder_arguments, "launcher_entry", lambda: None)
 
         @env.PyBuilder()
         def report(targets, sources):
@@ -1051,3 +1056,528 @@ class TestSysPath:
         project.resolve()
 
         assert payload_of(made, tmp_path)["path"] == [marker.as_posix()]
+
+
+class TestEmitter:
+    """A builder that works out its own targets when the build resolves."""
+
+    def test_the_emitter_names_the_target(self, project: Project, env: Any) -> None:
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, repo, **kw: (
+                [f"{repo}.stamp"],
+                sources,
+            )
+        )
+        def fetch(targets, sources, repo, url):
+            return None
+
+        made = fetch(repo="gcc", url="https://example.invalid/gcc.git")
+        project.resolve()
+
+        assert made.output_nodes[0].path.as_posix() == "build/gcc.stamp"
+
+    def test_the_emitter_runs_at_resolve(self, project: Project, env: Any) -> None:
+        """Not at the call: what it reads may not have been built yet."""
+        calls: list[int] = []
+
+        def emitter(targets, sources, env, **kwargs):
+            calls.append(1)
+            return [*targets, "extra.txt"], sources
+
+        @env.PyBuilder(emitter=emitter)
+        def report(targets, sources):
+            return None
+
+        report(target="out.txt", source=["a.txt"])
+        assert calls == []
+
+        project.resolve()
+        assert calls == [1]
+
+    def test_the_emitter_adds_a_target(self, project: Project, env: Any) -> None:
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, **kw: (
+                [*targets, "out.log"],
+                sources,
+            )
+        )
+        def report(targets, sources):
+            return None
+
+        made = report(target="out.txt", source=["a.txt"])
+        project.resolve()
+
+        assert [n.path.as_posix() for n in made.output_nodes] == [
+            "build/out.txt",
+            "build/out.log",
+        ]
+        assert tokens(made)[4:6] == ["--n-targets", "2"]
+
+    def test_the_emitter_adds_a_source(self, project: Project, env: Any) -> None:
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, **kw: (targets, [*sources, "b.txt"])
+        )
+        def report(targets, sources):
+            return None
+
+        made = report(target="out.txt", source=["a.txt"])
+        project.resolve()
+
+        assert source_paths(made) == ["a.txt", "b.txt"]
+
+    def test_the_emitter_sees_the_environment(self, project: Project, env: Any) -> None:
+        @env.PyBuilder(
+            emitter=lambda targets, sources, environment, **kw: (
+                [environment.build_dir / "named.txt"],
+                sources,
+            )
+        )
+        def report(targets, sources):
+            return None
+
+        made = report(source=["a.txt"])
+        project.resolve()
+
+        assert made.output_nodes[0].path.as_posix() == "build/named.txt"
+
+    def test_the_same_keywords_reach_the_emitter_and_the_function(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, stem, **kw: (
+                [f"{stem}.txt"],
+                sources,
+            )
+        )
+        def report(targets, sources, stem, title):
+            return None
+
+        made = report(stem="counts", title="Counts", source=["a.txt"])
+        project.resolve()
+
+        assert made.output_nodes[0].path.as_posix() == "build/counts.txt"
+        assert payload_of(made, tmp_path)["kwargs"] == {
+            "stem": "counts",
+            "title": "Counts",
+        }
+
+    def test_a_target_named_after_a_program(self, project: Project, env: Any) -> None:
+        """The real use: a name only the resolved program knows.
+
+        The program's file name is the linker's business, so no call can
+        write it out; the emitter reads it off the resolved target instead.
+        """
+        program = env.Command(
+            target=lambda: "firmware.elf",
+            source=["a.txt"],
+            command=["link", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, **kw: (
+                [f"{sources[0].output_nodes[0].path.stem}.hex"],
+                sources,
+            )
+        )
+        def to_hex(targets, sources):
+            return None
+
+        made = to_hex(source=[program])
+        project.resolve()
+
+        assert made.output_nodes[0].path.as_posix() == "build/firmware.hex"
+        assert source_paths(made) == ["build/firmware.elf"]
+
+    def test_a_target_source_the_emitter_drops_is_only_ordered(
+        self, project: Project, env: Any
+    ) -> None:
+        """The emitter reads the call's Targets at resolve, so they resolve
+        first; one it drops is no input, and never reruns the edge."""
+        first = env.Command(
+            target="made.txt", source=["a.txt"], command=["cp", "$SOURCE", "$TARGET"]
+        )
+
+        @env.PyBuilder(emitter=lambda targets, sources, env, **kw: (["out.txt"], []))
+        def report(targets, sources):
+            return None
+
+        made = report(source=[first])
+        assert first in made.dependencies
+        project.resolve()
+
+        assert source_paths(made) == []
+        assert "build/made.txt" not in implicit_deps(made)
+
+    def test_an_unnamed_edge_is_labelled_by_its_output(
+        self, project: Project, env: Any
+    ) -> None:
+        """No target at the call, and no name needed: the edge wears its
+        output's path once the emitter has named it, as any command does."""
+
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, n, **kw: ([f"out{n}.txt"], sources)
+        )
+        def render(targets, sources, n):
+            return None
+
+        first = render(n=1)
+        named = render(n=2, name="second")
+        project.resolve()
+
+        assert (first.name, named.name) == ("out1.txt", "second")
+        assert first.anonymous
+
+    def test_the_pickle_is_named_after_the_emitted_target(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, n, **kw: ([f"out{n}.txt"], sources)
+        )
+        def render(targets, sources, n):
+            return None
+
+        made = render(n=1)
+        render(n=2)
+        project.resolve()
+
+        assert node_tokens(made) == [
+            RUNNER,
+            "build/pybuilder/render.py",
+            "build/pybuilder/out1.txt.args.pkl",
+        ]
+        assert sorted(q.name for q in (tmp_path / "build" / "pybuilder").iterdir()) == [
+            "out1.txt.args.pkl",
+            "out2.txt.args.pkl",
+            "pcons-runner",
+            "render.py",
+        ]
+
+    def test_the_generated_ninja_names_the_emitted_target(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        @env.PyBuilder(
+            emitter=lambda targets, sources, env, **kw: (["emitted.txt"], sources)
+        )
+        def render(targets, sources):
+            return None
+
+        render(source=["a.txt"])
+        text = ninja_text(project, tmp_path)
+
+        assert "build emitted.txt: " in text
+        assert "emitted.txt.args.pkl" in text
+
+
+class TestEmitterRefusals:
+    def test_no_target_and_no_emitter(self, project: Project, env: Any) -> None:
+        @env.PyBuilder()
+        def report(targets, sources):
+            return None
+
+        with pytest.raises(PyBuilderError, match="needs target="):
+            report(source=["a.txt"])
+
+    def test_an_emitter_that_is_not_callable(self, env: Any) -> None:
+        """Refused at the decoration, which is where it was written."""
+        with pytest.raises(PyBuilderError, match="is not callable"):
+            env.PyBuilder(emitter="out.txt")  # ty: ignore[invalid-argument-type]
+
+    def test_an_emitter_that_cannot_take_the_keywords(
+        self, project: Project, env: Any
+    ) -> None:
+        """Refused at the call, which is where the keywords were written."""
+
+        @env.PyBuilder(emitter=lambda targets, sources, env: (targets, sources))
+        def report(targets, sources, title):
+            return None
+
+        with pytest.raises(PyBuilderError, match="cannot be called with title"):
+            report(target="out.txt", title="Counts")
+
+    def test_an_emitter_that_returns_one_list(self, project: Project, env: Any) -> None:
+        @env.PyBuilder(emitter=lambda targets, sources, env, **kw: ["out.txt"])
+        def report(targets, sources):
+            return None
+
+        report(source=["a.txt"])
+
+        with pytest.raises(PyBuilderError, match="returns the pair"):
+            project.resolve()
+
+    def test_an_emitter_that_returns_no_target(
+        self, project: Project, env: Any
+    ) -> None:
+        @env.PyBuilder(emitter=lambda targets, sources, env, **kw: ([], sources))
+        def report(targets, sources):
+            return None
+
+        report(source=["a.txt"])
+
+        with pytest.raises(PconsError, match="must return the file"):
+            project.resolve()
+
+
+@dataclass
+class Settings:
+    """A user's own object holding a target, which expands where it sits."""
+
+    program: Any
+    level: int
+
+
+class TestArgumentsNameTheBuild:
+    """A keyword may hold a target, a node or a Subst, read at resolve."""
+
+    def test_a_target_arrives_as_its_files(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """Its outputs, as the function opens them from where it runs; it's
+        named lazily here, so only resolve has the path."""
+        program = env.Command(
+            target=lambda: "firmware.elf",
+            source=["a.txt"],
+            command=["link", "$SOURCE", "$TARGET"],
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources, program):
+            return None
+
+        made = report(target="out.txt", program=program)
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {"program": ["firmware.elf"]}
+
+    def test_a_target_is_a_dependency_that_reruns_the_edge(
+        self, project: Project, env: Any
+    ) -> None:
+        """The function reads it, so a change to it reruns the function."""
+        program = env.Command(
+            target="firmware.elf", source=["a.txt"], command=["link", "$TARGET"]
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources, program):
+            return None
+
+        made = report(target="out.txt", program=program)
+        assert program in made.dependencies
+        project.resolve()
+
+        assert "build/firmware.elf" in implicit_deps(made)
+
+    def test_a_source_node_is_seen_from_the_build_directory(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """The function runs in the build directory, so a source's path climbs
+        out of it, as its own sources' paths do."""
+
+        @env.PyBuilder()
+        def report(targets, sources, data):
+            return None
+
+        made = report(target="out.txt", data=project.node("a.txt"))
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {"data": "../a.txt"}
+        assert "a.txt" in implicit_deps(made)
+
+    def test_a_marker_expands_where_it_sits(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """In a list, a dictionary value, or an object's attribute alike."""
+        program = env.Command(
+            target="firmware.elf", source=["a.txt"], command=["link", "$TARGET"]
+        )
+
+        @env.PyBuilder()
+        def report(targets, sources, nested, settings):
+            return None
+
+        made = report(
+            target="out.txt",
+            nested={"programs": [program, 3]},
+            settings=Settings(program, 2),
+        )
+        project.resolve()
+
+        kwargs = payload_of(made, tmp_path)["kwargs"]
+        assert kwargs["nested"] == {"programs": [["firmware.elf"], 3]}
+        assert kwargs["settings"] == Settings(["firmware.elf"], 2)
+
+    def test_a_subst_is_the_value_resolve_settled(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """Expanded in the edge's environment when it resolves, so a flag set
+        after the call is there, as it is for a compile."""
+        env.add_tool("tool")
+        env.tool.flags = ["-O1"]
+
+        @env.PyBuilder()
+        def report(targets, sources, flags, literal):
+            return None
+
+        made = report(target="out.txt", flags=Subst("$tool.flags"), literal="$x")
+        env.tool.flags = ["-O2", "-Wall"]
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {
+            "flags": ["-O2", "-Wall"],
+            "literal": "$x",
+        }
+
+    def test_a_path_in_a_subst_is_seen_from_the_build_directory(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        env.add_tool("tool")
+        env.tool.iprefix = "-I"
+        env.tool.includes = [ProjectPath("inc")]
+
+        @env.PyBuilder()
+        def report(targets, sources, flags):
+            return None
+
+        made = report(
+            target="out.txt", flags=Subst("${prefix(tool.iprefix, tool.includes)}")
+        )
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {"flags": ["-I../inc"]}
+
+    def test_paths_follow_the_edges_cwd(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        """The function runs where cwd= says, so its paths start there."""
+        (tmp_path / "work").mkdir()
+        program = env.Command(
+            target="firmware.elf", source=["a.txt"], command=["link", "$TARGET"]
+        )
+
+        @env.PyBuilder(cwd="work")
+        def report(targets, sources, program, data):
+            return None
+
+        made = report(target="out.txt", program=program, data=project.node("a.txt"))
+        project.resolve()
+
+        assert payload_of(made, tmp_path)["kwargs"] == {
+            "program": ["../build/firmware.elf"],
+            "data": "../a.txt",
+        }
+
+
+class TestArgumentRefusalsAtTheCall:
+    """What the call can settle, it settles, before a marker has a value."""
+
+    def test_an_unpicklable_argument_beside_a_marker(
+        self, project: Project, env: Any
+    ) -> None:
+        @env.PyBuilder()
+        def report(targets, sources, data, handle):
+            return None
+
+        with pytest.raises(PyBuilderError, match="cannot pickle argument handle"):
+            report(target="out.txt", data=project.node("a.txt"), handle=lambda: 1)
+
+    def test_an_alias_says_to_pass_its_targets(
+        self, project: Project, env: Any
+    ) -> None:
+        @env.PyBuilder()
+        def report(targets, sources, group):
+            return None
+
+        with pytest.raises(PyBuilderError, match="Pass the targets it groups"):
+            report(target="out.txt", group=project.Alias("everything"))
+
+
+class TestArgumentRefusalsAtResolve:
+    """What only resolve can see, blamed on the call that passed it."""
+
+    def test_a_subst_that_does_not_expand(self, project: Project, env: Any) -> None:
+        @env.PyBuilder()
+        def report(targets, sources, flags):
+            return None
+
+        call_line = inspect.currentframe().f_lineno + 1  # ty: ignore[possibly-missing-attribute]
+        report(target="out.txt", flags=Subst("$nosuch.flags"))
+
+        with pytest.raises(PyBuilderError) as caught:
+            project.resolve()
+
+        assert "Subst('$nosuch.flags') does not expand" in str(caught.value)
+        assert caught.value.location.lineno == call_line
+
+    def test_a_target_that_builds_no_file(self, project: Project, env: Any) -> None:
+        headers = project.HeaderOnlyLibrary("headers")
+
+        @env.PyBuilder()
+        def report(targets, sources, lib):
+            return None
+
+        report(target="out.txt", lib=headers)
+
+        with pytest.raises(PyBuilderError, match="builds no file"):
+            project.resolve()
+
+
+class TestDiscoveredInputs:
+    """``discovers=True``: the function says what it read, pcons declares it."""
+
+    def one(self, project: Project, env: Any, **how: Any) -> Target:
+        @env.PyBuilder(discovers=True, **how)
+        def bundle(targets, sources):
+            return None
+
+        made = bundle(target="bundle.txt", source=["a.txt"])
+        project.resolve()
+        return made
+
+    def test_the_edge_declares_a_depfile(self, project: Project, env: Any) -> None:
+        info = build_info(self.one(project, env))
+
+        assert info["deps_style"] == "gcc"
+        assert isinstance(info["depfile"], PathToken)
+        assert Path(info["depfile"].path).as_posix() == "build/bundle.txt"
+        assert info["depfile"].suffix == ".d"
+
+    def test_the_command_tells_the_runner_where_to_write_it(
+        self, project: Project, env: Any
+    ) -> None:
+        """A marker, not a path: the build tool writes the target's path."""
+        command = tokens(self.one(project, env))
+
+        assert command[command.index("--depfile") + 1] == TargetPath(
+            suffix=".d", start=0
+        )
+
+    def test_ninja_reads_the_depfile(
+        self, project: Project, env: Any, tmp_path: Path
+    ) -> None:
+        self.one(project, env)
+        text = ninja_text(project, tmp_path)
+
+        assert "depfile = $out.d" in text
+        assert "deps = gcc" in text
+
+    def test_without_it_the_edge_declares_none(
+        self, project: Project, env: Any
+    ) -> None:
+        made = one_source(project, env)
+
+        assert build_info(made)["depfile"] is None
+        assert "--depfile" not in tokens(made)
+
+    def test_two_targets_are_refused(self, project: Project, env: Any) -> None:
+        """One depfile is named after one output."""
+
+        @env.PyBuilder(discovers=True)
+        def bundle(targets, sources):
+            return None
+
+        with pytest.raises(PconsError, match="may have only one target"):
+            bundle(target=["one.txt", "two.txt"], source=["a.txt"])
+
+    def test_cwd_is_refused(self, env: Any) -> None:
+        """The build tool would read the reported paths from the wrong place."""
+        with pytest.raises(PyBuilderError, match="discovers=True with cwd="):
+            env.PyBuilder(discovers=True, cwd="work")

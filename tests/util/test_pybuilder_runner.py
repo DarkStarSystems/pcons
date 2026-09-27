@@ -13,7 +13,14 @@ from typing import Any
 import pytest
 
 from pcons.util import pybuilder
-from pcons.util.pybuilder import PROTOCOL_VERSION, USAGE, main, run
+from pcons.util.pybuilder import (
+    PROTOCOL_VERSION,
+    USAGE,
+    discovered_inputs,
+    main,
+    run,
+    write_depfile,
+)
 
 RUNNER = pybuilder.__file__
 
@@ -112,6 +119,24 @@ BLOB = pickle.dumps(Point(3))
 def render(targets, sources):
     with open(targets[0], "wb") as out:
         out.write(BLOB)
+"""
+
+
+DISCOVERS = """
+def render(targets, sources):
+    with open(targets[0], "w") as out:
+        out.write("bundled")
+    return {"inputs": ["a.txt", "sub/b.txt"]}
+"""
+
+RETURNS_A_LIST = """
+def render(targets, sources):
+    return ["a.txt"]
+"""
+
+RETURNS_AN_UNKNOWN_KEY = """
+def render(targets, sources):
+    return {"inputs": [], "outputs": ["x"], "extra": 1}
 """
 
 
@@ -505,3 +530,134 @@ class TestScriptEntryPoint:
 
         assert result.returncode == 1
         assert USAGE in result.stderr
+
+
+class TestWriteDepfile:
+    """The exact text, because a build tool parses it and nobody reads it.
+
+    Ninja reads the prerequisites as the files that make the output stale,
+    so a separator in the wrong place is a wrong build rather than an error.
+    """
+
+    def written(self, tmp_path: Path, target: str, inputs: list[str]) -> str:
+        depfile = tmp_path / "out.d"
+        write_depfile(str(depfile), target, inputs)
+        return depfile.read_text(encoding="utf-8")
+
+    def test_one_line_target_then_inputs(self, tmp_path: Path) -> None:
+        assert (
+            self.written(tmp_path, "report.txt", ["a.txt", "sub/b.txt"])
+            == "report.txt: a.txt sub/b.txt\n"
+        )
+
+    def test_no_inputs_is_a_rule_with_no_prerequisites(self, tmp_path: Path) -> None:
+        """Still written: the edge declares a depfile, so one has to be there."""
+        assert self.written(tmp_path, "report.txt", []) == "report.txt:\n"
+
+    def test_a_windows_drive_letter_is_not_the_separator(self, tmp_path: Path) -> None:
+        """The colon that ends the target is the one followed by a space."""
+        written = self.written(tmp_path, "E:\\build\\out.txt", ["C:\\src\\a.txt"])
+
+        assert written == "E:/build/out.txt: C:/src/a.txt\n"
+
+    def test_what_a_depfile_gives_meaning_is_escaped(self, tmp_path: Path) -> None:
+        written = self.written(
+            tmp_path, "x y/out.txt", ["c d.txt", "n#1.txt", "$v.txt"]
+        )
+
+        assert written == "x\\ y/out.txt: c\\ d.txt n\\#1.txt $$v.txt\n"
+
+    def test_a_missing_directory_is_made(self, tmp_path: Path) -> None:
+        depfile = tmp_path / "deep" / "down" / "out.d"
+
+        write_depfile(str(depfile), "report.txt", [])
+
+        assert depfile.is_file()
+
+
+class TestDiscoveredInputs:
+    """What a discovering function may return."""
+
+    def test_none_is_nothing_discovered(self) -> None:
+        assert discovered_inputs(None, "render") == []
+
+    def test_paths_become_text(self) -> None:
+        assert discovered_inputs({"inputs": [Path("a.txt"), "b.txt"]}, "render") == [
+            str(Path("a.txt")),
+            "b.txt",
+        ]
+
+    def test_a_bare_list_says_what_to_return(self) -> None:
+        with pytest.raises(TypeError, match=r"render\(\) returned list"):
+            discovered_inputs(["a.txt"], "render")
+
+    def test_an_unknown_key_names_it(self) -> None:
+        """Refused rather than ignored: a typo would lose every dependency."""
+        with pytest.raises(ValueError, match="returned extra, outputs"):
+            discovered_inputs({"inputs": [], "outputs": [], "extra": 1}, "render")
+
+    def test_a_string_of_inputs_is_not_a_list_of_paths(self) -> None:
+        with pytest.raises(TypeError, match="inputs='a.txt'"):
+            discovered_inputs({"inputs": "a.txt"}, "render")
+
+
+class TestRunWithADepfile:
+    """The runner writes the depfile for a discovering edge."""
+
+    def test_what_the_function_returned_reaches_the_depfile(
+        self, tmp_path: Path
+    ) -> None:
+        module, args = build(tmp_path, "discovers", DISCOVERS)
+        depfile = tmp_path / "out.d"
+
+        run(module, args, [str(tmp_path / "report.txt")], [], depfile=str(depfile))
+
+        assert depfile.read_text(encoding="utf-8").endswith(": a.txt sub/b.txt\n")
+
+    def test_returning_none_still_writes_the_depfile(self, tmp_path: Path) -> None:
+        module, args = build(tmp_path, "quiet", RETURNS_NONE)
+        depfile = tmp_path / "out.d"
+
+        run(module, args, ["report.txt"], [], depfile=str(depfile))
+
+        assert depfile.read_text(encoding="utf-8") == "report.txt:\n"
+
+    def test_a_list_is_refused_and_no_depfile_is_written(self, tmp_path: Path) -> None:
+        module, args = build(tmp_path, "listy", RETURNS_A_LIST)
+        depfile = tmp_path / "out.d"
+
+        with pytest.raises(TypeError, match="returned list"):
+            run(module, args, ["report.txt"], [], depfile=str(depfile))
+
+        assert not depfile.exists()
+
+    def test_an_unknown_key_is_refused(self, tmp_path: Path) -> None:
+        module, args = build(tmp_path, "unknownkey", RETURNS_AN_UNKNOWN_KEY)
+
+        with pytest.raises(ValueError, match="returned extra, outputs"):
+            run(module, args, ["report.txt"], [], depfile=str(tmp_path / "out.d"))
+
+    def test_without_a_depfile_a_return_value_still_fails(self, tmp_path: Path) -> None:
+        """The contract for every edge that didn't opt in."""
+        module, args = build(tmp_path, "notdiscovering", DISCOVERS)
+
+        with pytest.raises(TypeError, match="discovers=True"):
+            run(module, args, [str(tmp_path / "out.txt")], [])
+
+    def test_main_takes_the_depfile_before_the_count(self, tmp_path: Path) -> None:
+        module, args = build(tmp_path, "maindep", DISCOVERS)
+        depfile = tmp_path / "out.d"
+        target = str(tmp_path / "report.txt")
+
+        code = main(
+            [module, args, "--depfile", str(depfile), "--n-targets", "1", target]
+        )
+
+        assert code == 0
+        assert depfile.read_text(encoding="utf-8").endswith(": a.txt sub/b.txt\n")
+
+    def test_a_depfile_flag_with_no_path_prints_usage(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["mod.py", "args.pkl", "--depfile"]) == 1
+        assert USAGE in capsys.readouterr().err
