@@ -47,6 +47,7 @@ commands = [
     # it offline (the package has no runtime deps).
     { run = "uv pip install --python .venv --no-index --find-links dist pcons_hello_ext", timeout = 300 },
     { run = "uv run --no-sync python test_wheel.py", expect_stdout = "Hello, world!" },
+    { run = "uv run --no-sync pcons-hello-ext", expect_stdout = "Hello, world!" },
 
     # --- source distribution ---
     { run = "uv build --sdist", timeout = 300 },
