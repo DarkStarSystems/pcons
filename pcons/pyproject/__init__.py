@@ -522,15 +522,46 @@ def _run_pcons(
         raise RuntimeError(f"pcons-build.py exited with code {exit_code}")
 
 
-def _run_ninja(build_dir: Path, targets: list[str] | None = None) -> None:
+def _jobs(
+    config_settings: dict[str, Any] | None, pcons_cfg: dict[str, Any]
+) -> int | None:
+    """Return the ninja job count, None to keep ninja's default.
+
+    ``config_settings["jobs"]`` (``-C jobs=N``) wins over ``[tool.pcons] jobs``.
+    A setting repeated on the command line arrives as a list, the last one wins,
+    and an empty list counts as unset. A ``[tool.pcons] jobs`` list is refused.
+    A value that is not a positive integer raises RuntimeError.
+    """
+    value: Any = (config_settings or {}).get("jobs")
+    if isinstance(value, list):
+        value = value[-1] if value else None
+    source = "config setting -C jobs"
+    if value is None:
+        value = pcons_cfg.get("jobs")
+        source = "pyproject [tool.pcons] jobs"
+    if value is None:
+        return None
+    try:
+        jobs = value if type(value) is int else int(str(value).strip())
+    except ValueError:
+        jobs = 0
+    if jobs < 1:
+        raise RuntimeError(f"{source} must be a positive integer, got {value!r}.")
+    return jobs
+
+
+def _run_ninja(
+    build_dir: Path, targets: list[str] | None = None, jobs: int | None = None
+) -> None:
     """Run ninja in *build_dir* via pcons.cli.run_ninja.
 
     If *targets* is given, only those ninja targets are built (e.g. an
-    ``install`` alias), otherwise everything is built.
+    ``install`` alias), otherwise everything is built. *jobs* caps ninja's
+    parallelism, None keeps its default.
     """
     from pcons.cli import run_ninja
 
-    exit_code = run_ninja(build_dir, targets=targets)
+    exit_code = run_ninja(build_dir, targets=targets, jobs=jobs)
     if exit_code != 0:
         raise RuntimeError(f"ninja exited with code {exit_code}")
 
@@ -735,7 +766,12 @@ def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
     return dist_info_name
 
 
-def _build(wheel_directory: str, *, editable: bool) -> str:
+def _build(
+    wheel_directory: str,
+    config_settings: dict[str, Any] | None = None,
+    *,
+    editable: bool,
+) -> str:
     source_dir = Path.cwd()
     wheel_dir = Path(wheel_directory)
 
@@ -749,6 +785,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
     variables = dict(pcons_cfg.get("variables") or {})
     # Ninja target (alias) that stages the files to package into the wheel.
     install_target = str(pcons_cfg.get("install-target", "wheel"))
+    jobs = _jobs(config_settings, pcons_cfg)
 
     python_tag, abi_tag, platform_tag = _wheel_tag()
     wheel_name = f"{name}-{version}-{python_tag}-{abi_tag}-{platform_tag}.whl"
@@ -761,7 +798,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
 
     if editable:
         _run_pcons(source_dir, build_dir, variant=variant, variables=variables or None)
-        _run_ninja(build_dir)
+        _run_ninja(build_dir, jobs=jobs)
         _write_editable_wheel(
             wheel_dir / wheel_name,
             name,
@@ -791,7 +828,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
         _warn_if_shared(build_dir)
         _run_pcons(source_dir, build_dir, variant=variant, variables=variables)
         try:
-            _run_ninja(build_dir, targets=[install_target])
+            _run_ninja(build_dir, targets=[install_target], jobs=jobs)
         finally:
             _stamp_wheel_build(build_dir)
 
@@ -838,7 +875,7 @@ def build_wheel(
     metadata_directory: str | None = None,
 ) -> str:
     """Build a wheel and return its filename."""
-    return _build(wheel_directory, editable=False)
+    return _build(wheel_directory, config_settings, editable=False)
 
 
 def prepare_metadata_for_build_editable(
@@ -860,7 +897,7 @@ def build_editable(
     build_dir to sys.path.  Re-running ninja in the build directory is enough
     to pick up rebuilt extensions without reinstalling.
     """
-    return _build(wheel_directory, editable=True)
+    return _build(wheel_directory, config_settings, editable=True)
 
 
 def build_sdist(

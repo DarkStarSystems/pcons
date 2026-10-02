@@ -4058,6 +4058,7 @@ variant = "release"          # optional: pcons variant to build
 install-target = "install"   # alias to build for wheels (default: "wheel")
 # variables = { SOME_VAR = "value" }  # optional: extra pcons variables
 # build-dir = "build"        # optional: wheel build directory (default: "build")
+# jobs = 4                   # optional: ninja parallel jobs (default: ninja's)
 ```
 
 #### How wheels are built
@@ -4146,6 +4147,26 @@ The backend neither reads nor writes `pcons_cache.json`. Its `variant` and
 `variables` come from `pyproject.toml` on every build, so a variant, generator
 or variable you persisted with `pcons -B build --variant=debug SOMEVAR=ON`
 does not reach the backend build. The cache stays as it was after `uv sync`.
+
+#### Parallel jobs
+
+Ninja runs as many jobs as it chooses by default. Cap it with `jobs`, or per
+build with the `jobs` config setting, which wins over the key:
+
+```bash
+uv build --wheel -C jobs=4
+pip install -C jobs=4 .
+```
+
+For `uv sync`, set it in `pyproject.toml`:
+
+```toml
+[tool.uv]
+config-settings = { jobs = "4" }
+```
+
+The value must be a positive integer. `jobs` caps the ninja build only. The
+configure step, including any subprocess a build script runs, is not limited.
 
 #### Metadata and sdists
 

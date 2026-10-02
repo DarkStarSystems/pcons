@@ -34,7 +34,9 @@ def _make_fake_extension(build_dir: Path, name: str = "myext") -> Path:
     return ext
 
 
-def _stage_extension_side_effect(build_dir: Path, targets: list[str] | None = None):
+def _stage_extension_side_effect(
+    build_dir: Path, targets: list[str] | None = None, jobs: int | None = None
+) -> None:
     """Stand-in for _run_ninja that stages a fake extension into the wheel dir.
 
     The non-editable wheel build packages whatever the install target copies
@@ -1106,10 +1108,7 @@ class TestDistInfoExtrasInDistributions:
         with (
             patch("pcons.pyproject._run_pcons"),
             patch(
-                "pcons.pyproject._run_ninja",
-                side_effect=lambda build_dir, targets=None: (
-                    _stage_extension_side_effect(build_dir, targets)
-                ),
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
             ),
         ):
             filename = backend.build_wheel(str(src / "dist"))
@@ -1244,12 +1243,11 @@ class TestBuildDir:
     ) -> None:
         src = self._setup(tmp_path, monkeypatch, "out")
 
-        def stage(build_dir: Path, targets: list[str] | None = None) -> None:
-            _make_fake_extension(build_dir / ".wheel-staging")
-
         with (
             patch("pcons.pyproject._run_pcons") as mock_pcons,
-            patch("pcons.pyproject._run_ninja", side_effect=stage) as mock_ninja,
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ) as mock_ninja,
         ):
             backend.build_wheel(str(src / "dist"))
 
@@ -1538,3 +1536,89 @@ class TestSharedBuildDirWarning:
         self._wheel(tmp_path)
         assert not self._warned(caplog)
         assert (tmp_path / "build-wheel" / backend._WHEEL_STAMP).exists()
+
+
+class TestJobs:
+    def test_unset_is_none(self) -> None:
+        assert backend._jobs(None, {}) is None
+        assert backend._jobs({}, {}) is None
+
+    def test_config_setting_string(self) -> None:
+        assert backend._jobs({"jobs": "4"}, {}) == 4
+
+    def test_repeated_config_setting_takes_last(self) -> None:
+        assert backend._jobs({"jobs": ["2", "6"]}, {}) == 6
+
+    def test_empty_config_setting_list_falls_back(self) -> None:
+        assert backend._jobs({"jobs": []}, {"jobs": 3}) == 3
+        assert backend._jobs({"jobs": []}, {}) is None
+
+    def test_pyproject_key(self) -> None:
+        assert backend._jobs(None, {"jobs": 3}) == 3
+
+    @pytest.mark.parametrize("value", [[3], [], ["2", "6"]])
+    def test_pyproject_list_is_refused(self, value: list[object]) -> None:
+        with pytest.raises(RuntimeError, match=r"\[tool.pcons\] jobs must be"):
+            backend._jobs(None, {"jobs": value})
+
+    def test_config_setting_wins(self) -> None:
+        assert backend._jobs({"jobs": "8"}, {"jobs": 3}) == 8
+
+    @pytest.mark.parametrize("value", ["0", "-1", "four", "2.5", ""])
+    def test_bad_config_setting_raises(self, value: str) -> None:
+        with pytest.raises(RuntimeError, match="-C jobs must be a positive integer"):
+            backend._jobs({"jobs": value}, {})
+
+    @pytest.mark.parametrize("value", [0, -2, True, 2.0, "x"])
+    def test_bad_pyproject_key_raises(self, value: object) -> None:
+        with pytest.raises(RuntimeError, match=r"\[tool.pcons\] jobs must be"):
+            backend._jobs(None, {"jobs": value})
+
+    def _setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        _make_pyproject(
+            tmp_path,
+            '[project]\nname = "mypkg"\nversion = "0.1"\n[tool.pcons]\njobs = 2\n',
+        )
+        (tmp_path / "pcons-build.py").write_text("# stub")
+        monkeypatch.chdir(tmp_path)
+        return tmp_path
+
+    def test_wheel_passes_jobs_to_ninja(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        with (
+            patch("pcons.pyproject._run_pcons"),
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ) as mock_ninja,
+        ):
+            backend.build_wheel(str(src / "dist"), {"jobs": "4"})
+        assert mock_ninja.call_args.kwargs["jobs"] == 4
+
+    def test_editable_passes_jobs_to_ninja(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        with (
+            patch("pcons.pyproject._run_pcons"),
+            patch("pcons.pyproject._run_ninja") as mock_ninja,
+        ):
+            backend.build_editable(str(src / "dist"))
+        assert mock_ninja.call_args.kwargs["jobs"] == 2
+
+    def test_bad_jobs_fails_before_configure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        with (
+            patch("pcons.pyproject._run_pcons") as mock_pcons,
+            pytest.raises(RuntimeError, match="jobs"),
+        ):
+            backend.build_wheel(str(src / "dist"), {"jobs": "0"})
+        mock_pcons.assert_not_called()
+
+    def test_run_ninja_forwards_jobs(self, tmp_path: Path) -> None:
+        with patch("pcons.cli.run_ninja", return_value=0) as mock_run:
+            backend._run_ninja(tmp_path, targets=["install"], jobs=3)
+        mock_run.assert_called_once_with(tmp_path, targets=["install"], jobs=3)
