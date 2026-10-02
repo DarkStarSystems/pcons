@@ -366,19 +366,53 @@ _SDIST_EXCLUDE_DIRS = frozenset(
 )
 
 
-def _sdist_files(source_dir: Path) -> list[Path]:
+def _build_dir(source_dir: Path, pcons_cfg: dict[str, Any]) -> Path:
+    """Return the wheel build directory named by ``[tool.pcons] build-dir``.
+
+    The value is a path relative to *source_dir*, or absolute. It defaults to
+    ``build``. Empty and non-string values raise an error, so do a Windows
+    drive-relative path and any path that is *source_dir* or one of its
+    ancestors. Editable builds always use ``build``, the directory a plain
+    ``pcons`` run uses and the ``.pth`` file points at.
+    """
+    value = pcons_cfg.get("build-dir", "build")
+    if not isinstance(value, str) or not value:
+        raise RuntimeError(
+            f"pyproject [tool.pcons] build-dir must be a non-empty path, got {value!r}."
+        )
+    windows_path = PureWindowsPath(value)
+    if windows_path.drive and not windows_path.is_absolute():
+        raise RuntimeError(
+            f"pyproject [tool.pcons] build-dir must not be drive-relative, got {value!r}."
+        )
+    build_dir = source_dir / value
+    if source_dir.resolve().is_relative_to(build_dir.resolve()):
+        raise RuntimeError(
+            "pyproject [tool.pcons] build-dir must not be the project directory "
+            f"or one of its parents, got {value!r}."
+        )
+    return build_dir
+
+
+def _sdist_files(source_dir: Path, build_dir: Path) -> list[Path]:
     """Return every source file to ship in the sdist, recursively.
 
     Walks the whole project tree (so package subdirectories like ``src/`` are
-    included, not just top-level files) and skips build artifacts, VCS data and
-    tooling caches listed in :data:`_SDIST_EXCLUDE_DIRS`.
+    included, not just top-level files) and skips *build_dir*, build artifacts,
+    VCS data and tooling caches listed in :data:`_SDIST_EXCLUDE_DIRS`.
     """
     files = []
+    try:
+        build_rel: Path | None = build_dir.resolve().relative_to(source_dir.resolve())
+    except ValueError:
+        build_rel = None
     for path in source_dir.rglob("*"):
         if not path.is_file():
             continue
         rel = path.relative_to(source_dir)
         if any(part in _SDIST_EXCLUDE_DIRS for part in rel.parts):
+            continue
+        if build_rel is not None and rel.is_relative_to(build_rel):
             continue
         files.append(path)
     return sorted(files)
@@ -636,13 +670,13 @@ def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
 def _build(wheel_directory: str, *, editable: bool) -> str:
     source_dir = Path.cwd()
     wheel_dir = Path(wheel_directory)
-    build_dir = source_dir / "build"
 
     pyproject = _load_pyproject(source_dir)
     project = pyproject.get("project", {})
     name, version = _name_version(project)
 
     pcons_cfg = pyproject.get("tool", {}).get("pcons", {})
+    build_dir = source_dir / "build" if editable else _build_dir(source_dir, pcons_cfg)
     variant = pcons_cfg.get("variant")
     variables = dict(pcons_cfg.get("variables") or {})
     # Ninja target (alias) that stages the files to package into the wheel.
@@ -778,7 +812,8 @@ def build_sdist(
     prefix = f"{name}-{version}"
     # PKG-INFO uses the core-metadata format, same content as the wheel METADATA.
     pkg_info = _render_metadata(name, version, project, source_dir).encode()
-    files = _sdist_files(source_dir)
+    build_dir = _build_dir(source_dir, pyproject.get("tool", {}).get("pcons", {}))
+    files = _sdist_files(source_dir, build_dir)
 
     with tarfile.open(sdist_dir / sdist_name, "w:gz") as tf:
         # The sdist spec requires a PKG-INFO at the root of the tree.

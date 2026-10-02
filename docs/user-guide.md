@@ -4057,6 +4057,7 @@ requires-python = ">=3.11"
 variant = "release"          # optional: pcons variant to build
 install-target = "install"   # alias to build for wheels (default: "wheel")
 # variables = { SOME_VAR = "value" }  # optional: extra pcons variables
+# build-dir = "build"        # optional: wheel build directory (default: "build")
 ```
 
 #### How wheels are built
@@ -4107,6 +4108,25 @@ that puts the **build directory** on `sys.path`. Imports resolve directly to
 the compiled extensions in `build/`, so after editing C++ sources, re-running
 `ninja` is enough — no reinstall needed. (`PCONS_BUILD_WHEEL` is *not* set for
 editable builds.)
+
+#### Build directory
+
+Wheel and editable builds both use `build/` by default, the same directory as
+a plain `pcons` run. Set `build-dir` to give wheel builds their own directory:
+
+```toml
+[tool.pcons]
+build-dir = "build-wheel"
+```
+
+The path is relative to the project directory, or absolute. Editable builds
+ignore `build-dir`. They always use `build/`, the directory the `.pth` file
+points at.
+
+Use a dedicated directory. The project directory, its parents and a Windows
+drive-relative path such as `C:build` are refused. An sdist leaves the
+build directory out when it lies inside the project, so a source directory
+like `src` would be missing from the sdist.
 
 #### Metadata and sdists
 

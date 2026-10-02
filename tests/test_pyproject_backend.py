@@ -1202,3 +1202,101 @@ class TestSdistValidation:
         with pytest.raises(RuntimeError, match="console_scripts"):
             backend.build_sdist(str(tmp_path / "dist"))
         assert not (tmp_path / "dist").exists()
+
+
+class TestBuildDir:
+    def _setup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, build_dir: str
+    ) -> Path:
+        src = tmp_path / "src"
+        src.mkdir()
+        _make_pyproject(
+            src,
+            '[project]\nname = "mypkg"\nversion = "0.1"\n'
+            f"[tool.pcons]\nbuild-dir = {build_dir!r}\n",
+        )
+        (src / "pcons-build.py").write_text("# stub")
+        monkeypatch.chdir(src)
+        return src
+
+    def test_default_is_build(self, tmp_path: Path) -> None:
+        assert backend._build_dir(tmp_path, {}) == tmp_path / "build"
+
+    def test_absolute_path_is_kept(self, tmp_path: Path) -> None:
+        out = tmp_path / "elsewhere"
+        assert backend._build_dir(tmp_path / "src", {"build-dir": str(out)}) == out
+
+    @pytest.mark.parametrize(
+        "value",
+        ["", ".", "..", "../..", "sub/..", str(Path.cwd().anchor), 3, "C:build"],
+    )
+    def test_invalid_value_raises(self, tmp_path: Path, value: object) -> None:
+        with pytest.raises(RuntimeError, match="build-dir"):
+            backend._build_dir(tmp_path / "proj", {"build-dir": value})
+
+    def test_sibling_of_project_is_allowed(self, tmp_path: Path) -> None:
+        assert backend._build_dir(tmp_path / "proj", {"build-dir": "../out"}) == (
+            tmp_path / "proj" / "../out"
+        )
+
+    def test_wheel_uses_build_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch, "out")
+
+        def stage(build_dir: Path, targets: list[str] | None = None) -> None:
+            _make_fake_extension(build_dir / ".wheel-staging")
+
+        with (
+            patch("pcons.pyproject._run_pcons") as mock_pcons,
+            patch("pcons.pyproject._run_ninja", side_effect=stage) as mock_ninja,
+        ):
+            backend.build_wheel(str(src / "dist"))
+
+        assert mock_pcons.call_args.args[1] == src / "out"
+        assert mock_ninja.call_args.args[0] == src / "out"
+        _, kwargs = mock_pcons.call_args
+        assert kwargs["variables"]["PCONS_INSTALL_PREFIX"] == str(
+            src / "out" / ".wheel-staging"
+        )
+
+    def test_editable_ignores_build_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch, "out")
+
+        with (
+            patch("pcons.pyproject._run_pcons") as mock_pcons,
+            patch("pcons.pyproject._run_ninja"),
+        ):
+            filename = backend.build_editable(str(src / "dist"))
+
+        assert mock_pcons.call_args.args[1] == src / "build"
+        with zipfile.ZipFile(src / "dist" / filename) as zf:
+            pth = next(n for n in zf.namelist() if n.endswith(".pth"))
+            assert zf.read(pth).decode() == f"{(src / 'build').resolve()}\n"
+
+    def test_sdist_excludes_build_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tarfile
+
+        src = self._setup(tmp_path, monkeypatch, "out/wheel")
+        (src / "out" / "wheel").mkdir(parents=True)
+        (src / "out" / "wheel" / "build.ninja").write_text("junk")
+        (src / "out" / "keep.txt").write_text("source")
+        filename = backend.build_sdist(str(src / "dist"))
+        with tarfile.open(src / "dist" / filename) as tf:
+            names = tf.getnames()
+        assert "mypkg-0.1/out/keep.txt" in names
+        assert not any("build.ninja" in n for n in names)
+
+    def test_sdist_with_build_dir_outside(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tarfile
+
+        src = self._setup(tmp_path, monkeypatch, str(tmp_path / "out"))
+        filename = backend.build_sdist(str(src / "dist"))
+        with tarfile.open(src / "dist" / filename) as tf:
+            assert "mypkg-0.1/pcons-build.py" in tf.getnames()
