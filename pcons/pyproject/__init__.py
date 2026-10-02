@@ -12,6 +12,7 @@ extensions, by setting in pyproject.toml:
 from __future__ import annotations
 
 import base64
+import glob
 import hashlib
 import io
 import os
@@ -19,7 +20,8 @@ import shutil
 import sys
 import sysconfig
 import zipfile
-from pathlib import Path
+from email.headerregistry import Address
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -71,24 +73,168 @@ def _ninja_requirement() -> list[str]:
     return ["ninja"]
 
 
-# PEP 621 [project] fields the backend renders into METADATA.
-# Any other non-dynamic field present in [project]
-# is rejected rather than silently dropped,
-# so a package never installs with metadata that quietly lost its
-# dependencies, entry points, license, etc.
 _HONORED_PROJECT_FIELDS = frozenset(
-    {"name", "version", "requires-python", "dependencies"}
+    {
+        "name",
+        "version",
+        "requires-python",
+        "dependencies",
+        "description",
+        "readme",
+        "license",
+        "license-files",
+        "authors",
+        "maintainers",
+        "keywords",
+        "classifiers",
+        "urls",
+    }
 )
 
+_README_CONTENT_TYPES = {
+    ".md": "text/markdown",
+    ".rst": "text/x-rst",
+    ".txt": "text/plain",
+}
 
-def _render_metadata(name: str, version: str, project: dict[str, Any]) -> str:
+
+def _header(field: str, value: str) -> str:
+    """Return one METADATA header line, folding a multi-line *value*."""
+    return f"{field}: " + value.replace("\n", "\n        ")
+
+
+def _read_inside(source_dir: Path, relative: str, field: str) -> str:
+    """Read the UTF-8 text of *relative*, which must stay inside *source_dir*."""
+    root = source_dir.resolve()
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root):
+        raise RuntimeError(
+            f"pyproject [project] {field}: {relative!r} is outside the project."
+        )
+    if not path.is_file():
+        raise RuntimeError(
+            f"pyproject [project] {field}: file {relative!r} does not exist."
+        )
+    return path.read_text(encoding="utf-8")
+
+
+def _readme(project: dict[str, Any], source_dir: Path) -> tuple[str, str] | None:
+    """Return the (body, content type) of the ``readme`` field, or None."""
+    readme = project.get("readme")
+    if not readme:
+        return None
+    if isinstance(readme, str):
+        content_type = _README_CONTENT_TYPES.get(Path(readme).suffix.lower())
+        if content_type is None:
+            raise RuntimeError(
+                f"pyproject [project] readme: cannot tell the content type of "
+                f"{readme!r}, use .md, .rst or .txt, or the table form."
+            )
+        return _read_inside(source_dir, readme, "readme"), content_type
+    content_type = readme.get("content-type")
+    if not content_type:
+        raise RuntimeError("pyproject [project] readme: 'content-type' is required.")
+    if ("file" in readme) == ("text" in readme):
+        raise RuntimeError(
+            "pyproject [project] readme: give exactly one of 'file' and 'text'."
+        )
+    if "file" in readme:
+        return _read_inside(source_dir, readme["file"], "readme"), content_type
+    return str(readme["text"]), content_type
+
+
+def _people(role: str, entries: list[dict[str, str]]) -> list[str]:
+    """Render ``authors`` or ``maintainers`` as ``<role>`` and ``<role>-email``."""
+    names = [e["name"] for e in entries if e.get("name") and not e.get("email")]
+    emails = [
+        str(Address(display_name=e.get("name", ""), addr_spec=e["email"]))
+        for e in entries
+        if e.get("email")
+    ]
+    lines = []
+    if names:
+        lines.append(_header(role, ", ".join(names)))
+    if emails:
+        lines.append(_header(f"{role}-email", ", ".join(emails)))
+    return lines
+
+
+def _license_files(project: dict[str, Any], source_dir: Path) -> list[str]:
+    """Return the sorted project-relative paths matched by ``license-files``.
+
+    A pattern must be relative and free of ``..``, a drive and backslashes. Each
+    match is resolved, so a symlink leaving the project is refused too.
+    """
+    root = source_dir.resolve()
+    found: set[str] = set()
+    for pattern in project.get("license-files") or []:
+        as_windows = PureWindowsPath(pattern)
+        if (
+            "\\" in pattern
+            or Path(pattern).is_absolute()
+            or as_windows.anchor
+            or ".." in PurePosixPath(pattern).parts
+        ):
+            raise RuntimeError(
+                f"pyproject [project] license-files: {pattern!r} is outside the project."
+            )
+        matches: set[str] = set()
+        for m in glob.glob(pattern, root_dir=root, recursive=True):
+            path = (root / m).resolve()
+            if not path.is_file():
+                continue
+            if not path.is_relative_to(root):
+                raise RuntimeError(
+                    f"pyproject [project] license-files: {m!r} resolves outside "
+                    "the project."
+                )
+            matches.add(Path(m).as_posix())
+        if not matches:
+            raise RuntimeError(
+                f"pyproject [project] license-files: {pattern!r} matches no file."
+            )
+        found |= matches
+    return sorted(found)
+
+
+def _license_lines(project: dict[str, Any], source_dir: Path) -> list[str]:
+    """Render the ``license`` field, as an SPDX expression or the legacy table."""
+    license_ = project.get("license")
+    if not license_:
+        return []
+    if isinstance(license_, str):
+        return [_header("License-Expression", license_)]
+    if ("file" in license_) == ("text" in license_):
+        raise RuntimeError(
+            "pyproject [project] license: give exactly one of 'file' and 'text'."
+        )
+    if "file" in license_:
+        return [
+            _header("License", _read_inside(source_dir, license_["file"], "license"))
+        ]
+    return [_header("License", str(license_["text"]))]
+
+
+def _dist_info_extras(project: dict[str, Any], source_dir: Path) -> dict[str, bytes]:
+    """Return the dist-info files beyond METADATA, WHEEL and RECORD.
+
+    Keys are paths relative to the ``.dist-info`` directory.
+    """
+    extras: dict[str, bytes] = {}
+    for relative in _license_files(project, source_dir):
+        extras[f"licenses/{relative}"] = (source_dir / relative).read_bytes()
+    return extras
+
+
+def _render_metadata(
+    name: str, version: str, project: dict[str, Any], source_dir: Path
+) -> str:
     """Render the wheel METADATA file from the ``[project]`` table.
 
-    Honors ``Name``, ``Version``, ``Requires-Python`` and ``Requires-Dist``.
     PEP 621 requires the backend to honor every non-dynamic ``[project]`` field,
-    so any other field present (``description``, ``readme``, ``license``,
-    ``authors``, ``optional-dependencies``, entry points, ...) raises instead of
-    being silently dropped.
+    so a field the backend does not know, and any non-empty ``dynamic``, raise
+    instead of being silently dropped. *source_dir* resolves ``readme``,
+    ``license`` and ``license-files``.
     """
     unsupported = sorted(
         field
@@ -103,16 +249,38 @@ def _render_metadata(name: str, version: str, project: dict[str, Any]) -> str:
         )
 
     lines = [
-        "Metadata-Version: 2.1",
+        "Metadata-Version: 2.4",
         f"Name: {name}",
         f"Version: {version}",
+    ]
+    description = project.get("description")
+    if description:
+        if any(c in description for c in "\r\n"):
+            raise RuntimeError("pyproject [project] description must be a single line.")
+        lines.append(f"Summary: {description}")
+    if project.get("keywords"):
+        lines.append(_header("Keywords", ",".join(project["keywords"])))
+    lines += _people("Author", project.get("authors") or [])
+    lines += _people("Maintainer", project.get("maintainers") or [])
+    lines += _license_lines(project, source_dir)
+    lines += [f"License-File: {p}" for p in _license_files(project, source_dir)]
+    lines += [f"Classifier: {c}" for c in project.get("classifiers") or []]
+    lines += [
+        _header("Project-URL", f"{label}, {url}")
+        for label, url in (project.get("urls") or {}).items()
     ]
     requires_python = project.get("requires-python")
     if requires_python:
         lines.append(f"Requires-Python: {requires_python}")
+    readme = _readme(project, source_dir)
+    if readme:
+        lines.append(f"Description-Content-Type: {readme[1]}")
     for dep in project.get("dependencies", []):
         lines.append(f"Requires-Dist: {dep}")
-    return "\n".join(lines) + "\n"
+    text = "\n".join(lines) + "\n"
+    if readme:
+        text += "\n" + readme[0]
+    return text
 
 
 # Directories never shipped in an sdist: build outputs, VCS data and tooling
@@ -212,11 +380,13 @@ def _write_wheel(
     python_tag: str,
     abi_tag: str,
     platform_tag: str,
+    extras: dict[str, bytes] | None = None,
 ) -> None:
     """Create the .whl file (a zip) at *wheel_path*.
 
     *root* is the staging directory that serves as the site-packages image, the structure is preserved.
     *metadata* is the rendered dist-info/METADATA text (see :func:`_render_metadata`).
+    *extras* are further dist-info files (see :func:`_dist_info_extras`).
     """
     dist_info = f"{name}-{version}.dist-info"
 
@@ -252,6 +422,11 @@ def _write_wheel(
         zf.writestr(arcname, pkg_meta_bytes)
         record.append((arcname, _sha256_record(pkg_meta_bytes), len(pkg_meta_bytes)))
 
+        for relative, data in sorted((extras or {}).items()):
+            arcname = f"{dist_info}/{relative}"
+            zf.writestr(arcname, data)
+            record.append((arcname, _sha256_record(data), len(data)))
+
         # dist-info/RECORD (no hash for the record file itself)
         record_lines = [f"{arc},{h},{sz}" for arc, h, sz in record]
         record_lines.append(f"{dist_info}/RECORD,,")
@@ -267,6 +442,7 @@ def _write_editable_wheel(
     python_tag: str,
     abi_tag: str,
     platform_tag: str,
+    extras: dict[str, bytes] | None = None,
 ) -> None:
     """Create an editable wheel containing only a .pth file pointing at build_dir.
 
@@ -276,6 +452,7 @@ def _write_editable_wheel(
     re-running ninja is enough to pick up rebuilt extensions without reinstalling.
 
     *metadata* is the rendered dist-info/METADATA text (see :func:`_render_metadata`).
+    *extras* are further dist-info files (see :func:`_dist_info_extras`).
     """
     dist_info = f"{name}-{version}.dist-info"
     pth_name = f"_{name}_editable.pth"
@@ -307,6 +484,11 @@ def _write_editable_wheel(
         arcname = f"{dist_info}/METADATA"
         zf.writestr(arcname, pkg_meta_bytes)
         record.append((arcname, _sha256_record(pkg_meta_bytes), len(pkg_meta_bytes)))
+
+        for relative, data in sorted((extras or {}).items()):
+            arcname = f"{dist_info}/{relative}"
+            zf.writestr(arcname, data)
+            record.append((arcname, _sha256_record(data), len(data)))
 
         record_lines = [f"{arc},{h},{sz}" for arc, h, sz in record]
         record_lines.append(f"{dist_info}/RECORD,,")
@@ -369,13 +551,21 @@ def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
     dist_info_dir = meta_dir / dist_info_name
     dist_info_dir.mkdir(parents=True, exist_ok=True)
 
-    (dist_info_dir / "WHEEL").write_text(
-        "Wheel-Version: 1.0\n"
-        "Generator: pcons\n"
-        f"Root-Is-Purelib: {purelib}\n"
-        f"Tag: {tag}\n"
+    (dist_info_dir / "WHEEL").write_bytes(
+        (
+            "Wheel-Version: 1.0\n"
+            "Generator: pcons\n"
+            f"Root-Is-Purelib: {purelib}\n"
+            f"Tag: {tag}\n"
+        ).encode()
     )
-    (dist_info_dir / "METADATA").write_text(_render_metadata(name, version, project))
+    (dist_info_dir / "METADATA").write_bytes(
+        _render_metadata(name, version, project, source_dir).encode()
+    )
+    for relative, data in _dist_info_extras(project, source_dir).items():
+        target = dist_info_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
 
     return dist_info_name
 
@@ -401,7 +591,8 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
 
     # Render (and validate) metadata up front so an unsupported [project] field
     # fails the build before any compilation happens.
-    metadata = _render_metadata(name, version, project)
+    metadata = _render_metadata(name, version, project, source_dir)
+    extras = _dist_info_extras(project, source_dir)
 
     if editable:
         _run_pcons(source_dir, build_dir, variant=variant, variables=variables or None)
@@ -415,6 +606,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
             python_tag,
             abi_tag,
             platform_tag,
+            extras,
         )
     else:
         # Install the project into a clean staging directory, then package the
@@ -457,6 +649,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
             python_tag,
             abi_tag,
             platform_tag,
+            extras,
         )
 
     return wheel_name
@@ -520,7 +713,7 @@ def build_sdist(
 
     prefix = f"{name}-{version}"
     # PKG-INFO uses the core-metadata format, same content as the wheel METADATA.
-    pkg_info = _render_metadata(name, version, project).encode()
+    pkg_info = _render_metadata(name, version, project, source_dir).encode()
     files = _sdist_files(source_dir)
 
     with tarfile.open(sdist_dir / sdist_name, "w:gz") as tf:

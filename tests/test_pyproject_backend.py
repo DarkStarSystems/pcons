@@ -125,48 +125,316 @@ class TestSha256Record:
 
 
 class TestRenderMetadata:
-    def test_minimal(self) -> None:
-        meta = backend._render_metadata("mypkg", "1.0", {})
-        assert "Metadata-Version: 2.1" in meta
+    def test_minimal(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata("mypkg", "1.0", {}, tmp_path)
+        assert "Metadata-Version: 2.4" in meta
         assert "Name: mypkg" in meta
         assert "Version: 1.0" in meta
 
-    def test_requires_python(self) -> None:
-        meta = backend._render_metadata("mypkg", "1.0", {"requires-python": ">=3.11"})
+    def test_requires_python(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"requires-python": ">=3.11"}, tmp_path
+        )
         assert "Requires-Python: >=3.11" in meta
 
-    def test_dependencies_become_requires_dist(self) -> None:
+    def test_dependencies_become_requires_dist(self, tmp_path: Path) -> None:
         meta = backend._render_metadata(
             "mypkg",
             "1.0",
             {"dependencies": ["requests>=2", "rich; python_version >= '3.8'"]},
+            tmp_path,
         )
         assert "Requires-Dist: requests>=2" in meta
         assert "Requires-Dist: rich; python_version >= '3.8'" in meta
 
-    def test_unsupported_field_raises(self) -> None:
-        with pytest.raises(RuntimeError, match="optional-dependencies"):
+    def test_unknown_field_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="frobnicate"):
+            backend._render_metadata("mypkg", "1.0", {"frobnicate": "x"}, tmp_path)
+
+    def test_non_empty_dynamic_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="dynamic"):
+            backend._render_metadata("mypkg", "1.0", {"dynamic": ["version"]}, tmp_path)
+
+    def test_error_lists_every_unsupported_field(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError) as exc:
             backend._render_metadata(
-                "mypkg", "1.0", {"optional-dependencies": {"test": ["pytest"]}}
+                "mypkg", "1.0", {"frobnicate": "x", "dynamic": ["version"]}, tmp_path
+            )
+        message = str(exc.value)
+        assert "frobnicate" in message
+        assert "dynamic" in message
+
+    def test_empty_unsupported_field_is_ignored(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"dynamic": [], "keywords": []}, tmp_path
+        )
+        assert "Name: mypkg" in meta
+
+    def test_description_becomes_summary(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"description": "A tool"}, tmp_path
+        )
+        assert "Summary: A tool\n" in meta
+
+    @pytest.mark.parametrize("description", ["a\nb", "a\rb", "a\r\nb"])
+    def test_multiline_description_raises(
+        self, tmp_path: Path, description: str
+    ) -> None:
+        with pytest.raises(RuntimeError, match="description"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"description": description}, tmp_path
             )
 
-    def test_error_lists_every_unsupported_field(self) -> None:
-        with pytest.raises(RuntimeError) as exc:
+    @pytest.mark.parametrize(
+        ("filename", "content_type"),
+        [
+            ("README.md", "text/markdown"),
+            ("README.rst", "text/x-rst"),
+            ("README.txt", "text/plain"),
+        ],
+    )
+    def test_readme_string(
+        self, tmp_path: Path, filename: str, content_type: str
+    ) -> None:
+        (tmp_path / filename).write_text("Hello\nworld\n")
+        meta = backend._render_metadata("mypkg", "1.0", {"readme": filename}, tmp_path)
+        assert f"Description-Content-Type: {content_type}\n" in meta
+        head, _, body = meta.partition("\n\n")
+        assert "Hello" not in head
+        assert body == "Hello\nworld\n"
+
+    def test_readme_table_file(self, tmp_path: Path) -> None:
+        (tmp_path / "DOC").write_text("body\n")
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"readme": {"file": "DOC", "content-type": "text/plain"}},
+            tmp_path,
+        )
+        assert "Description-Content-Type: text/plain\n" in meta
+        assert meta.endswith("\n\nbody\n")
+
+    def test_readme_table_text(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"readme": {"text": "inline", "content-type": "text/markdown"}},
+            tmp_path,
+        )
+        assert meta.endswith("\n\ninline")
+
+    def test_readme_table_needs_content_type(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="content-type"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"readme": {"text": "x"}}, tmp_path
+            )
+
+    def test_readme_table_file_and_text_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="exactly one"):
             backend._render_metadata(
                 "mypkg",
                 "1.0",
-                {"description": "hi", "scripts": {"cli": "mypkg:main"}},
+                {"readme": {"file": "R", "text": "x", "content-type": "text/plain"}},
+                tmp_path,
             )
-        message = str(exc.value)
-        assert "description" in message
-        assert "scripts" in message
 
-    def test_empty_unsupported_field_is_ignored(self) -> None:
-        # A present-but-empty field (e.g. dynamic = []) is not a dropped value.
+    def test_readme_missing_file_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="README.md"):
+            backend._render_metadata("mypkg", "1.0", {"readme": "README.md"}, tmp_path)
+
+    def test_readme_unknown_suffix_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "README.adoc").write_text("x")
+        with pytest.raises(RuntimeError, match="content type"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"readme": "README.adoc"}, tmp_path
+            )
+
+    def test_readme_outside_project_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "outside.md").write_text("x")
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        with pytest.raises(RuntimeError, match="outside"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"readme": "../outside.md"}, project_dir
+            )
+
+    def test_license_expression(self, tmp_path: Path) -> None:
         meta = backend._render_metadata(
-            "mypkg", "1.0", {"description": "", "keywords": []}
+            "mypkg", "1.0", {"license": "MIT OR Apache-2.0"}, tmp_path
         )
-        assert "Name: mypkg" in meta
+        assert "License-Expression: MIT OR Apache-2.0\n" in meta
+
+    def test_license_table_text(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"license": {"text": "Custom"}}, tmp_path
+        )
+        assert "License: Custom\n" in meta
+
+    def test_license_table_file_folds_lines(self, tmp_path: Path) -> None:
+        (tmp_path / "LICENSE").write_text("line one\nline two")
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"license": {"file": "LICENSE"}}, tmp_path
+        )
+        assert "License: line one\n        line two\n" in meta
+
+    def test_license_files_listed_sorted(self, tmp_path: Path) -> None:
+        (tmp_path / "LICENSE").write_text("a")
+        (tmp_path / "NOTICE").write_text("b")
+        (tmp_path / "licenses").mkdir()
+        (tmp_path / "licenses" / "X.txt").write_text("c")
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"license-files": ["NOTICE", "LICENSE*", "licenses/*.txt"]},
+            tmp_path,
+        )
+        lines = [ln for ln in meta.splitlines() if ln.startswith("License-File:")]
+        assert lines == [
+            "License-File: LICENSE",
+            "License-File: NOTICE",
+            "License-File: licenses/X.txt",
+        ]
+
+    def test_license_table_file_and_text_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="exactly one"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"license": {"file": "L", "text": "x"}}, tmp_path
+            )
+
+    def test_license_files_skip_directories(self, tmp_path: Path) -> None:
+        (tmp_path / "licenses" / "sub").mkdir(parents=True)
+        (tmp_path / "licenses" / "X.txt").write_text("c")
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"license-files": ["licenses/*"]}, tmp_path
+        )
+        lines = [ln for ln in meta.splitlines() if ln.startswith("License-File:")]
+        assert lines == ["License-File: licenses/X.txt"]
+
+    def test_license_files_without_match_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="matches no file"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"license-files": ["LICENSE*"]}, tmp_path
+            )
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "../LICENSE",
+            "/LICENSE",
+            "C:LICENSE",
+            "C:/LICENSE",
+            "sub\\LICENSE",
+            "\\LICENSE",
+        ],
+    )
+    def test_license_files_outside_project_raises(
+        self, tmp_path: Path, pattern: str
+    ) -> None:
+        with pytest.raises(RuntimeError, match="outside"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"license-files": [pattern]}, tmp_path
+            )
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="needs symlink privilege")
+    def test_license_files_symlink_escape_raises(self, tmp_path: Path) -> None:
+        project = tmp_path / "project"
+        project.mkdir()
+        secret = tmp_path / "secret.txt"
+        secret.write_text("secret")
+        (project / "LICENSE").symlink_to(secret)
+        with pytest.raises(RuntimeError, match="outside"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"license-files": ["LICENSE"]}, project
+            )
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="needs symlink privilege")
+    def test_license_files_symlink_inside_is_accepted(self, tmp_path: Path) -> None:
+        (tmp_path / "REAL").write_text("text")
+        (tmp_path / "LICENSE").symlink_to(tmp_path / "REAL")
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"license-files": ["LICENSE"]}, tmp_path
+        )
+        assert "License-File: LICENSE\n" in meta
+
+    def test_people(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {
+                "authors": [
+                    {"name": "Ada", "email": "ada@example.com"},
+                    {"email": "bare@example.com"},
+                    {"name": "Bob"},
+                ],
+                "maintainers": [{"name": "Eve", "email": "eve@example.com"}],
+            },
+            tmp_path,
+        )
+        assert "Author: Bob\n" in meta
+        assert "Author-email: Ada <ada@example.com>, bare@example.com\n" in meta
+        assert "Maintainer-email: Eve <eve@example.com>\n" in meta
+        assert "Maintainer:" not in meta
+
+    def test_person_name_with_comma_is_quoted(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"authors": [{"name": "Doe, Jane", "email": "j@example.com"}]},
+            tmp_path,
+        )
+        assert 'Author-email: "Doe, Jane" <j@example.com>\n' in meta
+
+    def test_non_ascii_person_name_stays_utf8(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"authors": [{"name": "Zo\u00eb M\u00fcller", "email": "z@example.com"}]},
+            tmp_path,
+        )
+        assert "Author-email: Zo\u00eb M\u00fcller <z@example.com>\n" in meta
+        assert "=?" not in meta
+
+    def test_keywords_classifiers_urls(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {
+                "keywords": ["build", "ninja"],
+                "classifiers": ["License :: OSI Approved :: MIT License", "Topic :: X"],
+                "urls": {"Homepage": "https://example.com", "Docs": "https://d.io"},
+            },
+            tmp_path,
+        )
+        assert "Keywords: build,ninja\n" in meta
+        assert "Classifier: License :: OSI Approved :: MIT License\n" in meta
+        assert "Classifier: Topic :: X\n" in meta
+        assert "Project-URL: Homepage, https://example.com\n" in meta
+        assert "Project-URL: Docs, https://d.io\n" in meta
+
+    def test_parses_as_email_message(self, tmp_path: Path) -> None:
+        from email import message_from_string
+
+        (tmp_path / "README.md").write_text("# Title\n")
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"description": "S", "readme": "README.md", "license": "MIT"},
+            tmp_path,
+        )
+        msg = message_from_string(meta)
+        assert msg["Summary"] == "S"
+        assert msg["License-Expression"] == "MIT"
+        assert msg.get_payload() == "# Title\n"
+
+
+class TestDistInfoExtras:
+    def test_license_files_land_under_licenses(self, tmp_path: Path) -> None:
+        (tmp_path / "LICENSE").write_bytes(b"MIT text")
+        extras = backend._dist_info_extras({"license-files": ["LICENSE"]}, tmp_path)
+        assert extras == {"licenses/LICENSE": b"MIT text"}
+
+    def test_empty_without_fields(self, tmp_path: Path) -> None:
+        assert backend._dist_info_extras({}, tmp_path) == {}
 
 
 class TestNameVersion:
@@ -211,7 +479,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
-            backend._render_metadata("mypkg", "1.0", {}),
+            backend._render_metadata("mypkg", "1.0", {}, tmp_path),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -227,7 +495,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
-            backend._render_metadata("mypkg", "1.0", {}),
+            backend._render_metadata("mypkg", "1.0", {}, tmp_path),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -247,7 +515,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
-            backend._render_metadata("mypkg", "1.0", {}),
+            backend._render_metadata("mypkg", "1.0", {}, tmp_path),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -267,7 +535,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
-            backend._render_metadata("mypkg", "1.0", {}),
+            backend._render_metadata("mypkg", "1.0", {}, tmp_path),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -286,7 +554,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
-            backend._render_metadata("mypkg", "1.0", {}),
+            backend._render_metadata("mypkg", "1.0", {}, tmp_path),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -303,7 +571,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
-            backend._render_metadata("mypkg", "1.0", {}),
+            backend._render_metadata("mypkg", "1.0", {}, tmp_path),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -328,7 +596,7 @@ class TestWriteWheel:
             "1.0",
             [root / "mypkg" / "__init__.py", ext],
             root,
-            backend._render_metadata("mypkg", "1.0", {}),
+            backend._render_metadata("mypkg", "1.0", {}, tmp_path),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -696,3 +964,107 @@ class TestBuildEditable:
             # Extension must NOT be bundled in the editable wheel
             ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
             assert not any(n.endswith(ext_suffix) for n in names)
+
+
+_RICH_PYPROJECT = """\
+[project]
+name = "mypkg"
+version = "0.1"
+description = "A package"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+"""
+
+
+def _rich_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    _make_pyproject(tmp_path, _RICH_PYPROJECT)
+    (tmp_path / "README.md").write_text("# Hello\n")
+    (tmp_path / "LICENSE").write_text("MIT text\n")
+    (tmp_path / "pcons-build.py").write_text("# stub")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+class TestDistInfoExtrasInDistributions:
+    def test_wheel_carries_license_and_record(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = _rich_project(tmp_path, monkeypatch)
+        with (
+            patch("pcons.pyproject._run_pcons"),
+            patch(
+                "pcons.pyproject._run_ninja",
+                side_effect=lambda build_dir, targets=None: (
+                    _stage_extension_side_effect(build_dir, targets)
+                ),
+            ),
+        ):
+            filename = backend.build_wheel(str(src / "dist"))
+        with zipfile.ZipFile(src / "dist" / filename) as zf:
+            assert zf.read("mypkg-0.1.dist-info/licenses/LICENSE") == b"MIT text\n"
+            record = zf.read("mypkg-0.1.dist-info/RECORD").decode()
+            metadata = zf.read("mypkg-0.1.dist-info/METADATA").decode()
+        assert "mypkg-0.1.dist-info/licenses/LICENSE,sha256=" in record
+        assert "License-File: LICENSE\n" in metadata
+        assert "Summary: A package\n" in metadata
+
+    def test_editable_wheel_carries_license_and_record(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = _rich_project(tmp_path, monkeypatch)
+        with (
+            patch("pcons.pyproject._run_pcons"),
+            patch("pcons.pyproject._run_ninja"),
+        ):
+            filename = backend.build_editable(str(src / "dist"))
+        with zipfile.ZipFile(src / "dist" / filename) as zf:
+            assert zf.read("mypkg-0.1.dist-info/licenses/LICENSE") == b"MIT text\n"
+            record = zf.read("mypkg-0.1.dist-info/RECORD").decode()
+        assert "mypkg-0.1.dist-info/licenses/LICENSE,sha256=" in record
+
+    def test_prepare_metadata_writes_license(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _rich_project(tmp_path, monkeypatch)
+        meta_dir = tmp_path / "meta"
+        backend.prepare_metadata_for_build_wheel(str(meta_dir))
+        dist_info = meta_dir / "mypkg-0.1.dist-info"
+        assert (dist_info / "licenses" / "LICENSE").read_text() == "MIT text\n"
+        assert "Summary: A package" in (dist_info / "METADATA").read_text()
+
+    def test_prepared_metadata_is_byte_identical_to_wheel(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = _rich_project(tmp_path, monkeypatch)
+        (src / "README.md").write_text("# H\u00e9llo \u2603\n", encoding="utf-8")
+        meta_dir = tmp_path / "meta"
+        backend.prepare_metadata_for_build_wheel(str(meta_dir))
+        prepared = (meta_dir / "mypkg-0.1.dist-info" / "METADATA").read_bytes()
+        with (
+            patch("pcons.pyproject._run_pcons"),
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ),
+        ):
+            filename = backend.build_wheel(str(src / "dist"))
+        with zipfile.ZipFile(src / "dist" / filename) as zf:
+            assert zf.read("mypkg-0.1.dist-info/METADATA") == prepared
+        assert b"\r" not in prepared
+        assert "H\u00e9llo \u2603".encode() in prepared
+
+    def test_sdist_pkg_info_has_new_fields(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tarfile
+
+        src = _rich_project(tmp_path, monkeypatch)
+        filename = backend.build_sdist(str(src / "dist"))
+        with tarfile.open(src / "dist" / filename) as tf:
+            member = tf.extractfile("mypkg-0.1/PKG-INFO")
+            assert member is not None
+            pkg_info = member.read().decode()
+            assert "mypkg-0.1/LICENSE" in tf.getnames()
+        assert "Metadata-Version: 2.4" in pkg_info
+        assert "License-Expression: MIT\n" in pkg_info
+        assert pkg_info.endswith("\n\n# Hello\n")

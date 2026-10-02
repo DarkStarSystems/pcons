@@ -4110,11 +4110,32 @@ editable builds.)
 
 #### Metadata and sdists
 
-The backend honors the PEP 621 `[project]` fields `name`, `version`,
-`requires-python`, and `dependencies` (emitted as `Requires-Dist`). Any other
-non-empty `[project]` field raises an error rather than being silently
-dropped from the wheel's metadata — remove the field or file an issue.
-`name` and `version` are required.
+The backend renders these PEP 621 `[project]` fields into `METADATA`
+(Metadata-Version 2.4):
+
+- `name`, `version` and `requires-python`. `name` and `version` are required.
+- `dependencies`, as `Requires-Dist`.
+- `description`, as `Summary`. It must be one line.
+- `readme`, a file name or a table with `file` or `text` and `content-type`.
+  A file name needs the suffix `.md`, `.rst` or `.txt`. The text becomes the
+  message body and `Description-Content-Type` is set.
+- `license`, an SPDX expression string (`License-Expression`). The legacy
+  `{text = ...}` and `{file = ...}` tables become `License`. The expression is
+  passed through, not validated.
+- `license-files`, a list of globs. Each match gets a `License-File` line and is
+  copied to `<name>-<version>.dist-info/licenses/`. A glob that matches nothing
+  is an error.
+- `authors` and `maintainers`, as `Author`, `Author-email`, `Maintainer` and
+  `Maintainer-email`.
+- `keywords`, `classifiers` and `urls`, as `Keywords`, `Classifier` and
+  `Project-URL`.
+
+Files named by `readme`, `license` and `license-files` must lie inside the
+project.
+
+An unknown `[project]` key, or a non-empty `dynamic`, raises an error rather
+than being silently dropped from the wheel's metadata. Remove it or file an
+issue.
 
 `build_sdist` ships the whole source tree (recursively, excluding build
 output, VCS data, and tool caches) plus the spec-required `PKG-INFO`.
