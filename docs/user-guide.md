@@ -4128,6 +4128,20 @@ drive-relative path such as `C:build` are refused. An sdist leaves the
 build directory out when it lies inside the project, so a source directory
 like `src` would be missing from the sdist.
 
+A wheel build reconfigures its build directory with the wheel layout. When
+that directory was last configured by something else, a `pcons` run, an
+editable install or a ninja regen, the backend logs a warning:
+
+```
+pcons: build directory /path/to/project/build was last configured by something
+other than a wheel build: ...
+```
+
+After such a build, `ninja -C build` rebuilds with the wheel layout. Set
+`build-dir` to keep the two apart. The backend records each wheel build in a
+`.pcons-wheel` file in the build directory to tell them apart. `uv build`
+prints the warning. pip shows backend output only with `-v`.
+
 The backend neither reads nor writes `pcons_cache.json`. Its `variant` and
 `variables` come from `pyproject.toml` on every build, so a variant, generator
 or variable you persisted with `pcons -B build --variant=debug SOMEVAR=ON`

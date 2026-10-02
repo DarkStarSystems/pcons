@@ -1366,3 +1366,175 @@ class TestRunPcons:
 
         assert (build_dir / "build.ninja").exists()
         assert not (build_dir / "pcons_cache.json").exists()
+
+
+class TestSharedBuildDirWarning:
+    _MESSAGE = "was last configured by something other than a wheel build"
+
+    def _setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        _make_pyproject(tmp_path, '[project]\nname = "mypkg"\nversion = "0.1"\n')
+        (tmp_path / "pcons-build.py").write_text("# stub")
+        monkeypatch.chdir(tmp_path)
+        return tmp_path
+
+    @staticmethod
+    def _configure(
+        src: Path,
+        build_dir: Path,
+        variant: str | None = None,
+        variables: dict[str, str] | None = None,
+    ) -> None:
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / "build.ninja").write_text(f"# wheel {variables}\n")
+
+    def _wheel(self, src: Path) -> None:
+        with (
+            patch("pcons.pyproject._run_pcons", side_effect=self._configure),
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ),
+        ):
+            backend.build_wheel(str(src / "dist"))
+
+    def _warned(self, caplog: pytest.LogCaptureFixture) -> bool:
+        return any(self._MESSAGE in r.getMessage() for r in caplog.records)
+
+    def test_fresh_dir_does_not_warn(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        self._wheel(src)
+        assert not self._warned(caplog)
+        assert (src / "build" / backend._WHEEL_STAMP).exists()
+
+    def test_wheel_after_wheel_does_not_warn(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        self._wheel(src)
+        self._wheel(src)
+        assert not self._warned(caplog)
+
+    def test_dir_configured_by_another_build_warns(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        (src / "build").mkdir()
+        (src / "build" / "build.ninja").write_text("# cli\n")
+        self._wheel(src)
+        assert self._warned(caplog)
+        record = next(r for r in caplog.records if self._MESSAGE in r.getMessage())
+        assert record.levelname == "WARNING"
+
+    def test_reconfigure_after_wheel_warns(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        self._wheel(src)
+        (src / "build" / "build.ninja").write_text("# editable\n")
+        self._wheel(src)
+        assert self._warned(caplog)
+
+    def test_same_size_rewrite_warns(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        import os
+
+        src = self._setup(tmp_path, monkeypatch)
+        self._wheel(src)
+        ninja_file = src / "build" / "build.ninja"
+        stat = ninja_file.stat()
+        os.utime(ninja_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        self._wheel(src)
+        assert self._warned(caplog)
+
+    def test_unreadable_stamp_warns(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        self._wheel(src)
+        (src / "build" / backend._WHEEL_STAMP).write_text("not json")
+        self._wheel(src)
+        assert self._warned(caplog)
+
+    def test_failed_ninja_still_stamps(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        with (
+            patch("pcons.pyproject._run_pcons", side_effect=self._configure),
+            patch("pcons.pyproject._run_ninja", side_effect=RuntimeError("ninja")),
+            pytest.raises(RuntimeError, match="ninja"),
+        ):
+            backend.build_wheel(str(src / "dist"))
+        assert (src / "build" / backend._WHEEL_STAMP).exists()
+
+    def test_unwritable_stamp_does_not_mask_ninja_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        (src / "build" / backend._WHEEL_STAMP).mkdir(parents=True)
+        with (
+            patch("pcons.pyproject._run_pcons", side_effect=self._configure),
+            patch("pcons.pyproject._run_ninja", side_effect=RuntimeError("ninja")),
+            pytest.raises(RuntimeError, match="ninja"),
+        ):
+            backend.build_wheel(str(src / "dist"))
+
+    def test_unreadable_build_ninja_counts_as_absent(self, tmp_path: Path) -> None:
+        not_a_dir = tmp_path / "file"
+        not_a_dir.write_text("x")
+        assert backend._ninja_file_state(not_a_dir) is None
+
+    def test_editable_does_not_warn(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        (src / "build").mkdir()
+        (src / "build" / "build.ninja").write_text("# cli\n")
+        with (
+            patch("pcons.pyproject._run_pcons"),
+            patch("pcons.pyproject._run_ninja"),
+        ):
+            backend.build_editable(str(src / "dist"))
+        assert not self._warned(caplog)
+
+    def test_wheel_in_own_build_dir_does_not_warn(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        _make_pyproject(
+            tmp_path,
+            '[project]\nname = "mypkg"\nversion = "0.1"\n'
+            '[tool.pcons]\nbuild-dir = "build-wheel"\n',
+        )
+        (tmp_path / "pcons-build.py").write_text("# stub")
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "build.ninja").write_text("# editable\n")
+        self._wheel(tmp_path)
+        assert not self._warned(caplog)
+        assert (tmp_path / "build-wheel" / backend._WHEEL_STAMP).exists()

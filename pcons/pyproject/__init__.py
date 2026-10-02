@@ -15,6 +15,8 @@ import base64
 import glob
 import hashlib
 import io
+import json
+import logging
 import os
 import re
 import shutil
@@ -24,6 +26,10 @@ import zipfile
 from email.headerregistry import Address
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+_WHEEL_STAMP = ".pcons-wheel"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -434,6 +440,58 @@ def _sha256_record(data: bytes) -> str:
     return f"sha256={digest}"
 
 
+def _ninja_file_state(build_dir: Path) -> dict[str, int] | None:
+    """Return the mtime and size of *build_dir*/build.ninja, None when unreadable."""
+    try:
+        stat = (build_dir / "build.ninja").stat()
+    except OSError:
+        return None
+    return {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}
+
+
+def _stamp_wheel_build(build_dir: Path) -> None:
+    """Record the build.ninja a wheel build left in *build_dir*.
+
+    A stamp that cannot be written is skipped, so it never masks the error of
+    the build that called this from a ``finally``. The next wheel build then
+    warns, which is the safe side.
+    """
+    state = _ninja_file_state(build_dir)
+    if state is None:
+        return
+    try:
+        (build_dir / _WHEEL_STAMP).write_text(json.dumps(state))
+    except OSError:
+        logger.debug("could not write %s in %s", _WHEEL_STAMP, build_dir)
+
+
+def _warn_if_shared(build_dir: Path) -> None:
+    """Warn when *build_dir* was last configured by something other than a wheel build.
+
+    Any other configure, a CLI run, an editable build or ninja's own regen,
+    rewrites build.ninja, so its mtime and size no longer match the stamp the
+    last wheel build left.
+    """
+    state = _ninja_file_state(build_dir)
+    if state is None:
+        return
+    try:
+        stamp = json.loads((build_dir / _WHEEL_STAMP).read_text())
+    except (OSError, ValueError):
+        stamp = None
+    if stamp == state:
+        return
+    logger.warning(
+        "pcons: build directory %s was last configured by something other "
+        "than a wheel build: a pcons run, an editable install or a ninja regen. "
+        "This wheel build reconfigures it, and the next `ninja -C %s` rebuilds "
+        "with the wheel layout. Set [tool.pcons] build-dir to give wheel builds "
+        "their own directory.",
+        build_dir,
+        build_dir,
+    )
+
+
 def _run_pcons(
     source_dir: Path,
     build_dir: Path,
@@ -730,8 +788,12 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
         # eg.: install to the root of the prefix rather than the usual bin/lib convention.
         variables["PCONS_BUILD_WHEEL"] = "1"
 
+        _warn_if_shared(build_dir)
         _run_pcons(source_dir, build_dir, variant=variant, variables=variables)
-        _run_ninja(build_dir, targets=[install_target])
+        try:
+            _run_ninja(build_dir, targets=[install_target])
+        finally:
+            _stamp_wheel_build(build_dir)
 
         # The staging directory IS the wheel payload: package everything the
         # install target put there (the extension(s), stubs, and any dependent
