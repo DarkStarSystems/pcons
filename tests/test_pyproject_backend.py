@@ -8,7 +8,7 @@ import sys
 import sysconfig
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1622,3 +1622,208 @@ class TestJobs:
         with patch("pcons.cli.run_ninja", return_value=0) as mock_run:
             backend._run_ninja(tmp_path, targets=["install"], jobs=3)
         mock_run.assert_called_once_with(tmp_path, targets=["install"], jobs=3)
+
+
+class TestBuildEnvIsTemporary:
+    @staticmethod
+    def _layout(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[Path, Path, Path]:
+        temp = tmp_path / "temp"
+        cache = tmp_path / "cache"
+        prefix = cache / "builds" / "env"
+        pcons_dir = prefix / "site-packages"
+        for d in (temp, pcons_dir):
+            d.mkdir(parents=True)
+        purelib = tmp_path / "target" / "site-packages"
+        purelib.mkdir(parents=True)
+        real_is_cache_dir = backend._is_cache_dir
+        monkeypatch.setattr(backend.tempfile, "gettempdir", lambda: str(temp))
+        monkeypatch.setattr(backend.sys, "prefix", str(prefix))
+        monkeypatch.setattr(backend.sys, "executable", str(prefix / "bin" / "python"))
+        monkeypatch.setattr(
+            backend.sysconfig, "get_paths", lambda: {"purelib": str(purelib)}
+        )
+        monkeypatch.setattr(
+            backend,
+            "_is_cache_dir",
+            lambda path: (
+                path.is_relative_to(tmp_path.resolve()) and real_is_cache_dir(path)
+            ),
+        )
+        return temp, cache, prefix
+
+    def test_pcons_under_temp_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        temp, _, _ = self._layout(tmp_path, monkeypatch)
+        overlay = temp / "pip-build-env" / "overlay"
+        overlay.mkdir(parents=True)
+        assert backend._build_env_is_temporary(overlay)
+
+    def test_prefix_inside_tagged_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, cache, prefix = self._layout(tmp_path, monkeypatch)
+        (cache / "CACHEDIR.TAG").write_bytes(backend._CACHEDIR_SIGNATURE + b"\n")
+        assert backend._build_env_is_temporary(prefix / "site-packages")
+
+    def test_tag_on_prefix_itself_does_not_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, _, prefix = self._layout(tmp_path, monkeypatch)
+        (prefix / "CACHEDIR.TAG").write_bytes(backend._CACHEDIR_SIGNATURE)
+        assert not backend._build_env_is_temporary(prefix / "site-packages")
+
+    def test_tag_without_signature_does_not_count(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, cache, prefix = self._layout(tmp_path, monkeypatch)
+        (cache / "CACHEDIR.TAG").write_text("not a cache\n")
+        assert not backend._build_env_is_temporary(prefix / "site-packages")
+
+    def test_symlinked_temp_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._layout(tmp_path, monkeypatch)
+        real = tmp_path / "private" / "var"
+        pcons_dir = real / "pip-build-env" / "overlay"
+        pcons_dir.mkdir(parents=True)
+        link = tmp_path / "var"
+        try:
+            link.symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks unavailable")
+        monkeypatch.setattr(backend.tempfile, "gettempdir", lambda: str(link))
+        assert backend._build_env_is_temporary(pcons_dir.resolve())
+
+    def _pip_isolation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[Path, Path]:
+        temp, _, _ = self._layout(tmp_path, monkeypatch)
+        target = tmp_path / "venv"
+        purelib = target / "lib" / "site-packages"
+        purelib.mkdir(parents=True)
+        monkeypatch.setattr(backend.sys, "prefix", str(target))
+        monkeypatch.setattr(backend.sys, "executable", str(target / "bin" / "python"))
+        monkeypatch.setattr(
+            backend.sysconfig, "get_paths", lambda: {"purelib": str(purelib)}
+        )
+        overlay = temp / "pip-build-env" / "overlay"
+        overlay.mkdir(parents=True)
+        return overlay, purelib
+
+    def test_target_env_with_pcons_survives(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        overlay, purelib = self._pip_isolation(tmp_path, monkeypatch)
+        (purelib / "pcons").mkdir()
+        (purelib / "pcons" / "__init__.py").write_text("")
+        assert not backend._build_env_is_temporary(overlay)
+
+    def test_target_env_without_pcons_is_temporary(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        overlay, _ = self._pip_isolation(tmp_path, monkeypatch)
+        assert backend._build_env_is_temporary(overlay)
+
+    def test_pcons_inside_target_purelib_is_not_temporary(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, purelib = self._pip_isolation(tmp_path, monkeypatch)
+        (purelib / "pcons").mkdir()
+        (purelib / "pcons" / "__init__.py").write_text("")
+        assert not backend._build_env_is_temporary(purelib.resolve() / "pcons")
+
+    def test_interpreter_outside_prefix_is_temporary(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        overlay, purelib = self._pip_isolation(tmp_path, monkeypatch)
+        (purelib / "pcons").mkdir()
+        (purelib / "pcons" / "__init__.py").write_text("")
+        monkeypatch.setattr(
+            backend.sys, "executable", str(tmp_path / "elsewhere" / "python")
+        )
+        assert backend._build_env_is_temporary(overlay)
+
+    def test_target_env_under_temp_dir_is_temporary(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        overlay, purelib = self._pip_isolation(tmp_path, monkeypatch)
+        (purelib / "pcons").mkdir()
+        (purelib / "pcons" / "__init__.py").write_text("")
+        monkeypatch.setattr(backend.tempfile, "gettempdir", lambda: str(tmp_path))
+        assert backend._build_env_is_temporary(overlay)
+
+
+class TestIsolationWarning:
+    _MESSAGE = "runs in an isolated build environment"
+
+    def _setup(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        _make_pyproject(tmp_path, '[project]\nname = "mypkg"\nversion = "0.1"\n')
+        (tmp_path / "pcons-build.py").write_text("# stub")
+        monkeypatch.chdir(tmp_path)
+        return tmp_path
+
+    def _editable(self, src: Path, probe: MagicMock) -> str:
+        with (
+            patch("pcons.pyproject._build_env_is_temporary", probe),
+            patch("pcons.pyproject._run_pcons"),
+            patch("pcons.pyproject._run_ninja"),
+        ):
+            return backend.build_editable(str(src / "dist"))
+
+    def _warnings(self, caplog: pytest.LogCaptureFixture) -> list[str]:
+        return [
+            r.getMessage() for r in caplog.records if self._MESSAGE in r.getMessage()
+        ]
+
+    def test_temporary_env_warns_and_builds(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        filename = self._editable(src, MagicMock(return_value=True))
+        (message,) = self._warnings(caplog)
+        assert "--no-build-isolation" in message
+        assert sys.executable in message
+        assert str(src / "build") in message
+        assert (src / "dist" / filename).exists()
+
+    def test_surviving_env_does_not_warn(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        filename = self._editable(src, MagicMock(return_value=False))
+        assert not self._warnings(caplog)
+        assert (src / "dist" / filename).exists()
+
+    def test_failing_probe_does_not_warn_or_fail(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        filename = self._editable(src, MagicMock(side_effect=RuntimeError("probe")))
+        assert not self._warnings(caplog)
+        assert (src / "dist" / filename).exists()
+
+    def test_wheel_build_does_not_probe(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src = self._setup(tmp_path, monkeypatch)
+        with (
+            patch("pcons.pyproject._build_env_is_temporary") as probe,
+            patch("pcons.pyproject._run_pcons"),
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ),
+        ):
+            backend.build_wheel(str(src / "dist"))
+        probe.assert_not_called()

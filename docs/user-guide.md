@@ -4110,6 +4110,42 @@ the compiled extensions in `build/`, so after editing C++ sources, re-running
 `ninja` is enough — no reinstall needed. (`PCONS_BUILD_WHEEL` is *not* set for
 editable builds.)
 
+`build/build.ninja` records the Python that ran the backend. It runs that
+Python to regenerate itself when `pcons-build.py` changes, and for any command
+built on `sys.executable`. Under build isolation, the default for uv and pip,
+that Python does not survive the install. uv deletes its build venv. pip keeps
+the interpreter but drops the temporary directory that held pcons. The first
+regen then fails, for example with exit code 127. Plain C++ rebuilds keep
+working.
+
+The backend detects this case and logs a warning before it builds:
+
+```
+pcons: this editable install runs in an isolated build environment. ...
+```
+
+The install still succeeds. To get a build directory you can rerun ninja in,
+install pcons, ninja and the other build requirements into the target
+environment and turn build isolation off:
+
+```sh
+uv pip install pcons ninja && uv pip install --no-build-isolation -e .
+pip install pcons ninja && pip install --no-build-isolation -e .
+```
+
+With `uv sync`, add pcons and ninja to the dev dependency group and set
+`[tool.uv] no-build-isolation-package = ["<name>"]` for your package, or run
+`uv sync --no-build-isolation`.
+
+Re-running the install also recovers a failed regen, it rebuilds incrementally
+in `build/`. The backend treats an environment as temporary when pcons lies
+under the system temp directory, or when a directory above `sys.prefix` holds
+a signed `CACHEDIR.TAG`, as uv's cache does. A venv deliberately kept under the
+temp directory, or below a tagged directory, also triggers the warning. The
+warning is skipped when the target environment already has its own pcons,
+since regeneration imports that copy. `uv sync`, `uv pip install` and pip show backend output
+only with `-v`, so the warning shows up only in a verbose install.
+
 #### Build directory
 
 Wheel and editable builds both use `build/` by default, the same directory as

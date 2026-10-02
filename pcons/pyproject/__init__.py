@@ -22,6 +22,7 @@ import re
 import shutil
 import sys
 import sysconfig
+import tempfile
 import zipfile
 from email.headerregistry import Address
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -30,6 +31,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _WHEEL_STAMP = ".pcons-wheel"
+_CACHEDIR_SIGNATURE = b"Signature: 8a477f597d28d172789f06886806bc55"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -492,6 +494,79 @@ def _warn_if_shared(build_dir: Path) -> None:
     )
 
 
+def _is_cache_dir(path: Path) -> bool:
+    """Return True when *path* holds a Cache Directory Tagging ``CACHEDIR.TAG``."""
+    try:
+        with (path / "CACHEDIR.TAG").open("rb") as tag:
+            return tag.read(len(_CACHEDIR_SIGNATURE)) == _CACHEDIR_SIGNATURE
+    except OSError:
+        return False
+
+
+def _target_env_has_pcons(pcons_dir: Path) -> bool:
+    """Return True when regeneration can import pcons from the target environment.
+
+    pip's overlay hides the target's site-packages during the build, so pcons
+    loads from the overlay. At regeneration ``sys.executable`` is the target
+    interpreter and finds the target's own copy. That copy must live outside
+    the temp dir to survive.
+    """
+    purelib = Path(sysconfig.get_paths()["purelib"]).resolve()
+    if pcons_dir.is_relative_to(purelib):
+        return False
+    if purelib.is_relative_to(Path(tempfile.gettempdir()).resolve()):
+        return False
+    if not Path(sys.executable).absolute().is_relative_to(Path(sys.prefix).absolute()):
+        return False
+    return (purelib / "pcons" / "__init__.py").is_file()
+
+
+def _build_env_is_temporary(pcons_dir: Path) -> bool:
+    """Return True when pcons, imported from *pcons_dir*, runs from an
+    environment the frontend deletes after the build.
+
+    pip installs build requirements under the system temp dir. uv creates its
+    build venvs inside its cache dir, which carries a ``CACHEDIR.TAG``. uv tags
+    every venv it creates too, so only the strict ancestors of ``sys.prefix``
+    count.
+    """
+    if _target_env_has_pcons(pcons_dir):
+        return False
+    if pcons_dir.is_relative_to(Path(tempfile.gettempdir()).resolve()):
+        return True
+    return any(_is_cache_dir(parent) for parent in Path(sys.prefix).resolve().parents)
+
+
+def _warn_if_isolated(build_dir: Path) -> None:
+    """Warn when an editable build records an interpreter that will not survive.
+
+    A probe that fails is logged at debug level and never stops the build.
+    """
+    try:
+        pcons_dir = Path(__file__).resolve().parent.parent
+        temporary = _build_env_is_temporary(pcons_dir)
+    except Exception:
+        logger.debug("could not inspect the build environment", exc_info=True)
+        return
+    if not temporary:
+        return
+    logger.warning(
+        "pcons: this editable install runs in an isolated build environment. "
+        "%s/build.ninja calls %s with pcons from %s to regenerate itself, and "
+        "the frontend deletes that environment once the install ends. The next "
+        "ninja run that regenerates build files will fail. To get a build "
+        "directory you can rerun ninja in, install pcons and the other build "
+        "requirements into the target environment and turn build isolation off:\n"
+        "    uv pip install pcons ninja && uv pip install --no-build-isolation -e .\n"
+        "    pip install pcons ninja && pip install --no-build-isolation -e .\n"
+        "Re-running the install also recovers a failed regen, it rebuilds "
+        "incrementally.",
+        build_dir,
+        sys.executable,
+        pcons_dir,
+    )
+
+
 def _run_pcons(
     source_dir: Path,
     build_dir: Path,
@@ -781,6 +856,8 @@ def _build(
 
     pcons_cfg = pyproject.get("tool", {}).get("pcons", {})
     build_dir = source_dir / "build" if editable else _build_dir(source_dir, pcons_cfg)
+    if editable:
+        _warn_if_isolated(build_dir)
     variant = pcons_cfg.get("variant")
     variables = dict(pcons_cfg.get("variables") or {})
     # Ninja target (alias) that stages the files to package into the wheel.
