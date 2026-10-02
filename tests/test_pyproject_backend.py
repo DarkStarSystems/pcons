@@ -1300,3 +1300,69 @@ class TestBuildDir:
         filename = backend.build_sdist(str(src / "dist"))
         with tarfile.open(src / "dist" / filename) as tf:
             assert "mypkg-0.1/pcons-build.py" in tf.getnames()
+
+
+class TestRunPcons:
+    def test_does_not_persist(self, tmp_path: Path) -> None:
+        (tmp_path / "pcons-build.py").write_text("# stub")
+        with patch("pcons.cli.run_script", return_value=(0, [])) as mock_run:
+            backend._run_pcons(tmp_path, tmp_path / "build", variables={"A": "1"})
+        assert mock_run.call_args.kwargs["persist"] is False
+        assert mock_run.call_args.kwargs["fresh"] is True
+
+    def test_ignores_and_keeps_the_developer_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import json
+
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_VARIANT", raising=False)
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        (tmp_path / "pcons-build.py").write_text(
+            "import json\n"
+            "from pathlib import Path\n"
+            "from pcons import Project, get_var, get_variant\n"
+            "Project('p')\n"
+            "Path('seen.json').write_text(json.dumps({\n"
+            "    'variant': get_variant('unset'),\n"
+            "    'somevar': get_var('SOMEVAR'),\n"
+            "    'a': get_var('A'),\n"
+            "}))\n"
+        )
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        cache_file = build_dir / "pcons_cache.json"
+        cache_file.write_text(
+            json.dumps(
+                {
+                    "source_dir": str(tmp_path),
+                    "vars": {"SOMEVAR": "ON"},
+                    "variant": "debug",
+                    "generator": "make",
+                }
+            )
+        )
+        before = cache_file.read_bytes()
+        monkeypatch.chdir(tmp_path)
+
+        backend._run_pcons(tmp_path, build_dir, variables={"A": "1"})
+
+        assert json.loads((tmp_path / "seen.json").read_text()) == {
+            "variant": "unset",
+            "somevar": None,
+            "a": "1",
+        }
+        assert (build_dir / "build.ninja").exists()
+        assert not (build_dir / "Makefile").exists()
+        assert cache_file.read_bytes() == before
+
+    def test_writes_no_cache_into_a_fresh_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\nProject('p')\n"
+        )
+        build_dir = tmp_path / "build"
+
+        backend._run_pcons(tmp_path, build_dir, variables={"SOMEVAR": "OFF"})
+
+        assert (build_dir / "build.ninja").exists()
+        assert not (build_dir / "pcons_cache.json").exists()

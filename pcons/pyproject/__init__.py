@@ -440,7 +440,12 @@ def _run_pcons(
     variant: str | None = None,
     variables: dict[str, str] | None = None,
 ) -> None:
-    """Run pcons-build.py via pcons.cli.run_script (in-process)."""
+    """Run pcons-build.py via pcons.cli.run_script (in-process).
+
+    The build-dir cache is neither read nor written: *variables* and *variant*
+    come from pyproject.toml on every build, and a developer's own settings in
+    a shared build directory stay as they were.
+    """
     from pcons.cli import run_script
 
     build_script = source_dir / "pcons-build.py"
@@ -448,7 +453,12 @@ def _run_pcons(
         raise FileNotFoundError(f"pcons-build.py not found in {source_dir}")
 
     exit_code, _ = run_script(
-        build_script, build_dir, variables=variables, variant=variant
+        build_script,
+        build_dir,
+        variables=variables,
+        variant=variant,
+        persist=False,
+        fresh=True,
     )
     if exit_code != 0:
         raise RuntimeError(f"pcons-build.py exited with code {exit_code}")

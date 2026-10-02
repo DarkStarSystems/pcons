@@ -4128,6 +4128,11 @@ drive-relative path such as `C:build` are refused. An sdist leaves the
 build directory out when it lies inside the project, so a source directory
 like `src` would be missing from the sdist.
 
+The backend neither reads nor writes `pcons_cache.json`. Its `variant` and
+`variables` come from `pyproject.toml` on every build, so a variant, generator
+or variable you persisted with `pcons -B build --variant=debug SOMEVAR=ON`
+does not reach the backend build. The cache stays as it was after `uv sync`.
+
 #### Metadata and sdists
 
 The backend renders these PEP 621 `[project]` fields into `METADATA`
