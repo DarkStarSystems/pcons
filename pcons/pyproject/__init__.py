@@ -90,6 +90,9 @@ _HONORED_PROJECT_FIELDS = frozenset(
         "classifiers",
         "urls",
         "optional-dependencies",
+        "scripts",
+        "gui-scripts",
+        "entry-points",
     }
 )
 
@@ -249,6 +252,28 @@ def _extra_lines(project: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _entry_points(project: dict[str, Any]) -> str:
+    """Render ``scripts``, ``gui-scripts`` and ``entry-points`` as entry_points.txt."""
+    groups: dict[str, dict[str, str]] = {}
+    for group, entries in (project.get("entry-points") or {}).items():
+        if group in ("console_scripts", "gui_scripts"):
+            raise RuntimeError(
+                f"pyproject [project.entry-points] must not define {group!r}, "
+                "use [project.scripts] or [project.gui-scripts]."
+            )
+        groups[group] = dict(entries)
+    if project.get("scripts"):
+        groups["console_scripts"] = dict(project["scripts"])
+    if project.get("gui-scripts"):
+        groups["gui_scripts"] = dict(project["gui-scripts"])
+    sections = []
+    for group in sorted(groups):
+        if groups[group]:
+            body = "".join(f"{n} = {groups[group][n]}\n" for n in sorted(groups[group]))
+            sections.append(f"[{group}]\n{body}")
+    return "\n".join(sections)
+
+
 def _dist_info_extras(project: dict[str, Any], source_dir: Path) -> dict[str, bytes]:
     """Return the dist-info files beyond METADATA, WHEEL and RECORD.
 
@@ -257,6 +282,9 @@ def _dist_info_extras(project: dict[str, Any], source_dir: Path) -> dict[str, by
     extras: dict[str, bytes] = {}
     for relative in _license_files(project, source_dir):
         extras[f"licenses/{relative}"] = (source_dir / relative).read_bytes()
+    entry_points = _entry_points(project)
+    if entry_points:
+        extras["entry_points.txt"] = entry_points.encode()
     return extras
 
 
@@ -742,6 +770,7 @@ def build_sdist(
     pyproject = _load_pyproject(source_dir)
     project = pyproject.get("project", {})
     name, version = _name_version(project)
+    _dist_info_extras(project, source_dir)
 
     sdist_name = f"{name}-{version}.tar.gz"
     sdist_dir.mkdir(parents=True, exist_ok=True)

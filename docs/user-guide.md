@@ -4130,6 +4130,10 @@ The backend renders these PEP 621 `[project]` fields into `METADATA`
   is an error.
 - `authors` and `maintainers`, as `Author`, `Author-email`, `Maintainer` and
   `Maintainer-email`.
+- `scripts`, `gui-scripts` and `entry-points`, written to `entry_points.txt`
+  as the groups `console_scripts`, `gui_scripts` and one group per
+  `entry-points` table. `entry-points` must not define `console_scripts` or
+  `gui_scripts`. Editable installs get the script launchers too.
 - `keywords`, `classifiers` and `urls`, as `Keywords`, `Classifier` and
   `Project-URL`.
 

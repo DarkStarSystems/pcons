@@ -11,6 +11,9 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 
+[project.scripts]
+pcons-hello-ext = "pcons_hello_ext:hello_world"
+
 [tool.pcons]
 variant = "release"
 # The install target to use for building the wheel.

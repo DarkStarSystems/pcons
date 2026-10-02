@@ -498,6 +498,53 @@ class TestDistInfoExtras:
     def test_empty_without_fields(self, tmp_path: Path) -> None:
         assert backend._dist_info_extras({}, tmp_path) == {}
 
+    def test_entry_points_text(self, tmp_path: Path) -> None:
+        project = {
+            "scripts": {"zed": "pkg:z", "alpha": "pkg.cli:main"},
+            "gui-scripts": {"win": "pkg.gui:run"},
+            "entry-points": {
+                "pcons.plugins": {"b": "pkg:b", "a": "pkg:a"},
+                "another.group": {"x": "pkg:x"},
+            },
+        }
+        extras = backend._dist_info_extras(project, tmp_path)
+        assert extras["entry_points.txt"].decode() == (
+            "[another.group]\n"
+            "x = pkg:x\n"
+            "\n"
+            "[console_scripts]\n"
+            "alpha = pkg.cli:main\n"
+            "zed = pkg:z\n"
+            "\n"
+            "[gui_scripts]\n"
+            "win = pkg.gui:run\n"
+            "\n"
+            "[pcons.plugins]\n"
+            "a = pkg:a\n"
+            "b = pkg:b\n"
+        )
+
+    def test_empty_entry_points_write_nothing(self, tmp_path: Path) -> None:
+        project = {"scripts": {}, "entry-points": {"g": {}}}
+        assert backend._dist_info_extras(project, tmp_path) == {}
+
+    @pytest.mark.parametrize("group", ["console_scripts", "gui_scripts"])
+    def test_reserved_entry_point_group_raises(
+        self, tmp_path: Path, group: str
+    ) -> None:
+        project = {"entry-points": {group: {"x": "pkg:x"}}}
+        with pytest.raises(RuntimeError, match=group):
+            backend._dist_info_extras(project, tmp_path)
+
+    def test_scripts_are_honored_fields(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"scripts": {"hello": "pkg:main"}, "gui-scripts": {"g": "pkg:g"}},
+            tmp_path,
+        )
+        assert "Name: mypkg" in meta
+
 
 class TestNameVersion:
     def test_returns_name_and_version(self) -> None:
@@ -1036,6 +1083,9 @@ description = "A package"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
+
+[project.scripts]
+hello = "mypkg:main"
 """
 
 
@@ -1068,6 +1118,7 @@ class TestDistInfoExtrasInDistributions:
             record = zf.read("mypkg-0.1.dist-info/RECORD").decode()
             metadata = zf.read("mypkg-0.1.dist-info/METADATA").decode()
         assert "mypkg-0.1.dist-info/licenses/LICENSE,sha256=" in record
+        assert "mypkg-0.1.dist-info/entry_points.txt,sha256=" in record
         assert "License-File: LICENSE\n" in metadata
         assert "Summary: A package\n" in metadata
 
@@ -1083,7 +1134,10 @@ class TestDistInfoExtrasInDistributions:
         with zipfile.ZipFile(src / "dist" / filename) as zf:
             assert zf.read("mypkg-0.1.dist-info/licenses/LICENSE") == b"MIT text\n"
             record = zf.read("mypkg-0.1.dist-info/RECORD").decode()
+            entry_points = zf.read("mypkg-0.1.dist-info/entry_points.txt").decode()
         assert "mypkg-0.1.dist-info/licenses/LICENSE,sha256=" in record
+        assert "mypkg-0.1.dist-info/entry_points.txt,sha256=" in record
+        assert entry_points == "[console_scripts]\nhello = mypkg:main\n"
 
     def test_prepare_metadata_writes_license(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1093,6 +1147,9 @@ class TestDistInfoExtrasInDistributions:
         backend.prepare_metadata_for_build_wheel(str(meta_dir))
         dist_info = meta_dir / "mypkg-0.1.dist-info"
         assert (dist_info / "licenses" / "LICENSE").read_text() == "MIT text\n"
+        assert (dist_info / "entry_points.txt").read_text() == (
+            "[console_scripts]\nhello = mypkg:main\n"
+        )
         assert "Summary: A package" in (dist_info / "METADATA").read_text()
 
     def test_prepared_metadata_is_byte_identical_to_wheel(
@@ -1130,3 +1187,18 @@ class TestDistInfoExtrasInDistributions:
         assert "Metadata-Version: 2.4" in pkg_info
         assert "License-Expression: MIT\n" in pkg_info
         assert pkg_info.endswith("\n\n# Hello\n")
+
+
+class TestSdistValidation:
+    def test_reserved_entry_point_group_fails_sdist(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_pyproject(
+            tmp_path,
+            '[project]\nname = "mypkg"\nversion = "0.1"\n'
+            '[project.entry-points.console_scripts]\nx = "pkg:x"\n',
+        )
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(RuntimeError, match="console_scripts"):
+            backend.build_sdist(str(tmp_path / "dist"))
+        assert not (tmp_path / "dist").exists()
