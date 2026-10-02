@@ -1094,7 +1094,7 @@ hello = "mypkg:main"
 def _rich_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _make_pyproject(tmp_path, _RICH_PYPROJECT)
     (tmp_path / "README.md").write_text("# Hello\n")
-    (tmp_path / "LICENSE").write_text("MIT text\n")
+    (tmp_path / "LICENSE").write_bytes(b"MIT text\n")
     (tmp_path / "pcons-build.py").write_text("# stub")
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -1227,9 +1227,11 @@ class TestBuildDir:
 
     @pytest.mark.parametrize(
         "value",
-        ["", ".", "..", "../..", "sub/..", str(Path.cwd().anchor), 3, "C:build"],
+        ["", ".", "..", "../..", "sub/..", "<anchor>", 3, "C:build"],
     )
     def test_invalid_value_raises(self, tmp_path: Path, value: object) -> None:
+        if value == "<anchor>":
+            value = tmp_path.anchor
         with pytest.raises(RuntimeError, match="build-dir"):
             backend._build_dir(tmp_path / "proj", {"build-dir": value})
 
