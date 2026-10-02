@@ -16,6 +16,7 @@ import glob
 import hashlib
 import io
 import os
+import re
 import shutil
 import sys
 import sysconfig
@@ -88,6 +89,7 @@ _HONORED_PROJECT_FIELDS = frozenset(
         "keywords",
         "classifiers",
         "urls",
+        "optional-dependencies",
     }
 )
 
@@ -215,6 +217,38 @@ def _license_lines(project: dict[str, Any], source_dir: Path) -> list[str]:
     return [_header("License", str(license_["text"]))]
 
 
+_EXTRA_NAME = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+
+
+def _extra_lines(project: dict[str, Any]) -> list[str]:
+    """Render ``optional-dependencies`` as ``Provides-Extra`` and ``Requires-Dist``."""
+    extras: dict[str, list[str]] = {}
+    for extra, requirements in (project.get("optional-dependencies") or {}).items():
+        normalized = re.sub(r"[-_.]+", "-", extra).lower()
+        if not _EXTRA_NAME.fullmatch(normalized):
+            raise RuntimeError(
+                f"pyproject [project.optional-dependencies] extra {extra!r} is not "
+                "a valid name, use letters, digits and single '-', '_' or '.' "
+                "separators."
+            )
+        if normalized in extras:
+            raise RuntimeError(
+                f"pyproject [project.optional-dependencies] extra {extra!r} "
+                f"collides with another extra after normalization to {normalized!r}."
+            )
+        extras[normalized] = list(requirements)
+    lines = []
+    for extra in sorted(extras):
+        lines.append(f"Provides-Extra: {extra}")
+        for requirement in extras[extra]:
+            spec, _, marker = requirement.partition(";")
+            condition = f'extra == "{extra}"'
+            if marker.strip():
+                condition = f"({marker.strip()}) and {condition}"
+            lines.append(f"Requires-Dist: {spec.strip()}; {condition}")
+    return lines
+
+
 def _dist_info_extras(project: dict[str, Any], source_dir: Path) -> dict[str, bytes]:
     """Return the dist-info files beyond METADATA, WHEEL and RECORD.
 
@@ -277,6 +311,7 @@ def _render_metadata(
         lines.append(f"Description-Content-Type: {readme[1]}")
     for dep in project.get("dependencies", []):
         lines.append(f"Requires-Dist: {dep}")
+    lines += _extra_lines(project)
     text = "\n".join(lines) + "\n"
     if readme:
         text += "\n" + readme[0]

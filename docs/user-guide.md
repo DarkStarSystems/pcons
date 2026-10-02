@@ -4115,6 +4115,9 @@ The backend renders these PEP 621 `[project]` fields into `METADATA`
 
 - `name`, `version` and `requires-python`. `name` and `version` are required.
 - `dependencies`, as `Requires-Dist`.
+- `optional-dependencies`, as `Provides-Extra` plus one `Requires-Dist` per
+  requirement, tagged with the extra marker. Extra names are normalized to
+  lowercase with `-` for runs of `-`, `_` and `.`.
 - `description`, as `Summary`. It must be one line.
 - `readme`, a file name or a table with `file` or `text` and `content-type`.
   A file name needs the suffix `.md`, `.rst` or `.txt`. The text becomes the

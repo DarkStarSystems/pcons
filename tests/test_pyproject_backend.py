@@ -427,6 +427,68 @@ class TestRenderMetadata:
         assert msg.get_payload() == "# Title\n"
 
 
+class TestOptionalDependencies:
+    def _lines(self, tmp_path: Path, extras: dict[str, list[str]]) -> list[str]:
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"optional-dependencies": extras}, tmp_path
+        )
+        return [
+            ln
+            for ln in meta.splitlines()
+            if ln.startswith(("Provides-Extra", "Requires-Dist"))
+        ]
+
+    def test_plain_requirement(self, tmp_path: Path) -> None:
+        assert self._lines(tmp_path, {"test": ["pytest>=8"]}) == [
+            "Provides-Extra: test",
+            'Requires-Dist: pytest>=8; extra == "test"',
+        ]
+
+    def test_marker_is_parenthesized(self, tmp_path: Path) -> None:
+        assert self._lines(tmp_path, {"test": ['numpy; python_version < "3.13"']}) == [
+            "Provides-Extra: test",
+            'Requires-Dist: numpy; (python_version < "3.13") and extra == "test"',
+        ]
+
+    def test_url_requirement_with_marker(self, tmp_path: Path) -> None:
+        assert self._lines(
+            tmp_path, {"dev": ['pkg @ https://example.com/p.whl ; os_name == "nt"']}
+        ) == [
+            "Provides-Extra: dev",
+            "Requires-Dist: pkg @ https://example.com/p.whl; "
+            '(os_name == "nt") and extra == "dev"',
+        ]
+
+    def test_names_are_normalized_and_sorted(self, tmp_path: Path) -> None:
+        assert self._lines(tmp_path, {"Zed_Extra": ["a"], "my.dev__tools": ["b"]}) == [
+            "Provides-Extra: my-dev-tools",
+            'Requires-Dist: b; extra == "my-dev-tools"',
+            "Provides-Extra: zed-extra",
+            'Requires-Dist: a; extra == "zed-extra"',
+        ]
+
+    def test_names_colliding_after_normalization_raise(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="a-b"):
+            self._lines(tmp_path, {"a_b": ["x"], "A.b": ["y"]})
+
+    @pytest.mark.parametrize("extra", ["_dev", "dev!", "-dev", "", "d e v"])
+    def test_invalid_extra_name_raises(self, tmp_path: Path, extra: str) -> None:
+        with pytest.raises(RuntimeError, match="extra"):
+            self._lines(tmp_path, {extra: ["x"]})
+
+    def test_empty_extra_still_provided(self, tmp_path: Path) -> None:
+        assert self._lines(tmp_path, {"none": []}) == ["Provides-Extra: none"]
+
+    def test_runtime_dependencies_come_first(self, tmp_path: Path) -> None:
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"dependencies": ["rich"], "optional-dependencies": {"t": ["pytest"]}},
+            tmp_path,
+        )
+        assert meta.index("Requires-Dist: rich\n") < meta.index("Provides-Extra: t")
+
+
 class TestDistInfoExtras:
     def test_license_files_land_under_licenses(self, tmp_path: Path) -> None:
         (tmp_path / "LICENSE").write_bytes(b"MIT text")
