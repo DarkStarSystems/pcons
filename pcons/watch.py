@@ -29,7 +29,14 @@ from typing import TYPE_CHECKING
 from pcons.core.errors import PconsError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Container, Iterable, Iterator, Sequence
+    from collections.abc import (
+        Callable,
+        Container,
+        Generator,
+        Iterable,
+        Iterator,
+        Sequence,
+    )
     from types import FrameType
 
 INSTALL_HINT = (
@@ -220,7 +227,7 @@ def watch_and_build(
 
 
 @contextlib.contextmanager
-def _stop_on_interrupt(stop: threading.Event) -> Iterator[None]:
+def _stop_on_interrupt(stop: threading.Event) -> Generator[None]:
     """Make the first Ctrl-C ask the watch loop to finish and stop.
 
     Raising KeyboardInterrupt out of a build subprocess would leave the

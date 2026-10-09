@@ -370,6 +370,39 @@ class TestCompileCommandsSymlink:
         target = os.readlink(link_path)
         assert "wrong" not in target
 
+    @staticmethod
+    def _generate_with_symlink_error(tmp_path, monkeypatch, winerror):
+        def fail_symlink(*_args, **_kwargs):
+            error = OSError(1, "symlink refused")
+            error.winerror = winerror  # type: ignore[attr-defined]
+            raise error
+
+        monkeypatch.setattr(os, "symlink", fail_symlink)
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        CompileCommandsGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+    def test_windows_privilege_error_is_not_a_warning(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        caplog.set_level("INFO", logger="pcons.generators.compile_commands")
+        self._generate_with_symlink_error(tmp_path, monkeypatch, winerror=1314)
+
+        records = [r for r in caplog.records if "compile_commands" in r.message]
+        assert records
+        assert {r.levelname for r in records} == {"INFO"}
+        assert "root_symlink=False" in records[0].message
+        assert (tmp_path / "build" / "compile_commands.json").exists()
+        assert not os.path.lexists(tmp_path / "compile_commands.json")
+
+    def test_other_symlink_error_warns(self, tmp_path, monkeypatch, caplog):
+        self._generate_with_symlink_error(tmp_path, monkeypatch, winerror=None)
+
+        assert any(
+            r.levelname == "WARNING" and "symlink refused" in r.message
+            for r in caplog.records
+        )
+
 
 class TestAutoCompileCommands:
     def test_ninja_generates_compile_commands(self, tmp_path):

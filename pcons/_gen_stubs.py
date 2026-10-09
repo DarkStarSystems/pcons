@@ -300,7 +300,6 @@ def generate_project_builder_stubs() -> str:
 # Well-known Environment instance variables (initialized in Environment.__init__).
 # Unlike tool namespaces, these are real attribute reads, not `_tools` lookups.
 _ENVIRONMENT_VAR_TYPES: tuple[tuple[str, str], ...] = (
-    ("build_dir", "Path"),
     ("variant", "str"),
     # Assignable from either spelling; stored as a Path.
     ("build_prefix", "str | Path | None"),
