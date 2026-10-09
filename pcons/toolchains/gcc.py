@@ -7,13 +7,16 @@ import functools
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.node import FileNode
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.toolchains.gnu_common import (
     gnu_archiver_builders,
@@ -24,7 +27,7 @@ from pcons.toolchains.gnu_common import (
     gnu_link_vars,
 )
 from pcons.toolchains.unix import UnixToolchain
-from pcons.tools.tool import BaseTool
+from pcons.tools.tool import BaseTool, resolve_env_cmd_override
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -161,6 +164,42 @@ def _find_gcc_std_module_source(
     return Path(line[2:])
 
 
+# A GCC driver's name: optional target prefix, the driver, optional suffix
+# ("x86_64-linux-gnu-g++-14", "gcc-mp-14"). cc and c++ count: the gcc
+# toolchain only accepts GCC-family drivers.
+_GCC_DRIVER = re.compile(r"(?P<prefix>(?:.*-)?)(?:gcc|g\+\+|cc|c\+\+)(?P<suffix>-.+)?")
+
+
+def gcc_archiver_for(driver: str) -> str | None:
+    """The archiver that belongs to GCC driver *driver*, or None.
+
+    ``gcc-ar`` hands ``ar`` its own GCC's LTO plugin, so an archive of
+    ``-flto`` objects gets a symbol index whatever binutils finds in its
+    ``bfd-plugins`` directory. The name keeps the driver's target prefix
+    and suffix (``x86_64-linux-gnu-g++-14`` gives
+    ``x86_64-linux-gnu-gcc-ar-14``); a prefixed driver without one falls
+    back to that target's ``ar``. Each name is looked for next to the
+    driver, then on PATH, where a driver in a ccache directory finds it.
+    """
+    path = Path(driver)
+    exe = path.suffix if path.suffix.lower() == ".exe" else ""
+    match = _GCC_DRIVER.fullmatch(path.name.removesuffix(exe))
+    if match is None:
+        return None
+    prefix, suffix = match["prefix"], match["suffix"] or ""
+    names = [f"{prefix}gcc-ar{suffix}{exe}"]
+    if prefix:
+        names.append(f"{prefix}ar{exe}")
+    for name in names:
+        sibling = path.parent / name
+        if path.parent != Path() and sibling.is_file():
+            return str(sibling)
+        found = shutil.which(name)
+        if found is not None:
+            return found
+    return None
+
+
 class GccCCompiler(BaseTool):
     """GCC C compiler tool (variables come from gnu_compile_vars)."""
 
@@ -218,7 +257,7 @@ class GccCxxCompiler(BaseTool):
 
 
 class GccArchiver(BaseTool):
-    """GNU archiver (ar) for creating static libraries."""
+    """GCC's archiver for creating static libraries: gcc-ar, else ar."""
 
     env_var = "AR"
 
@@ -226,13 +265,13 @@ class GccArchiver(BaseTool):
         super().__init__("ar")
 
     def default_vars(self) -> dict[str, object]:
-        return gnu_archiver_vars("ar")
+        return gnu_archiver_vars(gcc_archiver_for("gcc") or "ar")
 
     def builders(self) -> dict[str, Builder]:
         return gnu_archiver_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "ar")
+        return self._find_tool_config(config, "gcc-ar", "ar")
 
 
 class GccLinker(BaseTool):
@@ -290,6 +329,44 @@ class GccToolchain(UnixToolchain):
                 f"use a clang-based toolchain, which retargets via --target."
             )
         super().apply_cross_preset(env, preset)
+
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """The $CC/$CXX presets, with the archiver of the driver they pick.
+
+        ``ar.cmd <- $CXX`` in explain() says why the archiver changed. An
+        explicit $AR is authoritative and keeps its own preset.
+        """
+        presets = super().setup_presets(env)
+        if resolve_env_cmd_override("AR") is not None:
+            return presets
+        for var in ("CXX", "CC"):
+            driver = resolve_env_cmd_override(var)
+            archiver = gcc_archiver_for(driver) if driver else None
+            if archiver is not None:
+                ar = ToolContribution("ar", cmd=archiver)
+                return [
+                    replace(p, contributions=(*p.contributions, ar))
+                    if p.name == f"${var}"
+                    else p
+                    for p in presets
+                ]
+        return presets
+
+    def _target_contributions(self, cross: Any) -> list[ToolContribution]:
+        """A cross preset's contributions, plus the archiver of its driver.
+
+        A preset that names cross drivers but no archiver would otherwise
+        archive with the host's (see gcc_archiver_for). $AR still wins.
+        """
+        contribs = super()._target_contributions(cross)
+        cmds = {c.tool: c.cmd for c in contribs if c.cmd}
+        if "ar" in cmds or resolve_env_cmd_override("AR") is not None:
+            return contribs
+        driver = cmds.get("cxx") or cmds.get("cc") or cmds.get("link")
+        archiver = gcc_archiver_for(driver) if driver else None
+        if archiver is not None:
+            contribs.append(ToolContribution("ar", cmd=archiver))
+        return contribs
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, including C++20 module interfaces."""

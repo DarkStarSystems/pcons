@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The gcc toolchain archives with `gcc-ar` instead of `ar`, so static
+  libraries built with the `lto` preset get a symbol index even when
+  binutils can't find GCC's LTO plugin. A `$CC`/`$CXX` driver or a cross
+  preset's drivers bring their own (`g++-16` → `gcc-ar-16`); `$AR` still
+  wins (#214).
 - On Windows without Developer Mode, every generate warned that it couldn't
   create the root `compile_commands.json` symlink. Pcons now skips the link
   quietly and explains why under `-v` (#217).
