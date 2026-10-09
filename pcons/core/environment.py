@@ -350,9 +350,7 @@ class Environment(_EnvironmentStubs):
         elif name in PLACEMENT_VARS:
             self._set_placement(name, value)
         elif name == "build_dir":
-            self._build_dir_base = Path(value)
-            self._build_dir_offset = Path()
-            self._get_vars()["build_dir"] = self._effective_build_dir()
+            object.__setattr__(self, name, value)
         else:
             vars_dict = self._get_vars()
             vars_dict[name] = value
@@ -433,6 +431,12 @@ class Environment(_EnvironmentStubs):
         )
         path = self.build_dir_for(offset)
         return self._project.top.root_dir / path if self._project else path
+
+    @build_dir.setter
+    def build_dir(self, value: str | Path) -> None:
+        self._build_dir_base = Path(value)
+        self._build_dir_offset = Path()
+        self._get_vars()["build_dir"] = self._effective_build_dir()
 
     def _effective_build_dir(self) -> Path:
         """This environment's own build directory.
