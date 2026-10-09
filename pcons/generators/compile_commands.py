@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Windows refuses symlink creation without Developer Mode or admin rights.
+_ERROR_PRIVILEGE_NOT_HELD = 1314
+
 
 class CompileCommandsGenerator(BaseGenerator):
     """Generator for compile_commands.json.
@@ -135,10 +138,18 @@ class CompileCommandsGenerator(BaseGenerator):
             os.symlink(target_path, tmp_link)
             os.replace(tmp_link, link_path)
         except OSError as e:
-            logger.warning(
-                "Could not create compile_commands.json symlink at project root: %s",
-                e,
-            )
+            if getattr(e, "winerror", None) == _ERROR_PRIVILEGE_NOT_HELD:
+                logger.info(
+                    "Not linking compile_commands.json at project root: "
+                    "Windows symlinks need Developer Mode or admin rights. "
+                    "Pass root_symlink=False to generate() to skip the link."
+                )
+            else:
+                logger.warning(
+                    "Could not create compile_commands.json symlink at "
+                    "project root: %s",
+                    e,
+                )
             try:
                 os.unlink(tmp_link)
             except OSError:

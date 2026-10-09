@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows without Developer Mode, every generate warned that it couldn't
+  create the root `compile_commands.json` symlink. Pcons now skips the link
+  quietly and explains why under `-v` (#217).
+
 ## [0.30.0] - 2026-09-27
 
 Big release this time! You can write builders as Python functions

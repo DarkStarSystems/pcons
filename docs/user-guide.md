@@ -3067,7 +3067,9 @@ Generator().generate(project, root_symlink=False)  # no root symlink
 ```
 
 With multiple build configurations in one project root, the last generation
-to run owns the root symlink.
+to run owns the root symlink. On Windows, creating a symlink needs Developer
+Mode or admin rights; without them pcons skips the root link (`-v` says so).
+clangd still finds the database in the default `build` directory.
 
 This enables source inspection and completion features in:
 
