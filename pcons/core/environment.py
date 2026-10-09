@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import UserList
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from difflib import get_close_matches
 from pathlib import Path
@@ -766,7 +766,7 @@ class Environment(_EnvironmentStubs):
         return new_env
 
     @contextmanager
-    def override(self, **kwargs: Any) -> Iterator[Environment]:
+    def override(self, **kwargs: Any) -> Generator[Environment]:
         """Build with a temporarily modified copy of this environment.
 
         This is :meth:`clone` plus a scope: it yields a full clone, leaving
@@ -1068,7 +1068,7 @@ class Environment(_EnvironmentStubs):
                         defines.remove(d)
 
     @contextmanager
-    def _dedup_fanout(self) -> Iterator[None]:
+    def _dedup_fanout(self) -> Generator[None]:
         """Scope a per-toolchain fan-out so identical presets apply once."""
         self._fanout_seen = set()
         try:
