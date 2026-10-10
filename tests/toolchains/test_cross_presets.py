@@ -25,7 +25,7 @@ from pcons.toolchains.presets import (
 
 
 def _make_unix_env() -> Environment:
-    """Create an environment with cc, cxx, and link tools."""
+    """Create an environment with cc, cxx, ar, and link tools."""
     env = Environment()
     cc = env.add_tool("cc")
     cc.set("cmd", "clang")
@@ -36,6 +36,8 @@ def _make_unix_env() -> Environment:
     cxx.set("cmd", "clang++")
     cxx.set("flags", [])
     cxx.set("defines", [])
+
+    env.add_tool("ar").set("cmd", "ar")
 
     link = env.add_tool("link")
     link.set("cmd", "clang")
@@ -366,6 +368,37 @@ class TestCrossPresetApplication:
         assert env.cc.cmd == "aarch64-linux-gnu-gcc"
         assert not any("--target=" in str(f) for f in env.cc.flags)
         assert not any("--target=" in str(f) for f in env.cxx.flags)
+
+    @pytest.mark.parametrize("given_ar", [None, "my-ar"])
+    def test_gcc_cross_preset_archives_with_its_gcc_ar(
+        self,
+        test_project,  # noqa: F811
+        monkeypatch,
+        tmp_path,
+        given_ar,
+    ):
+        """A preset naming cross drivers but no ar gets the drivers' gcc-ar."""
+        from pcons.toolchains.gcc import GccToolchain
+
+        monkeypatch.delenv("AR", raising=False)
+        gcc_ar = tmp_path / "aarch64-linux-gnu-gcc-ar-13"
+        gcc_ar.write_text("")
+        env = _make_unix_env()
+        tool_cmds = {"cc": str(tmp_path / "aarch64-linux-gnu-gcc-13")}
+        if given_ar:
+            tool_cmds["ar"] = given_ar
+
+        GccToolchain().apply_cross_preset(
+            env,
+            CrossPreset(
+                name="test",
+                arch="arm64",
+                triple="aarch64-linux-gnu",
+                tool_cmds=tool_cmds,
+            ),
+        )
+
+        assert env.ar.cmd == (given_ar or str(gcc_ar))
 
     def test_cross_preset_arch_is_metadata_only(self, test_project):  # noqa: F811
         """CrossPreset.arch never becomes a flag on any host; the triple

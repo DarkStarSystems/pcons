@@ -222,6 +222,13 @@ error. Specifically, the rules are as follows:
   (`CXX=g++-15` with `toolchain="msvc"`) is an error.
 - Values a compiler-id can't classify (e.g. wrapper scripts) are used
   as-is on whichever toolchain is selected.
+- On the gcc toolchain, `$CXX` or `$CC` also picks the archiver: the
+  `gcc-ar` next to that driver, keeping its prefix and version
+  (`CXX=g++-15` archives with `gcc-ar-15`). `gcc-ar` gives `ar` that GCC's
+  LTO plugin, so `-flto` static libraries work whatever binutils has
+  installed. A cross preset's `tool_cmds` drivers do the same, and `$AR`
+  overrides both. A script that sets `env.cxx.cmd` itself should set
+  `env.ar.cmd` too.
 - Explicit script assignments (`env.cxx.cmd = ...`) and cross-preset
   `tool_cmds` still win over the environment; SDK-owned toolchains
   (emscripten, wasi) ignore these variables entirely, like CMake's
