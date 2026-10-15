@@ -141,6 +141,29 @@ class TestOverrideApplication:
         env = Environment(toolchain=_registry_toolchain("llvm"))
         assert env.ar.cmd == str(fake)
 
+    def test_cxx_override_brings_its_gcc_ar(self, test_project, monkeypatch, tmp_path):  # noqa: F811
+        fake = _fake_compiler(tmp_path, "g++-14")
+        gcc_ar = _fake_compiler(tmp_path, "gcc-ar-14")
+        monkeypatch.setenv("CXX", str(fake))
+        monkeypatch.delenv("CC", raising=False)
+        monkeypatch.delenv("AR", raising=False)
+
+        env = Environment(toolchain=_registry_toolchain("gcc"))
+        assert env.ar.cmd == str(gcc_ar)
+        rows = [r for r in env.ar.explain().rows if r.token == str(gcc_ar)]
+        assert rows and rows[0].source == "$CXX"
+
+    def test_ar_override_beats_derived_gcc_ar(
+        self, test_project, monkeypatch, tmp_path
+    ):  # noqa: F811
+        monkeypatch.setenv("CXX", str(_fake_compiler(tmp_path, "g++-14")))
+        _fake_compiler(tmp_path, "gcc-ar-14")
+        ar = _fake_compiler(tmp_path, "my-ar")
+        monkeypatch.setenv("AR", str(ar))
+
+        env = Environment(toolchain=_registry_toolchain("gcc"))
+        assert env.ar.cmd == str(ar)
+
     def test_script_assignment_wins_over_env(self, test_project, monkeypatch, tmp_path):  # noqa: F811
         fake = _fake_compiler(tmp_path, "my-g++")
         monkeypatch.setenv("CXX", str(fake))

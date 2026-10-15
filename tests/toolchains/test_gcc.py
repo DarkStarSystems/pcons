@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.gcc."""
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -114,12 +115,25 @@ class TestGccCxxCompiler:
         assert ".cc" in obj_builder.src_suffixes
 
 
+def _executable(directory: Path, name: str) -> Path:
+    path = directory / name
+    path.write_text("#!/bin/sh\n")
+    path.chmod(0o755)
+    return path
+
+
+posix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX exec bits on PATH"
+)
+
+
 class TestGccArchiver:
     def test_creation(self):
         ar = GccArchiver()
         assert ar.name == "ar"
 
-    def test_default_vars(self):
+    def test_default_vars(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("PATH", str(tmp_path))
         ar = GccArchiver()
         vars = ar.default_vars()
         assert vars["cmd"] == "ar"
@@ -133,6 +147,71 @@ class TestGccArchiver:
         assert "StaticLibrary" in builders
         lib_builder = builders["StaticLibrary"]
         assert lib_builder.name == "StaticLibrary"
+
+    @posix_only
+    def test_default_is_gcc_ar_on_path(self, monkeypatch, tmp_path):
+        gcc_ar = _executable(tmp_path, "gcc-ar")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        assert GccArchiver().default_vars()["cmd"] == str(gcc_ar)
+
+
+class TestGccArchiverFor:
+    """gcc_archiver_for: the gcc-ar that belongs to a driver (#214)."""
+
+    @pytest.fixture(autouse=True)
+    def _empty_path(self, monkeypatch, tmp_path):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+
+    @pytest.mark.parametrize(
+        ("driver", "archiver"),
+        [
+            ("gcc", "gcc-ar"),
+            ("g++-16", "gcc-ar-16"),
+            ("x86_64-pc-linux-gnu-g++-16", "x86_64-pc-linux-gnu-gcc-ar-16"),
+            ("gcc-mp-14", "gcc-ar-mp-14"),
+            ("cc", "gcc-ar"),
+            ("c++", "gcc-ar"),
+            ("x86_64-w64-mingw32-gcc.exe", "x86_64-w64-mingw32-gcc-ar.exe"),
+        ],
+    )
+    def test_sibling_keeps_prefix_and_suffix(self, tmp_path, driver, archiver):
+        from pcons.toolchains.gcc import gcc_archiver_for
+
+        expected = _executable(tmp_path, archiver)
+        assert gcc_archiver_for(str(tmp_path / driver)) == str(expected)
+
+    def test_prefixed_driver_falls_back_to_target_ar(self, tmp_path):
+        from pcons.toolchains.gcc import gcc_archiver_for
+
+        target_ar = _executable(tmp_path, "arm-none-eabi-ar")
+        driver = tmp_path / "arm-none-eabi-gcc"
+        assert gcc_archiver_for(str(driver)) == str(target_ar)
+
+    def test_not_a_gcc_driver(self, tmp_path):
+        from pcons.toolchains.gcc import gcc_archiver_for
+
+        _executable(tmp_path, "gcc-ar")
+        for driver in ("clang", "clang++-18", "ccache", "nvcc"):
+            assert gcc_archiver_for(str(tmp_path / driver)) is None
+
+    def test_none_without_a_gcc_ar(self, tmp_path):
+        from pcons.toolchains.gcc import gcc_archiver_for
+
+        assert gcc_archiver_for(str(tmp_path / "gcc-14")) is None
+
+    @posix_only
+    def test_ccache_driver_finds_gcc_ar_on_path(self, monkeypatch, tmp_path):
+        from pcons.toolchains.gcc import gcc_archiver_for
+
+        ccache_dir = tmp_path / "ccache"
+        bin_dir = tmp_path / "bin"
+        ccache_dir.mkdir()
+        bin_dir.mkdir()
+        gcc_ar = _executable(bin_dir, "gcc-ar-14")
+        monkeypatch.setenv("PATH", str(bin_dir))
+        assert gcc_archiver_for(str(ccache_dir / "gcc-14")) == str(gcc_ar)
 
 
 class TestGccLinker:

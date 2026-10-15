@@ -58,7 +58,6 @@ if TYPE_CHECKING:
         qt: ToolConfig  # QtToolchain
         rc: ToolConfig  # ClangClToolchain, MsvcToolchain
         swiftc: ToolConfig  # SwiftToolchain
-        build_dir: Path
         variant: str
         build_prefix: str | Path | None
         runtime_directory: str | Path | None
