@@ -173,6 +173,26 @@ def test_the_runtime_libdir_comes_from_fc(monkeypatch, tmp_path) -> None:
     assert seen == [str(fc)]
 
 
+@pytest.mark.parametrize("cls", [GfortranToolchain, FlangToolchain])
+def test_no_runtime_libdir_from_a_compiler_that_will_not_run(cls) -> None:
+    def broken(cmd, **kwargs):
+        raise OSError("no such file")
+
+    with patch.object(subprocess, "check_output", broken):
+        assert cls()._find_runtime_libdir("fc") is None
+
+
+def test_no_flang_runtime_libdir_without_the_runtime(tmp_path) -> None:
+    (tmp_path / "lib" / "darwin").mkdir(parents=True)
+    answers = {
+        "-print-resource-dir": f"{tmp_path}\n",
+        "-print-target-triple": "arm64-apple-darwin\n",
+    }
+
+    with patch.object(subprocess, "check_output", lambda cmd, **k: answers[cmd[1]]):
+        assert FlangToolchain()._find_runtime_libdir("flang") is None
+
+
 # =============================================================================
 # Presets and variants
 # =============================================================================
@@ -221,6 +241,12 @@ def test_detection_order(installed, cls, monkeypatch) -> None:
     monkeypatch.delenv("FC", raising=False)
     with _installed(*installed):
         assert isinstance(find_fortran_toolchain(), cls)
+
+
+def test_a_preference_overrides_the_detection_order(monkeypatch) -> None:
+    monkeypatch.delenv("FC", raising=False)
+    with _installed("gfortran", "flang"):
+        assert isinstance(find_fortran_toolchain(prefer=["flang"]), FlangToolchain)
 
 
 def test_an_added_toolchain_gets_its_own_target_type_flags(
@@ -461,6 +487,17 @@ def test_gfortran_gets_mingw_gcc(on_windows, monkeypatch) -> None:
         assert isinstance(find_c_toolchain(abi="mingw"), GccToolchain)
 
 
+def test_no_compatible_c_says_which_would_do(on_windows, monkeypatch) -> None:
+    from pcons.toolchains import find_c_toolchain
+
+    for var in ("CC", "CXX"):
+        monkeypatch.delenv(var, raising=False)
+    with _installed("clang-cl"), pytest.raises(RuntimeError) as err:
+        find_c_toolchain(abi="mingw")
+    assert "'mingw' ABI" in str(err.value)
+    assert "gcc" in str(err.value)
+
+
 def test_an_incompatible_fc_is_an_error(on_windows, monkeypatch, tmp_path) -> None:
     """$FC is the user's explicit choice: not honorable, not overridden."""
     fc = tmp_path / "gfortran"
@@ -474,6 +511,21 @@ def test_an_incompatible_fc_is_an_error(on_windows, monkeypatch, tmp_path) -> No
 def test_an_incompatible_name_is_an_error(on_windows) -> None:
     with _installed("gfortran"), pytest.raises(RuntimeError, match="'mingw' ABI"):
         toolchain_registry.resolve("gfortran", abi="msvc")
+
+
+def test_without_an_abi_an_unavailable_toolchain_is_just_unavailable(
+    tmp_path, monkeypatch
+) -> None:
+    from pcons import Project
+
+    if sys.platform == "win32":
+        pytest.skip("on Windows every toolchain declares an ABI")
+    project = Project("p", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(toolchain=GfortranToolchain())
+    with _installed(), pytest.raises(RuntimeError) as err:
+        env.add_toolchain("flang")
+    assert "not available" in str(err.value)
+    assert "beside" not in str(err.value)
 
 
 def test_envs_keep_their_own_abis(on_windows, tmp_path, monkeypatch, gcc_toolchain):
@@ -666,6 +718,24 @@ def test_a_complete_flang_is_available() -> None:
     flang_mod.intrinsic_modules_problem.cache_clear()
 
 
+def test_a_flang_that_will_not_run_says_why() -> None:
+    def broken(*args, **kwargs):
+        raise OSError("bad executable")
+
+    flang_mod.intrinsic_modules_problem.cache_clear()
+    with patch.object(subprocess, "run", broken):
+        assert flang_mod.intrinsic_modules_problem("/x/flang") == "bad executable"
+    flang_mod.intrinsic_modules_problem.cache_clear()
+
+
+def test_a_silent_flang_failure_gives_its_exit_code() -> None:
+    failed = subprocess.CompletedProcess([], 3, stdout="", stderr="")
+    flang_mod.intrinsic_modules_problem.cache_clear()
+    with patch.object(subprocess, "run", lambda *a, **k: failed):
+        assert flang_mod.intrinsic_modules_problem("/x/flang") == "exit code 3"
+    flang_mod.intrinsic_modules_problem.cache_clear()
+
+
 def test_an_added_ifx_names_the_console_subsystem(on_windows, tmp_path) -> None:
     """A Fortran program beside clang-cl links with link.exe, and ifx (not
     the primary) supplies the /SUBSYSTEM link.exe can't infer: main is in
@@ -688,3 +758,41 @@ def test_an_added_ifx_names_the_console_subsystem(on_windows, tmp_path) -> None:
 
     (link,) = (n for n in prog.output_nodes if n.path.suffix == ".exe")
     assert "/SUBSYSTEM:CONSOLE" in link._build_info["context"].link_flags
+
+
+# =============================================================================
+# Configure-driven setup (toolchain.configure(Configure(...)))
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("cls", "archiver"),
+    [
+        (GfortranToolchain, "ar"),
+        (FlangToolchain, "ar"),
+        (IfxToolchain, "ar"),
+        (IfxMsvcToolchain, "lib"),
+    ],
+)
+def test_configure_finds_each_tool(cls, archiver, on_windows, tmp_path) -> None:
+    from pcons.configure.config import Configure, ProgramInfo
+
+    config = Configure(build_dir=tmp_path)
+    config.find_program = (  # type: ignore[method-assign]
+        lambda *a, **k: ProgramInfo(path=Path("/opt/bin/tool"), version="1")
+    )
+    tc = cls()
+    assert tc.configure(config)
+    assert set(tc.tools) == {"fc", archiver, "link"}
+
+
+def test_configure_fails_without_a_compiler(tmp_path) -> None:
+    from pcons.configure.config import Configure
+
+    config = Configure(build_dir=tmp_path)
+    config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
+    assert not GfortranToolchain().configure(config)
+
+
+def test_configure_needs_a_configure() -> None:
+    assert not GfortranToolchain().configure(object())

@@ -189,8 +189,9 @@ class FortranToolchainBase(BaseToolchain):
     LINKER: ClassVar[type[BaseTool]]
     # Libraries (no -l prefix) a C/C++-driven link needs for Fortran objects.
     RUNTIME_LIBS: ClassVar[tuple[str, ...]]
-    # A runtime library file the compiler can locate with -print-file-name.
-    RUNTIME_PROBE_FILE: ClassVar[str | None] = None
+    # A runtime library file the compiler can locate with -print-file-name
+    # (only for the default _find_runtime_libdir).
+    RUNTIME_PROBE_FILE: ClassVar[str]
 
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("fc",)
@@ -275,8 +276,6 @@ class FortranToolchainBase(BaseToolchain):
         """Ask *compiler* where RUNTIME_PROBE_FILE is (e.g. Homebrew's
         libgfortran, on macOS)."""
         name = self.RUNTIME_PROBE_FILE
-        if name is None:
-            return None
         try:
             libfile = subprocess.check_output(
                 [compiler, f"-print-file-name={name}"],
