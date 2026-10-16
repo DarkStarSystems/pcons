@@ -4,7 +4,9 @@
 description = "C++ primary calling Fortran via BIND(C), with automatic Fortran runtime injection"
 
 expected_outputs = [
-    "build/obj.hello/src/main.cpp.o",
+    # .o from MinGW g++, .obj from MSVC or clang-cl, whichever matches
+    # the Fortran compiler's ABI on Windows.
+    "build/obj.hello/src/main.cpp.o*",
     "build/obj.hello/src/math_utils.f90.o",
     "build/hello",
 ]
@@ -15,10 +17,9 @@ commands = [
 ]
 
 [skip]
-# MinGW gfortran objects can't link with the MSVC-ABI C++ toolchain that
-# Windows selects by default (flang and ifx can); skipped there until
-# toolchain selection matches ABIs.
-platforms = ["windows"]
+# Both must be found, with ABIs that link together: on Windows, MinGW
+# gfortran goes with MinGW gcc, flang and ifx with MSVC or clang-cl.
+requires_toolchains = ["c++", "fortran"]
 requires_any = ["gfortran", "flang", "ifx"]
 # Xcode generator does not support Fortran
 # Make generator doesn't support Ninja dyndep for Fortran module ordering
