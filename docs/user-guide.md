@@ -222,6 +222,13 @@ error. Specifically, the rules are as follows:
   (`CXX=g++-15` with `toolchain="msvc"`) is an error.
 - Values a compiler-id can't classify (e.g. wrapper scripts) are used
   as-is on whichever toolchain is selected.
+- On the gcc toolchain, `$CXX` or `$CC` also picks the archiver: the
+  `gcc-ar` next to that driver, keeping its prefix and version
+  (`CXX=g++-15` archives with `gcc-ar-15`). `gcc-ar` gives `ar` that GCC's
+  LTO plugin, so `-flto` static libraries work whatever binutils has
+  installed. A cross preset's `tool_cmds` drivers do the same, and `$AR`
+  overrides both. A script that sets `env.cxx.cmd` itself should set
+  `env.ar.cmd` too.
 - Explicit script assignments (`env.cxx.cmd = ...`) and cross-preset
   `tool_cmds` still win over the environment; SDK-owned toolchains
   (emscripten, wasi) ignore these variables entirely, like CMake's
@@ -3067,7 +3074,9 @@ Generator().generate(project, root_symlink=False)  # no root symlink
 ```
 
 With multiple build configurations in one project root, the last generation
-to run owns the root symlink.
+to run owns the root symlink. On Windows, creating a symlink needs Developer
+Mode or admin rights; without them pcons skips the root link (`-v` says so).
+clangd still finds the database in the default `build` directory.
 
 This enables source inspection and completion features in:
 
@@ -4113,43 +4122,42 @@ editable builds.)
 `build/build.ninja` records the Python that ran the backend. It runs that
 Python to regenerate itself when `pcons-build.py` changes, and for any command
 built on `sys.executable`. Under build isolation, the default for uv and pip,
-that Python does not survive the install. uv deletes its build venv. pip keeps
-the interpreter but drops the temporary directory that held pcons. The first
-regen then fails, for example with exit code 127. Plain C++ rebuilds keep
-working.
-
-The backend detects this case and logs a warning before it builds:
+that Python doesn't outlive the install: uv deletes its build venv, and pip's
+interpreter can't import pcons once the temporary build requirements are gone.
+The next regen then fails:
 
 ```
-pcons: this editable install runs in an isolated build environment. ...
+/bin/sh: .../uv/builds-v0/.tmpbL8Fju/bin/python: No such file or directory
+ninja: error: rebuilding 'build.ninja': subcommand failed
 ```
 
-The install still succeeds. To get a build directory you can rerun ninja in,
-install pcons, ninja and the other build requirements into the target
-environment and turn build isolation off:
+Plain C++ rebuilds keep working, and re-running the install recovers.
+
+To get a build directory you can always rerun ninja in, turn build isolation
+off for your package. With `uv sync`, put pcons, ninja and your other build
+requirements in the dev dependency group:
+
+```toml
+[dependency-groups]
+dev = ["pcons", "ninja"]
+
+[tool.uv]
+no-build-isolation-package = ["<name>"]
+```
+
+uv installs the dev group first, then builds your package with the project's
+Python. With pip or `uv pip`:
 
 ```sh
-uv pip install pcons ninja && uv pip install --no-build-isolation -e .
 pip install pcons ninja && pip install --no-build-isolation -e .
+uv pip install pcons ninja && uv pip install --no-build-isolation -e .
 ```
-
-With `uv sync`, add pcons and ninja to the dev dependency group and set
-`[tool.uv] no-build-isolation-package = ["<name>"]` for your package, or run
-`uv sync --no-build-isolation`.
-
-Re-running the install also recovers a failed regen, it rebuilds incrementally
-in `build/`. The backend treats an environment as temporary when pcons lies
-under the system temp directory, or when a directory above `sys.prefix` holds
-a signed `CACHEDIR.TAG`, as uv's cache does. A venv deliberately kept under the
-temp directory, or below a tagged directory, also triggers the warning. The
-warning is skipped when the target environment already has its own pcons,
-since regeneration imports that copy. `uv sync`, `uv pip install` and pip show backend output
-only with `-v`, so the warning shows up only in a verbose install.
 
 #### Build directory
 
-Wheel and editable builds both use `build/` by default, the same directory as
-a plain `pcons` run. Set `build-dir` to give wheel builds their own directory:
+Wheel builds use `build/wheel/` by default. A wheel build configures with the
+wheel layout, so it keeps out of `build/`, where a plain `pcons` run and an
+editable install build. Set `build-dir` to put it somewhere else:
 
 ```toml
 [tool.pcons]
@@ -4164,20 +4172,6 @@ Use a dedicated directory. The project directory, its parents and a Windows
 drive-relative path such as `C:build` are refused. An sdist leaves the
 build directory out when it lies inside the project, so a source directory
 like `src` would be missing from the sdist.
-
-A wheel build reconfigures its build directory with the wheel layout. When
-that directory was last configured by something else, a `pcons` run, an
-editable install or a ninja regen, the backend logs a warning:
-
-```
-pcons: build directory /path/to/project/build was last configured by something
-other than a wheel build: ...
-```
-
-After such a build, `ninja -C build` rebuilds with the wheel layout. Set
-`build-dir` to keep the two apart. The backend records each wheel build in a
-`.pcons-wheel` file in the build directory to tell them apart. `uv build`
-prints the warning. pip shows backend output only with `-v`.
 
 The backend neither reads nor writes `pcons_cache.json`. Its `variant` and
 `variables` come from `pyproject.toml` on every build, so a variant, generator

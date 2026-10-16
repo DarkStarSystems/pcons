@@ -19,10 +19,12 @@ expected_outputs_windows = [
 [verify]
 # Two install paths are exercised, both driving the full PEP 517 / pcons.pyproject
 # code path. pcons is installed from the local checkout (injected by the test
-# runner via [tool.uv.sources]) into an isolated build environment.
+# runner via [tool.uv.sources]) into the project venv, through the dev group:
+# the package builds without build isolation (see pyproject.toml).
 #
 # 1. Editable install (build_editable): uv sync drops a .pth pointing at the
-#    project build/ dir, so the imported extension lives under build/.
+#    project build/ dir, so the imported extension lives under build/. The
+#    test then touches pcons-build.py and checks that ninja regenerates.
 # 2. Real install (build_wheel): uv build produces a wheel via the staging dir,
 #    which is installed into the venv, the extension then lives in site-packages.
 # uv sync and uv build resolve and download packages into an isolated
