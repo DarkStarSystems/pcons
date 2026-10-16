@@ -481,10 +481,17 @@ class ScannerResolver:
         info_nodes: list[FileNode] = []
         manifest_edges: list[dict[str, Any]] = []
         for governed, scanned in edges:
-            info_node = self._make_scan_node(target, scanner, env, governed, scanned)
+            # The governed edge's own environment: a source added with
+            # add_sources(env=...) is compiled, so scanned, by that one.
+            edge_env = (governed._build_info or {}).get("env") or env
+            info_node = self._make_scan_node(
+                target, scanner, edge_env, governed, scanned
+            )
             info_nodes.append(info_node)
             manifest_edges.append(
-                self._manifest_edge(scanner, env, governed, scanned, info_node, rel)
+                self._manifest_edge(
+                    scanner, edge_env, governed, scanned, info_node, rel
+                )
             )
 
         # --- imports: exports of scanned dependency scopes, plus the

@@ -28,6 +28,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
     toolchains differ.
     """
 
+    LINKER_STYLE = "msvc"
+
     # Named feature presets; see docs/presets.md.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {

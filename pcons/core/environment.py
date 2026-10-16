@@ -177,6 +177,7 @@ class Environment(_EnvironmentStubs):
         "_fanout_seen",
         "_fanout_applied",
         "_variant_request",
+        "_tool_owners",
         "_name",
         "_cross_preset",
         "_target",
@@ -246,6 +247,8 @@ class Environment(_EnvironmentStubs):
         self._fanout_applied: list[Preset] | None = None
         # The last set_variant() call, for toolchains added after it
         self._variant_request: tuple[str, dict[str, Any]] | None = None
+        # Tool name -> the toolchain that brought it (see apply_from)
+        self._tool_owners: dict[str, Toolchain] = {}
         self._cross_preset: Any = None
         self._target: Platform | None = None
         if name is not None:
@@ -270,6 +273,7 @@ class Environment(_EnvironmentStubs):
         if toolchain is not None:
             toolchain.setup(self)
             self._record_toolchain_baseline(toolchain, list(self._get_tools().keys()))
+            self._tool_owners = dict.fromkeys(self._get_tools(), toolchain)
             # After the baseline, so explain() attributes these by name.
             for preset in toolchain.setup_presets(self):
                 self.apply(preset)
@@ -579,9 +583,11 @@ class Environment(_EnvironmentStubs):
         toolchain.setup(self)
         new_tools = [n for n in self._get_tools() if n not in before]
         self._record_toolchain_baseline(toolchain, new_tools)
-        # It configures only the tools it brought: $FC from an added Fortran
-        # toolchain must not retarget the primary toolchain's linker. A
-        # variant the script already set is realized for those tools in place
+        self._tool_owners.update(dict.fromkeys(new_tools, toolchain))
+        # It configures only the tools it brought (see apply_from): $FC from
+        # an added Fortran toolchain must not retarget the primary
+        # toolchain's linker. A variant the script already set is realized
+        # for those tools in place
         # of the toolchain's own default (an added ifx gets /MDd, not /MD,
         # under debug), and the environment keeps its variant name.
         presets = toolchain.setup_presets(self)
@@ -595,9 +601,7 @@ class Environment(_EnvironmentStubs):
         current_variant = self.variant
         with self._dedup_fanout(join=True):
             for preset in presets:
-                owned = tuple(c for c in preset.contributions if c.tool in new_tools)
-                if owned:
-                    self.apply(dataclasses.replace(preset, contributions=owned))
+                self.apply_from(toolchain, preset)
         self.variant = current_variant
 
     @property
@@ -990,6 +994,27 @@ class Environment(_EnvironmentStubs):
         if preset.category == "arch" and preset.arch is not None:
             self.target_arch = preset.arch
 
+    def apply_from(self, toolchain: Toolchain, preset: Preset) -> None:
+        """Apply *toolchain*'s *preset* to the tools that toolchain brought.
+
+        How each toolchain realizes a knob (set_variant, apply_preset, ...)
+        fits its own tools only: clang-cl's debug ``/DEBUG`` would break
+        flang's link driver in a Fortran-primary environment beside it, as
+        an added flang's ``-fopenmp`` would break link.exe. A tool no
+        toolchain brought takes every contribution.
+        """
+        owners = self._tool_owners
+        owned = tuple(
+            c
+            for c in preset.contributions
+            if owners.get(c.tool, toolchain) is toolchain
+        )
+        if not owned and preset.contributions:
+            return
+        if len(owned) < len(preset.contributions):
+            preset = dataclasses.replace(preset, contributions=owned)
+        self.apply(preset)
+
     @property
     def applied_presets(self) -> tuple[Preset, ...]:
         """Presets applied to this environment, in order (for inspection)."""
@@ -1285,7 +1310,7 @@ class Environment(_EnvironmentStubs):
                 if preset is None:
                     preset = resolve_registered_feature(name, toolchain)  # registry
                 if preset is not None:
-                    self.apply(preset)
+                    self.apply_from(toolchain, preset)
                     applied = True
         # Imperative escape-hatch preset: runs once against the whole env.
         description = apply_imperative_preset(name, self)

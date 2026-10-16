@@ -672,6 +672,51 @@ def test_an_added_toolchain_realizes_the_variant_already_set(
     assert env.variant == "debug"
 
 
+def test_a_variant_keeps_to_each_toolchains_own_tools(on_windows, tmp_path) -> None:
+    """flang drives the link beside clang-cl: clang-cl's debug variant
+    compiles its sources with /Z7 but must not hand flang's GNU-style
+    driver link.exe's /DEBUG, which flang reads as a file name."""
+    from pcons import Project
+
+    project = Project("v", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("flang").create_toolchain()
+    )
+    env.add_toolchain(toolchain_registry.get("clang-cl").create_toolchain())
+    env.set_variant("debug")
+
+    assert "/Z7" in env.cxx.flags
+    assert "-g" in env.fc.flags
+    assert "/DEBUG" not in env.link.flags
+
+
+def test_a_flang_dll_is_linked_through_its_import_library(on_windows, tmp_path) -> None:
+    """Targeting the MSVC ABI, flang's link writes answer.lib beside
+    answer.dll, and that, not the DLL, is what link.exe takes."""
+    from pcons import Project
+    from pcons.core.subst import TargetPath
+
+    (tmp_path / "answer.f90").write_text("subroutine answer()\nend subroutine\n")
+    (tmp_path / "main.f90").write_text("program p\nend program\n")
+    project = Project("dll", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("flang").create_toolchain()
+    )
+    lib = project.SharedLibrary("answer", env, sources=["answer.f90"])
+    prog = project.Program("main", env, sources=["main.f90"]).link(lib)
+    project.resolve()
+
+    (dll,) = lib.output_nodes
+    outputs = dll._build_info["outputs"]
+    assert outputs["import_lib"]["path"].name == "answer.lib"
+    assert TargetPath(prefix="-Wl,/IMPLIB:", index=1) in (
+        dll._build_info["context"].link_flags
+    )
+    (exe,) = prog.output_nodes
+    linked = [n.path.name for n in exe.explicit_deps]
+    assert "answer.lib" in linked and "answer.dll" not in linked
+
+
 def test_a_flang_without_intrinsic_modules_is_not_available(caplog) -> None:
     """Visual Studio's bundled flang.exe has no intrinsic modules."""
     complaint = "error: Source file 'iso_c_binding.mod' was not found"
@@ -796,3 +841,50 @@ def test_configure_fails_without_a_compiler(tmp_path) -> None:
 
 def test_configure_needs_a_configure() -> None:
     assert not GfortranToolchain().configure(object())
+
+
+def test_a_fortran_main_linked_as_cxx_names_the_console_subsystem(
+    on_windows, tmp_path
+) -> None:
+    """C++ beside a Fortran main program links as C++, with link.exe; ifx
+    still supplies the /SUBSYSTEM the Fortran main needs."""
+    from pcons import Project
+    from pcons.toolchains.ifx import IfxMsvcCompiler
+    from pcons.toolchains.msvc import MsvcLibrarian, MsvcLinker
+
+    ifx = IfxMsvcToolchain()
+    ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
+    ifx._configured = True
+    (tmp_path / "main.f90").write_text("program p\nend program\n")
+    (tmp_path / "helper.cpp").write_text('extern "C" void helper() {}\n')
+    project = Project("mix", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("clang-cl").create_toolchain()
+    )
+    env.add_toolchain(ifx)
+    prog = project.Program("app", env, sources=["main.f90", "helper.cpp"])
+    project.resolve()
+
+    (link,) = (n for n in prog.output_nodes if n.path.suffix == ".exe")
+    assert "/SUBSYSTEM:CONSOLE" in link._build_info["context"].link_flags
+
+
+def test_an_added_gnu_style_toolchain_adds_no_link_flags_to_link_exe(
+    on_windows, tmp_path
+) -> None:
+    """flang beside clang-cl compiles a DLL's Fortran, but link.exe links
+    it: flang's -Wl,/IMPLIB: is for its own driver, not link.exe."""
+    from pcons import Project
+
+    (tmp_path / "answer.f90").write_text("subroutine answer()\nend subroutine\n")
+    project = Project("dll", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("clang-cl").create_toolchain()
+    )
+    env.add_toolchain(toolchain_registry.get("flang").create_toolchain())
+    lib = project.SharedLibrary("answer", env, sources=["answer.f90"])
+    project.resolve()
+
+    (dll,) = lib.output_nodes
+    flags = dll._build_info["context"].link_flags
+    assert not any("-Wl," in str(f) for f in flags)

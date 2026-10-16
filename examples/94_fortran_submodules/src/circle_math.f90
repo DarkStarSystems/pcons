@@ -1,7 +1,6 @@
-! Implementation of area(), in a submodule of circle.
+! Implementation of area(), in a submodule of circle, whose pi it uses.
 SUBMODULE (circle) circle_math
   IMPLICIT NONE
-  REAL, PARAMETER :: pi = 3.14159265
 CONTAINS
   MODULE PURE FUNCTION area(r) RESULT(a)
     REAL, INTENT(IN) :: r

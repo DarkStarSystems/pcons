@@ -53,6 +53,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   honors) no longer replaces the primary toolchain's tools: with C++
   primary and Fortran added, `FC=gfortran-15` changed the link driver to
   gfortran.
+- A toolchain's variant, feature, C++-standard and cross-target flags now
+  reach only the tools it brought into the environment. Before, on Windows
+  with flang primary and clang-cl added, `set_variant("debug")` handed
+  flang's link driver link.exe's `/DEBUG`, which flang read as a file.
+- A shared library linked by clang or flang for the MSVC ABI comes with
+  its import library (`foo.lib`), and that is what targets linking it
+  take. Before, they were given `foo.dll`, which link.exe rejects
+  (LNK1107).
+- A Fortran source added with `add_sources(env=...)` writes its modules
+  to that environment's module directory, which pcons now creates, and the
+  build's dependency scan looks for them there. Before, the scan assumed
+  the target's own directory.
 
 - The gcc toolchain archives with `gcc-ar` instead of `ar`, so static
   libraries built with the `lto` preset get a symbol index even when

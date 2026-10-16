@@ -22,12 +22,18 @@ module.
 ``SUBMODULE (foo) impl`` requires its parent ``foo`` and provides
 ``foo:impl``, whose file the compiler names (``--submodule-file``, e.g.
 ``{ancestor}@{name}.smod`` for gfortran); a submodule of it,
-``SUBMODULE (foo:impl) more``, requires ``foo:impl``. Module names are
+``SUBMODULE (foo:impl) more``, requires ``foo:impl``. A submodule sees its
+ancestor's private entities too, which gfortran keeps out of ``foo.mod``
+and writes to ``foo.smod`` (``--ancestor-file``), for a module that
+declares a separate module procedure. There, ``foo`` also provides
+``foo:`` at that file, and ``SUBMODULE (foo) impl`` requires ``foo:``
+instead, so a change to a private entity recompiles it. Module names are
 lowercased throughout: Fortran is case-insensitive and compilers write
 lowercase module files.
 
-Limitation: Fortran ``INCLUDE`` lines are not followed, so a module
-declaration reached only through an include is invisible here.
+Limitations: Fortran ``INCLUDE`` lines are not followed, so a module
+declaration reached only through an include is invisible here; and the
+preprocessor doesn't run, so a declaration ``#if`` leaves out still counts.
 
 Paths in the output are relative to the build directory, where Ninja runs.
 """
@@ -50,7 +56,7 @@ from pcons.core.collate import SCAN_INFO_VERSION, write_text_if_changed
 # procedures a submodule implements ("module subroutine step()", "module pure
 # function f(x)"), none of which defines a module.
 _MODULE_RE = re.compile(
-    r"^\s*MODULE\s+(\w+)\s*(?:;|$)",
+    r"^\s*MODULE\s+(\w+)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -63,6 +69,21 @@ _SUBMODULE_RE = re.compile(
 # How gfortran and ifx name a submodule's file; flang uses {ancestor}-{name}.mod.
 DEFAULT_SUBMODULE_FILE = "{ancestor}@{name}.smod"
 
+# The file a submodule reads from its ancestor module: the module's own .mod
+# for flang and ifx; gfortran's is {name}.smod.
+DEFAULT_ANCESTOR_FILE = "{name}.mod"
+
+# A separate module procedure's interface: "module" among the prefixes of a
+# function or subroutine statement ("module function f()", "integer module
+# function f()", "pure module subroutine s(x)"). Not "module procedure",
+# and [ \t] keeps it to one line: "end module" ending one line must not
+# join a "subroutine s" starting the next.
+_SEPARATE_PROCEDURE_RE = re.compile(
+    r"^[ \t]*(?:\w+(?:[ \t]*\([^)\n]*\))?[ \t]+)*?MODULE[ \t]+"
+    r"(?:\w+(?:[ \t]*\([^)\n]*\))?[ \t]+)*?(?:FUNCTION|SUBROUTINE)[ \t]+\w",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 # Regex for USE <name> statements (consumes a .mod file)
 # Handles: USE foo, USE :: foo, USE foo, ONLY: bar
 # Does not match USE statements inside string literals (good enough for real code)
@@ -73,6 +94,9 @@ _USE_RE = re.compile(
 
 # Regex to detect Fortran inline comments (! starts a comment)
 _COMMENT_RE = re.compile(r"!.*$", re.MULTILINE)
+
+# A free-form continuation: "&" ending a line, and optionally starting the next.
+_CONTINUATION_RE = re.compile(r"&[ \t]*\n[ \t]*&?")
 
 # Intrinsic modules that should not create .mod dependencies
 _INTRINSIC_MODULES = frozenset(
@@ -95,27 +119,48 @@ def strip_comments(source: str) -> str:
     return _COMMENT_RE.sub("", source)
 
 
-def scan_fortran_source(source_text: str) -> tuple[list[str], list[str]]:
+def _statements(source: str) -> str:
+    """*source* without comments, one statement per line: continuations
+    joined, and ";"-separated statements split."""
+    joined = _CONTINUATION_RE.sub(" ", strip_comments(source))
+    return joined.replace(";", "\n")
+
+
+def scan_fortran_source(
+    source_text: str, ancestor_file_apart: bool = False
+) -> tuple[list[str], list[str]]:
     """Scan Fortran source for MODULE and USE statements.
 
     Args:
         source_text: Content of the Fortran source file.
+        ancestor_file_apart: Whether a module writes its submodules a file
+            of their own (gfortran's .smod) when it declares a separate
+            module procedure.
 
     Returns:
         Tuple of (produces, consumes) where:
         - produces: list of module names this file defines (lowercase);
-          a submodule is "<ancestor>:<name>"
+          a submodule is "<ancestor>:<name>", and with ancestor_file_apart
+          a module declaring a separate module procedure is also "<name>:"
         - consumes: list of module names this file uses (lowercase);
-          a submodule uses its parent, "<ancestor>" or "<ancestor>:<parent>"
+          a submodule uses its parent, "<ancestor>" ("<ancestor>:" with
+          ancestor_file_apart) or "<ancestor>:<parent>"
     """
-    clean = strip_comments(source_text)
+    clean = _statements(source_text)
 
-    produces = [m.group(1).lower() for m in _MODULE_RE.finditer(clean)]
+    modules = list(_MODULE_RE.finditer(clean))
+    produces = [m.group(1).lower() for m in modules]
     used = [m.group(1).lower() for m in _USE_RE.finditer(clean)]
-    for m in _SUBMODULE_RE.finditer(clean):
+    submodules = list(_SUBMODULE_RE.finditer(clean))
+    for m in submodules:
         ancestor, parent, name = (g.lower() if g else g for g in m.groups())
         produces.append(f"{ancestor}:{name}")
-        used.append(f"{ancestor}:{parent}" if parent else ancestor)
+        if parent:
+            used.append(f"{ancestor}:{parent}")
+        else:
+            used.append(f"{ancestor}:" if ancestor_file_apart else ancestor)
+    if ancestor_file_apart:
+        produces += _modules_declaring_separate_procedures(modules, submodules, clean)
 
     consumes = []
     seen: set[str] = set()
@@ -133,8 +178,28 @@ def scan_fortran_source(source_text: str) -> tuple[list[str], list[str]]:
     return produces, consumes
 
 
+def _modules_declaring_separate_procedures(
+    modules: list[re.Match[str]], submodules: list[re.Match[str]], source: str
+) -> list[str]:
+    """ "<name>:" for each module that declares a separate module procedure,
+    the procedure taken to belong to the nearest MODULE or SUBMODULE above."""
+    units = sorted(
+        [(m.start(), m.group(1).lower()) for m in modules]
+        + [(m.start(), None) for m in submodules]
+    )
+    found: dict[str, None] = {}
+    for procedure in _SEPARATE_PROCEDURE_RE.finditer(source):
+        above = [name for start, name in units if start < procedure.start()]
+        if above and above[-1] is not None:
+            found[f"{above[-1]}:"] = None
+    return list(found)
+
+
 def scan_info(
-    source_text: str, moddir: str, submodule_file: str = DEFAULT_SUBMODULE_FILE
+    source_text: str,
+    moddir: str,
+    submodule_file: str = DEFAULT_SUBMODULE_FILE,
+    ancestor_file: str = DEFAULT_ANCESTOR_FILE,
 ) -> dict[str, object]:
     """The scan-info document for one Fortran source.
 
@@ -142,14 +207,17 @@ def scan_info(
     edges can depend on it) and ``extra_outputs`` (so the dyndep file claims
     the compile writes it) -- the contract collate enforces.
     """
-    produces, consumes = scan_fortran_source(source_text)
+    apart = ancestor_file != DEFAULT_ANCESTOR_FILE
+    produces, consumes = scan_fortran_source(source_text, apart)
     mod_dir = moddir.rstrip("/") or "."
     provided = list(dict.fromkeys(produces))
 
     def module_file(name: str) -> str:
-        ancestor, _, submodule = name.partition(":")
-        if not submodule:
+        ancestor, colon, submodule = name.partition(":")
+        if not colon:
             return f"{name}.mod"
+        if not submodule:
+            return ancestor_file.format(name=ancestor)
         return submodule_file.format(ancestor=ancestor, name=submodule)
 
     mod_paths = [f"{mod_dir}/{module_file(name)}" for name in provided]
@@ -188,6 +256,12 @@ def main(argv: list[str] | None = None) -> int:
         f"(default: {DEFAULT_SUBMODULE_FILE})",
     )
     parser.add_argument(
+        "--ancestor-file",
+        default=DEFAULT_ANCESTOR_FILE,
+        help="file a submodule reads from its ancestor module, from {name} "
+        f"(default: {DEFAULT_ANCESTOR_FILE})",
+    )
+    parser.add_argument(
         "--out",
         required=True,
         help="scan-info JSON file to write",
@@ -200,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pcons fortran scan: cannot read {args.scan_one}: {e}", file=sys.stderr)
         return 1
 
-    info = scan_info(text, args.moddir, args.submodule_file)
+    info = scan_info(text, args.moddir, args.submodule_file, args.ancestor_file)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     write_text_if_changed(out, json.dumps(info, indent=1, sort_keys=True) + "\n")

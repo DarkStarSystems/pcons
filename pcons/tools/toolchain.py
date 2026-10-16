@@ -70,7 +70,7 @@ def _cxx_set_standard(env: Environment, standard: int | str) -> None:
         for toolchain in env.toolchains:
             preset = toolchain.make_cxx_standard_preset(n)
             if preset is not None:
-                env.apply(preset)
+                env.apply_from(toolchain, preset)
 
 
 # =============================================================================
@@ -916,6 +916,11 @@ class BaseToolchain(ABC):
     # the Environment typing stub.
     TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
 
+    # The command-line conventions of this toolchain's link flags: "gnu" (a
+    # gcc-style driver) or "msvc" (link.exe). A toolchain that compiled a
+    # target's objects adds its link flags to a link tool of the same style.
+    LINKER_STYLE: ClassVar[str | None] = None
+
     # Default language priorities (higher = stronger).
     # Fortran is NOT listed here so that C/C++ toolchains don't claim
     # priority over Fortran objects. GfortranToolchain overrides this
@@ -1076,7 +1081,7 @@ class BaseToolchain(ABC):
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release") to the environment."""
-        env.apply(self.make_variant_preset(variant, **kwargs))
+        env.apply_from(self, self.make_variant_preset(variant, **kwargs))
 
     def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
         """Build a variant Preset. Base contributes no flags."""
@@ -1107,7 +1112,9 @@ class BaseToolchain(ABC):
         contribs = tuple(self._arch_contributions(arch))
         if not contribs:
             return False
-        env.apply(Preset(name=arch, category="arch", arch=arch, contributions=contribs))
+        env.apply_from(
+            self, Preset(name=arch, category="arch", arch=arch, contributions=contribs)
+        )
         return True
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
@@ -1120,7 +1127,7 @@ class BaseToolchain(ABC):
         if preset is None:
             logger.warning("Unknown preset '%s' for toolchain '%s'", name, self.name)
             return
-        env.apply(preset)
+        env.apply_from(self, preset)
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
         """Build a C++-standard Preset, or None if this toolchain has no C++.
@@ -1189,7 +1196,7 @@ class BaseToolchain(ABC):
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross-compilation target preset (a CrossPreset)."""
-        env.apply(self.make_target_preset(preset))
+        env.apply_from(self, self.make_target_preset(preset))
 
     def make_target_preset(self, cross: Any) -> Preset:
         """Convert a CrossPreset descriptor into a Preset."""

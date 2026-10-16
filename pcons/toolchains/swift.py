@@ -57,7 +57,7 @@ def _swift_set_cxx_interop(env: Environment, standard: str | int | None = None) 
         if maker is not None:
             preset = maker(standard)
             if preset is not None:
-                env.apply(preset)
+                env.apply_from(toolchain, preset)
 
 
 def module_name_for(target_name: str) -> str:

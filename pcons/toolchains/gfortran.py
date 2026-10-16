@@ -16,6 +16,9 @@ class GfortranCompiler(FortranCompiler):
 
     COMMANDS = ("gfortran",)
     MODDIR_FLAG = "-J"
+    # Private entities, which submodules see but users of a module don't,
+    # go here rather than into the .mod.
+    ANCESTOR_FILE = "{name}.smod"
 
 
 class GfortranLinker(FortranLinker):

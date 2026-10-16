@@ -96,6 +96,7 @@ class IfxMsvcCompiler(FortranCompiler):
             "defines": [],
             "moddir": DEFAULT_MODDIR,
             "submodule_file": self.SUBMODULE_FILE,
+            "ancestor_file": self.ANCESTOR_FILE,
             "objcmd": [
                 "$fc.cmd",
                 "$fc.flags",

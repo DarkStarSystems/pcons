@@ -8,6 +8,7 @@ from __future__ import annotations
 import functools
 import logging
 import subprocess
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import Platform, get_platform
@@ -89,6 +90,7 @@ class UnixToolchain(BaseToolchain):
     # MinGW ("mingw") and MSVC ("msvc") objects can't be linked together.
     # Elsewhere every Unix toolchain links with every other: no tag.
     WINDOWS_ABI: ClassVar[str | None] = None
+    LINKER_STYLE = "gnu"
 
     @property
     def abi(self) -> str | None:
@@ -436,7 +438,21 @@ class UnixToolchain(BaseToolchain):
         flags = self._exported_symbols_flags(target)
         if target.target_type == "shared_library":
             flags = [*self._install_name_flags(target, existing_flags), *flags]
+            if self.abi == "msvc":
+                # Where get_import_library_name says (the link's second output)
+                flags.append(TargetPath(prefix="-Wl,/IMPLIB:", index=1))
         return flags
+
+    def get_import_library_name(
+        self, shared_library_name: str, target: Platform | None = None
+    ) -> str | None:
+        """``foo.lib`` for a DLL linked for the MSVC ABI, as by clang or
+        flang targeting it: their driver hands the link to link.exe or
+        lld-link, which writes the import library a consumer links against.
+        MinGW's ld links a DLL directly and writes none."""
+        if self.abi != "msvc":
+            return None
+        return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
 
     def link_group_tokens(
         self, archives: Sequence[PathToken], env: Environment | None = None

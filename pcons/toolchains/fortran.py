@@ -19,7 +19,10 @@ from typing import TYPE_CHECKING, ClassVar, cast
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.subst import SourcePath, TargetPath
-from pcons.toolchains.fortran_scanner import DEFAULT_SUBMODULE_FILE
+from pcons.toolchains.fortran_scanner import (
+    DEFAULT_ANCESTOR_FILE,
+    DEFAULT_SUBMODULE_FILE,
+)
 from pcons.toolchains.gnu_common import gnu_link_builders, gnu_link_vars
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool, resolve_env_cmd_override
@@ -46,16 +49,14 @@ DEFAULT_MODDIR = "modules"
 DEFAULT_PREFERENCE = ("gfortran", "flang", "ifx")
 
 
+def _fc_var(env: object, name: str, default: str) -> str:
+    """One of an environment's Fortran compiler settings."""
+    return str(getattr(getattr(env, "fc", None), name, None) or default)
+
+
 def _moddir_of(env: object) -> str:
     """The module directory an environment compiles Fortran into."""
-    fc = getattr(env, "fc", None)
-    return str(getattr(fc, "moddir", None) or DEFAULT_MODDIR)
-
-
-def _submodule_file_of(env: object) -> str:
-    """How an environment's compiler names a submodule's file."""
-    fc = getattr(env, "fc", None)
-    return str(getattr(fc, "submodule_file", None) or DEFAULT_SUBMODULE_FILE)
+    return _fc_var(env, "moddir", DEFAULT_MODDIR)
 
 
 def _fortran_targets(
@@ -99,6 +100,8 @@ class FortranCompiler(BaseTool):
     MODDIR_FLAG: ClassVar[str]
     # The file a submodule compiles to, from {ancestor} and {name}.
     SUBMODULE_FILE: ClassVar[str] = DEFAULT_SUBMODULE_FILE
+    # The file a submodule reads from its ancestor module, from {name}.
+    ANCESTOR_FILE: ClassVar[str] = DEFAULT_ANCESTOR_FILE
 
     def __init__(self) -> None:
         super().__init__("fc", language="fortran")
@@ -113,6 +116,7 @@ class FortranCompiler(BaseTool):
             "defines": [],
             "moddir": DEFAULT_MODDIR,
             "submodule_file": self.SUBMODULE_FILE,
+            "ancestor_file": self.ANCESTOR_FILE,
             "objcmd": [
                 "$fc.cmd",
                 "$fc.flags",
@@ -344,10 +348,15 @@ class FortranToolchainBase(BaseToolchain):
 
         # Compilers don't create the module directory, and a consuming-only
         # compile never has it as an output for ninja to create. Make it at
-        # configure time.
+        # configure time, for each environment that compiles Fortran: a
+        # source added with add_sources(env=...) may use its own.
         build_dir_fs = project.top_path_resolver.execution_dir
-        for target in targets:
-            (build_dir_fs / _moddir_of(target._env)).mkdir(parents=True, exist_ok=True)
+        moddirs = {
+            _moddir_of((obj._build_info or {}).get("env"))
+            for _, obj in source_obj_by_language["fortran"]
+        }
+        for moddir in moddirs:
+            (build_dir_fs / moddir).mkdir(parents=True, exist_ok=True)
 
         # gfortran and flang leave a .mod file untouched when recompiling
         # produces an identical one — the very thing that keeps a cosmetic
@@ -367,7 +376,12 @@ class FortranToolchainBase(BaseToolchain):
             # environments use different module directories or compilers.
             return {
                 "FC_MODDIR": _moddir_of(env),
-                "FC_SUBMODULE_FILE": _submodule_file_of(env),
+                "FC_SUBMODULE_FILE": _fc_var(
+                    env, "submodule_file", DEFAULT_SUBMODULE_FILE
+                ),
+                "FC_ANCESTOR_FILE": _fc_var(
+                    env, "ancestor_file", DEFAULT_ANCESTOR_FILE
+                ),
             }
 
         fortran_suffixes = tuple(sorted(FORTRAN_EXTENSIONS))
@@ -387,6 +401,8 @@ class FortranToolchainBase(BaseToolchain):
                 NodeVar("FC_MODDIR"),
                 "--submodule-file",
                 NodeVar("FC_SUBMODULE_FILE"),
+                "--ancestor-file",
+                NodeVar("FC_ANCESTOR_FILE"),
                 "--out",
                 TargetPath(),
             ],

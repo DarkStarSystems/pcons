@@ -319,6 +319,7 @@ class TestCompileLinkContext:
 
         class _StubEnv:
             _toolchain = _StubToolchain()
+            _tool_owners: dict[str, object] = {}
 
             def has_tool(self, name: str) -> bool:
                 return False

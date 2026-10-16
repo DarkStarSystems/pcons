@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import textwrap
 from pathlib import Path
 from unittest.mock import patch
@@ -256,6 +258,130 @@ def test_scan_info_names_submodule_files_as_the_compiler_does() -> None:
     assert flang["requires"] == ["shapes"]
 
 
+def test_scan_info_points_submodules_at_gfortran_smod() -> None:
+    """gfortran keeps a module's private entities, which its submodules see,
+    out of the .mod: they read the .smod it writes beside it."""
+    parent = textwrap.dedent("""\
+        module shapes
+          real, parameter, private :: pi = 3.14159
+          interface
+            module pure function area(r) result(a)
+              real, intent(in) :: r
+              real :: a
+            end function
+          end interface
+        end module
+    """)
+    child = "submodule (shapes) impl\nend submodule\n"
+
+    provider = scan_info(parent, "modules", ancestor_file="{name}.smod")
+    consumer = scan_info(child, "modules", ancestor_file="{name}.smod")
+
+    assert provider["provides"] == [
+        {"name": "shapes", "path": "modules/shapes.mod"},
+        {"name": "shapes:", "path": "modules/shapes.smod"},
+    ]
+    assert provider["extra_outputs"] == ["modules/shapes.mod", "modules/shapes.smod"]
+    assert consumer["requires"] == ["shapes:"]
+    # flang and ifx put everything in the .mod.
+    assert scan_info(child, "modules")["requires"] == ["shapes"]
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "module subroutine s(x)",
+        "integer module function f()",
+        "PURE MODULE FUNCTION f(x) RESULT(y)",
+        "real(kind=8) module function f()",
+    ],
+)
+def test_scan_separate_module_procedures_make_a_smod(declaration) -> None:
+    src = f"module m\ninterface\n  {declaration}\n  end\nend interface\nend module\n"
+    produces, _ = scan_fortran_source(src, ancestor_file_apart=True)
+    assert produces == ["m", "m:"]
+
+
+def test_scan_only_a_module_with_separate_procedures_makes_a_smod() -> None:
+    """gfortran writes no .smod for the rest; claiming one would leave
+    ninja waiting forever for a file nothing writes."""
+    src = textwrap.dedent("""\
+        module plain
+          interface g
+            module procedure foo
+          end interface
+        contains
+          subroutine foo()
+          end subroutine
+        end module
+        module hosting
+          interface
+            module subroutine s()
+            end subroutine
+          end interface
+        end module
+        submodule (hosting) impl
+        contains
+          module subroutine s()
+          end subroutine
+        end submodule
+        module after
+        end module
+        subroutine external()
+        end subroutine
+    """)
+    produces, consumes = scan_fortran_source(src, ancestor_file_apart=True)
+    assert produces == ["plain", "hosting", "after", "hosting:impl", "hosting:"]
+    # The submodule's parent is in this same file.
+    assert consumes == []
+
+
+_SMOD_LAYOUTS = {
+    "plain": "module m\n  integer :: x\nend module\n",
+    "generic interface": (
+        "module m\ninterface g\n  module procedure foo\nend interface\n"
+        "contains\nsubroutine foo()\nend subroutine\nend module\n"
+    ),
+    "separate procedure": (
+        "module m\ninterface\n  module subroutine s()\n  end subroutine\n"
+        "end interface\nend module\n"
+    ),
+    "prefixes": (
+        "module m\ninterface\n  recursive module subroutine s(n)\n"
+        "    integer, intent(in) :: n\n  end subroutine\n"
+        "  module character(len=8) function name()\n  end function\n"
+        "end interface\nend module\n"
+    ),
+    "continued": (
+        "module m\ninterface\n  module &\n    function f() result(r)\n"
+        "    integer :: r\n  end function\nend interface\nend module\n"
+    ),
+    "one line": (
+        "module m; interface; module subroutine s(); end subroutine; "
+        "end interface; end module\n"
+    ),
+    "body in the module": (
+        "module m\ninterface\n  module subroutine s()\n  end subroutine\n"
+        "end interface\ncontains\n  module procedure s\n  end procedure\n"
+        "end module\n"
+    ),
+}
+
+
+@pytest.mark.skipif(shutil.which("gfortran") is None, reason="needs gfortran")
+@pytest.mark.parametrize("layout", sorted(_SMOD_LAYOUTS))
+def test_scan_predicts_gfortran_smod(layout, tmp_path) -> None:
+    """The scanner claims a module's .smod exactly when gfortran writes one:
+    a missed one leaves submodules stale, and one gfortran never writes
+    leaves ninja rebuilding forever."""
+    source = tmp_path / "m.f90"
+    source.write_text(_SMOD_LAYOUTS[layout])
+    subprocess.run(["gfortran", "-c", source.name], cwd=tmp_path, check=True)
+
+    produces, _ = scan_fortran_source(source.read_text(), ancestor_file_apart=True)
+    assert ("m:" in produces) == (tmp_path / "m.smod").exists()
+
+
 def test_scan_module_names_lowercased() -> None:
     """Module names are normalized to lowercase."""
     src = textwrap.dedent("""\
@@ -479,6 +605,32 @@ class TestScannerWiring:
 
         assert (tmp_path / "build" / "modules").is_dir()
 
+    def test_a_source_with_its_own_env_uses_its_module_directory(
+        self, tmp_path, monkeypatch, fortran_toolchain
+    ):
+        """add_sources(env=...): that environment compiles the source, so
+        its module directory is where the scan points and what is made."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.f90").write_text("PROGRAM p\nEND PROGRAM\n")
+        (tmp_path / "src" / "special.f90").write_text("MODULE special\nEND MODULE\n")
+        project = Project("own", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=fortran_toolchain)
+        special = env.clone()
+        special.fc.moddir = "special_mods"
+        prog = project.Program("app", env, sources=["src/main.f90"])
+        prog.add_sources(["src/special.f90"], env=special)
+        project.resolve()
+
+        scope = project._scan_scopes[("fortran-modules", "own::app")]
+        moddirs = {
+            n.path.name.split(".")[0]: n._build_info["vars"]["FC_MODDIR"]
+            for n in scope.collate_node._build_info["sources"]
+            if n.path.name.endswith(".fscan.json")
+        }
+        assert moddirs == {"main": "modules", "special": "special_mods"}
+        assert (tmp_path / "build" / "special_mods").is_dir()
+
     def test_scan_command_carries_the_module_directory_per_edge(
         self, tmp_path, monkeypatch, fortran_toolchain
     ):
@@ -495,6 +647,7 @@ class TestScannerWiring:
         assert info_node._build_info["vars"] == {
             "FC_MODDIR": "modules",
             "FC_SUBMODULE_FILE": "{ancestor}@{name}.smod",
+            "FC_ANCESTOR_FILE": "{name}.smod",
         }
 
     def test_no_scanner_without_fortran_sources(
