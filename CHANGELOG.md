@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler's own runtime.
 - Fortran builds on Windows, with all three compilers: MinGW gfortran,
   and flang and ifx (MSVC ABI, so they mix with MSVC and clang-cl C++).
+- A flang that can't find its intrinsic modules (Visual Studio's bundled
+  `flang.exe`) doesn't count as available; pcons warns and looks further.
 - `env.add_toolchain()` picks a toolchain whose ABI matches the
   environment's primary one: on Windows, `"fortran"` beside MSVC or
   clang-cl finds flang or ifx rather than MinGW gfortran, and `"c"` beside
@@ -38,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that set a path on only one of them and worked by luck:** set it on
   both, or on the target (`target.private.include_dirs`), which applies to
   every source.
+- A toolchain added with `add_toolchain()` after `set_variant()` now gets
+  that variant for its tools; before, they kept the toolchain's defaults
+  (no `-O0 -g` for an added CUDA or Fortran compiler under `debug`).
 - `set_variant()` on an environment with two toolchains applied only the
   last one's flags: with C++ and Fortran together, `debug` left the C++
   compiles without `-O0 -g`.

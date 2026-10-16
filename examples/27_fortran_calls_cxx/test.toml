@@ -20,7 +20,6 @@ commands = [
 # Both must be found, with ABIs that link together: on Windows, MinGW
 # gfortran goes with MinGW gcc, flang and ifx with MSVC or clang-cl.
 requires_toolchains = ["fortran", "c"]
-requires_any = ["gfortran", "flang", "ifx"]
 # Xcode generator does not support Fortran
 # Make generator doesn't support Ninja dyndep for Fortran module ordering
 generators = ["xcode", "make"]

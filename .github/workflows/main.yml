@@ -310,7 +310,7 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run Fortran example and toolchain tests
-        run: uv run pytest -n auto --cov=pcons --cov-report=xml -v -k "fortran" tests/test_examples.py tests/toolchains/test_fortran_compilers.py
+        run: uv run pytest -n auto --cov=pcons --cov-report=xml -v -rs -k "fortran" tests/test_examples.py tests/toolchains/test_fortran_compilers.py
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
