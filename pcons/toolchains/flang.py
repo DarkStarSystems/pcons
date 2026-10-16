@@ -3,7 +3,11 @@
 
 from __future__ import annotations
 
+import functools
+import logging
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +22,8 @@ from pcons.toolchains.unix import UnixToolchain
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+
+logger = logging.getLogger(__name__)
 
 
 class FlangCompiler(FortranCompiler):
@@ -129,6 +135,47 @@ class FlangToolchain(FortranToolchain):
         return None
 
 
+@functools.cache
+def intrinsic_modules_problem(flang: str) -> str | None:
+    """Why *flang* can't compile a ``USE iso_c_binding``, or None if it can.
+
+    A driver can be installed without its intrinsic modules: Visual Studio's
+    bundled LLVM ships flang.exe that way. Such a flang fails on nearly any
+    real program, so it doesn't count as available.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "probe.f90"
+        source.write_text("program probe\n  use iso_c_binding\nend program\n")
+        try:
+            result = subprocess.run(
+                [flang, "-fsyntax-only", str(source)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                cwd=tmp,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            return str(e)
+    if result.returncode == 0:
+        return None
+    said = (result.stderr or result.stdout).strip().splitlines()
+    return said[0] if said else f"exit code {result.returncode}"
+
+
+def _flang_is_available() -> bool:
+    """A flang on PATH that can compile programs using intrinsic modules."""
+    flang = shutil.which("flang")
+    if flang is None:
+        return False
+    problem = intrinsic_modules_problem(flang)
+    if problem is not None:
+        logger.warning(
+            "Not using %s: it can't find its intrinsic modules (%s).", flang, problem
+        )
+        return False
+    return True
+
+
 # =============================================================================
 # Registration
 # =============================================================================
@@ -144,4 +191,5 @@ toolchain_registry.register(
     platforms=["linux", "darwin", "win32"],
     description="LLVM Flang Fortran compiler (flang)",
     finder="find_fortran_toolchain()",
+    is_available=_flang_is_available,
 )

@@ -282,7 +282,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
             exclusive_group="build_variant",
             contributions=tuple(
                 ToolContribution(tool, flags=("/MD",))
-                for tool in ("cc", "cxx")
+                for tool in self._feature_preset_tools()
                 if env.has_tool(tool)
             ),
         )
@@ -295,14 +295,15 @@ class MsvcCompatibleToolchain(BaseToolchain):
         if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
-                f"Supported variants: debug, release, release-fastest, "
-                f"relwithdebinfo, minsizerel."
+                f"Supported variants: {', '.join(self.MSVC_VARIANTS)}."
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
+        # Realized on the same compile tools as feature presets, so an
+        # MSVC-style Fortran compiler (ifx's fc) gets working variants too.
         contribs = [
-            ToolContribution("cc", flags=tuple(flags), defines=tuple(defines)),
-            ToolContribution("cxx", flags=tuple(flags), defines=tuple(defines)),
+            ToolContribution(tool, flags=tuple(flags), defines=tuple(defines))
+            for tool in self._feature_preset_tools()
         ]
         if "/Z7" in flags:
             contribs.append(ToolContribution("link", flags=("/DEBUG",)))

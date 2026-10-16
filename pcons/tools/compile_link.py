@@ -535,13 +535,14 @@ class CompileLinkFactory:
         compiler command with the same effective requirements, the same object
         node is reused.
         """
-        handler = self._get_source_handler(source.path, env)
-        if handler is None:
+        found = self._get_source_handler_with_toolchain(source.path, env)
+        if found is None:
             if _is_linker_passthrough(source.path):
                 # A prebuilt object, library or linker script: not compiled,
                 # but a legitimate input to the link step.
                 return source
             raise _unhandled_source_error(target, source.path, env)
+        handler, toolchain = found
 
         tool_name = handler.tool_name
         language = handler.language
@@ -591,6 +592,7 @@ class CompileLinkFactory:
             "context": context,
             "env": env,
             "producer": target,
+            "toolchain": toolchain,
         }
 
         self._object_cache[cache_key] = obj_node
@@ -659,6 +661,7 @@ class CompileLinkFactory:
             "context": context,
             "env": env,
             "producer": target,
+            "toolchain": toolchain,
         }
 
         toolchain.setup_group_node(obj_node, target, env)

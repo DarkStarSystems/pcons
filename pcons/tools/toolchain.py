@@ -297,9 +297,10 @@ class ToolchainRegistry:
     def register_finder(
         self,
         names: Sequence[str],
-        finder: Callable[[], BaseToolchain | None],
+        finder: Callable[..., BaseToolchain | None],
         *,
         description: str = "",
+        takes_abi: bool = False,
     ) -> None:
         """Register an auto-detection finder under one or more names.
 
@@ -314,10 +315,10 @@ class ToolchainRegistry:
                 nothing suitable is available (resolve() turns that into an
                 error). May also raise with a descriptive message.
             description: Short human-readable description for listings.
+            takes_abi: The finder takes ``abi=``, to choose among the
+                toolchains compatible with an environment's (see
+                BaseToolchain.abi).
         """
-        import inspect
-
-        takes_abi = "abi" in inspect.signature(finder).parameters
         entry = _FinderEntry(
             finder=finder, description=description, takes_abi=takes_abi
         )
@@ -531,6 +532,19 @@ class ToolchainRegistry:
 
         return None
 
+    def no_compatible_toolchain(
+        self, category: str, label: str, abi: str, tried: list[str]
+    ) -> RuntimeError:
+        """The error for finding no *category* toolchain compatible with
+        *abi*, naming the ones that would be."""
+        compatible = self.names_with_abi(category, abi)
+        return RuntimeError(
+            f"No {label} toolchain compatible with the '{abi}' ABI found. "
+            f"Tried: {', '.join(tried)}. Install one that is"
+            + (f" ({', '.join(compatible)})" if compatible else "")
+            + ", and put it on PATH."
+        )
+
     def names_with_abi(self, category: str, abi: str | None) -> list[str]:
         """The registered *category* toolchains compatible with *abi*, by
         their first alias: what to suggest when one doesn't match."""
@@ -681,6 +695,10 @@ class Toolchain(Protocol):
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release"); each toolchain
         defines its own semantics."""
+        ...
+
+    def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
+        """Build the Preset that apply_variant() applies."""
         ...
 
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:

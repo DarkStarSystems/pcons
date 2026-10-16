@@ -238,18 +238,6 @@ def env_selected_toolchain(
     return None
 
 
-def _not_found(category: str, label: str, abi: str, tried: list[str]) -> str:
-    """Why no *category* toolchain compatible with *abi* was found, and
-    which ones would be."""
-    compatible = toolchain_registry.names_with_abi(category, abi)
-    return (
-        f"No {label} toolchain compatible with the '{abi}' ABI found. "
-        f"Tried: {', '.join(tried)}. Install one that is"
-        + (f" ({', '.join(compatible)})" if compatible else "")
-        + ", and put it on PATH."
-    )
-
-
 def find_c_toolchain(
     prefer: list[str] | None = None,
     abi: str | None = None,
@@ -294,7 +282,7 @@ def find_c_toolchain(
 
     tried = toolchain_registry.get_tried_names("c", prefer)
     if abi is not None:
-        raise RuntimeError(_not_found("c", "C/C++", abi, tried))
+        raise toolchain_registry.no_compatible_toolchain("c", "C/C++", abi, tried)
     raise RuntimeError(
         f"No C/C++ toolchain found. Tried: {', '.join(tried)}. "
         "Make sure a compiler (clang, clang-cl, gcc, or MSVC) is installed and in PATH."
@@ -305,6 +293,7 @@ toolchain_registry.register_finder(
     ["c", "c++", "cpp"],
     find_c_toolchain,
     description="Auto-detect a C/C++ toolchain",
+    takes_abi=True,
 )
 
 
@@ -412,6 +401,7 @@ __all__ = [
     "build_tools_program",
     "newest_build_tools",
     # Toolchain finder and registry
+    "env_selected_toolchain",
     "find_c_toolchain",
     "find_fortran_toolchain",
     "find_swift_toolchain",

@@ -176,6 +176,7 @@ class Environment(_EnvironmentStubs):
         "_use_origins",
         "_fanout_seen",
         "_fanout_applied",
+        "_variant_request",
         "_name",
         "_cross_preset",
         "_target",
@@ -243,6 +244,8 @@ class Environment(_EnvironmentStubs):
         # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
         self._fanout_seen: set[Any] | None = None
         self._fanout_applied: list[Preset] | None = None
+        # The last set_variant() call, for toolchains added after it
+        self._variant_request: tuple[str, dict[str, Any]] | None = None
         self._cross_preset: Any = None
         self._target: Platform | None = None
         if name is not None:
@@ -577,12 +580,25 @@ class Environment(_EnvironmentStubs):
         new_tools = [n for n in self._get_tools() if n not in before]
         self._record_toolchain_baseline(toolchain, new_tools)
         # It configures only the tools it brought: $FC from an added Fortran
-        # toolchain must not retarget the primary toolchain's linker.
+        # toolchain must not retarget the primary toolchain's linker. A
+        # variant the script already set is realized for those tools in place
+        # of the toolchain's own default (an added ifx gets /MDd, not /MD,
+        # under debug), and the environment keeps its variant name.
+        presets = toolchain.setup_presets(self)
+        if self._variant_request is not None:
+            name, kwargs = self._variant_request
+            variant = toolchain.make_variant_preset(name, **kwargs)
+            presets = [
+                p for p in presets if p.exclusive_group != variant.exclusive_group
+            ]
+            presets.append(variant)
+        current_variant = self.variant
         with self._dedup_fanout(join=True):
-            for preset in toolchain.setup_presets(self):
+            for preset in presets:
                 owned = tuple(c for c in preset.contributions if c.tool in new_tools)
                 if owned:
                     self.apply(dataclasses.replace(preset, contributions=owned))
+        self.variant = current_variant
 
     @property
     def toolchains(self) -> list[Toolchain]:
@@ -765,6 +781,7 @@ class Environment(_EnvironmentStubs):
         # Copy applied presets (frozen dataclasses → shallow copy is safe)
         new_env._applied_presets = list(self._applied_presets)
         new_env._applied_imperative = list(self._applied_imperative)
+        new_env._variant_request = self._variant_request
         new_env._use_origins = dict(self._use_origins)
 
         new_env._build_dir_base = self._build_dir_base
@@ -1152,6 +1169,7 @@ class Environment(_EnvironmentStubs):
             env.set_variant("release", extra_flags=["-march=native"])
         """
         trace("env", "Setting variant: %s", name)
+        self._variant_request = (name, dict(kwargs))
         # Recorded whether or not a toolchain realizes it, because this is the
         # only point at which a variant name is observable: `get_variant` takes
         # a string and returns one. The CLI persists the names for completion.

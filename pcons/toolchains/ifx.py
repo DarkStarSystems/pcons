@@ -11,9 +11,8 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.fortran import (
@@ -136,15 +135,11 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
         "fast-math": {"compile_flags": ["/fp:fast"]},
     }
 
-    # Like MsvcToolchain's, the dynamic CRT throughout, so Fortran and
-    # C/C++ objects agree on one C runtime: /MD(d) also selects Intel's
-    # DLL runtime. ifx has /Z7 too, debug info in the object.
-    IFX_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
-        "debug": (["/Od", "/Z7", "/MDd"], ["DEBUG", "_DEBUG"]),
-        "release": (["/O2", "/MD"], ["NDEBUG"]),
+    # MsvcToolchain's, so Fortran and C/C++ objects agree on one C runtime
+    # (/MD(d) also selects Intel's DLL runtime), with ifx's own top level.
+    MSVC_VARIANTS = {
+        **MsvcCompatibleToolchain.MSVC_VARIANTS,
         "release-fastest": (["/O3", "/MD"], ["NDEBUG"]),
-        "relwithdebinfo": (["/O2", "/Z7", "/MD"], ["NDEBUG"]),
-        "minsizerel": (["/O1", "/MD"], ["NDEBUG"]),
     }
 
     def __init__(self) -> None:
@@ -192,32 +187,6 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
         if (libdir / "libifcoremd.lib").is_file():
             return str(libdir)
         return None
-
-    def setup_presets(self, env: Environment) -> list[Preset]:
-        """The dynamic CRT (/MD) from the start, as MsvcToolchain does."""
-        crt = Preset(
-            name="default",
-            category="variant",
-            exclusive_group="build_variant",
-            contributions=(ToolContribution("fc", flags=("/MD",)),),
-        )
-        return [*super().setup_presets(env), crt]
-
-    def _variant_contributions(
-        self, variant: str, **kwargs: Any
-    ) -> list[ToolContribution]:
-        spec = self.IFX_VARIANTS.get(variant.lower())
-        if spec is None:
-            raise ValueError(
-                f"Unknown variant '{variant}'. "
-                f"Supported variants: {', '.join(self.IFX_VARIANTS)}."
-            )
-        flags = [*spec[0], *kwargs.get("extra_flags", [])]
-        defines = [*spec[1], *kwargs.get("extra_defines", [])]
-        contribs = [ToolContribution("fc", flags=tuple(flags), defines=tuple(defines))]
-        if "/Z7" in flags:
-            contribs.append(ToolContribution("link", flags=("/DEBUG",)))
-        return contribs
 
 
 # =============================================================================

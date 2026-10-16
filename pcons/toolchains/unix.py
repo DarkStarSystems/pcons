@@ -47,8 +47,9 @@ def abi_from_triple(triple: str) -> str | None:
 
 @functools.cache
 def target_triple(compiler: str) -> str | None:
-    """*compiler*'s default target triple (``-print-target-triple``, which
-    clang, flang and gcc all answer), or None when it can't be asked."""
+    """*compiler*'s default target triple, from ``-print-target-triple``
+    (clang and flang; GCC has ``-dumpmachine`` instead), or None when it
+    can't be asked."""
     try:
         out = subprocess.check_output(
             [compiler, "-print-target-triple"],

@@ -267,10 +267,19 @@ class CompileLinkContext:
 
         link_flags = list(effective.link_flags)
 
-        # Let the toolchain inject target-specific link flags
+        # Let the toolchains inject target-specific link flags: the
+        # environment's, and any added one that compiled objects in the link
+        # language (ifx's /SUBSYSTEM:CONSOLE for a Fortran program built
+        # beside MSVC C++).
         if target is not None and output_name is not None and env is not None:
-            toolchain = env._toolchain
-            if toolchain is not None:
+            compilers = [
+                (node._build_info or {}).get("toolchain")
+                for node in target.intermediate_nodes
+                if (node._build_info or {}).get("language") == language
+            ]
+            for toolchain in dict.fromkeys(
+                t for t in (env._toolchain, *compilers) if t is not None
+            ):
                 extra = toolchain.get_link_flags_for_target(
                     target, output_name, link_flags
                 )

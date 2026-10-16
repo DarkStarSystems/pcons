@@ -4,6 +4,7 @@ what they share through FortranToolchain."""
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+import pcons.toolchains.flang as flang_mod
 from pcons.toolchains import unix as unix_mod
 from pcons.toolchains.flang import FlangToolchain
 from pcons.toolchains.fortran import (
@@ -217,11 +219,7 @@ def test_ifx_compiles_position_independent_code() -> None:
 )
 def test_detection_order(installed, cls, monkeypatch) -> None:
     monkeypatch.delenv("FC", raising=False)
-
-    def which(name, *args, **kwargs):
-        return f"/usr/bin/{name}" if Path(name).name in installed else None
-
-    with patch("shutil.which", which):
+    with _installed(*installed):
         assert isinstance(find_fortran_toolchain(), cls)
 
 
@@ -391,13 +389,19 @@ def test_a_fortran_only_program_links_with_the_fortran_driver(
 # =============================================================================
 
 
+@contextlib.contextmanager
 def _installed(*names: str):
-    """Patch shutil.which so exactly *names* are on PATH."""
+    """Patch shutil.which so exactly *names* are on PATH, each a complete
+    install (a flang finds its intrinsic modules)."""
 
     def which(name, *args, **kwargs):
         return f"/usr/bin/{name}" if Path(name).name in names else None
 
-    return patch("shutil.which", which)
+    with (
+        patch("shutil.which", which),
+        patch.object(flang_mod, "intrinsic_modules_problem", lambda flang: None),
+    ):
+        yield
 
 
 def test_abi_compatible() -> None:
@@ -593,3 +597,73 @@ def test_off_windows_nothing_is_asked(monkeypatch) -> None:
     asked = _answer(monkeypatch, "x86_64-w64-windows-gnu")
     assert LlvmToolchain().abi is None and FlangToolchain().abi is None
     assert asked == []
+
+
+def test_an_added_toolchain_realizes_the_variant_already_set(
+    on_windows, tmp_path
+) -> None:
+    """set_variant() before add_toolchain(): the added toolchain gets that
+    variant (flang's debug C runtime), not its own default, and the
+    environment keeps its variant name."""
+    from pcons import Project
+
+    project = Project("v", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("llvm").create_toolchain()
+    )
+    env.set_variant("debug")
+    env.add_toolchain(toolchain_registry.get("flang").create_toolchain())
+
+    assert "-fms-runtime-lib=dll_dbg" in env.fc.flags
+    assert "-fms-runtime-lib=dll" not in env.fc.flags
+    assert "-O0" in env.fc.flags and "-O0" in env.cxx.flags
+    assert env.variant == "debug"
+
+
+def test_a_flang_without_intrinsic_modules_is_not_available(caplog) -> None:
+    """Visual Studio's bundled flang.exe has no intrinsic modules."""
+    complaint = "error: Source file 'iso_c_binding.mod' was not found"
+    failed = subprocess.CompletedProcess([], 1, stdout="", stderr=complaint + "\n")
+    flang_mod.intrinsic_modules_problem.cache_clear()
+    with (
+        patch("shutil.which", lambda name, *a, **k: "/vs/flang.exe"),
+        patch.object(subprocess, "run", lambda *a, **k: failed),
+    ):
+        assert not flang_mod._flang_is_available()
+    flang_mod.intrinsic_modules_problem.cache_clear()
+    assert "iso_c_binding.mod" in caplog.text
+
+
+def test_a_complete_flang_is_available() -> None:
+    passed = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+    flang_mod.intrinsic_modules_problem.cache_clear()
+    with (
+        patch("shutil.which", lambda name, *a, **k: "/opt/flang"),
+        patch.object(subprocess, "run", lambda *a, **k: passed),
+    ):
+        assert flang_mod._flang_is_available()
+    flang_mod.intrinsic_modules_problem.cache_clear()
+
+
+def test_an_added_ifx_names_the_console_subsystem(on_windows, tmp_path) -> None:
+    """A Fortran program beside clang-cl links with link.exe, and ifx (not
+    the primary) supplies the /SUBSYSTEM link.exe can't infer: main is in
+    Intel's runtime."""
+    from pcons import Project
+    from pcons.toolchains.ifx import IfxMsvcCompiler, IfxMsvcToolchain
+    from pcons.toolchains.msvc import MsvcLibrarian, MsvcLinker
+
+    ifx = IfxMsvcToolchain()
+    ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
+    ifx._configured = True
+    (tmp_path / "hello.f90").write_text("program p\nend program\n")
+    project = Project("sub", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("clang-cl").create_toolchain()
+    )
+    env.add_toolchain(ifx)
+    prog = project.Program("hello", env, sources=["hello.f90"])
+    project.resolve()
+
+    (link,) = (n for n in prog.output_nodes if n.path.suffix == ".exe")
+    assert "/SUBSYSTEM:CONSOLE" in link._build_info["context"].link_flags

@@ -325,6 +325,7 @@ class TestCompileLinkContext:
 
         class _StubTarget:
             name = "foo"
+            intermediate_nodes: list[object] = []
 
         effective = EffectiveRequirements(link_flags=["-Wl,-soname,libfoo.so"])
         ctx = CompileLinkContext.from_effective_requirements(
