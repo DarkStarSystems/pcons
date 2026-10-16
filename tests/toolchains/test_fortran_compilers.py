@@ -360,3 +360,22 @@ def test_ifx_on_windows_links_console_programs(tmp_path, monkeypatch) -> None:
     assert tc.get_link_flags_for_target(prog, "app.exe", []) == ["/SUBSYSTEM:CONSOLE"]
     assert tc.get_link_flags_for_target(prog, "app.exe", ["/SUBSYSTEM:WINDOWS"]) == []
     assert tc.get_link_flags_for_target(lib, "lib.lib", []) == []
+
+
+def test_a_fortran_only_program_links_with_the_fortran_driver(
+    tmp_path, monkeypatch, gcc_toolchain
+) -> None:
+    """With C++ primary and Fortran added, a program of Fortran sources
+    links with the Fortran driver, which brings the Fortran runtime."""
+    from pcons import Project
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "hello.f90").write_text("program p\nend program\n")
+    project = Project("fonly", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(toolchain=gcc_toolchain)
+    env.add_toolchain(toolchain_registry.get("gfortran").create_toolchain())
+    prog = project.Program("hello", env, sources=["hello.f90"])
+    project.resolve()
+
+    (link,) = prog.output_nodes
+    assert link._build_info["context"].linker_cmd == env.fc.cmd
