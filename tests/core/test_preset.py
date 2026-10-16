@@ -289,6 +289,57 @@ class TestExclusiveGroup:
         env.apply(p)
         assert env.cc.flags.count("-g") == 1
 
+    def test_one_fanout_is_one_knob_setting(self, test_project):
+        """Each toolchain realizes a variant for its own tools; the presets
+        one set_variant fans out to must not un-apply each other, and the
+        next set_variant replaces all of them."""
+
+        def variant(name: str, tool: str, flag: str) -> Preset:
+            return Preset(
+                name=name,
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(ToolContribution(tool, flags=(flag,)),),
+            )
+
+        env = _make_env()
+        with env._dedup_fanout():
+            env.apply(variant("debug", "cc", "-g"))
+            env.apply(variant("debug", "cxx", "-g"))
+        assert env.cc.flags == ["-g"]
+        assert env.cxx.flags == ["-g"]
+
+        with env._dedup_fanout():
+            env.apply(variant("release", "cc", "-O2"))
+            env.apply(variant("release", "cxx", "-O2"))
+        assert env.cc.flags == ["-O2"]
+        assert env.cxx.flags == ["-O2"]
+        assert [p.name for p in env.applied_presets] == ["release", "release"]
+
+    def test_joining_fanout_keeps_the_current_setting(self, test_project):
+        """A toolchain added later realizes the knob for its new tools
+        without replacing the setting the others already realize."""
+        env = _make_env()
+        env.apply(
+            Preset(
+                name="default",
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(ToolContribution("cc", flags=("/MD",)),),
+            )
+        )
+        with env._dedup_fanout(join=True):
+            env.apply(
+                Preset(
+                    name="default",
+                    category="variant",
+                    exclusive_group="build_variant",
+                    contributions=(ToolContribution("cxx", flags=("/MD",)),),
+                )
+            )
+        assert env.cc.flags == ["/MD"]
+        assert env.cxx.flags == ["/MD"]
+
     def test_clone_then_switch_variant_works(self, test_project):
         """The documented workflow: clone at any point, retune the clone."""
         env = _make_env()

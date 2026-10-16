@@ -175,6 +175,7 @@ class Environment(_EnvironmentStubs):
         "_applied_imperative",
         "_use_origins",
         "_fanout_seen",
+        "_fanout_applied",
         "_name",
         "_cross_preset",
         "_target",
@@ -241,6 +242,7 @@ class Environment(_EnvironmentStubs):
         self._use_origins: dict[tuple[str, str], tuple[str, str]] = {}
         # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
         self._fanout_seen: set[Any] | None = None
+        self._fanout_applied: list[Preset] | None = None
         self._cross_preset: Any = None
         self._target: Platform | None = None
         if name is not None:
@@ -553,10 +555,11 @@ class Environment(_EnvironmentStubs):
         self._record_toolchain_baseline(toolchain, new_tools)
         # It configures only the tools it brought: $FC from an added Fortran
         # toolchain must not retarget the primary toolchain's linker.
-        for preset in toolchain.setup_presets(self):
-            owned = tuple(c for c in preset.contributions if c.tool in new_tools)
-            if owned:
-                self.apply(dataclasses.replace(preset, contributions=owned))
+        with self._dedup_fanout(join=True):
+            for preset in toolchain.setup_presets(self):
+                owned = tuple(c for c in preset.contributions if c.tool in new_tools)
+                if owned:
+                    self.apply(dataclasses.replace(preset, contributions=owned))
 
     @property
     def toolchains(self) -> list[Toolchain]:
@@ -906,8 +909,9 @@ class Environment(_EnvironmentStubs):
         Extends each contribution's tool flag/define lists; a ``cmd``
         contribution replaces the tool's command. Presets sharing an
         ``exclusive_group`` act as a knob: applying one first un-applies
-        any group member already applied. A preset applies fully or
-        raises (docs/presets.md, "Preset application").
+        the group members already applied, except those the same fan-out
+        applied — one knob setting, realized by each toolchain. A preset
+        applies fully or raises (docs/presets.md, "Preset application").
         """
         if self._fanout_seen is not None:
             # Identical presets resolved by several toolchains apply once
@@ -921,16 +925,23 @@ class Environment(_EnvironmentStubs):
         self._validate_preset(preset)
 
         if preset.exclusive_group is not None:
-            for i, applied in enumerate(self._applied_presets):
-                if applied.exclusive_group == preset.exclusive_group:
+            current = self._fanout_applied or []
+            kept: list[Preset] = []
+            for applied in self._applied_presets:
+                if applied.exclusive_group == preset.exclusive_group and not any(
+                    applied is c for c in current
+                ):
                     self._unapply_contributions(applied)
-                    del self._applied_presets[i]
-                    break
+                else:
+                    kept.append(applied)
+            self._applied_presets[:] = kept
 
         for contribution in preset.contributions:
             self._apply_contribution(contribution)
 
         self._applied_presets.append(preset)
+        if self._fanout_applied is not None:
+            self._fanout_applied.append(preset)
 
         if preset.category == "variant":
             self.variant = preset.name
@@ -1073,13 +1084,22 @@ class Environment(_EnvironmentStubs):
                         defines.remove(d)
 
     @contextmanager
-    def _dedup_fanout(self) -> Generator[None]:
-        """Scope a per-toolchain fan-out so identical presets apply once."""
+    def _dedup_fanout(self, *, join: bool = False) -> Generator[None]:
+        """Scope a per-toolchain fan-out: identical presets apply once, and
+        the group presets it applies together are one knob setting, so they
+        don't un-apply each other.
+
+        With *join*, the knob settings already applied count as this
+        fan-out's own: a toolchain added later realizes them for its tools
+        rather than replacing them for everyone else's.
+        """
         self._fanout_seen = set()
+        self._fanout_applied = list(self._applied_presets) if join else []
         try:
             yield
         finally:
             self._fanout_seen = None
+            self._fanout_applied = None
 
     def _apply_contribution(self, c: ToolContribution) -> None:
         """Apply a single tool contribution (extend flags/defines, set cmd)."""
