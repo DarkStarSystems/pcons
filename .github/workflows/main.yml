@@ -175,7 +175,7 @@ jobs:
           key: conan2-${{ runner.os }}-${{ hashFiles('examples/**/conanfile.*') }}
           restore-keys: conan2-${{ runner.os }}-
       - name: Run example tests
-        run: uv run pytest tests/test_examples.py -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
+        run: uv run pytest tests/test_examples.py -n auto --durations=20 --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
