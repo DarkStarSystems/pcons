@@ -586,7 +586,9 @@ def write_or_check(mode: str) -> int:
                 rc = 1
         elif mode == "write":
             if current != new_content:
-                path.write_text(new_content, encoding="utf-8")
+                # LF on every host, as checked in: text mode would write
+                # CRLF on Windows.
+                path.write_text(new_content, encoding="utf-8", newline="\n")
                 print(f"Updated {path}")
             else:
                 print(f"{path} is up to date.")
