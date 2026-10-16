@@ -4066,6 +4066,8 @@ requires-python = ">=3.11"
 variant = "release"          # optional: pcons variant to build
 install-target = "install"   # alias to build for wheels (default: "wheel")
 # variables = { SOME_VAR = "value" }  # optional: extra pcons variables
+# build-dir = "build"        # optional: wheel build directory (default: "build")
+# jobs = 4                   # optional: ninja parallel jobs (default: ninja's)
 ```
 
 #### How wheels are built
@@ -4117,13 +4119,120 @@ the compiled extensions in `build/`, so after editing C++ sources, re-running
 `ninja` is enough — no reinstall needed. (`PCONS_BUILD_WHEEL` is *not* set for
 editable builds.)
 
+`build/build.ninja` records the Python that ran the backend. It runs that
+Python to regenerate itself when `pcons-build.py` changes, and for any command
+built on `sys.executable`. Under build isolation, the default for uv and pip,
+that Python doesn't outlive the install: uv deletes its build venv, and pip's
+interpreter can't import pcons once the temporary build requirements are gone.
+The next regen then fails:
+
+```
+/bin/sh: .../uv/builds-v0/.tmpbL8Fju/bin/python: No such file or directory
+ninja: error: rebuilding 'build.ninja': subcommand failed
+```
+
+Plain C++ rebuilds keep working, and re-running the install recovers.
+
+To get a build directory you can always rerun ninja in, turn build isolation
+off for your package. With `uv sync`, put pcons, ninja and your other build
+requirements in the dev dependency group:
+
+```toml
+[dependency-groups]
+dev = ["pcons", "ninja"]
+
+[tool.uv]
+no-build-isolation-package = ["<name>"]
+```
+
+uv installs the dev group first, then builds your package with the project's
+Python. With pip or `uv pip`:
+
+```sh
+pip install pcons ninja && pip install --no-build-isolation -e .
+uv pip install pcons ninja && uv pip install --no-build-isolation -e .
+```
+
+#### Build directory
+
+Wheel builds use `build/wheel/` by default. A wheel build configures with the
+wheel layout, so it keeps out of `build/`, where a plain `pcons` run and an
+editable install build. Set `build-dir` to put it somewhere else:
+
+```toml
+[tool.pcons]
+build-dir = "build-wheel"
+```
+
+The path is relative to the project directory, or absolute. Editable builds
+ignore `build-dir`. They always use `build/`, the directory the `.pth` file
+points at.
+
+Use a dedicated directory. The project directory, its parents and a Windows
+drive-relative path such as `C:build` are refused. An sdist leaves the
+build directory out when it lies inside the project, so a source directory
+like `src` would be missing from the sdist.
+
+The backend neither reads nor writes `pcons_cache.json`. Its `variant` and
+`variables` come from `pyproject.toml` on every build, so a variant, generator
+or variable you persisted with `pcons -B build --variant=debug SOMEVAR=ON`
+does not reach the backend build. The cache stays as it was after `uv sync`.
+
+#### Parallel jobs
+
+Ninja runs as many jobs as it chooses by default. Cap it with `jobs`, or per
+build with the `jobs` config setting, which wins over the key:
+
+```bash
+uv build --wheel -C jobs=4
+pip install -C jobs=4 .
+```
+
+For `uv sync`, set it in `pyproject.toml`:
+
+```toml
+[tool.uv]
+config-settings = { jobs = "4" }
+```
+
+The value must be a positive integer. `jobs` caps the ninja build only. The
+configure step, including any subprocess a build script runs, is not limited.
+
 #### Metadata and sdists
 
-The backend honors the PEP 621 `[project]` fields `name`, `version`,
-`requires-python`, and `dependencies` (emitted as `Requires-Dist`). Any other
-non-empty `[project]` field raises an error rather than being silently
-dropped from the wheel's metadata — remove the field or file an issue.
-`name` and `version` are required.
+The backend renders these PEP 621 `[project]` fields into `METADATA`
+(Metadata-Version 2.4):
+
+- `name`, `version` and `requires-python`. `name` and `version` are required.
+- `dependencies`, as `Requires-Dist`.
+- `optional-dependencies`, as `Provides-Extra` plus one `Requires-Dist` per
+  requirement, tagged with the extra marker. Extra names are normalized to
+  lowercase with `-` for runs of `-`, `_` and `.`.
+- `description`, as `Summary`. It must be one line.
+- `readme`, a file name or a table with `file` or `text` and `content-type`.
+  A file name needs the suffix `.md`, `.rst` or `.txt`. The text becomes the
+  message body and `Description-Content-Type` is set.
+- `license`, an SPDX expression string (`License-Expression`). The legacy
+  `{text = ...}` and `{file = ...}` tables become `License`. The expression is
+  passed through, not validated.
+- `license-files`, a list of globs. Each match gets a `License-File` line and is
+  copied to `<name>-<version>.dist-info/licenses/`. A glob that matches nothing
+  is an error.
+- `authors` and `maintainers`, as `Author`, `Author-email`, `Maintainer` and
+  `Maintainer-email`.
+- `scripts`, `gui-scripts` and `entry-points`, written to `entry_points.txt`
+  as the groups `console_scripts`, `gui_scripts` and one group per
+  `entry-points` table. `entry-points` must not define `console_scripts` or
+  `gui_scripts`. Editable installs get the script launchers too.
+- `keywords`, `classifiers` and `urls`, as `Keywords`, `Classifier` and
+  `Project-URL`.
+
+Files named by `readme`, `license` and `license-files` must lie inside the
+project.
+
+An unknown `[project]` key, or a non-empty `dynamic`, raises an error rather
+than being silently dropped from the wheel's metadata. Remove it or file an
+issue.
 
 `build_sdist` ships the whole source tree (recursively, excluding build
 output, VCS data, and tool caches) plus the spec-required `PKG-INFO`.

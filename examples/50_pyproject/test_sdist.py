@@ -10,3 +10,4 @@ assert any(n.endswith("src/hello.cpp") for n in ns), (
 assert any(n.endswith("src/hello.hpp") for n in ns), (
     f"hello.hpp missing from sdist: {ns}"
 )
+assert any(n.endswith("/LICENSE") for n in ns), f"LICENSE missing from sdist: {ns}"
