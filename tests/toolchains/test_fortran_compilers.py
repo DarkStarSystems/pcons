@@ -379,3 +379,109 @@ def test_a_fortran_only_program_links_with_the_fortran_driver(
 
     (link,) = prog.output_nodes
     assert link._build_info["context"].linker_cmd == env.fc.cmd
+
+
+# =============================================================================
+# ABI matching: what add_toolchain() may put beside the primary toolchain
+# =============================================================================
+
+
+def _installed(*names: str):
+    """Patch shutil.which so exactly *names* are on PATH."""
+
+    def which(name, *args, **kwargs):
+        return f"/usr/bin/{name}" if Path(name).name in names else None
+
+    return patch("shutil.which", which)
+
+
+def test_abi_compatible() -> None:
+    from pcons.tools.toolchain import abi_compatible
+
+    assert abi_compatible("msvc", "msvc")
+    assert not abi_compatible("mingw", "msvc")
+    # Undeclared on either side links with anything.
+    assert abi_compatible(None, "msvc")
+    assert abi_compatible("mingw", None)
+
+
+def test_windows_abis(on_windows) -> None:
+    from pcons.toolchains.gcc import GccToolchain
+    from pcons.toolchains.llvm import LlvmToolchain
+
+    assert GccToolchain().abi == GfortranToolchain().abi == "mingw"
+    assert LlvmToolchain().abi == FlangToolchain().abi == "msvc"
+    assert IfxMsvcToolchain().abi == "msvc"
+    assert toolchain_registry.get("clang-cl").create_toolchain().abi == "msvc"
+
+
+def test_no_abis_off_windows() -> None:
+    if sys.platform == "win32":
+        pytest.skip("the host is Windows")
+    for cls in (GfortranToolchain, FlangToolchain, IfxToolchain):
+        assert cls().abi is None
+
+
+def test_msvc_cxx_gets_an_msvc_fortran(on_windows, monkeypatch) -> None:
+    """C++-primary on MSVC: "fortran" finds flang, passing MinGW gfortran."""
+    monkeypatch.delenv("FC", raising=False)
+    with _installed("gfortran", "flang"):
+        assert isinstance(find_fortran_toolchain(abi="msvc"), FlangToolchain)
+        assert isinstance(find_fortran_toolchain(abi="mingw"), GfortranToolchain)
+
+
+def test_no_compatible_fortran_says_which_would_do(on_windows, monkeypatch) -> None:
+    monkeypatch.delenv("FC", raising=False)
+    with _installed("gfortran"), pytest.raises(RuntimeError) as err:
+        find_fortran_toolchain(abi="msvc")
+    assert "'msvc' ABI" in str(err.value)
+    assert "flang" in str(err.value)
+
+
+def test_gfortran_gets_mingw_gcc(on_windows, monkeypatch) -> None:
+    """Fortran-primary on MinGW: "c" finds gcc, passing clang-cl and clang."""
+    from pcons.toolchains import find_c_toolchain
+    from pcons.toolchains.gcc import GccToolchain
+
+    for var in ("CC", "CXX"):
+        monkeypatch.delenv(var, raising=False)
+    with _installed("clang-cl", "clang", "gcc"):
+        assert isinstance(find_c_toolchain(abi="mingw"), GccToolchain)
+
+
+def test_an_incompatible_fc_is_an_error(on_windows, monkeypatch, tmp_path) -> None:
+    """$FC is the user's explicit choice: not honorable, not overridden."""
+    fc = tmp_path / "gfortran"
+    fc.write_text("#!/bin/sh\n")
+    fc.chmod(0o755)
+    monkeypatch.setenv("FC", str(fc))
+    with pytest.raises(RuntimeError, match=r"\$FC names .*'mingw' ABI"):
+        find_fortran_toolchain(abi="msvc")
+
+
+def test_an_incompatible_name_is_an_error(on_windows) -> None:
+    with _installed("gfortran"), pytest.raises(RuntimeError, match="'mingw' ABI"):
+        toolchain_registry.resolve("gfortran", abi="msvc")
+
+
+def test_envs_keep_their_own_abis(on_windows, tmp_path, monkeypatch, gcc_toolchain):
+    """Each environment matches its own primary toolchain only: a MinGW
+    environment and an MSVC one can sit side by side in one project."""
+    from pcons import Project
+
+    monkeypatch.chdir(tmp_path)
+    project = Project("two", root_dir=tmp_path, build_dir="build")
+    mingw = project.Environment(toolchain=gcc_toolchain)
+    mingw.add_toolchain(toolchain_registry.get("gfortran").create_toolchain())
+    msvc = project.Environment(
+        toolchain=toolchain_registry.get("clang-cl").create_toolchain()
+    )
+    msvc.add_toolchain(toolchain_registry.get("flang").create_toolchain())
+    assert [t.name for t in mingw.toolchains] == ["gcc", "gfortran"]
+    assert [t.name for t in msvc.toolchains] == ["clang-cl", "flang"]
+
+    # Within an environment, a mismatch is refused.
+    with pytest.raises(ValueError, match="can't be linked together"):
+        mingw.add_toolchain(toolchain_registry.get("flang").create_toolchain())
+    with _installed("gfortran"), pytest.raises(RuntimeError, match="clang-cl"):
+        msvc.add_toolchain("gfortran")

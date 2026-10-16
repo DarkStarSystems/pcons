@@ -29,6 +29,7 @@ class GfortranToolchain(FortranToolchain):
 
     TOOL_NAMES = ("fc", "ar", "link")
     ENV_COMPILER_FAMILY = "gfortran"
+    WINDOWS_ABI = "mingw"
 
     COMPILER = GfortranCompiler
     ARCHIVER = GccArchiver

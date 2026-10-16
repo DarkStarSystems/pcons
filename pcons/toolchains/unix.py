@@ -56,6 +56,15 @@ class UnixToolchain(BaseToolchain):
     # "my compiler isn't clang".
     IS_CLANG_DRIVER: ClassVar[bool] = False
 
+    # The ABI this toolchain's objects follow when it runs on Windows, where
+    # MinGW ("mingw") and MSVC ("msvc") objects can't be linked together.
+    # Elsewhere every Unix toolchain links with every other: no tag.
+    WINDOWS_ABI: ClassVar[str | None] = None
+
+    @property
+    def abi(self) -> str | None:
+        return self.WINDOWS_ABI if get_platform().is_windows else None
+
     # True for toolchains whose output is WebAssembly (see WasmToolchain).
     # wasm cross presets applied to a non-wasm toolchain fail fast: they
     # could repoint the compilers but not the output suffixes, shared-lib

@@ -85,6 +85,11 @@ class MsvcCompatibleToolchain(BaseToolchain):
         ]
     )
 
+    @property
+    def abi(self) -> str | None:
+        """MSVC's, which clang-cl, flang and ifx share on Windows."""
+        return "msvc"
+
     def compile_link_context_class(self) -> type[CompileLinkContext]:
         """MSVC and clang-cl both use MSVC-style command formatting.
 

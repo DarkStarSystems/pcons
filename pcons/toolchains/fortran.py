@@ -410,12 +410,15 @@ class FortranToolchain(FortranToolchainBase, UnixToolchain):
 
 def find_fortran_toolchain(
     prefer: list[str] | None = None,
+    abi: str | None = None,
 ) -> FortranToolchainBase:
     """Find the first available Fortran toolchain.
 
     Args:
         prefer: Toolchain names to try, in order. Defaults to the compiler
             $FC names, else gfortran, flang, ifx.
+        abi: Only a toolchain compatible with this ABI qualifies (see
+            BaseToolchain.abi): flang or ifx beside MSVC on Windows, say.
 
     Returns:
         A configured Fortran toolchain ready for use.
@@ -423,20 +426,22 @@ def find_fortran_toolchain(
     Raises:
         RuntimeError: If no Fortran toolchain is available.
     """
-    from pcons.toolchains import env_selected_toolchain
+    from pcons.toolchains import _not_found, env_selected_toolchain
 
     if prefer is None:
         # $FC steers auto-detection, like $CC/$CXX for C/C++.
-        env_toolchain = env_selected_toolchain("fortran", "FC")
+        env_toolchain = env_selected_toolchain("fortran", "FC", abi=abi)
         if env_toolchain is not None:
             return cast(FortranToolchainBase, env_toolchain)
         prefer = list(DEFAULT_PREFERENCE)
 
-    toolchain = toolchain_registry.find_available("fortran", prefer)
+    toolchain = toolchain_registry.find_available("fortran", prefer, abi=abi)
     if toolchain is not None:
         return cast(FortranToolchainBase, toolchain)
 
     tried = toolchain_registry.get_tried_names("fortran", prefer)
+    if abi is not None:
+        raise RuntimeError(_not_found("fortran", "Fortran", abi, tried))
     raise RuntimeError(
         f"No Fortran toolchain found. Tried: {', '.join(tried)}. "
         "Make sure gfortran, flang or ifx is installed and in PATH."

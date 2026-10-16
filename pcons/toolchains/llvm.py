@@ -386,6 +386,8 @@ class LlvmToolchain(UnixToolchain):
     """
 
     ENV_COMPILER_FAMILY = "llvm"
+    # Clang's default target on Windows is MSVC's (x86_64-pc-windows-msvc).
+    WINDOWS_ABI = "msvc"
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
 

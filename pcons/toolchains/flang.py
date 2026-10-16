@@ -40,6 +40,7 @@ class FlangToolchain(FortranToolchain):
 
     TOOL_NAMES = ("fc", "ar", "link")
     ENV_COMPILER_FAMILY = "flang"
+    WINDOWS_ABI = "msvc"
 
     COMPILER = FlangCompiler
     ARCHIVER = LlvmArchiver

@@ -300,6 +300,7 @@ class GccToolchain(UnixToolchain):
     """
 
     ENV_COMPILER_FAMILY = "gcc"
+    WINDOWS_ABI = "mingw"
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link")
 

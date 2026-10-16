@@ -194,7 +194,9 @@ toolchain_registry.register_lazy(
 )
 
 
-def env_selected_toolchain(category: str, *env_vars: str) -> BaseToolchain | None:
+def env_selected_toolchain(
+    category: str, *env_vars: str, abi: str | None = None
+) -> BaseToolchain | None:
     """The *category* toolchain the first set of *env_vars* implies, or None.
 
     When the variable names a classifiable compiler, that compiler's
@@ -203,9 +205,15 @@ def env_selected_toolchain(category: str, *env_vars: str) -> BaseToolchain | Non
     is the availability proof). An unclassifiable value (a wrapper script)
     returns None: normal detection proceeds, and the override still lands
     on whichever toolchain wins via Tool.env_var.
+
+    Raises:
+        RuntimeError: The variable names a compiler whose toolchain isn't
+            compatible with *abi*: the user's explicit choice can't be
+            honored, and silently picking another compiler would hide that.
     """
     from pcons.configure.compiler_id import compiler_family
     from pcons.tools.tool import resolve_env_cmd_override
+    from pcons.tools.toolchain import abi_compatible
 
     for var in env_vars:
         path = resolve_env_cmd_override(var)
@@ -216,12 +224,35 @@ def env_selected_toolchain(category: str, *env_vars: str) -> BaseToolchain | Non
             return None
         entry = toolchain_registry.get(family)
         if entry is not None and entry.category == category:
-            return entry.create_toolchain()
+            toolchain = entry.create_toolchain()
+            if not abi_compatible(toolchain.abi, abi):
+                compatible = toolchain_registry.names_with_abi(category, abi)
+                raise RuntimeError(
+                    f"${var} names {path}, a {family} compiler following the "
+                    f"'{toolchain.abi}' ABI, but the '{abi}' one is required "
+                    f"here: their objects can't be linked together. Unset "
+                    f"${var}, or name a compatible compiler"
+                    + (f" ({', '.join(compatible)})." if compatible else ".")
+                )
+            return toolchain
     return None
+
+
+def _not_found(category: str, label: str, abi: str, tried: list[str]) -> str:
+    """Why no *category* toolchain compatible with *abi* was found, and
+    which ones would be."""
+    compatible = toolchain_registry.names_with_abi(category, abi)
+    return (
+        f"No {label} toolchain compatible with the '{abi}' ABI found. "
+        f"Tried: {', '.join(tried)}. Install one that is"
+        + (f" ({', '.join(compatible)})" if compatible else "")
+        + ", and put it on PATH."
+    )
 
 
 def find_c_toolchain(
     prefer: list[str] | None = None,
+    abi: str | None = None,
 ) -> BaseToolchain:
     """Find the first available C/C++ toolchain from the registry.
 
@@ -229,6 +260,8 @@ def find_c_toolchain(
         prefer: Toolchain names to try, in order. Defaults to
                 ["clang-cl", "msvc", "llvm", "gcc"] on Windows,
                 ["llvm", "gcc"] elsewhere.
+        abi: Only a toolchain compatible with this ABI qualifies (see
+            BaseToolchain.abi): MinGW gcc for gfortran on Windows, say.
 
     Returns:
         A configured toolchain ready for use.
@@ -245,7 +278,7 @@ def find_c_toolchain(
     if prefer is None:
         # $CXX/$CC steer auto-detection: the user named a compiler, so use
         # the toolchain family that compiler belongs to (see docs).
-        env_toolchain = env_selected_toolchain("c", "CXX", "CC")
+        env_toolchain = env_selected_toolchain("c", "CXX", "CC", abi=abi)
         if env_toolchain is not None:
             return env_toolchain
         import sys
@@ -255,11 +288,13 @@ def find_c_toolchain(
         else:
             prefer = ["llvm", "gcc"]
 
-    toolchain = toolchain_registry.find_available("c", prefer)
+    toolchain = toolchain_registry.find_available("c", prefer, abi=abi)
     if toolchain is not None:
         return toolchain
 
     tried = toolchain_registry.get_tried_names("c", prefer)
+    if abi is not None:
+        raise RuntimeError(_not_found("c", "C/C++", abi, tried))
     raise RuntimeError(
         f"No C/C++ toolchain found. Tried: {', '.join(tried)}. "
         "Make sure a compiler (clang, clang-cl, gcc, or MSVC) is installed and in PATH."

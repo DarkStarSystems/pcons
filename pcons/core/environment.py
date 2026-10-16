@@ -537,14 +537,37 @@ class Environment(_EnvironmentStubs):
             toolchain: Toolchain to add. A string is looked up in the
                 toolchain registry, like the Environment constructor.
 
+        Its objects are linked with the primary toolchain's, so it must
+        follow a compatible ABI (Toolchain.abi). A name picks among the
+        compatible toolchains ("fortran" beside MSVC finds flang or ifx,
+        not MinGW gfortran); an incompatible one is an error. Only this
+        environment's primary toolchain counts: other environments in the
+        project may follow other ABIs.
+
         Example:
             env = project.Environment(toolchain="c")
             env.add_toolchain("cuda")  # Adds CUDA support
         """
-        if isinstance(toolchain, str):
-            from pcons.tools.toolchain import toolchain_registry
+        from pcons.tools.toolchain import abi_compatible, toolchain_registry
 
-            toolchain = toolchain_registry.resolve(toolchain)
+        primary = object.__getattribute__(self, "_toolchain")
+        abi = getattr(primary, "abi", None) if primary is not None else None
+        if isinstance(toolchain, str):
+            try:
+                toolchain = toolchain_registry.resolve(toolchain, abi=abi)
+            except RuntimeError as e:
+                if abi is None:
+                    raise
+                raise RuntimeError(
+                    f"Can't add '{toolchain}' beside {primary.name}, whose "
+                    f"objects follow the '{abi}' ABI: {e}"
+                ) from e
+        elif not abi_compatible(getattr(toolchain, "abi", None), abi):
+            raise ValueError(
+                f"Can't add {toolchain.name} beside {primary.name}: it follows "
+                f"the '{toolchain.abi}' ABI and {primary.name} the '{abi}' one, "
+                f"so their objects can't be linked together."
+            )
         additional: list[Toolchain] = object.__getattribute__(
             self, "_additional_toolchains"
         )
