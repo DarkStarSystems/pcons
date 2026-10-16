@@ -38,9 +38,10 @@ if TYPE_CHECKING:
 
 # Fortran source file extensions
 _FORTRAN_FREE_FORM = {".f90", ".f95", ".f03", ".f08", ".f18"}
-_FORTRAN_PREPROCESSED = {".F", ".F90"}
+# Run through the preprocessor first (the capital is what says so)
+FORTRAN_PREPROCESSED = {".F", ".F90"}
 _FORTRAN_FIXED_FORM = {".f", ".for", ".ftn"}
-FORTRAN_EXTENSIONS = _FORTRAN_FREE_FORM | _FORTRAN_PREPROCESSED | _FORTRAN_FIXED_FORM
+FORTRAN_EXTENSIONS = _FORTRAN_FREE_FORM | FORTRAN_PREPROCESSED | _FORTRAN_FIXED_FORM
 
 # Default module output/search directory, relative to the build directory.
 DEFAULT_MODDIR = "modules"

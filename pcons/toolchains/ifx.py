@@ -9,6 +9,7 @@ finds its intrinsic modules (``INCLUDE``).
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,6 +18,7 @@ from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.fortran import (
     DEFAULT_MODDIR,
+    FORTRAN_PREPROCESSED,
     FortranCompiler,
     FortranLinker,
     FortranToolchain,
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.flags import FlagToken
     from pcons.core.target import Target
+    from pcons.tools.toolchain import SourceHandler
 
 
 class IfxCompiler(FortranCompiler):
@@ -87,6 +90,21 @@ class IfxMsvcCompiler(FortranCompiler):
     MODDIR_FLAG = "/module:"
 
     def default_vars(self) -> dict[str, object]:
+        def compile_command(*extra: str) -> list[object]:
+            return [
+                "$fc.cmd",
+                "$fc.flags",
+                *extra,
+                "${prefix(fc.iprefix, fc.includes)}",
+                "${prefix(fc.dprefix, fc.defines)}",
+                f"{self.MODDIR_FLAG}$fc.moddir",
+                "/I",
+                "$fc.moddir",
+                "/c",
+                TargetPath(prefix="/Fo"),
+                SourcePath(),
+            ]
+
         return {
             "cmd": self.COMMANDS[0],
             "flags": ["/nologo"],
@@ -97,18 +115,10 @@ class IfxMsvcCompiler(FortranCompiler):
             "moddir": DEFAULT_MODDIR,
             "submodule_file": self.SUBMODULE_FILE,
             "ancestor_file": self.ANCESTOR_FILE,
-            "objcmd": [
-                "$fc.cmd",
-                "$fc.flags",
-                "${prefix(fc.iprefix, fc.includes)}",
-                "${prefix(fc.dprefix, fc.defines)}",
-                f"{self.MODDIR_FLAG}$fc.moddir",
-                "/I",
-                "$fc.moddir",
-                "/c",
-                TargetPath(prefix="/Fo"),
-                SourcePath(),
-            ],
+            "objcmd": compile_command(),
+            # Windows file names don't keep case, so ifx can't tell .F90 from
+            # .f90 there and preprocesses only when asked.
+            "fppcmd": compile_command("/fpp"),
         }
 
 
@@ -149,6 +159,12 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
     @property
     def objects_name_runtimes(self) -> bool:
         return True
+
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
+        handler = super().get_source_handler(suffix)
+        if handler is not None and suffix in FORTRAN_PREPROCESSED:
+            return dataclasses.replace(handler, command_var="fppcmd")
+        return handler
 
     def setup(self, env: Environment) -> None:
         """Set up ifx's tools, with link.exe and lib.exe by full path when

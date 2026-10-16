@@ -378,6 +378,31 @@ def test_ifx_on_windows_finds_its_runtime_beside_bin(tmp_path) -> None:
     assert IfxMsvcToolchain()._find_runtime_libdir(str(elsewhere)) is None
 
 
+def test_ifx_on_windows_preprocesses_capitalized_sources(on_windows, tmp_path) -> None:
+    """Windows file names don't keep case, so ifx preprocesses .F90 only
+    when told to; .f90 isn't preprocessed."""
+    from pcons import Project
+    from pcons.toolchains.ifx import IfxMsvcCompiler
+    from pcons.toolchains.msvc import MsvcLibrarian, MsvcLinker
+
+    ifx = IfxMsvcToolchain()
+    ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
+    ifx._configured = True
+    (tmp_path / "pre.F90").write_text("program p\nend program\n")
+    (tmp_path / "plain.f90").write_text("subroutine s()\nend subroutine\n")
+    project = Project("fpp", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(toolchain=ifx)
+    prog = project.Program("app", env, sources=["pre.F90", "plain.f90"])
+    project.resolve()
+
+    command_vars = {
+        node.path.name.split(".")[0]: node._build_info["command_var"]
+        for node in prog.intermediate_nodes
+    }
+    assert command_vars == {"pre": "fppcmd", "plain": "objcmd"}
+    assert "/fpp" in env.fc.fppcmd and "/fpp" not in env.fc.objcmd
+
+
 def test_ifx_on_windows_links_console_programs(tmp_path, monkeypatch) -> None:
     """link.exe can't infer the subsystem: main is in Intel's runtime."""
     from pcons import Project
