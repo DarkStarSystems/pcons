@@ -159,7 +159,12 @@ def intrinsic_modules_problem(flang: str) -> str | None:
     if result.returncode == 0:
         return None
     said = (result.stderr or result.stdout).strip().splitlines()
-    return said[0] if said else f"exit code {result.returncode}"
+    if not said:
+        return f"exit code {result.returncode}"
+    # flang leads with "error: Semantic errors in <file>"; the line that
+    # says what's wrong names the module. Its "<file>:2:7: " is noise.
+    line = next((s for s in said if "iso_c_binding" in s), said[0])
+    return line[line.find("error: ") :] if "error: " in line else line
 
 
 def _flang_is_available() -> bool:

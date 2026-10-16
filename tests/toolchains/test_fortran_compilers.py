@@ -634,6 +634,27 @@ def test_a_flang_without_intrinsic_modules_is_not_available(caplog) -> None:
     assert "iso_c_binding.mod" in caplog.text
 
 
+def test_the_missing_module_is_what_the_warning_says(caplog) -> None:
+    """flang's first line only says there were errors; the reason is the
+    one naming the module, without the probe file's path."""
+    complaint = (
+        "error: Semantic errors in C:/tmp/probe.f90\n"
+        "C:/tmp/probe.f90:2:7: error: Cannot parse module file for module "
+        "'iso_c_binding': Source file 'iso_c_binding.mod' was not found\n"
+        "    use iso_c_binding\n"
+    )
+    failed = subprocess.CompletedProcess([], 1, stdout="", stderr=complaint)
+    flang_mod.intrinsic_modules_problem.cache_clear()
+    with (
+        patch("shutil.which", lambda name, *a, **k: "/vs/flang.exe"),
+        patch.object(subprocess, "run", lambda *a, **k: failed),
+    ):
+        assert not flang_mod._flang_is_available()
+    flang_mod.intrinsic_modules_problem.cache_clear()
+    assert "(error: Cannot parse module file for module 'iso_c_binding'" in caplog.text
+    assert "probe.f90" not in caplog.text
+
+
 def test_a_complete_flang_is_available() -> None:
     passed = subprocess.CompletedProcess([], 0, stdout="", stderr="")
     flang_mod.intrinsic_modules_problem.cache_clear()
