@@ -15,6 +15,10 @@ commands = [
 ]
 
 [skip]
+# MinGW gfortran objects can't link with the MSVC-ABI C++ toolchain that
+# Windows selects by default (flang and ifx can); skipped there until
+# toolchain selection matches ABIs.
+platforms = ["windows"]
 requires_any = ["gfortran", "flang", "ifx"]
 # Xcode generator does not support Fortran
 # Make generator doesn't support Ninja dyndep for Fortran module ordering

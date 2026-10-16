@@ -165,11 +165,13 @@ class TestMixedLanguageIncludesAndDefines:
         target = project.Program("app", env, sources=sources)
         project.resolve()
 
+        # Keyed by source name: the object suffix is the host's (.obj on
+        # Windows).
         contexts = {
-            obj.path.name: obj._build_info["context"]
+            obj.path.name.rsplit(".", 1)[0]: obj._build_info["context"]
             for obj in target.intermediate_nodes
         }
-        c, cxx = contexts["gen.c.o"], contexts["app.cpp.o"]
+        c, cxx = contexts["gen.c"], contexts["app.cpp"]
         assert any("c_only" in i for i in c.includes)
         assert not any("cxx_only" in i for i in c.includes)
         assert any("cxx_only" in i for i in cxx.includes)
