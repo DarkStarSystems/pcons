@@ -901,9 +901,9 @@ class BaseToolchain(ABC):
     # The apply_*() methods are thin wrappers kept for call-site readability.
     # =========================================================================
 
-    # Compiler family this toolchain's cc/cxx belong to ("gcc", "llvm",
-    # "msvc", "clang-cl"), used to validate $CC/$CXX overrides. None skips
-    # validation.
+    # Compiler family this toolchain's compilers belong to ("gcc", "llvm",
+    # "msvc", "clang-cl", "gfortran", ...), used to validate $CC/$CXX/$FC
+    # overrides. None skips validation.
     ENV_COMPILER_FAMILY: str | None = None
 
     def setup_presets(self, env: Environment) -> list[Preset]:
@@ -934,7 +934,7 @@ class BaseToolchain(ABC):
             path = resolve_env_cmd_override(var)
             if path is None:
                 continue
-            if var in ("CC", "CXX"):
+            if var in ("CC", "CXX", "FC"):
                 self._validate_compiler_override(var, path)
             presets.append(
                 Preset(
@@ -948,7 +948,7 @@ class BaseToolchain(ABC):
         return presets
 
     def _validate_compiler_override(self, var: str, path: str) -> None:
-        """Reject a $CC/$CXX override from a different compiler family.
+        """Reject a compiler override from a different compiler family.
 
         The user asked for two contradictory things (e.g. ``CXX=g++-15``
         with ``toolchain="msvc"``); applying one silently would misbuild.
@@ -965,8 +965,8 @@ class BaseToolchain(ABC):
                 f"${var} is set to '{path}', which is a {family}-family "
                 f"compiler, but the requested toolchain is '{self.name}' "
                 f"({expected} family). Unset ${var} or use the matching "
-                f"toolchain (e.g. toolchain=\"{family}\" or the 'c' "
-                f"auto-detector, which follows ${var})."
+                f'toolchain (e.g. toolchain="{family}", or auto-detection, '
+                f"which follows ${var})."
             )
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:

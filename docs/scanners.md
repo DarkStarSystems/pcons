@@ -288,10 +288,10 @@ logical module names to keyed BMIs and writes each compile a modmap
 `/reference`. `import std;` rides `link_args`: configure describes dormant
 standard-library edges, and nothing builds or links unless some translation
 unit's scan reports the import. Fortran declares a `"fortran-modules"` scanner
-over its `MODULE`/`USE` scan and uses the generic collate unchanged.
+over its `MODULE`/`SUBMODULE`/`USE` scan and uses the generic collate unchanged.
 
 The examples: `examples/29_cxx_modules`, `30_cxx_partitions`,
 `32_cxx_import_std`, `35_cxx_modules_deps`, `36_cxx_modules_multi_level_subdirs`,
 `39_bmi_compat`, `71_cxx_modules_codegen`, `72_cxx_modules_codegen_interface`,
-and `26_fortran_modules`. The user-facing rules are in
+`26_fortran_modules` and `94_fortran_submodules`. The user-facing rules are in
 [C++20 modules](user-guide.md#c20-modules).

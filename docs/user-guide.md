@@ -189,6 +189,8 @@ IDE autocompletion for these names comes from the generated `KnownToolchain` typ
 - **Windows**: clang-cl → msvc → llvm → gcc
 - **Linux / macOS**: llvm → gcc
 
+**Default Fortran search order:** gfortran → flang → ifx
+
 ### Selecting compilers with environment variables
 
 Pcons honors the conventional tool-selection environment variables, same as
@@ -204,7 +206,7 @@ $ CXX=/opt/llvm/bin/clang++ pcons
 |----------|---------|------------|
 | `CC` | C compiler (and the link driver) | gcc, llvm, msvc, clang-cl |
 | `CXX` | C++ compiler | gcc, llvm, msvc, clang-cl |
-| `FC` | Fortran compiler | gfortran |
+| `FC` | Fortran compiler (and the link driver) | gfortran, flang, ifx |
 | `AR` | archiver | gcc, llvm, swift |
 | `SWIFTC` | Swift compiler | swift |
 | `CUDACXX` | CUDA compiler (nvcc) | cuda |
@@ -218,6 +220,8 @@ error. Specifically, the rules are as follows:
   named compiler's *family* — `CXX=g++-15` selects the gcc toolchain even
   where clang would normally win. Classification checks `--version`, so
   macOS's `g++`-that-is-really-Apple-clang is identified correctly.
+- With `toolchain="fortran"`, `$FC` does the same for Fortran:
+  `FC=flang-21` selects the flang toolchain.
 - An explicitly requested toolchain that *contradicts* the variable
   (`CXX=g++-15` with `toolchain="msvc"`) is an error.
 - Values a compiler-id can't classify (e.g. wrapper scripts) are used
@@ -311,12 +315,20 @@ env = project.Environment(toolchain="swift")
 env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
 ```
 
-**Fortran** (`gfortran`) is available as `toolchain="fortran"`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
+**Fortran** is available as `toolchain="fortran"`, which finds gfortran, LLVM's flang or Intel's ifx (`$FC` picks one; see above). Name one to require it: `toolchain="flang"`. All standard Fortran source extensions work. Modules and submodules are ordered at build time by Ninja dyndep (requires Ninja ≥ 1.10), so sources can be listed in any order:
 
 ```python
 env = project.Environment(toolchain="fortran")
 project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 ```
+
+The compilers differ in a few ways:
+
+- **flang** needs LLVM 21 or newer. It has no `-Os`, so `minsizerel` builds use `-O2`, and it has no `coverage` preset.
+- **ifx** runs on Linux, inside the oneAPI environment (`source /opt/intel/oneapi/setvars.sh`). It compiles position-independent code, so C and C++ drivers can link its objects. It has no `coverage` preset. It also rewrites every `.mod` file it compiles, even when nothing in it changed, so editing a module's implementation recompiles everything that uses the module. gfortran and flang only recompile those when the module's interface changes.
+- Each compiler realizes `warnings`, `werror`, `openmp` and `fast-math` with its own flags (ifx's `warnings` is `-warn all`).
+
+Fortran isn't supported on Windows yet.
 
 **Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
 
@@ -325,7 +337,8 @@ project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 env = project.Environment(toolchain="fortran")
 env.add_toolchain("c")
 
-# C++ primary: g++/clang++ links, -lgfortran injected for Fortran objects
+# C++ primary: g++/clang++ links, with the Fortran compiler's runtime
+# (-lgfortran, flang's -lflang_rt.runtime, or ifx's -lifcoremt etc.)
 env = project.Environment(toolchain="c++")
 env.add_toolchain("fortran")
 

@@ -13,12 +13,18 @@ Run as one scan edge::
         --out build/obj.hello/src/greetings.f90.o.fscan.json
 
 ``MODULE foo`` provides ``foo`` at ``<moddir>/foo.mod``, which the compile
-writes via ``-J <moddir>``; because that file is not one of the compile's
-declared outputs, each provided ``.mod`` is also reported as an extra output,
-which is what makes it a dyndep implicit output. ``USE bar`` requires ``bar``,
-unless this same file provides it or it is an intrinsic module. Module names
-are lowercased throughout: Fortran is case-insensitive and gfortran writes
-lowercase ``.mod`` files.
+writes into the module directory; because that file is not one of the
+compile's declared outputs, each provided ``.mod`` is also reported as an
+extra output, which is what makes it a dyndep implicit output. ``USE bar``
+requires ``bar``, unless this same file provides it or it is an intrinsic
+module.
+
+``SUBMODULE (foo) impl`` requires its parent ``foo`` and provides
+``foo:impl``, whose file the compiler names (``--submodule-file``, e.g.
+``{ancestor}@{name}.smod`` for gfortran); a submodule of it,
+``SUBMODULE (foo:impl) more``, requires ``foo:impl``. Module names are
+lowercased throughout: Fortran is case-insensitive and compilers write
+lowercase module files.
 
 Limitation: Fortran ``INCLUDE`` lines are not followed, so a module
 declaration reached only through an include is invisible here.
@@ -39,15 +45,23 @@ from pathlib import Path
 
 from pcons.core.collate import SCAN_INFO_VERSION, write_text_if_changed
 
-# Regex for MODULE <name> declarations (produces a .mod file)
-# Handles: MODULE foo, MODULE :: foo (gfortran doesn't need ::, but be flexible)
-# Excludes: MODULE PROCEDURE, and the "module subroutine" / "module function"
-# a submodule uses to implement a separate module procedure; neither defines
-# a module.
+# Regex for MODULE <name> declarations (produces a .mod file): the name ends
+# the statement. That excludes MODULE PROCEDURE lists and the separate module
+# procedures a submodule implements ("module subroutine step()", "module pure
+# function f(x)"), none of which defines a module.
 _MODULE_RE = re.compile(
-    r"^\s*MODULE\s+(?!PROCEDURE\b|SUBROUTINE\b|FUNCTION\b)(\w+)",
+    r"^\s*MODULE\s+(\w+)\s*(?:;|$)",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# Regex for SUBMODULE (<ancestor>[:<parent>]) <name> declarations
+_SUBMODULE_RE = re.compile(
+    r"^\s*SUBMODULE\s*\(\s*(\w+)\s*(?::\s*(\w+)\s*)?\)\s*(\w+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# How gfortran and ifx name a submodule's file; flang uses {ancestor}-{name}.mod.
+DEFAULT_SUBMODULE_FILE = "{ancestor}@{name}.smod"
 
 # Regex for USE <name> statements (consumes a .mod file)
 # Handles: USE foo, USE :: foo, USE foo, ONLY: bar
@@ -89,20 +103,23 @@ def scan_fortran_source(source_text: str) -> tuple[list[str], list[str]]:
 
     Returns:
         Tuple of (produces, consumes) where:
-        - produces: list of module names this file defines (lowercase)
-        - consumes: list of module names this file uses (lowercase)
+        - produces: list of module names this file defines (lowercase);
+          a submodule is "<ancestor>:<name>"
+        - consumes: list of module names this file uses (lowercase);
+          a submodule uses its parent, "<ancestor>" or "<ancestor>:<parent>"
     """
     clean = strip_comments(source_text)
 
-    produces = []
-    for m in _MODULE_RE.finditer(clean):
-        name = m.group(1).lower()
-        produces.append(name)
+    produces = [m.group(1).lower() for m in _MODULE_RE.finditer(clean)]
+    used = [m.group(1).lower() for m in _USE_RE.finditer(clean)]
+    for m in _SUBMODULE_RE.finditer(clean):
+        ancestor, parent, name = (g.lower() if g else g for g in m.groups())
+        produces.append(f"{ancestor}:{name}")
+        used.append(f"{ancestor}:{parent}" if parent else ancestor)
 
     consumes = []
     seen: set[str] = set()
-    for m in _USE_RE.finditer(clean):
-        name = m.group(1).lower()
+    for name in used:
         # Skip intrinsics and self-references
         if name not in _INTRINSIC_MODULES and name not in seen:
             consumes.append(name)
@@ -116,17 +133,26 @@ def scan_fortran_source(source_text: str) -> tuple[list[str], list[str]]:
     return produces, consumes
 
 
-def scan_info(source_text: str, moddir: str) -> dict[str, object]:
+def scan_info(
+    source_text: str, moddir: str, submodule_file: str = DEFAULT_SUBMODULE_FILE
+) -> dict[str, object]:
     """The scan-info document for one Fortran source.
 
-    Each provided module's ``.mod`` file appears in both ``provides`` (so
-    requiring edges can depend on it) and ``extra_outputs`` (so the dyndep
-    file claims the compile writes it) -- the contract collate enforces.
+    Each provided module's file appears in both ``provides`` (so requiring
+    edges can depend on it) and ``extra_outputs`` (so the dyndep file claims
+    the compile writes it) -- the contract collate enforces.
     """
     produces, consumes = scan_fortran_source(source_text)
     mod_dir = moddir.rstrip("/") or "."
     provided = list(dict.fromkeys(produces))
-    mod_paths = [f"{mod_dir}/{name}.mod" for name in provided]
+
+    def module_file(name: str) -> str:
+        ancestor, _, submodule = name.partition(":")
+        if not submodule:
+            return f"{name}.mod"
+        return submodule_file.format(ancestor=ancestor, name=submodule)
+
+    mod_paths = [f"{mod_dir}/{module_file(name)}" for name in provided]
     return {
         "version": SCAN_INFO_VERSION,
         "provides": [
@@ -156,6 +182,12 @@ def main(argv: list[str] | None = None) -> int:
         help="module directory relative to the build dir (default: modules)",
     )
     parser.add_argument(
+        "--submodule-file",
+        default=DEFAULT_SUBMODULE_FILE,
+        help="file a submodule compiles to, from {ancestor} and {name} "
+        f"(default: {DEFAULT_SUBMODULE_FILE})",
+    )
+    parser.add_argument(
         "--out",
         required=True,
         help="scan-info JSON file to write",
@@ -168,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pcons fortran scan: cannot read {args.scan_one}: {e}", file=sys.stderr)
         return 1
 
-    info = scan_info(text, args.moddir)
+    info = scan_info(text, args.moddir, args.submodule_file)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     write_text_if_changed(out, json.dumps(info, indent=1, sort_keys=True) + "\n")

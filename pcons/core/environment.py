@@ -7,6 +7,7 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from collections import UserList
@@ -550,8 +551,12 @@ class Environment(_EnvironmentStubs):
         toolchain.setup(self)
         new_tools = [n for n in self._get_tools() if n not in before]
         self._record_toolchain_baseline(toolchain, new_tools)
+        # It configures only the tools it brought: $FC from an added Fortran
+        # toolchain must not retarget the primary toolchain's linker.
         for preset in toolchain.setup_presets(self):
-            self.apply(preset)
+            owned = tuple(c for c in preset.contributions if c.tool in new_tools)
+            if owned:
+                self.apply(dataclasses.replace(preset, contributions=owned))
 
     @property
     def toolchains(self) -> list[Toolchain]:

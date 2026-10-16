@@ -12,15 +12,14 @@ import pytest
 
 from pcons import Project
 from pcons.core.target import Target
+from pcons.toolchains.fortran import FORTRAN_EXTENSIONS, find_fortran_toolchain
 from pcons.toolchains.fortran_scanner import main as fortran_scanner_main
 from pcons.toolchains.fortran_scanner import scan_fortran_source, scan_info
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.gfortran import (
-    FORTRAN_EXTENSIONS,
     GfortranCompiler,
     GfortranLinker,
     GfortranToolchain,
-    find_fortran_toolchain,
 )
 from pcons.tools.toolchain import SourceHandler, toolchain_registry
 
@@ -226,7 +225,43 @@ def test_scan_submodule_procedures_are_not_modules() -> None:
         end submodule
     """)
     produces, uses = scan_fortran_source(src)
-    assert produces == []
+    assert produces == ["parent:child"]
+    assert uses == ["parent"]
+
+
+def test_scan_prefixed_module_procedures_are_not_modules() -> None:
+    """ "module pure function f(x)" once read as a module named "pure"."""
+    src = textwrap.dedent("""\
+        submodule (shapes) impl
+        contains
+          module pure function area(r) result(a)
+          end function
+          module elemental subroutine scale(x)
+          end subroutine
+          module real function perimeter(r)
+          end function
+        end submodule
+    """)
+    produces, _ = scan_fortran_source(src)
+    assert produces == ["shapes:impl"]
+
+
+def test_scan_nested_submodule_uses_its_parent() -> None:
+    src = "SUBMODULE (Shapes : Impl) Helpers\nEND SUBMODULE\n"
+    assert scan_fortran_source(src) == (["shapes:helpers"], ["shapes:impl"])
+
+
+def test_scan_info_names_submodule_files_as_the_compiler_does() -> None:
+    src = "submodule (shapes) impl\nend submodule\n"
+
+    gnu = scan_info(src, "modules")
+    flang = scan_info(src, "modules", "{ancestor}-{name}.mod")
+
+    assert gnu["provides"] == [
+        {"name": "shapes:impl", "path": "modules/shapes@impl.smod"}
+    ]
+    assert flang["extra_outputs"] == ["modules/shapes-impl.mod"]
+    assert flang["requires"] == ["shapes"]
 
 
 def test_scan_module_names_lowercased() -> None:
@@ -348,7 +383,7 @@ def test_scan_one_cli_reports_a_missing_source(tmp_path: Path, capsys) -> None:
 
 
 # =============================================================================
-# Scanner wiring (GfortranToolchain.after_resolve)
+# Scanner wiring (FortranToolchain.after_resolve)
 # =============================================================================
 
 
@@ -446,7 +481,7 @@ class TestScannerWiring:
     def test_the_module_directory_is_created(
         self, tmp_path, monkeypatch, fortran_toolchain
     ):
-        """gfortran will not create the -J directory itself."""
+        """Compilers will not create the module directory themselves."""
         monkeypatch.chdir(tmp_path)
         _two_target_project(tmp_path, fortran_toolchain)
 
@@ -465,7 +500,10 @@ class TestScannerWiring:
             if n.path.name.endswith(".fscan.json")
         )
 
-        assert info_node._build_info["vars"] == {"FC_MODDIR": "modules"}
+        assert info_node._build_info["vars"] == {
+            "FC_MODDIR": "modules",
+            "FC_SUBMODULE_FILE": "{ancestor}@{name}.smod",
+        }
 
     def test_no_scanner_without_fortran_sources(
         self, tmp_path, monkeypatch, gcc_toolchain
@@ -489,14 +527,14 @@ class TestScannerWiring:
 
 
 def test_find_fortran_toolchain_raises_when_not_found() -> None:
-    """find_fortran_toolchain raises RuntimeError when gfortran not found."""
+    """find_fortran_toolchain raises RuntimeError when no compiler is found."""
     with patch("shutil.which", return_value=None):
         with pytest.raises(RuntimeError, match="No Fortran toolchain found"):
             find_fortran_toolchain()
 
 
 def test_find_fortran_toolchain_returns_toolchain() -> None:
-    """find_fortran_toolchain returns GfortranToolchain when gfortran found."""
+    """find_fortran_toolchain prefers gfortran when every compiler is found."""
     with patch("shutil.which", return_value="/usr/bin/gfortran"):
         tc = find_fortran_toolchain()
         assert isinstance(tc, GfortranToolchain)

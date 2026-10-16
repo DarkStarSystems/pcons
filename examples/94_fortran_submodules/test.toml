@@ -1,0 +1,23 @@
+# Test configuration for the fortran_submodules example
+
+[test]
+description = "Demonstrates Fortran submodules, nested, compiled in dependency order"
+
+expected_outputs = [
+    "build/obj.circles/src/circle.f90.o",
+    "build/obj.circles/src/circle_math.f90.o",
+    "build/obj.circles/src/circle_format.f90.o",
+    "build/circles",
+]
+
+[verify]
+commands = [
+    { run = "./build/circles", expect_stdout = "Circle area: 12.57" },
+]
+
+[skip]
+platforms = ["windows"]
+requires_any = ["gfortran", "flang", "ifx"]
+# Xcode generator does not support Fortran
+# Make generator doesn't support Ninja dyndep for Fortran module ordering
+generators = ["xcode", "make"]

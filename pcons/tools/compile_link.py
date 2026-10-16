@@ -258,14 +258,17 @@ class CompileLinkFactory:
 
         # Sources added with add_sources(..., env=...) compile with their own
         # environment; everything else uses the target's. Requirements are
-        # computed once per distinct environment.
-        requirements: dict[int, EffectiveRequirements] = {}
+        # computed once per distinct environment and compiling toolchain.
+        requirements: dict[tuple[int, int], EffectiveRequirements] = {}
 
-        def effective_for(source_env: Environment) -> EffectiveRequirements:
-            cached = requirements.get(id(source_env))
+        def effective_for(
+            source_env: Environment, toolchain: Toolchain | None = None
+        ) -> EffectiveRequirements:
+            key = (id(source_env), id(toolchain))
+            cached = requirements.get(key)
             if cached is None:
-                cached = self._compute_requirements(target, source_env)
-                requirements[id(source_env)] = cached
+                cached = self._compute_requirements(target, source_env, toolchain)
+                requirements[key] = cached
             return cached
 
         effective = effective_for(env)
@@ -314,7 +317,10 @@ class CompileLinkFactory:
                     continue
 
                 obj_node = self._create_object_node(
-                    target, source, effective_for(source_env), source_env
+                    target,
+                    source,
+                    effective_for(source_env, found[1] if found else None),
+                    source_env,
                 )
                 if obj_node:
                     target.intermediate_nodes.append(obj_node)
@@ -322,7 +328,12 @@ class CompileLinkFactory:
 
         for handler, toolchain, group_env, sources in grouped.values():
             obj_node = self._create_grouped_object_node(
-                target, sources, handler, toolchain, effective_for(group_env), group_env
+                target,
+                sources,
+                handler,
+                toolchain,
+                effective_for(group_env, toolchain),
+                group_env,
             )
             target.intermediate_nodes.append(obj_node)
             trace(
@@ -354,9 +365,13 @@ class CompileLinkFactory:
             trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
 
     def _compute_requirements(
-        self, target: Target, env: Environment
+        self,
+        target: Target,
+        env: Environment,
+        compiling_toolchain: Toolchain | None = None,
     ) -> EffectiveRequirements:
-        """Effective compile requirements for *target* under *env*.
+        """Effective compile requirements for *target* under *env*, for a
+        source *compiling_toolchain* compiles.
 
         The target's own requirements and its dependencies' are the same
         whichever environment a given source compiles with; only the
@@ -364,15 +379,17 @@ class CompileLinkFactory:
         """
         effective = compute_effective_requirements(target, env, for_compilation=True)
 
-        # Target-type compile flags (e.g. -fPIC for shared libs on Linux)
-        toolchain = env._toolchain
-        if toolchain is not None and target.target_type is not None:
-            target_type_flags = toolchain.get_compile_flags_for_target_type(
-                str(target.target_type), env=env
-            )
-            for flag in target_type_flags:
-                if flag not in effective.compile_flags:
-                    effective.compile_flags.append(flag)
+        # Target-type compile flags (e.g. -fPIC for shared libs on Linux):
+        # the environment's toolchain's, plus what a toolchain added beside
+        # it needs for its own sources (ifx's -fPIE in a C++ program).
+        if target.target_type is not None:
+            toolchains = [env._toolchain, compiling_toolchain]
+            for toolchain in dict.fromkeys(t for t in toolchains if t is not None):
+                for flag in toolchain.get_compile_flags_for_target_type(
+                    str(target.target_type), env=env
+                ):
+                    if flag not in effective.compile_flags:
+                        effective.compile_flags.append(flag)
 
         return effective
 

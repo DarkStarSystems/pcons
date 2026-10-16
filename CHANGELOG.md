@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- LLVM flang (21 or newer) and Intel ifx (on Linux) join gfortran as
+  Fortran toolchains: `toolchain="flang"` or `"ifx"`, or
+  `toolchain="fortran"` to find whichever is installed (gfortran first).
+  `$FC` steers that choice, like `$CC`/`$CXX` for C/C++. Mixed C++/Fortran
+  builds link each compiler's own runtime.
+
 ### Fixed
+
+- Fortran submodules are compiled after the module (or submodule) they
+  extend. Before, nothing ordered them, and a separate module procedure
+  with a prefix (`module pure function f()`) was read as a module named
+  `pure`.
+- `$FC` (or any other variable a toolchain added with `add_toolchain()`
+  honors) no longer replaces the primary toolchain's tools: with C++
+  primary and Fortran added, `FC=gfortran-15` changed the link driver to
+  gfortran.
 
 - The gcc toolchain archives with `gcc-ar` instead of `ar`, so static
   libraries built with the `lto` preset get a symbol index even when

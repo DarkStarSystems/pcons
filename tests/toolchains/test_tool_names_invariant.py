@@ -30,8 +30,10 @@ import pcons.toolchains.clang_cl  # noqa: F401
 import pcons.toolchains.cuda  # noqa: F401
 import pcons.toolchains.cython  # noqa: F401
 import pcons.toolchains.emscripten  # noqa: F401
+import pcons.toolchains.flang  # noqa: F401
 import pcons.toolchains.gcc  # noqa: F401
 import pcons.toolchains.gfortran  # noqa: F401
+import pcons.toolchains.ifx  # noqa: F401
 import pcons.toolchains.llvm  # noqa: F401
 import pcons.toolchains.msvc  # noqa: F401
 import pcons.toolchains.qt.toolchain  # noqa: F401
@@ -79,8 +81,10 @@ def test_every_builtin_toolchain_tool_names_matches_installed_tools() -> None:
         "CudaToolchain",
         "CythonToolchain",
         "EmscriptenToolchain",
+        "FlangToolchain",
         "GccToolchain",
         "GfortranToolchain",
+        "IfxToolchain",
         "LatexToolchain",
         "LlvmToolchain",
         "MsvcToolchain",

@@ -1,7 +1,7 @@
 # Test configuration for the fortran_hello example
 
 [test]
-description = "Demonstrates compiling a simple Fortran program with gfortran"
+description = "Demonstrates compiling a simple Fortran program with whichever compiler is found (gfortran, flang or ifx)"
 
 expected_outputs = [
     "build/obj.hello/src/hello.f90.o",
@@ -15,7 +15,7 @@ commands = [
 
 [skip]
 platforms = ["windows"]
-requires = ["gfortran"]
+requires_any = ["gfortran", "flang", "ifx"]
 # Xcode generator does not support Fortran
 # Make generator doesn't support Ninja dyndep for Fortran module ordering
 generators = ["xcode", "make"]

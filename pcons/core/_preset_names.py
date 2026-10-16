@@ -15,13 +15,13 @@ from typing import Literal
 
 KnownFeaturePreset = Literal[
     "coverage",  # EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, WasiToolchain
-    "fast-math",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
+    "fast-math",  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
     "hardened",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
     "lto",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
-    "openmp",  # ClangClToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, MsvcToolchain
+    "openmp",  # ClangClToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain
     "profile",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
     "pthread",  # EmscriptenToolchain, GccToolchain, LlvmToolchain, WasiToolchain
     "sanitize",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
-    "warnings",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
-    "werror",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
+    "warnings",  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
+    "werror",  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
 ]

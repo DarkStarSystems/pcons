@@ -4,7 +4,8 @@
 CC/CXX/FC/AR/SWIFTC/CUDACXX/RC are authoritative (autoconf/CMake/Meson
 convention): when set they select the tool's command; a value that can't
 be found is an error, never a silent fall-through. $CXX/$CC also steer
-"c" toolchain auto-detection to the named compiler's family.
+"c" toolchain auto-detection to the named compiler's family, and $FC
+steers "fortran" auto-detection.
 """
 
 from __future__ import annotations
@@ -69,6 +70,7 @@ class TestEnvVarDeclarations:
 
     def test_declared_vars(self):
         from pcons.toolchains.clang_cl import ClangClCCompiler, ClangClCxxCompiler
+        from pcons.toolchains.flang import FlangCompiler, FlangLinker
         from pcons.toolchains.gcc import (
             GccArchiver,
             GccCCompiler,
@@ -76,6 +78,7 @@ class TestEnvVarDeclarations:
             GccLinker,
         )
         from pcons.toolchains.gfortran import GfortranCompiler
+        from pcons.toolchains.ifx import IfxCompiler
         from pcons.toolchains.llvm import ClangCCompiler, ClangCxxCompiler
         from pcons.toolchains.msvc import (
             MsvcCompiler,
@@ -92,6 +95,9 @@ class TestEnvVarDeclarations:
         assert ClangCCompiler.env_var == "CC"
         assert ClangCxxCompiler.env_var == "CXX"
         assert GfortranCompiler.env_var == "FC"
+        assert FlangCompiler.env_var == "FC"
+        assert FlangLinker.env_var == "FC"  # links through the Fortran driver
+        assert IfxCompiler.env_var == "FC"
         assert SwiftCompiler.env_var == "SWIFTC"
         assert CudaCompiler.env_var == "CUDACXX"
         assert MsvcCompiler.env_var == "CC"
@@ -164,6 +170,21 @@ class TestOverrideApplication:
         env = Environment(toolchain=_registry_toolchain("gcc"))
         assert env.ar.cmd == str(ar)
 
+    def test_added_toolchain_overrides_only_its_own_tools(
+        self, test_project, monkeypatch, tmp_path
+    ):  # noqa: F811
+        # FC names the Fortran compiler and, for a Fortran-primary build,
+        # the link driver. C++ owns the link here, so FC must leave it alone.
+        fc = _fake_compiler(tmp_path, "my-fc")
+        monkeypatch.setenv("FC", str(fc))
+        env = Environment(toolchain=_registry_toolchain("gcc"))
+        link_cmd = env.link.cmd
+
+        env.add_toolchain(_registry_toolchain("gfortran"))
+
+        assert env.fc.cmd == str(fc)
+        assert env.link.cmd == link_cmd
+
     def test_script_assignment_wins_over_env(self, test_project, monkeypatch, tmp_path):  # noqa: F811
         fake = _fake_compiler(tmp_path, "my-g++")
         monkeypatch.setenv("CXX", str(fake))
@@ -197,6 +218,16 @@ class TestFamilyValidation:
 
         env = Environment(toolchain=_registry_toolchain("llvm"))
         assert env.cxx.cmd == str(fake)
+
+    def test_mismatched_fortran_family_raises(
+        self, test_project, monkeypatch, tmp_path
+    ):  # noqa: F811
+        fake = _fake_compiler(tmp_path, "some-fortran")
+        monkeypatch.setenv("FC", str(fake))
+        monkeypatch.setattr(compiler_id, "compiler_family", lambda p: "gfortran")
+
+        with pytest.raises(ValueError, match=r"\$FC.*gfortran-family.*'flang'"):
+            Environment(toolchain=_registry_toolchain("flang"))
 
     def test_unclassifiable_accepted(self, test_project, monkeypatch, tmp_path):  # noqa: F811
         # Compiler wrappers can't be classified; accept them.
@@ -259,6 +290,26 @@ class TestAutoDetectSteering:
         env = Environment(toolchain=toolchain)
         assert env.cxx.cmd == str(fake)
 
+    def test_fc_steers_fortran_family(self, test_project, monkeypatch, tmp_path):  # noqa: F811
+        from pcons.toolchains import find_fortran_toolchain
+
+        fake = _fake_compiler(tmp_path, "my-ifx")
+        monkeypatch.setenv("FC", str(fake))
+        monkeypatch.setattr(compiler_id, "compiler_family", lambda p: "ifx")
+
+        toolchain = find_fortran_toolchain()
+        assert toolchain.name == "ifx"
+        assert Environment(toolchain=toolchain).fc.cmd == str(fake)
+
+    def test_fc_never_selects_a_c_toolchain(self, test_project, monkeypatch, tmp_path):  # noqa: F811
+        from pcons.toolchains import env_selected_toolchain
+
+        fake = _fake_compiler(tmp_path, "gcc-as-fc")
+        monkeypatch.setenv("FC", str(fake))
+        monkeypatch.setattr(compiler_id, "compiler_family", lambda p: "gcc")
+
+        assert env_selected_toolchain("fortran", "FC") is None
+
     def test_explicit_prefer_list_respected(self, test_project, monkeypatch, tmp_path):  # noqa: F811
         from pcons.toolchains import find_c_toolchain
 
@@ -293,8 +344,27 @@ class TestCompilerFamily:
         )
         assert compiler_id.compiler_family.__wrapped__("/x/g++-15") == "gcc"
 
+    @pytest.mark.parametrize(
+        ("version", "family"),
+        [
+            (
+                "GNU Fortran (Homebrew GCC 16.2.0) 16.2.0\n"
+                "Copyright (C) 2026 Free Software Foundation, Inc.",
+                "gfortran",
+            ),
+            ("Homebrew flang version 23.1.3\nTarget: arm64-apple-darwin", "flang"),
+            ("Ubuntu flang version 21.1.2 (2ubuntu6)", "flang"),
+            ("ifx (IFX) 2025.3.2 20260112", "ifx"),
+        ],
+    )
+    def test_fortran_by_version_output(self, monkeypatch, version, family):
+        monkeypatch.setattr(compiler_id, "_version_output", lambda p: version)
+        assert compiler_id.compiler_family.__wrapped__("/x/fc") == family
+
     def test_unknown_falls_back_to_basename(self, monkeypatch):
         monkeypatch.setattr(compiler_id, "_version_output", lambda p: "")
         assert compiler_id.compiler_family.__wrapped__("/x/clang-19") == "llvm"
         assert compiler_id.compiler_family.__wrapped__("/x/gcc-13") == "gcc"
+        assert compiler_id.compiler_family.__wrapped__("/x/gfortran-15") == "gfortran"
+        assert compiler_id.compiler_family.__wrapped__("/x/flang-21") == "flang"
         assert compiler_id.compiler_family.__wrapped__("/x/mystery") is None

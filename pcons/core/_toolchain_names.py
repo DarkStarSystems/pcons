@@ -23,10 +23,13 @@ KnownToolchain = Literal[
     "cython",  # Auto-detect the Cython toolchain
     "emcc",  # Emscripten C/C++ to WebAssembly + JS (browser/Node.js)
     "emscripten",  # Auto-detect the Emscripten WebAssembly toolchain
+    "flang",  # LLVM Flang Fortran compiler (flang)
     "fortran",  # Auto-detect a Fortran toolchain
     "gcc",  # GNU Compiler Collection (gcc/g++)
     "gfortran",  # GNU Fortran compiler (gfortran)
     "gnu",  # GNU Compiler Collection (gcc/g++)
+    "ifx",  # Intel Fortran compiler (ifx)
+    "intel-fortran",  # Intel Fortran compiler (ifx)
     "latex",  # LaTeX document compilation via latexmk
     "latexmk",  # LaTeX document compilation via latexmk
     "llvm",  # LLVM/Clang compiler
