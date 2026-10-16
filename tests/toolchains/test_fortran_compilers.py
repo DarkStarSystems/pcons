@@ -445,6 +445,9 @@ def test_gfortran_gets_mingw_gcc(on_windows, monkeypatch) -> None:
 
     for var in ("CC", "CXX"):
         monkeypatch.delenv(var, raising=False)
+    # gcc's own check runs `gcc --version` to reject macOS's clang shim;
+    # here availability is only what the patched PATH says.
+    monkeypatch.setattr(toolchain_registry.get("gcc"), "is_available", None)
     with _installed("clang-cl", "clang", "gcc"):
         assert isinstance(find_c_toolchain(abi="mingw"), GccToolchain)
 
