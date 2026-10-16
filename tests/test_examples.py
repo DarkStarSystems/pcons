@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from tests.support import qt_runtime_env, subprocess_env
+from tests.support import USER_TOOL_ENV, qt_runtime_env, subprocess_env
 
 # Try to import tomllib (Python 3.11+) or tomli as fallback
 try:
@@ -959,6 +959,7 @@ def _run_generate(
     Project._clear_tree()
 
     env = subprocess_env(
+        **USER_TOOL_ENV,
         PCONS_BUILD_DIR=str(build_dir),
         PCONS_GENERATOR=generator,
     )

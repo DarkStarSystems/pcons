@@ -34,7 +34,7 @@ from pcons.toolchains.gcc import (
     GccLinker,
     GccToolchain,
 )
-from tests.support import NO_ANDROID_NDK, find_android_ndk
+from tests.support import NO_ANDROID_NDK, TOOL_ENV_VARS, find_android_ndk
 
 # Hypothesis profiles for the property tests in tests/fuzz/. "dev" is the
 # default: small and derandomized, so a normal `make test` costs little and
@@ -170,9 +170,10 @@ def clear_tool_env_vars(monkeypatch):
     CC/CXX/etc. are authoritative when set (they select compilers and
     steer toolchain auto-detection), so an exported CXX in a dev shell
     would perturb every Environment-creating test. Tests that exercise
-    the mechanism set the vars explicitly.
+    the mechanism set the vars explicitly; example tests pass the original
+    values on to the pcons they run (tests/support.py, USER_TOOL_ENV).
     """
-    for var in ("CC", "CXX", "FC", "AR", "SWIFTC", "CUDACXX", "RC"):
+    for var in TOOL_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
 
 
