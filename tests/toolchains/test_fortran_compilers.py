@@ -145,6 +145,7 @@ def test_runtime_libdir_unknown_when_the_compiler_cannot_find_it() -> None:
 
 @pytest.mark.parametrize("subdir", ["aarch64-unknown-linux-gnu", "darwin"])
 def test_flang_runtime_libdir_under_the_resource_dir(subdir, tmp_path) -> None:
+    unix_mod.target_triple.cache_clear()
     rt_dir = tmp_path / "lib" / subdir
     rt_dir.mkdir(parents=True)
     (rt_dir / "libflang_rt.runtime.a").touch()
@@ -183,6 +184,7 @@ def test_no_runtime_libdir_from_a_compiler_that_will_not_run(cls) -> None:
 
 
 def test_no_flang_runtime_libdir_without_the_runtime(tmp_path) -> None:
+    unix_mod.target_triple.cache_clear()
     (tmp_path / "lib" / "darwin").mkdir(parents=True)
     answers = {
         "-print-resource-dir": f"{tmp_path}\n",
@@ -389,6 +391,9 @@ def test_ifx_on_windows_links_console_programs(tmp_path, monkeypatch) -> None:
     assert tc.get_link_flags_for_target(prog, "app.exe", []) == ["/SUBSYSTEM:CONSOLE"]
     assert tc.get_link_flags_for_target(prog, "app.exe", ["/SUBSYSTEM:WINDOWS"]) == []
     assert tc.get_link_flags_for_target(lib, "lib.lib", []) == []
+    # A WinMain program says so in the environment's link flags.
+    env.add_tool("link").set("flags", ["/SUBSYSTEM:WINDOWS"])
+    assert tc.get_link_flags_for_target(prog, "app.exe", []) == []
 
 
 def test_a_fortran_only_program_links_with_the_fortran_driver(
@@ -688,6 +693,75 @@ def test_a_variant_keeps_to_each_toolchains_own_tools(on_windows, tmp_path) -> N
     assert "/Z7" in env.cxx.flags
     assert "-g" in env.fc.flags
     assert "/DEBUG" not in env.link.flags
+
+
+@pytest.mark.parametrize(
+    ("triple", "implib"),
+    [
+        ("aarch64-linux-gnu", None),
+        ("x86_64-w64-windows-gnu", None),
+        ("x86_64-pc-windows-msvc", "answer.lib"),
+    ],
+)
+def test_the_import_library_follows_the_platform_built_for(
+    on_windows, tmp_path, triple, implib
+) -> None:
+    """On a Windows host, clang cross-linking a shared library for Linux or
+    MinGW writes no import library; only an MSVC target's link does."""
+    from pcons import Project
+    from pcons.toolchains.presets import linux_cross
+
+    (tmp_path / "answer.c").write_text("int answer(void) { return 42; }\n")
+    project = Project("x", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("llvm").create_toolchain()
+    )
+    env.apply_cross_preset(linux_cross(triple))
+    lib = project.SharedLibrary("answer", env, sources=["answer.c"])
+    project.resolve()
+
+    (node,) = lib.output_nodes
+    outputs = node._build_info.get("outputs") or {}
+    found = outputs.get("import_lib", {}).get("path")
+    assert (found.name if found else None) == implib
+    flags = [str(f) for f in node._build_info["context"].link_flags]
+    assert any("/IMPLIB:" in f for f in flags) == (implib is not None)
+
+
+def test_a_clone_keeps_each_toolchains_flags_to_its_own_tools(
+    on_windows, tmp_path
+) -> None:
+    from pcons import Project
+
+    project = Project("v", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("flang").create_toolchain()
+    )
+    env.add_toolchain(toolchain_registry.get("clang-cl").create_toolchain())
+    debug = env.clone()
+    debug.set_variant("debug")
+
+    assert "/Z7" in debug.cxx.flags
+    assert "/DEBUG" not in debug.link.flags
+
+
+def test_a_same_style_toolchain_reaches_the_link(
+    tmp_path, monkeypatch, gcc_toolchain
+) -> None:
+    """gfortran has no sanitize preset, so gcc's link flags are the only
+    ones: without them the C++ objects' sanitizer references go unresolved."""
+    from pcons import Project
+
+    monkeypatch.chdir(tmp_path)
+    project = Project("s", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("gfortran").create_toolchain()
+    )
+    env.add_toolchain(gcc_toolchain)
+    env.apply_preset("sanitize")
+
+    assert "-fsanitize=address,undefined" in env.cxx.flags
+    assert "-fsanitize=address,undefined" in env.link.flags
 
 
 def test_a_flang_dll_is_linked_through_its_import_library(on_windows, tmp_path) -> None:

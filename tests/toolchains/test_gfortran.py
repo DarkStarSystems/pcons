@@ -505,8 +505,7 @@ def test_scan_one_cli_reports_a_missing_source(tmp_path: Path, capsys) -> None:
 # =============================================================================
 
 
-@pytest.fixture
-def fortran_toolchain() -> GfortranToolchain:
+def _configured_gfortran() -> GfortranToolchain:
     """A GfortranToolchain with its tools populated, needing no gfortran."""
     tc = GfortranToolchain()
     tc._tools = {
@@ -516,6 +515,11 @@ def fortran_toolchain() -> GfortranToolchain:
     }
     tc._configured = True
     return tc
+
+
+@pytest.fixture
+def fortran_toolchain() -> GfortranToolchain:
+    return _configured_gfortran()
 
 
 def _two_target_project(
@@ -630,6 +634,24 @@ class TestScannerWiring:
         }
         assert moddirs == {"main": "modules", "special": "special_mods"}
         assert (tmp_path / "build" / "special_mods").is_dir()
+
+    def test_each_fortran_toolchain_scans_its_own_targets(self, tmp_path, monkeypatch):
+        """Two environments, each with its own gfortran: each toolchain
+        attaches its scanner only to the targets it compiles."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "mathmod.f90").write_text("MODULE mathmod\nEND MODULE\n")
+        (tmp_path / "src" / "main.f90").write_text(
+            "PROGRAM p\n  USE mathmod\nEND PROGRAM\n"
+        )
+        project = Project("two", root_dir=tmp_path, build_dir="build")
+        lib_env = project.Environment(toolchain=_configured_gfortran(), name="lib")
+        app_env = project.Environment(toolchain=_configured_gfortran(), name="app")
+        lib = project.StaticLibrary("mathlib", lib_env, sources=["src/mathmod.f90"])
+        project.Program("app", app_env, sources=["src/main.f90"]).link(lib)
+        project.resolve()
+
+        assert len(project._scan_scopes) == 2
 
     def test_scan_command_carries_the_module_directory_per_edge(
         self, tmp_path, monkeypatch, fortran_toolchain

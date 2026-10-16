@@ -270,6 +270,14 @@ def apply_requirements_to_env(
         if eff.compile_flags:
             merge_flags(var(tool, "flags"), eff.compile_flags, sep, through)
 
+    # A Fortran compile finds a package's .mod files on its include path,
+    # which has no system form. Its compile flags are C-family flags.
+    if env.has_tool("fc"):
+        fc = env.fc
+        includes = [*eff.includes, *eff.system_includes]
+        extend_unique(fc, "includes", (str(inc) for inc in includes))
+        extend_unique(fc, "defines", eff.defines)
+
     if env.has_tool("link"):
         link = env.link
         extend_unique(link, "libdirs", (str(d) for d in eff.link_dirs))

@@ -36,14 +36,17 @@ def compiler_family(path: str) -> str | None:
 
     out = _version_output(path)
     lowered = out.lower()
+    # The product line, not the rest: clang's "InstalledDir: /opt/flang/bin"
+    # must not read as flang.
+    product = lowered.partition("\n")[0]
     # Fortran first: gfortran also credits the FSF, and flang is LLVM's.
-    if "gnu fortran" in lowered:
+    if "gnu fortran" in product:
         return "gfortran"
-    if "flang" in lowered:
+    if "flang" in product:
         return "flang"
-    if lowered.startswith("ifx "):
+    if product.startswith("ifx "):
         return "ifx"
-    if "clang" in lowered:  # covers "Apple clang" and "clang version"
+    if "clang" in product:  # covers "Apple clang" and "clang version"
         return "llvm"
     if "free software foundation" in lowered or "(gcc)" in lowered:
         return "gcc"

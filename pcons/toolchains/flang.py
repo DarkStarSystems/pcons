@@ -18,7 +18,7 @@ from pcons.toolchains.fortran import (
     FortranToolchain,
 )
 from pcons.toolchains.llvm import LlvmArchiver
-from pcons.toolchains.unix import UnixToolchain
+from pcons.toolchains.unix import UnixToolchain, target_triple
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -120,16 +120,18 @@ class FlangToolchain(FortranToolchain):
         ``lib/<triple>`` on Linux and Windows, ``lib/darwin`` on macOS.
         """
         try:
-            resource_dir, triple = (
-                subprocess.check_output(
-                    [compiler, flag], stderr=subprocess.DEVNULL, text=True
-                ).strip()
-                for flag in ("-print-resource-dir", "-print-target-triple")
-            )
-        except (subprocess.CalledProcessError, OSError):
+            resource_dir = subprocess.check_output(
+                [compiler, "-print-resource-dir"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=30,
+            ).strip()
+        except (OSError, subprocess.SubprocessError):
             return None
         lib = Path(resource_dir) / "lib"
-        for candidate in (lib / triple, lib / "darwin", lib / "linux"):
+        triple = target_triple(compiler)
+        by_triple = [lib / triple] if triple else []
+        for candidate in (*by_triple, lib / "darwin", lib / "linux"):
             if any(candidate.glob("*flang_rt.runtime.*")):
                 return str(candidate)
         return None

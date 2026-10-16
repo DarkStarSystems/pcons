@@ -584,10 +584,9 @@ class Environment(_EnvironmentStubs):
         new_tools = [n for n in self._get_tools() if n not in before]
         self._record_toolchain_baseline(toolchain, new_tools)
         self._tool_owners.update(dict.fromkeys(new_tools, toolchain))
-        # It configures only the tools it brought (see apply_from): $FC from
-        # an added Fortran toolchain must not retarget the primary
-        # toolchain's linker. A variant the script already set is realized
-        # for those tools in place
+        # It configures only the tools it brought: $FC from an added Fortran
+        # toolchain must not retarget the primary toolchain's linker. A
+        # variant the script already set is realized for those tools in place
         # of the toolchain's own default (an added ifx gets /MDd, not /MD,
         # under debug), and the environment keeps its variant name.
         presets = toolchain.setup_presets(self)
@@ -601,7 +600,7 @@ class Environment(_EnvironmentStubs):
         current_variant = self.variant
         with self._dedup_fanout(join=True):
             for preset in presets:
-                self.apply_from(toolchain, preset)
+                self.apply_from(toolchain, preset, own_tools_only=True)
         self.variant = current_variant
 
     @property
@@ -786,6 +785,7 @@ class Environment(_EnvironmentStubs):
         new_env._applied_presets = list(self._applied_presets)
         new_env._applied_imperative = list(self._applied_imperative)
         new_env._variant_request = self._variant_request
+        new_env._tool_owners = dict(self._tool_owners)
         new_env._use_origins = dict(self._use_origins)
 
         new_env._build_dir_base = self._build_dir_base
@@ -994,25 +994,34 @@ class Environment(_EnvironmentStubs):
         if preset.category == "arch" and preset.arch is not None:
             self.target_arch = preset.arch
 
-    def apply_from(self, toolchain: Toolchain, preset: Preset) -> None:
-        """Apply *toolchain*'s *preset* to the tools that toolchain brought.
+    def apply_from(
+        self, toolchain: Toolchain, preset: Preset, *, own_tools_only: bool = False
+    ) -> None:
+        """Apply *toolchain*'s *preset*: to the tools it brought, and to
+        another toolchain's only when both write flags the same way.
 
-        How each toolchain realizes a knob (set_variant, apply_preset, ...)
-        fits its own tools only: clang-cl's debug ``/DEBUG`` would break
-        flang's link driver in a Fortran-primary environment beside it, as
-        an added flang's ``-fopenmp`` would break link.exe. A tool no
-        toolchain brought takes every contribution.
+        Each toolchain realizes a knob (set_variant, apply_preset, ...) in
+        its own flag style (``LINKER_STYLE``): clang-cl's debug ``/DEBUG``
+        would break flang's GNU-style link driver beside it, as an added
+        flang's ``-fopenmp`` would break link.exe. A same-style contribution
+        lands, since the tool's own toolchain may not realize that knob:
+        gcc's ``-fsanitize`` reaches a gfortran link. With *own_tools_only*,
+        the toolchain's own tools take everything and others nothing. A
+        tool no toolchain brought takes every contribution.
         """
-        owners = self._tool_owners
-        owned = tuple(
-            c
-            for c in preset.contributions
-            if owners.get(c.tool, toolchain) is toolchain
-        )
-        if not owned and preset.contributions:
+        style = getattr(toolchain, "LINKER_STYLE", None)
+
+        def takes(tool: str) -> bool:
+            owner = self._tool_owners.get(tool, toolchain)
+            if owner is toolchain:
+                return True
+            return not own_tools_only and getattr(owner, "LINKER_STYLE", None) == style
+
+        taken = tuple(c for c in preset.contributions if takes(c.tool))
+        if not taken and preset.contributions:
             return
-        if len(owned) < len(preset.contributions):
-            preset = dataclasses.replace(preset, contributions=owned)
+        if len(taken) < len(preset.contributions):
+            preset = dataclasses.replace(preset, contributions=taken)
         self.apply(preset)
 
     @property
@@ -1501,8 +1510,9 @@ class Environment(_EnvironmentStubs):
         compile and link settings from a PackageDescription or ImportedTarget.
 
         The package's settings are applied to the appropriate tools:
-        - include_dirs → cxx.includes (and cc.includes if present)
-        - defines → cxx.defines (and cc.defines if present)
+        - include_dirs → cxx.includes (and cc.includes, fc.includes if
+          present)
+        - defines → cxx.defines (and cc.defines, fc.defines if present)
         - compile_flags → cxx.flags
         - library_dirs → link.libdirs
         - libraries → link.libs

@@ -438,7 +438,7 @@ class UnixToolchain(BaseToolchain):
         flags = self._exported_symbols_flags(target)
         if target.target_type == "shared_library":
             flags = [*self._install_name_flags(target, existing_flags), *flags]
-            if self.abi == "msvc":
+            if self._writes_import_library(self._target_platform(target)):
                 # Where get_import_library_name says (the link's second output)
                 flags.append(TargetPath(prefix="-Wl,/IMPLIB:", index=1))
         return flags
@@ -450,9 +450,19 @@ class UnixToolchain(BaseToolchain):
         flang targeting it: their driver hands the link to link.exe or
         lld-link, which writes the import library a consumer links against.
         MinGW's ld links a DLL directly and writes none."""
-        if self.abi != "msvc":
+        if not self._writes_import_library(target or get_platform()):
             return None
         return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
+
+    def _writes_import_library(self, platform: Platform) -> bool:
+        """Whether a DLL link for *platform* is an MSVC-ABI one. A cross
+        target says so by its naming (an MSVC triple's archives are .lib, a
+        MinGW one's .a); the host, by what this toolchain's compiler targets."""
+        if not platform.is_windows:
+            return False
+        if platform != get_platform():
+            return platform.static_lib_suffix == ".lib"
+        return self.abi == "msvc"
 
     def link_group_tokens(
         self, archives: Sequence[PathToken], env: Environment | None = None

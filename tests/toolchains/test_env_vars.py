@@ -333,6 +333,21 @@ class TestCompilerFamily:
         )
         assert compiler_id.compiler_family.__wrapped__("/usr/bin/g++") == "llvm"
 
+    def test_a_clang_installed_under_flang_is_clang(self, monkeypatch):
+        """Only the product line counts: clang names its install directory
+        further down, and a shared LLVM+flang prefix holds "flang"."""
+        monkeypatch.setattr(
+            compiler_id,
+            "_version_output",
+            lambda p: (
+                "clang version 21.1.8\nTarget: x86_64-unknown-linux-gnu\n"
+                "Thread model: posix\nInstalledDir: /opt/flang-21/bin\n"
+            ),
+        )
+        assert compiler_id.compiler_family.__wrapped__("/opt/flang-21/bin/clang") == (
+            "llvm"
+        )
+
     def test_gcc_by_version_output(self, monkeypatch):
         monkeypatch.setattr(
             compiler_id,

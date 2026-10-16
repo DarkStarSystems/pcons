@@ -170,13 +170,19 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
 
         A Fortran main program defines ``MAIN__``; ``main`` itself is in
         Intel's runtime library, so link.exe can't infer the subsystem from
-        the objects and fails (LNK1561) without one. A subsystem the
-        project chose wins.
+        the objects and fails (LNK1561) without one. Which object holds the
+        entry point isn't known when the build is described, so every
+        program with ifx objects is a console one, as CMake makes every
+        executable, unless the project chose a subsystem (a C++ ``WinMain``
+        program sets ``/SUBSYSTEM:WINDOWS``).
         """
         flags = super().get_link_flags_for_target(target, output_name, existing_flags)
+        env = getattr(target, "_env", None)
+        chosen = [*existing_flags]
+        if env is not None and env.has_tool("link"):
+            chosen += list(getattr(env.link, "flags", None) or [])
         if target.target_type == "program" and not any(
-            isinstance(f, str) and f.upper().startswith("/SUBSYSTEM:")
-            for f in existing_flags
+            isinstance(f, str) and f.upper().startswith("/SUBSYSTEM:") for f in chosen
         ):
             flags.append("/SUBSYSTEM:CONSOLE")
         return flags

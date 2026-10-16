@@ -60,17 +60,16 @@ def _moddir_of(env: object) -> str:
 
 
 def _fortran_targets(
-    project: Project,
-    source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
+    project: Project, compiles: list[tuple[Path, FileNode]]
 ) -> list[Target]:
-    """Every target owning a Fortran object, in declaration order.
+    """Every target owning one of these Fortran objects, in declaration order.
 
     An object a Fortran compile writes may be a target's intermediate (a
     program's or library's own compiles) or its output (a bare ``Object``
     target). Either way it belongs to exactly one target — the dyndep
     contract: one edge, one governing dyndep file.
     """
-    fortran_objs = {id(obj) for _, obj in source_obj_by_language.get("fortran", [])}
+    fortran_objs = {id(obj) for _, obj in compiles}
     if not fortran_objs:
         return []
 
@@ -342,7 +341,15 @@ class FortranToolchainBase(BaseToolchain):
         from pcons.core.scan import Scanner
         from pcons.core.subst import NodeVar
 
-        targets = _fortran_targets(project, source_obj_by_language)
+        # This toolchain's own compiles: every toolchain sees the whole
+        # project's, and two Fortran toolchains (one per environment) would
+        # otherwise each attach a scanner to the other's targets.
+        compiles = [
+            (src, obj)
+            for src, obj in source_obj_by_language.get("fortran", [])
+            if (obj._build_info or {}).get("toolchain") is self
+        ]
+        targets = _fortran_targets(project, compiles)
         if not targets:
             return
 
@@ -352,8 +359,7 @@ class FortranToolchainBase(BaseToolchain):
         # source added with add_sources(env=...) may use its own.
         build_dir_fs = project.top_path_resolver.execution_dir
         moddirs = {
-            _moddir_of((obj._build_info or {}).get("env"))
-            for _, obj in source_obj_by_language["fortran"]
+            _moddir_of((obj._build_info or {}).get("env")) for _, obj in compiles
         }
         for moddir in moddirs:
             (build_dir_fs / moddir).mkdir(parents=True, exist_ok=True)
@@ -365,7 +371,7 @@ class FortranToolchainBase(BaseToolchain):
         # source and recompiles on every build; with it, the recorded mtime
         # settles and dependents rebuild only when the module interface
         # really changed.
-        for _src, obj in source_obj_by_language.get("fortran", []):
+        for _src, obj in compiles:
             if obj._build_info is not None:
                 obj._build_info["restat"] = True
 
