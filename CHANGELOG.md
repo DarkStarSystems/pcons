@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler's own runtime.
 - Fortran builds on Windows, with all three compilers: MinGW gfortran,
   and flang and ifx (MSVC ABI, so they mix with MSVC and clang-cl C++).
+- `env.add_toolchain()` picks a toolchain whose ABI matches the
+  environment's primary one: on Windows, `"fortran"` beside MSVC or
+  clang-cl finds flang or ifx rather than MinGW gfortran, and `"c"` beside
+  gfortran finds MinGW gcc. An incompatible toolchain, named or chosen
+  with `$FC`/`$CC`/`$CXX`, is an error naming the ones that would fit.
+  Toolchains declare their ABI with the `abi` property; undeclared (None)
+  matches anything.
 
 ### Fixed
 

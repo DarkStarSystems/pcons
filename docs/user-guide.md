@@ -333,6 +333,8 @@ On Windows, each compiler mixes with the C and C++ compilers that share its ABI:
 - **gfortran** (MSYS2's MinGW build) is GNU-ABI, so it mixes only with MinGW's gcc and g++. Pure Fortran works with any setup.
 - **flang** and **ifx** are MSVC-ABI and mix with MSVC and clang-cl. They use the DLL C runtime (`/MD`, `/MDd` for debug), as pcons' MSVC builds do. ifx takes MSVC-style options (`/module:`, `/warn:all`) and links with `link.exe`. The official LLVM installer for Windows doesn't include flang; conda-forge's `flang` package does.
 
+`env.add_toolchain()` picks a toolchain with the same ABI as the environment's primary one: `"fortran"` beside MSVC or clang-cl finds flang or ifx, not gfortran, and `"c"` beside gfortran finds MinGW gcc. Naming an incompatible one (by name, or with `$FC`/`$CC`/`$CXX`) is an error that says which toolchains would fit. Only an environment's own toolchains have to match: a project can have a MinGW environment and an MSVC one side by side.
+
 **Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
 
 ```python
