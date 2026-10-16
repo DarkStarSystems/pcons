@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gfortran finds MinGW gcc. An incompatible toolchain, named or chosen
   with `$FC`/`$CC`/`$CXX`, is an error naming the ones that would fit.
   Toolchains declare their ABI with the `abi` property; undeclared (None)
-  matches anything.
+  matches anything. clang and flang report theirs from their target
+  triple, so MSYS2's clang64 compilers count as MinGW.
 
 ### Fixed
 

@@ -5,7 +5,9 @@ compile flags."""
 
 from __future__ import annotations
 
+import functools
 import logging
+import subprocess
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import Platform, get_platform
@@ -31,6 +33,32 @@ register_target_option(
     'shared-library install name (macOS) or SONAME (Linux); "" disables the '
     "automatic default",
 )
+
+
+def abi_from_triple(triple: str) -> str | None:
+    """The Windows ABI a target triple names: "msvc" for ``*-msvc``,
+    "mingw" for ``*-gnu`` and ``*-mingw*``; None when it names neither."""
+    if triple.endswith("-msvc"):
+        return "msvc"
+    if triple.endswith("-gnu") or "mingw" in triple:
+        return "mingw"
+    return None
+
+
+@functools.cache
+def target_triple(compiler: str) -> str | None:
+    """*compiler*'s default target triple (``-print-target-triple``, which
+    clang, flang and gcc all answer), or None when it can't be asked."""
+    try:
+        out = subprocess.check_output(
+            [compiler, "-print-target-triple"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.strip() or None
 
 
 #: Driver flags that hand the token after them to a sub-tool. Named here so
@@ -63,7 +91,19 @@ class UnixToolchain(BaseToolchain):
 
     @property
     def abi(self) -> str | None:
-        return self.WINDOWS_ABI if get_platform().is_windows else None
+        """On Windows, the compiler's target triple's ABI when it says,
+        else WINDOWS_ABI. A clang-driver toolchain may target either: LLVM's
+        own builds target MSVC, MSYS2's clang64 ones MinGW."""
+        if not get_platform().is_windows:
+            return None
+        compiler = self._abi_probe_compiler()
+        triple = target_triple(compiler) if compiler else None
+        return (abi_from_triple(triple) if triple else None) or self.WINDOWS_ABI
+
+    def _abi_probe_compiler(self) -> str | None:
+        """The compiler whose target triple decides this toolchain's ABI,
+        or None when WINDOWS_ABI always holds."""
+        return None
 
     # True for toolchains whose output is WebAssembly (see WasmToolchain).
     # wasm cross presets applied to a non-wasm toolchain fail fast: they

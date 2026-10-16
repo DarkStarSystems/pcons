@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from pcons.toolchains import unix as unix_mod
 from pcons.toolchains.flang import FlangToolchain
 from pcons.toolchains.fortran import (
     FORTRAN_EXTENSIONS,
@@ -290,6 +291,10 @@ def on_windows(monkeypatch):
         object_suffix=".obj",
     )
     monkeypatch.setattr(platform_mod, "_platform", win)
+    # No compiler is asked its target: each toolchain's WINDOWS_ABI holds,
+    # whatever the host's compilers would say. (Tests of the probe set
+    # their own answer.)
+    monkeypatch.setattr(unix_mod, "target_triple", lambda compiler: None)
     return win
 
 
@@ -488,3 +493,103 @@ def test_envs_keep_their_own_abis(on_windows, tmp_path, monkeypatch, gcc_toolcha
         mingw.add_toolchain(toolchain_registry.get("flang").create_toolchain())
     with _installed("gfortran"), pytest.raises(RuntimeError, match="clang-cl"):
         msvc.add_toolchain("gfortran")
+
+
+# =============================================================================
+# A clang driver's ABI comes from its target triple
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("triple", "abi"),
+    [
+        ("x86_64-pc-windows-msvc", "msvc"),
+        ("aarch64-pc-windows-msvc", "msvc"),
+        ("x86_64-w64-windows-gnu", "mingw"),
+        ("x86_64-w64-mingw32", "mingw"),
+        ("arm64-apple-darwin24.0.0", None),
+    ],
+)
+def test_abi_from_triple(triple, abi) -> None:
+    assert unix_mod.abi_from_triple(triple) == abi
+
+
+def _answer(monkeypatch, triple: str | None) -> list[str]:
+    """Make every compiler report *triple*; return the compilers asked."""
+    asked: list[str] = []
+
+    def probe(compiler: str) -> str | None:
+        asked.append(compiler)
+        return triple
+
+    monkeypatch.setattr(unix_mod, "target_triple", probe)
+
+    # And put clang and flang on PATH, so there is a compiler to ask. (A
+    # path, as $FC or $CXX may give, is found when the file exists.)
+    def which(name, *args, **kwargs):
+        if Path(name).name in ("clang", "flang") or Path(name).is_file():
+            return str(name)
+        return None
+
+    monkeypatch.setattr("shutil.which", which)
+    return asked
+
+
+def test_msys2_clang64_compilers_are_mingw(on_windows, monkeypatch) -> None:
+    from pcons.toolchains.llvm import LlvmToolchain
+
+    _answer(monkeypatch, "x86_64-w64-windows-gnu")
+    flang = FlangToolchain()
+    assert LlvmToolchain().abi == flang.abi == "mingw"
+    # Targeting MinGW, flang links its runtime by name, as on Linux, and
+    # takes no MSVC C runtime flag.
+    assert not flang.objects_name_runtimes
+    assert flang.get_runtime_libs("cxx", {"cxx", "fortran"}) == ["flang_rt.runtime"]
+    assert all(
+        "-fms-runtime-lib" not in flag
+        for c in flang._variant_contributions("debug")
+        for flag in c.flags
+    )
+
+
+def test_llvm_compilers_are_msvc(on_windows, monkeypatch) -> None:
+    from pcons.toolchains.llvm import LlvmToolchain
+
+    _answer(monkeypatch, "x86_64-pc-windows-msvc")
+    assert LlvmToolchain().abi == FlangToolchain().abi == "msvc"
+    assert FlangToolchain().objects_name_runtimes
+
+
+def test_an_unanswered_probe_falls_back(on_windows, monkeypatch) -> None:
+    from pcons.toolchains.llvm import LlvmToolchain
+
+    _answer(monkeypatch, None)
+    assert LlvmToolchain().abi == FlangToolchain().abi == "msvc"
+
+
+def test_the_probe_asks_the_compiler_that_will_build(
+    on_windows, monkeypatch, tmp_path
+) -> None:
+    """$FC and $CXX/$CC name the compilers that build, so they're asked."""
+    from pcons.toolchains.llvm import LlvmToolchain
+
+    fc = tmp_path / "flang-new"
+    cxx = tmp_path / "clang++"
+    for exe in (fc, cxx):
+        exe.write_text("#!/bin/sh\n")
+        exe.chmod(0o755)
+    monkeypatch.setenv("FC", str(fc))
+    monkeypatch.setenv("CXX", str(cxx))
+    asked = _answer(monkeypatch, "x86_64-w64-windows-gnu")
+    assert FlangToolchain().abi == LlvmToolchain().abi == "mingw"
+    assert [Path(a).name for a in asked] == ["flang-new", "clang++"]
+
+
+def test_off_windows_nothing_is_asked(monkeypatch) -> None:
+    if sys.platform == "win32":
+        pytest.skip("the host is Windows")
+    from pcons.toolchains.llvm import LlvmToolchain
+
+    asked = _answer(monkeypatch, "x86_64-w64-windows-gnu")
+    assert LlvmToolchain().abi is None and FlangToolchain().abi is None
+    assert asked == []

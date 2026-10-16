@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pcons.configure.platform import get_platform
 from pcons.core.preset import Preset, ToolContribution
 from pcons.toolchains.fortran import (
     FortranCompiler,
@@ -40,7 +39,12 @@ class FlangToolchain(FortranToolchain):
 
     TOOL_NAMES = ("fc", "ar", "link")
     ENV_COMPILER_FAMILY = "flang"
+    # LLVM's own Windows builds target MSVC; MSYS2's clang64 one MinGW.
     WINDOWS_ABI = "msvc"
+
+    def _abi_probe_compiler(self) -> str | None:
+        """$FC, else flang on PATH: the compiler that will build."""
+        return self.compiler_path
 
     COMPILER = FlangCompiler
     ARCHIVER = LlvmArchiver
@@ -75,9 +79,9 @@ class FlangToolchain(FortranToolchain):
         return ToolContribution("fc", flags=(f"-fms-runtime-lib={crt}",))
 
     def setup_presets(self, env: Environment) -> list[Preset]:
-        """The DLL C runtime from the start, on Windows."""
+        """The DLL C runtime from the start, targeting MSVC."""
         presets = super().setup_presets(env)
-        if not get_platform().is_windows:
+        if self.abi != "msvc":
             return presets
         crt = Preset(
             name="default",
@@ -91,16 +95,17 @@ class FlangToolchain(FortranToolchain):
         self, variant: str, **kwargs: Any
     ) -> list[ToolContribution]:
         contribs = super()._variant_contributions(variant, **kwargs)
-        if get_platform().is_windows:
+        if self.abi == "msvc":
             crt = self.WINDOWS_CRT.get(variant.lower(), self.WINDOWS_DEFAULT_CRT)
             contribs.append(self._crt_flag(crt))
         return contribs
 
     @property
     def objects_name_runtimes(self) -> bool:
-        """On Windows flang is MSVC-ABI: its objects name their runtime
-        (``/DEFAULTLIB:flang_rt.runtime.static.lib``)."""
-        return get_platform().is_windows
+        """Targeting MSVC, flang's objects name their runtime
+        (``/DEFAULTLIB:flang_rt.runtime.static.lib``); targeting MinGW, a
+        link names it (-lflang_rt.runtime) as on Linux."""
+        return self.abi == "msvc"
 
     def _find_runtime_libdir(self, compiler: str) -> str | None:
         """The directory holding flang_rt.runtime.
