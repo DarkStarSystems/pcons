@@ -677,6 +677,8 @@ Each environment has namespaced tool configurations:
 - `env.cxx` - C++ compiler settings
 - `env.link` - Linker settings
 
+Each source compiles with its own tool's settings, even in a target that mixes languages: a `.c` file gets `env.cc.includes`, a `.cpp` file `env.cxx.includes`. For a path every source needs, set it on both, or on the target (`target.private.include_dirs`).
+
 Environments can be cloned and then the clone modified, to set up multiple variants; see [Environment Cloning](#environment-cloning).
 
 ### Path Conventions

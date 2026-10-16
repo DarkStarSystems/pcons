@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named
   `pure`.
+- In a target with both C and C++ sources, each source now gets its own
+  compiler's environment includes and defines: `env.cc.includes` for C,
+  `env.cxx.includes` for C++. Before, every source got one compiler's,
+  and which one depended on internal ordering. **This can break a build
+  that set a path on only one of them and worked by luck:** set it on
+  both, or on the target (`target.private.include_dirs`), which applies to
+  every source.
 - `$FC` (or any other variable a toolchain added with `add_toolchain()`
   honors) no longer replaces the primary toolchain's tools: with C++
   primary and Fortran added, `FC=gfortran-15` changed the link driver to

@@ -319,6 +319,7 @@ def compute_effective_requirements(
     target: Target,
     env: Environment,
     for_compilation: bool = True,
+    tool_name: str | None = None,
 ) -> EffectiveRequirements:
     """Compute complete requirements for a target.
 
@@ -331,6 +332,9 @@ def compute_effective_requirements(
         env: The environment providing base configuration.
         for_compilation: If True, compute for compilation phase.
                         If False, compute for linking phase.
+        tool_name: The tool whose environment includes and defines form
+                   the base layer, e.g. "cc" for a C source. Defaults to
+                   the target's primary tool, for target-wide views.
 
     Returns:
         EffectiveRequirements containing the merged requirements.
@@ -341,8 +345,9 @@ def compute_effective_requirements(
         passthrough_flags=get_passthrough_flags_from_toolchains(env.toolchains),
     )
 
-    # Layer 1: Base environment (primary tool's includes and defines).
-    tool_name = _get_primary_tool(target, env)
+    # Layer 1: Base environment (the tool's includes and defines).
+    if tool_name is None:
+        tool_name = _get_primary_tool(target, env)
     if tool_name and env.has_tool(tool_name):
         tool_config = getattr(env, tool_name)
 
