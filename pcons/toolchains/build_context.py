@@ -250,10 +250,9 @@ class CompileLinkContext:
                 linker_cmd = cxx_cmd
             elif cxx_cmd and link_cmd is None:
                 linker_cmd = cxx_cmd
-        elif language == "fortran" and env is not None and env.has_tool("fc"):
-            fc_cmd = getattr(env.fc, "cmd", None)
-            if fc_cmd:
-                linker_cmd = fc_cmd
+        # A Fortran link needs no override: a Fortran toolchain's own link
+        # tool already is its driver (gfortran, flang) or, for ifx on
+        # Windows, link.exe.
 
         link_flags = list(effective.link_flags)
 

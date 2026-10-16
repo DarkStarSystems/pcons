@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
+from pcons.configure.platform import get_platform
+from pcons.core.preset import Preset, ToolContribution
 from pcons.toolchains.fortran import (
     FortranCompiler,
     FortranLinker,
@@ -13,6 +16,9 @@ from pcons.toolchains.fortran import (
 )
 from pcons.toolchains.llvm import LlvmArchiver
 from pcons.toolchains.unix import UnixToolchain
+
+if TYPE_CHECKING:
+    from pcons.core.environment import Environment
 
 
 class FlangCompiler(FortranCompiler):
@@ -57,11 +63,49 @@ class FlangToolchain(FortranToolchain):
     def __init__(self) -> None:
         super().__init__("flang")
 
+    # On Windows, the C runtime each variant links: the DLL one, as
+    # pcons' MSVC and clang-cl builds use (/MD, /MDd), so Fortran and C/C++
+    # objects agree. flang's own default is the static one.
+    WINDOWS_CRT = {"debug": "dll_dbg"}
+    WINDOWS_DEFAULT_CRT = "dll"
+
+    @staticmethod
+    def _crt_flag(crt: str) -> ToolContribution:
+        return ToolContribution("fc", flags=(f"-fms-runtime-lib={crt}",))
+
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """The DLL C runtime from the start, on Windows."""
+        presets = super().setup_presets(env)
+        if not get_platform().is_windows:
+            return presets
+        crt = Preset(
+            name="default",
+            category="variant",
+            exclusive_group="build_variant",
+            contributions=(self._crt_flag(self.WINDOWS_DEFAULT_CRT),),
+        )
+        return [*presets, crt]
+
+    def _variant_contributions(
+        self, variant: str, **kwargs: Any
+    ) -> list[ToolContribution]:
+        contribs = super()._variant_contributions(variant, **kwargs)
+        if get_platform().is_windows:
+            crt = self.WINDOWS_CRT.get(variant.lower(), self.WINDOWS_DEFAULT_CRT)
+            contribs.append(self._crt_flag(crt))
+        return contribs
+
+    @property
+    def objects_name_runtimes(self) -> bool:
+        """On Windows flang is MSVC-ABI: its objects name their runtime
+        (``/DEFAULTLIB:flang_rt.runtime.static.lib``)."""
+        return get_platform().is_windows
+
     def _find_runtime_libdir(self, compiler: str) -> str | None:
-        """The directory holding libflang_rt.runtime.
+        """The directory holding flang_rt.runtime.
 
         It is a per-target directory under flang's resource directory:
-        ``lib/<triple>`` on Linux, ``lib/darwin`` on macOS.
+        ``lib/<triple>`` on Linux and Windows, ``lib/darwin`` on macOS.
         """
         try:
             resource_dir, triple = (
@@ -74,7 +118,7 @@ class FlangToolchain(FortranToolchain):
             return None
         lib = Path(resource_dir) / "lib"
         for candidate in (lib / triple, lib / "darwin", lib / "linux"):
-            if any(candidate.glob("libflang_rt.runtime.*")):
+            if any(candidate.glob("*flang_rt.runtime.*")):
                 return str(candidate)
         return None
 
@@ -91,7 +135,7 @@ toolchain_registry.register(
     check_command="flang",
     tool_classes=[FlangCompiler, LlvmArchiver, FlangLinker],
     category="fortran",
-    platforms=["linux", "darwin"],
+    platforms=["linux", "darwin", "win32"],
     description="LLVM Flang Fortran compiler (flang)",
     finder="find_fortran_toolchain()",
 )

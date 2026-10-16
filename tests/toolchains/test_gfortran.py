@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from pcons import Project
+from pcons.configure.platform import get_platform
 from pcons.core.target import Target
 from pcons.toolchains.fortran import FORTRAN_EXTENSIONS, find_fortran_toolchain
 from pcons.toolchains.fortran_scanner import main as fortran_scanner_main
@@ -67,19 +68,10 @@ def test_get_source_handler_all_fortran_extensions() -> None:
         assert isinstance(handler, SourceHandler)
         assert handler.tool_name == "fc"
         assert handler.language == "fortran"
-        assert handler.object_suffix == ".o"
+        assert handler.object_suffix == get_platform().object_suffix
         # No depfile/deps_style for Fortran (uses dyndep instead)
         assert handler.depfile is None
         assert handler.deps_style is None
-
-
-def test_get_source_handler_c_fallthrough() -> None:
-    """GfortranToolchain falls through to UnixToolchain for C/C++ files."""
-    tc = GfortranToolchain()
-    handler = tc.get_source_handler(".c")
-    assert handler is not None
-    assert handler.tool_name == "cc"
-    assert handler.language == "c"
 
 
 def test_get_source_handler_unknown() -> None:
@@ -440,7 +432,7 @@ class TestScannerWiring:
         scope = project._scan_scopes[("fortran-modules", "xt::mathlib")]
         governed = [n.path.name for n in scope.governed]
 
-        assert governed == ["mathmod.f90.o"]
+        assert governed == [f"mathmod.f90{get_platform().object_suffix}"]
         assert scope.dyndep_rel == "scan/fortran-modules/xt.mathlib.dyndep"
 
     def test_governed_compile_takes_the_dyndep_in_order_only_position(

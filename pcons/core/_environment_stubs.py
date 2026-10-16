@@ -48,11 +48,11 @@ if TYPE_CHECKING:
         cycc: ToolConfig  # CythonToolchain
         cylink: ToolConfig  # CythonToolchain
         cython: ToolConfig  # CythonToolchain
-        fc: ToolConfig  # FlangToolchain, GfortranToolchain, IfxToolchain
+        fc: ToolConfig  # FlangToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain
         install: ToolConfig  # Environment._setup_standalone_tools (always)
         latex: ToolConfig  # LatexToolchain
-        lib: ToolConfig  # ClangClToolchain, MsvcToolchain
-        link: ToolConfig  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
+        lib: ToolConfig  # ClangClToolchain, IfxMsvcToolchain, MsvcToolchain
+        link: ToolConfig  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
         metal: ToolConfig  # LlvmToolchain
         ml: ToolConfig  # ClangClToolchain, MsvcToolchain
         qt: ToolConfig  # QtToolchain

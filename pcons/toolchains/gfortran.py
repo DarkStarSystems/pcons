@@ -63,7 +63,7 @@ toolchain_registry.register(
     check_command="gfortran",
     tool_classes=[GfortranCompiler, GccArchiver, GfortranLinker],
     category="fortran",
-    platforms=["linux", "darwin"],
+    platforms=["linux", "darwin", "win32"],
     description="GNU Fortran compiler (gfortran)",
     finder="find_fortran_toolchain()",
 )

@@ -23,6 +23,7 @@ from pcons.toolchains.fortran_scanner import DEFAULT_SUBMODULE_FILE
 from pcons.toolchains.gnu_common import gnu_link_builders, gnu_link_vars
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool, resolve_env_cmd_override
+from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -167,21 +168,25 @@ class FortranLinker(BaseTool):
         return self._find_tool_config(config, *self.COMMANDS)
 
 
-class FortranToolchain(UnixToolchain):
-    """A Fortran compiler, an archiver, and the compiler as linker.
+class FortranToolchainBase(BaseToolchain):
+    """What a Fortran toolchain is, whichever conventions its tools follow:
+    the compiler, an archiver and a linker; Fortran sources; module
+    dependency ordering via Ninja dyndep; and the runtimes a mixed-language
+    link needs.
 
-    Uses Ninja dyndep for Fortran module dependency ordering.
+    Combined with a conventions base: UnixToolchain (FortranToolchain, for
+    GNU-style drivers) or MsvcCompatibleToolchain (ifx on Windows).
     """
 
-    # Subclasses set TOOL_NAMES = ("fc", "ar", "link"); like UnixToolchain,
-    # this base declares none, so generated stubs list only real toolchains.
+    # Subclasses set TOOL_NAMES; like UnixToolchain, this base declares
+    # none, so generated stubs list only real toolchains.
 
     # Each compiler declares its own; C/C++ presets don't carry over.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {}
 
     COMPILER: ClassVar[type[FortranCompiler]]
     ARCHIVER: ClassVar[type[BaseTool]]
-    LINKER: ClassVar[type[FortranLinker]]
+    LINKER: ClassVar[type[BaseTool]]
     # Libraries (no -l prefix) a C/C++-driven link needs for Fortran objects.
     RUNTIME_LIBS: ClassVar[tuple[str, ...]]
     # A runtime library file the compiler can locate with -print-file-name.
@@ -189,6 +194,11 @@ class FortranToolchain(UnixToolchain):
 
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("fc",)
+
+    def get_object_suffix(self) -> str:
+        """The platform's, as the ``Object`` builder uses: ``.obj`` on
+        Windows for every Fortran compiler, MinGW's included."""
+        return get_platform().object_suffix
 
     # Priority 3 so Fortran wins over C/C++ when this is the primary toolchain.
     @property
@@ -212,19 +222,25 @@ class FortranToolchain(UnixToolchain):
         if link.configure(config) is None:
             return False
 
-        self._tools = {"fc": fc, "ar": ar, "link": link}
+        # The archiver is "ar" or, MSVC-style, "lib".
+        self._tools = {"fc": fc, ar.name: ar, "link": link}
         return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Return handler for Fortran source file suffixes."""
+        """Return handler for Fortran source file suffixes, and only those.
+
+        C and C++ sources belong to the C/C++ toolchain added beside this
+        one. Claiming them here, as UnixToolchain does, would compile them
+        with the GNU conventions (``.o``, gcc depfiles) even when that
+        toolchain is clang-cl or MSVC.
+        """
         from pcons.tools.toolchain import SourceHandler
 
         # Case-sensitive check (.F/.F90 are preprocessed forms)
         if suffix in FORTRAN_EXTENSIONS:
             # No depfile: Fortran has no header includes; module deps use dyndep
-            return SourceHandler("fc", "fortran", ".o", None, None)
-
-        return super().get_source_handler(suffix)
+            return SourceHandler("fc", "fortran", self.get_object_suffix(), None, None)
+        return None
 
     @cached_property
     def compiler_path(self) -> str | None:
@@ -238,6 +254,16 @@ class FortranToolchain(UnixToolchain):
             if found is not None:
                 return found
         return None
+
+    @property
+    def objects_name_runtimes(self) -> bool:
+        """Whether compiled objects carry their runtime libraries themselves.
+
+        MSVC-ABI compilers (flang and ifx on Windows, like cl and clang-cl)
+        embed ``/DEFAULTLIB`` directives, so a link names no runtime
+        library, Fortran's or C++'s; it needs only their directories.
+        """
+        return False
 
     @cached_property
     def runtime_libdir(self) -> str | None:
@@ -272,6 +298,8 @@ class FortranToolchain(UnixToolchain):
         - Fortran linker + C++ objects → C++ runtime (-lc++ or -lstdc++)
         - C/C++ linker + Fortran objects → this compiler's Fortran runtime
         """
+        if self.objects_name_runtimes:
+            return []
         if linker_language == "fortran" and "cxx" in object_languages:
             return ["c++"] if get_platform().is_macos else ["stdc++"]
         if linker_language in ("c", "cxx") and "fortran" in object_languages:
@@ -281,10 +309,13 @@ class FortranToolchain(UnixToolchain):
     def get_runtime_libdirs(
         self, linker_language: str, object_languages: set[str]
     ) -> list[str]:
-        """The Fortran runtime's directory, when C/C++ links Fortran objects."""
-        if linker_language in ("c", "cxx") and "fortran" in object_languages:
-            if self.runtime_libdir:
-                return [self.runtime_libdir]
+        """The Fortran runtime's directory, when C/C++ links Fortran objects
+        — or any link does, when the objects name their runtime and the
+        linker has to find it."""
+        if "fortran" not in object_languages or not self.runtime_libdir:
+            return []
+        if self.objects_name_runtimes or linker_language in ("c", "cxx"):
+            return [self.runtime_libdir]
         return []
 
     def after_resolve(
@@ -373,9 +404,13 @@ class FortranToolchain(UnixToolchain):
         scanner.attach(*targets)
 
 
+class FortranToolchain(FortranToolchainBase, UnixToolchain):
+    """A GNU-style Fortran driver, an archiver, and the driver as linker."""
+
+
 def find_fortran_toolchain(
     prefer: list[str] | None = None,
-) -> FortranToolchain:
+) -> FortranToolchainBase:
     """Find the first available Fortran toolchain.
 
     Args:
@@ -394,12 +429,12 @@ def find_fortran_toolchain(
         # $FC steers auto-detection, like $CC/$CXX for C/C++.
         env_toolchain = env_selected_toolchain("fortran", "FC")
         if env_toolchain is not None:
-            return cast(FortranToolchain, env_toolchain)
+            return cast(FortranToolchainBase, env_toolchain)
         prefer = list(DEFAULT_PREFERENCE)
 
     toolchain = toolchain_registry.find_available("fortran", prefer)
     if toolchain is not None:
-        return cast(FortranToolchain, toolchain)
+        return cast(FortranToolchainBase, toolchain)
 
     tried = toolchain_registry.get_tried_names("fortran", prefer)
     raise RuntimeError(

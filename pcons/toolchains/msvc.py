@@ -771,6 +771,55 @@ class MsvcLinker(BaseTool):
         return ToolConfig("link", cmd=str(link.path))
 
 
+def use_msvc_tool_paths(env: Environment, tool_exes: dict[str, str]) -> None:
+    """Point *env*'s MSVC tools (tool name -> executable) at full paths when
+    PATH alone would get them wrong.
+
+    Handles two cases:
+    1. cl.exe is in PATH but link.exe resolves to the wrong binary
+       (e.g. Git's /usr/bin/link.exe shadows MSVC's link.exe).
+       Sets the full path only for the shadowed tool.
+    2. cl.exe is not in PATH at all (not a VS Developer shell).
+       Warns and sets full paths for all the tools via vswhere.
+    """
+    import shutil
+
+    cl_which = shutil.which("cl.exe")
+    if cl_which is not None:
+        cl_dir = Path(cl_which).parent
+        for tool_name, exe_name in tool_exes.items():
+            tool_which = shutil.which(exe_name)
+            if tool_which is not None and Path(tool_which).parent == cl_dir:
+                continue  # Correct tool, nothing to do
+            # Wrong tool or not found — use the one next to cl.exe
+            correct_path = cl_dir / exe_name
+            if correct_path.exists():
+                logger.warning(
+                    "%s in PATH is not the MSVC one (expected in %s). "
+                    "Using full path: %s",
+                    exe_name,
+                    cl_dir,
+                    correct_path,
+                )
+                env.add_tool(tool_name).set("cmd", str(correct_path))
+        return
+
+    # cl.exe not in PATH — try vswhere
+    bin_dir = _find_msvc_bin_dir()
+    if bin_dir is None:
+        return
+    logger.warning(
+        "MSVC found via vswhere at %s but cl.exe is not in PATH. "
+        "Consider running from a Visual Studio Developer shell "
+        "for full SDK support (headers, libraries, rc.exe, etc.).",
+        bin_dir,
+    )
+    for tool_name, exe_name in tool_exes.items():
+        full_path = bin_dir / exe_name
+        if full_path.exists():
+            env.add_tool(tool_name).set("cmd", str(full_path))
+
+
 class MsvcToolchain(MsvcCompatibleToolchain):
     """Microsoft Visual C++ toolchain (Windows only)."""
 
@@ -794,59 +843,11 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         return contribs
 
     def setup(self, env: Environment) -> None:
-        """Set up MSVC tools, resolving full paths when needed.
-
-        Handles two cases:
-        1. cl.exe is in PATH but link.exe resolves to the wrong binary
-           (e.g. Git's /usr/bin/link.exe shadows MSVC's link.exe).
-           Emits full path only for the shadowed tool.
-        2. cl.exe is not in PATH at all (not a VS Developer shell).
-           Warns and emits full paths for all MSVC tools via vswhere.
-        """
-        import shutil
-
+        """Set up MSVC tools, resolving full paths when needed."""
         super().setup(env)
-
-        cl_which = shutil.which("cl.exe")
-        if cl_which is not None:
-            cl_dir = Path(cl_which).parent
-            # Check if link.exe and lib.exe resolve to the same dir as cl.exe
-            for tool_name, exe_name in [("link", "link.exe"), ("lib", "lib.exe")]:
-                tool_which = shutil.which(exe_name)
-                if tool_which is not None and Path(tool_which).parent == cl_dir:
-                    continue  # Correct tool, nothing to do
-                # Wrong tool or not found — use the one next to cl.exe
-                correct_path = cl_dir / exe_name
-                if correct_path.exists():
-                    logger.warning(
-                        "%s in PATH is not the MSVC one (expected in %s). "
-                        "Using full path: %s",
-                        exe_name,
-                        cl_dir,
-                        correct_path,
-                    )
-                    env.add_tool(tool_name).set("cmd", str(correct_path))
-        else:
-            # cl.exe not in PATH — try vswhere
-            bin_dir = _find_msvc_bin_dir()
-            if bin_dir is None:
-                return
-            logger.warning(
-                "MSVC found via vswhere at %s but cl.exe is not in PATH. "
-                "Consider running from a Visual Studio Developer shell "
-                "for full SDK support (headers, libraries, rc.exe, etc.).",
-                bin_dir,
-            )
-            tool_exes = {
-                "cc": "cl.exe",
-                "cxx": "cl.exe",
-                "link": "link.exe",
-                "lib": "lib.exe",
-            }
-            for tool_name, exe_name in tool_exes.items():
-                full_path = bin_dir / exe_name
-                if full_path.exists():
-                    env.add_tool(tool_name).set("cmd", str(full_path))
+        use_msvc_tool_paths(
+            env, {"cc": "cl.exe", "cxx": "cl.exe", "link": "link.exe", "lib": "lib.exe"}
+        )
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

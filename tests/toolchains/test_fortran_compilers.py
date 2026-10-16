@@ -5,6 +5,7 @@ what they share through FortranToolchain."""
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,19 +14,31 @@ import pytest
 from pcons.toolchains.flang import FlangToolchain
 from pcons.toolchains.fortran import (
     FORTRAN_EXTENSIONS,
-    FortranToolchain,
+    FortranToolchainBase,
     find_fortran_toolchain,
 )
+from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.gfortran import GfortranToolchain
-from pcons.toolchains.ifx import IfxToolchain
+from pcons.toolchains.ifx import (
+    IfxCompiler,
+    IfxLinker,
+    IfxMsvcToolchain,
+    IfxToolchain,
+)
 from pcons.tools.toolchain import toolchain_registry
 
-TOOLCHAINS = [GfortranToolchain, FlangToolchain, IfxToolchain]
+TOOLCHAINS = [GfortranToolchain, FlangToolchain, IfxToolchain, IfxMsvcToolchain]
+# "ifx" is registered once per host, with that platform's conventions.
+REGISTERED_IFX = IfxMsvcToolchain if sys.platform == "win32" else IfxToolchain
 
 
 @pytest.mark.parametrize(
     ("alias", "cls"),
-    [("gfortran", GfortranToolchain), ("flang", FlangToolchain), ("ifx", IfxToolchain)],
+    [
+        ("gfortran", GfortranToolchain),
+        ("flang", FlangToolchain),
+        ("ifx", REGISTERED_IFX),
+    ],
 )
 def test_registered_as_fortran(alias, cls) -> None:
     entry = toolchain_registry.get(alias)
@@ -35,12 +48,24 @@ def test_registered_as_fortran(alias, cls) -> None:
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_fortran_sources_and_priority(cls: type[FortranToolchain]) -> None:
+def test_fortran_sources_and_priority(cls: type[FortranToolchainBase]) -> None:
     tc = cls()
     for ext in FORTRAN_EXTENSIONS:
         handler = tc.get_source_handler(ext)
         assert handler is not None and handler.tool_name == "fc"
     assert tc.language_priority["fortran"] > tc.language_priority["cxx"]
+
+
+@pytest.mark.parametrize("cls", TOOLCHAINS)
+def test_c_and_cxx_sources_belong_to_the_c_toolchain(
+    cls: type[FortranToolchainBase],
+) -> None:
+    """A Fortran primary must leave .c/.cpp to the C/C++ toolchain added
+    beside it, whose conventions (clang-cl's .obj and /showIncludes, say)
+    may not be GNU's."""
+    tc = cls()
+    for ext in (".c", ".cpp", ".cc", ".S"):
+        assert tc.get_source_handler(ext) is None
 
 
 @pytest.mark.parametrize(
@@ -67,22 +92,31 @@ def test_compile_and_link_commands(cls, cmd, moddir_flag) -> None:
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_cxx_link_gets_the_fortran_runtime(cls: type[FortranToolchain]) -> None:
-    libs = cls().get_runtime_libs("cxx", {"cxx", "fortran"})
-    assert libs == list(cls.RUNTIME_LIBS)
+def test_cxx_link_gets_the_fortran_runtime(cls: type[FortranToolchainBase]) -> None:
+    tc = cls()
+    libs = tc.get_runtime_libs("cxx", {"cxx", "fortran"})
+    # MSVC-ABI objects name their runtimes (/DEFAULTLIB) themselves.
+    assert libs == ([] if tc.objects_name_runtimes else list(cls.RUNTIME_LIBS))
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_fortran_link_gets_the_cxx_runtime(cls: type[FortranToolchain]) -> None:
-    libs = cls().get_runtime_libs("fortran", {"cxx", "fortran"})
-    assert libs in (["c++"], ["stdc++"])
+def test_fortran_link_gets_the_cxx_runtime(cls: type[FortranToolchainBase]) -> None:
+    tc = cls()
+    libs = tc.get_runtime_libs("fortran", {"cxx", "fortran"})
+    if tc.objects_name_runtimes:
+        assert libs == []
+    else:
+        assert libs in (["c++"], ["stdc++"])
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_single_language_links_need_nothing(cls: type[FortranToolchain]) -> None:
+def test_single_language_links_need_nothing(
+    cls: type[FortranToolchainBase],
+) -> None:
     tc = cls()
     assert tc.get_runtime_libs("fortran", {"fortran"}) == []
-    assert tc.get_runtime_libdirs("fortran", {"fortran"}) == []
+    if not tc.objects_name_runtimes:
+        assert tc.get_runtime_libdirs("fortran", {"fortran"}) == []
 
 
 @pytest.mark.parametrize(
@@ -154,7 +188,8 @@ def test_presets_are_per_compiler() -> None:
 
 
 def test_flang_minsizerel_has_no_os() -> None:
-    (contribution,) = FlangToolchain()._variant_contributions("minsizerel")
+    # (On Windows a C runtime contribution follows.)
+    contribution = FlangToolchain()._variant_contributions("minsizerel")[0]
     assert contribution.tool == "fc"
     assert "-Os" not in contribution.flags
     assert "-O2" in contribution.flags
@@ -176,7 +211,7 @@ def test_ifx_compiles_position_independent_code() -> None:
     [
         ({"gfortran", "flang", "ifx"}, GfortranToolchain),
         ({"flang", "ifx"}, FlangToolchain),
-        ({"ifx"}, IfxToolchain),
+        ({"ifx"}, REGISTERED_IFX),
     ],
 )
 def test_detection_order(installed, cls, monkeypatch) -> None:
@@ -201,13 +236,127 @@ def test_an_added_toolchain_gets_its_own_target_type_flags(
     (tmp_path / "sum.f90").write_text("subroutine s()\nend subroutine\n")
     project = Project("mixed", root_dir=tmp_path, build_dir="build")
     env = project.Environment(toolchain=gcc_toolchain)
-    env.add_toolchain(toolchain_registry.get("ifx").create_toolchain())
+    ifx = IfxToolchain()
+    ifx._tools = {"fc": IfxCompiler(), "ar": GccArchiver(), "link": IfxLinker()}
+    ifx._configured = True
+    env.add_toolchain(ifx)
     prog = project.Program("app", env, sources=["main.cpp", "sum.f90"])
     project.resolve()
 
+    # Keyed by source name: the object suffix is the host's.
     flags = {
-        node.path.name: node._build_info["context"].flags
+        node.path.name.rsplit(".", 1)[0]: node._build_info["context"].flags
         for node in prog.intermediate_nodes
     }
-    assert "-fPIE" in flags["sum.f90.o"]
-    assert "-fPIE" not in flags["main.cpp.o"]
+    assert "-fPIE" in flags["sum.f90"]
+    assert "-fPIE" not in flags["main.cpp"]
+
+
+def test_a_variant_reaches_every_toolchain(tmp_path, monkeypatch, gcc_toolchain):
+    """set_variant fans out to each toolchain; one's variant flags must not
+    un-apply another's (they share the build_variant group)."""
+    from pcons import Project
+
+    monkeypatch.chdir(tmp_path)
+    project = Project("mixed", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(toolchain=gcc_toolchain)
+    env.add_toolchain(toolchain_registry.get("gfortran").create_toolchain())
+    env.set_variant("debug")
+    assert "-g" in env.cxx.flags
+    assert "-g" in env.fc.flags
+    env.set_variant("release")
+    assert "-g" not in env.cxx.flags and "-g" not in env.fc.flags
+    assert "-O2" in env.cxx.flags and "-O2" in env.fc.flags
+
+
+# =============================================================================
+# Windows: flang's C runtime, and ifx as an MSVC-style toolchain
+# =============================================================================
+
+
+@pytest.fixture
+def on_windows(monkeypatch):
+    from pcons.configure import platform as platform_mod
+
+    win = platform_mod.Platform(
+        os="windows",
+        arch="x86_64",
+        is_64bit=True,
+        exe_suffix=".exe",
+        shared_lib_suffix=".dll",
+        shared_lib_prefix="",
+        static_lib_suffix=".lib",
+        static_lib_prefix="",
+        object_suffix=".obj",
+    )
+    monkeypatch.setattr(platform_mod, "_platform", win)
+    return win
+
+
+def test_flang_on_windows_uses_the_dll_c_runtime(on_windows) -> None:
+    """Like pcons' MSVC and clang-cl builds (/MD, /MDd), so mixed objects
+    agree on one C runtime; and its objects name their runtimes."""
+    tc = FlangToolchain()
+    assert tc.objects_name_runtimes
+    assert tc.get_object_suffix() == ".obj"
+    crt = tc._variant_contributions("debug")[-1]
+    assert crt.flags == ("-fms-runtime-lib=dll_dbg",)
+    crt = tc._variant_contributions("release")[-1]
+    assert crt.flags == ("-fms-runtime-lib=dll",)
+
+
+def test_flang_elsewhere_names_its_runtime() -> None:
+    if sys.platform == "win32":
+        pytest.skip("the host is Windows")
+    tc = FlangToolchain()
+    assert not tc.objects_name_runtimes
+    assert all(c.tool == "fc" for c in tc._variant_contributions("debug"))
+
+
+def test_ifx_on_windows_is_msvc_style() -> None:
+    fc_vars = IfxMsvcToolchain.COMPILER().default_vars()
+    objcmd = fc_vars["objcmd"]
+    assert fc_vars["cmd"] == "ifx"
+    assert "/module:$fc.moddir" in objcmd
+    assert "/c" in objcmd
+    tc = IfxMsvcToolchain()
+    assert tc.TOOL_NAMES == ("fc", "lib", "link")
+    assert tc.objects_name_runtimes
+    assert tc.get_runtime_libs("cxx", {"cxx", "fortran"}) == []
+
+
+def test_ifx_on_windows_variants_use_the_dll_c_runtime() -> None:
+    tc = IfxMsvcToolchain()
+    debug = tc._variant_contributions("debug")
+    assert "/MDd" in debug[0].flags
+    assert ("link", ("/DEBUG",)) in [(c.tool, c.flags) for c in debug]
+    (release,) = tc._variant_contributions("release")
+    assert "/MD" in release.flags
+    with pytest.raises(ValueError, match="Unknown variant"):
+        tc._variant_contributions("fastest-ever")
+
+
+def test_ifx_on_windows_finds_its_runtime_beside_bin(tmp_path) -> None:
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "libifcoremd.lib").touch()
+    ifx = tmp_path / "bin" / "ifx.exe"
+    found = IfxMsvcToolchain()._find_runtime_libdir(str(ifx))
+    assert found == str((tmp_path / "lib").resolve())
+    elsewhere = tmp_path / "a" / "bin" / "ifx.exe"
+    assert IfxMsvcToolchain()._find_runtime_libdir(str(elsewhere)) is None
+
+
+def test_ifx_on_windows_links_console_programs(tmp_path, monkeypatch) -> None:
+    """link.exe can't infer the subsystem: main is in Intel's runtime."""
+    from pcons import Project
+
+    monkeypatch.chdir(tmp_path)
+    project = Project("p", root_dir=tmp_path, build_dir="build")
+    env = project.Environment()
+    prog = project.Program("app", env)
+    lib = project.StaticLibrary("lib", env)
+    tc = IfxMsvcToolchain()
+    assert tc.get_link_flags_for_target(prog, "app.exe", []) == ["/SUBSYSTEM:CONSOLE"]
+    assert tc.get_link_flags_for_target(prog, "app.exe", ["/SUBSYSTEM:WINDOWS"]) == []
+    assert tc.get_link_flags_for_target(lib, "lib.lib", []) == []
