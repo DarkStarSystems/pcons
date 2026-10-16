@@ -325,10 +325,13 @@ project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 The compilers differ in a few ways:
 
 - **flang** needs LLVM 21 or newer. It has no `-Os`, so `minsizerel` builds use `-O2`, and it has no `coverage` preset.
-- **ifx** runs on Linux, inside the oneAPI environment (`source /opt/intel/oneapi/setvars.sh`). It compiles position-independent code, so C and C++ drivers can link its objects. It has no `coverage` preset. It also rewrites every `.mod` file it compiles, even when nothing in it changed, so editing a module's implementation recompiles everything that uses the module. gfortran and flang only recompile those when the module's interface changes.
+- **ifx** needs the oneAPI environment: `source /opt/intel/oneapi/setvars.sh` on Linux, `setvars.bat` on Windows. On Linux it compiles position-independent code, so C and C++ drivers can link its objects. It has no `coverage` preset. It also rewrites every `.mod` file it compiles, even when nothing in it changed, so editing a module's implementation recompiles everything that uses the module. gfortran and flang only recompile those when the module's interface changes.
 - Each compiler realizes `warnings`, `werror`, `openmp` and `fast-math` with its own flags (ifx's `warnings` is `-warn all`).
 
-Fortran isn't supported on Windows yet.
+On Windows, each compiler mixes with the C and C++ compilers that share its ABI:
+
+- **gfortran** (MSYS2's MinGW build) is GNU-ABI, so it mixes only with MinGW's gcc and g++. Pure Fortran works with any setup.
+- **flang** and **ifx** are MSVC-ABI and mix with MSVC and clang-cl. They use the DLL C runtime (`/MD`, `/MDd` for debug), as pcons' MSVC builds do. ifx takes MSVC-style options (`/module:`, `/warn:all`) and links with `link.exe`. The official LLVM installer for Windows doesn't include flang; conda-forge's `flang` package does.
 
 **Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
 

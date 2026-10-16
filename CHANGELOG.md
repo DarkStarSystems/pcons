@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- LLVM flang (21 or newer) and Intel ifx (on Linux) join gfortran as
-  Fortran toolchains: `toolchain="flang"` or `"ifx"`, or
-  `toolchain="fortran"` to find whichever is installed (gfortran first).
-  `$FC` steers that choice, like `$CC`/`$CXX` for C/C++. Mixed C++/Fortran
-  builds link each compiler's own runtime.
+- LLVM flang (21 or newer) and Intel ifx join gfortran as Fortran
+  toolchains: `toolchain="flang"` or `"ifx"`, or `toolchain="fortran"` to
+  find whichever is installed (gfortran first). `$FC` steers that choice,
+  like `$CC`/`$CXX` for C/C++. Mixed C++/Fortran builds link each
+  compiler's own runtime.
+- Fortran builds on Windows, with all three compilers: MinGW gfortran,
+  and flang and ifx (MSVC ABI, so they mix with MSVC and clang-cl C++).
 
 ### Fixed
 
@@ -28,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that set a path on only one of them and worked by luck:** set it on
   both, or on the target (`target.private.include_dirs`), which applies to
   every source.
+- `set_variant()` on an environment with two toolchains applied only the
+  last one's flags: with C++ and Fortran together, `debug` left the C++
+  compiles without `-O0 -g`.
+- A Fortran-primary environment no longer compiles C and C++ sources
+  itself (GNU-style, even beside clang-cl); the C/C++ toolchain added to
+  it does.
 - `$FC` (or any other variable a toolchain added with `add_toolchain()`
   honors) no longer replaces the primary toolchain's tools: with C++
   primary and Fortran added, `FC=gfortran-15` changed the link driver to

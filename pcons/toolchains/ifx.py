@@ -227,6 +227,7 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
 from pcons.tools.toolchain import toolchain_registry  # noqa: E402
 
 # One "ifx" per host: its options and ABI follow the platform it runs on.
+# Both list both platforms, so docs generated on either host show both.
 if sys.platform == "win32":
     toolchain_registry.register(
         IfxMsvcToolchain,
@@ -234,7 +235,7 @@ if sys.platform == "win32":
         check_command="ifx",
         tool_classes=[IfxMsvcCompiler, MsvcLibrarian, MsvcLinker],
         category="fortran",
-        platforms=["win32"],
+        platforms=["linux", "win32"],
         description="Intel Fortran compiler (ifx)",
         finder="find_fortran_toolchain()",
     )
@@ -245,7 +246,7 @@ else:
         check_command="ifx",
         tool_classes=[IfxCompiler, GccArchiver, IfxLinker],
         category="fortran",
-        platforms=["linux"],
+        platforms=["linux", "win32"],
         description="Intel Fortran compiler (ifx)",
         finder="find_fortran_toolchain()",
     )
