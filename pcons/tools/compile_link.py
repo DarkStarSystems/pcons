@@ -8,6 +8,7 @@ protocol; the core resolver dispatches to it via the builder registry.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -258,18 +259,26 @@ class CompileLinkFactory:
 
         # Sources added with add_sources(..., env=...) compile with their own
         # environment; everything else uses the target's. Requirements are
-        # computed once per distinct environment and compiling toolchain.
-        requirements: dict[tuple[int, int], EffectiveRequirements] = {}
+        # computed once per distinct environment, and adjusted for a source
+        # that a toolchain added beside the environment's own compiles.
+        requirements: dict[int, EffectiveRequirements] = {}
+        adjusted: dict[tuple[int, int], EffectiveRequirements] = {}
 
         def effective_for(
             source_env: Environment, toolchain: Toolchain | None = None
         ) -> EffectiveRequirements:
+            base = requirements.get(id(source_env))
+            if base is None:
+                base = self._compute_requirements(target, source_env)
+                requirements[id(source_env)] = base
+            if toolchain is None or toolchain is source_env._toolchain:
+                return base
             key = (id(source_env), id(toolchain))
-            cached = requirements.get(key)
-            if cached is None:
-                cached = self._compute_requirements(target, source_env, toolchain)
-                requirements[key] = cached
-            return cached
+            if key not in adjusted:
+                own = dataclasses.replace(base, compile_flags=list(base.compile_flags))
+                self._add_target_type_flags(own, target, source_env, toolchain)
+                adjusted[key] = own
+            return adjusted[key]
 
         effective = effective_for(env)
 
@@ -365,33 +374,35 @@ class CompileLinkFactory:
             trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
 
     def _compute_requirements(
-        self,
-        target: Target,
-        env: Environment,
-        compiling_toolchain: Toolchain | None = None,
+        self, target: Target, env: Environment
     ) -> EffectiveRequirements:
-        """Effective compile requirements for *target* under *env*, for a
-        source *compiling_toolchain* compiles.
+        """Effective compile requirements for *target* under *env*.
 
         The target's own requirements and its dependencies' are the same
         whichever environment a given source compiles with; only the
         environment layer differs (see ``add_sources(..., env=...)``).
         """
         effective = compute_effective_requirements(target, env, for_compilation=True)
-
-        # Target-type compile flags (e.g. -fPIC for shared libs on Linux):
-        # the environment's toolchain's, plus what a toolchain added beside
-        # it needs for its own sources (ifx's -fPIE in a C++ program).
-        if target.target_type is not None:
-            toolchains = [env._toolchain, compiling_toolchain]
-            for toolchain in dict.fromkeys(t for t in toolchains if t is not None):
-                for flag in toolchain.get_compile_flags_for_target_type(
-                    str(target.target_type), env=env
-                ):
-                    if flag not in effective.compile_flags:
-                        effective.compile_flags.append(flag)
-
+        if env._toolchain is not None:
+            self._add_target_type_flags(effective, target, env, env._toolchain)
         return effective
+
+    @staticmethod
+    def _add_target_type_flags(
+        effective: EffectiveRequirements,
+        target: Target,
+        env: Environment,
+        toolchain: Toolchain,
+    ) -> None:
+        """Add *toolchain*'s compile flags for the target's type (e.g. -fPIC
+        for shared libs on Linux, or ifx's -fPIE for its sources anywhere)."""
+        if target.target_type is None:
+            return
+        for flag in toolchain.get_compile_flags_for_target_type(
+            str(target.target_type), env=env
+        ):
+            if flag not in effective.compile_flags:
+                effective.compile_flags.append(flag)
 
     def resolve_pending(self, target: Target) -> None:
         """No-op: resolve() adopted them, before creating the object nodes."""
