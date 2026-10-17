@@ -383,6 +383,9 @@ def render_explanation(
             timeout = getattr(spec, "timeout", None)
             if timeout:
                 details.append(f"timeout: {timeout:g}s")
+            skip_returncode = getattr(spec, "skip_returncode", None)
+            if skip_returncode is not None:
+                details.append(f"skip-returncode: {skip_returncode}")
             details.extend(
                 name.replace("_", "-")
                 for name in ("should_fail", "serial", "disabled")

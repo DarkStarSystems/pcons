@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Toolchains declare their ABI with the `abi` property; undeclared (None)
   matches anything. clang and flang report theirs from their target
   triple, so MSYS2's clang64 compilers count as MinGW.
+- `project.Test(..., skip_returncode=77)`: a test that exits with that code
+  is reported as skipped, not failed, like CTest's `SKIP_RETURN_CODE`. For
+  tests that can tell only at run time that they can't run.
 
 ### Changed
 

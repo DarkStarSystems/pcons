@@ -487,14 +487,23 @@ def run_one_test(test: dict, build_dir: Path) -> TestResult:
         )
 
     duration = time.monotonic() - start
-    passed = (result.returncode == 0) != should_fail
+    message = ""
+    if result.returncode == test.get("skip_returncode"):
+        # Checked before should_fail: a test that skips itself didn't run.
+        status = SKIP
+        message = f"exit code {result.returncode}"
+    elif (result.returncode == 0) != should_fail:
+        status = PASS
+    else:
+        status = FAIL
     return TestResult(
         name=name,
-        status=PASS if passed else FAIL,
+        status=status,
         duration=duration,
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
+        message=message,
         labels=labels,
     )
 

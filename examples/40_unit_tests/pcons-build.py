@@ -6,6 +6,7 @@ This example shows:
 - Filtering tests by ``labels``
 - Marking a test ``should_fail=True`` for expected-failure assertions
 - Marking a test ``disabled=True`` so the runner records it as skipped
+- Letting a test skip itself at run time with ``skip_returncode``
 - Chaining tests with ``depends_on`` so fixtures gate dependents
 - Adjusting test properties after the fact with ``set_test_property``
 
@@ -54,6 +55,17 @@ project.Test(
     args=["add"],
     labels=["slow"],
     disabled=True,
+)
+
+# `skip_returncode` lets a test decide at run time that it can't run
+# (a missing tool, say): exiting with that code reports it as skipped,
+# not failed.
+project.Test(
+    "math.needs_tool",
+    test_prog,
+    args=["skip"],
+    labels=["unit"],
+    skip_returncode=77,
 )
 
 # `depends_on` chains tests. `math.regression` only runs if both

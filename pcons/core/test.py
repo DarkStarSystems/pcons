@@ -52,6 +52,7 @@ class TestSpec:
         labels: Tags for filtering (e.g., "unit", "fuzz", "slow").
         timeout: Seconds before the runner kills the test, or None.
         should_fail: If True, a non-zero exit code is a pass.
+        skip_returncode: Exit code reported as skipped, or None.
         serial: If True, runner won't parallelize this test with others.
         disabled: If True, runner reports the test as skipped.
         data: Extra files the test reads at runtime (informational only).
@@ -69,6 +70,7 @@ class TestSpec:
     labels: tuple[str, ...] = ()
     timeout: float | None = None
     should_fail: bool = False
+    skip_returncode: int | None = None
     serial: bool = False
     disabled: bool = False
     data: tuple[Path, ...] = ()
@@ -101,6 +103,7 @@ _MUTABLE_TEST_KEYS = frozenset(
         "labels",
         "timeout",
         "should_fail",
+        "skip_returncode",
         "serial",
         "disabled",
         "data",
@@ -122,8 +125,9 @@ def set_test_property(target: Target, key: str, value: Any) -> None:
     Args:
         target: The Test target to update (returned by ``project.Test()``).
         key: Property name. One of: ``args``, ``cwd``, ``env``, ``labels``,
-            ``timeout``, ``should_fail``, ``serial``, ``disabled``,
-            ``data``, ``program``.
+            ``timeout``, ``should_fail``, ``skip_returncode``, ``serial``,
+            ``disabled``, ``data``, ``depends_on``, ``discover``,
+            ``program``.
         value: New value. Coerced the same way ``project.Test()`` does at
             creation time (lists for ``args``, tuples for ``labels`` and
             ``data``, dict for ``env``).
