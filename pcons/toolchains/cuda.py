@@ -77,6 +77,21 @@ class CudaToolchain(BaseToolchain):
         "openmp": {"compile_flags": ["-Xcompiler=-fopenmp"]},
     }
 
+    # With cl.exe as the host compiler (Windows): MSVC's compile flags, as
+    # MsvcCompatibleToolchain has them. nvcc's -Werror=all-warnings already
+    # passes /WX to cl. cl's ASan objects name their runtime, so the link
+    # needs nothing. profile is MSVC's link-only /PROFILE, the host
+    # linker's to realize; no lto, pthread or coverage, as with MSVC.
+    MSVC_HOST_FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
+        "warnings": {"compile_flags": ["-Xcompiler=/W4"]},
+        "werror": {"compile_flags": ["-Werror=all-warnings"]},
+        "sanitize": {"compile_flags": ["-Xcompiler=/fsanitize=address"]},
+        "profile": {"compile_flags": []},
+        "hardened": {"compile_flags": ["-Xcompiler=/GS", "-Xcompiler=/guard:cf"]},
+        "fast-math": {"compile_flags": ["-use_fast_math", "-Xcompiler=/fp:fast"]},
+        "openmp": {"compile_flags": ["-Xcompiler=/openmp"]},
+    }
+
     def __init__(self) -> None:
         super().__init__("cuda")
 
@@ -84,11 +99,16 @@ class CudaToolchain(BaseToolchain):
         return ("cuda",)
 
     def make_feature_preset(self, name: str) -> Preset | None:
-        """The table's presets, which are GCC and Clang host flags. On
-        Windows nvcc's host compiler is cl.exe, which none of them suit."""
-        if get_platform().is_windows:
+        """FEATURE_PRESETS for a GCC or Clang host; on Windows, where the
+        host compiler is cl.exe, MSVC_HOST_FEATURE_PRESETS."""
+        if not get_platform().is_windows:
+            return super().make_feature_preset(name)
+        spec = self.MSVC_HOST_FEATURE_PRESETS.get(name)
+        if spec is None:
             return None
-        return super().make_feature_preset(name)
+        flags = tuple(spec["compile_flags"])
+        contribs = (ToolContribution("cuda", flags=flags),) if flags else ()
+        return Preset(name=name, category="feature", contributions=contribs)
 
     def get_compile_flags_for_target_type(
         self, target_type: str, env: Environment | None = None

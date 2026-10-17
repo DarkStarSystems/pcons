@@ -259,11 +259,34 @@ class TestCudaFeatures:
         _on(monkeypatch, _LINUX_PLATFORM)
         assert CudaToolchain().make_feature_preset("lto") is None
 
-    def test_no_host_flags_for_cl_exe(self, monkeypatch):
-        """On Windows the host compiler is cl.exe, which the GCC-style
-        host flags don't suit."""
+    @pytest.mark.parametrize(
+        "name, flags",
+        [
+            ("warnings", ("-Xcompiler=/W4",)),
+            ("werror", ("-Werror=all-warnings",)),
+            ("sanitize", ("-Xcompiler=/fsanitize=address",)),
+            ("hardened", ("-Xcompiler=/GS", "-Xcompiler=/guard:cf")),
+            ("fast-math", ("-use_fast_math", "-Xcompiler=/fp:fast")),
+            ("openmp", ("-Xcompiler=/openmp",)),
+        ],
+    )
+    def test_msvc_host_flags_on_windows(self, monkeypatch, name, flags):
+        """On Windows the host compiler is cl.exe, so the host flags are
+        MSVC's (checked with nvcc 12.5 and cl 19.44)."""
         _on(monkeypatch, _WINDOWS_PLATFORM)
-        assert CudaToolchain().make_feature_preset("warnings") is None
+        preset = CudaToolchain().make_feature_preset(name)
+        assert preset is not None
+        assert [(c.tool, c.flags) for c in preset.contributions] == [("cuda", flags)]
+
+    def test_on_windows_profile_is_the_linkers(self, monkeypatch):
+        _on(monkeypatch, _WINDOWS_PLATFORM)
+        preset = CudaToolchain().make_feature_preset("profile")
+        assert preset is not None and preset.contributions == ()
+
+    @pytest.mark.parametrize("name", ["lto", "pthread", "coverage"])
+    def test_unavailable_on_windows_as_with_msvc(self, monkeypatch, name):
+        _on(monkeypatch, _WINDOWS_PLATFORM)
+        assert CudaToolchain().make_feature_preset(name) is None
 
     def test_shared_libraries_are_pic_through_xcompiler(self, monkeypatch):
         _on(monkeypatch, _LINUX_PLATFORM)

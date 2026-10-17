@@ -122,6 +122,25 @@ through as one token, `-Xcompiler=<flag>`; `-Xcompiler` splits on commas.
 The link side is the host toolchain's. Position-independent code is
 `-Xcompiler=-fPIC`; gcc's bare `-fPIC` reaching nvcc today is a bug.
 
+### CUDA with cl.exe as the host compiler (Windows)
+
+Verified on tower1 with nvcc 12.5 and cl 19.44 (VS 2022), a Quadro RTX
+6000 running the kernel:
+
+| feature | compile | verdict |
+|---|---|---|
+| warnings | `-Xcompiler=/W4` | realize: cl reports C4101 |
+| werror | `-Werror=all-warnings` | realize: nvcc passes `-WX` to cl itself, so `/WX` isn't needed |
+| sanitize | `-Xcompiler=/fsanitize=address` | realize: catches a host heap overflow; nvcc's host object carries `/InferAsanLibs`, so the link needs nothing |
+| profile | | no-op: MSVC's `profile` is link-only `/PROFILE`, the host linker's |
+| hardened | `-Xcompiler=/GS -Xcompiler=/guard:cf` | realize: GUARD_CF set (the link flags are MSVC's) |
+| fast-math | `-use_fast_math -Xcompiler=/fp:fast` | realize |
+| openmp | `-Xcompiler=/openmp` | realize: 32 threads |
+| lto, pthread, coverage | | unavailable, as with MSVC |
+
+A DLL from a `.cu` needs no PIC flag. `-Xcompiler=/W4,/WX` splits on the
+comma, so a flag whose value has a comma needs its own `-Xcompiler=`.
+
 ## Mixed links (Fortran objects, C++ driver), for Phase 4
 
 - Coverage: gfortran objects linked by clang++ need `-lgcov`.
