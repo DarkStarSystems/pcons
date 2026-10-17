@@ -156,7 +156,9 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
 
     monkeypatch.setattr(unix_mod, "target_triple", lambda compiler: None)
     monkeypatch.setattr(
-        unix_mod.UnixToolchain, "_compiler_is_apple_clang", lambda self: False
+        unix_mod.UnixToolchain,
+        "_compiler_is_apple_clang",
+        lambda self, tool="cxx": False,
     )
     monkeypatch.setattr(
         fortran_mod.FortranToolchainBase,

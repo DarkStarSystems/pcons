@@ -140,6 +140,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fortran loads one OpenMP runtime. With two it crashed (macOS, Homebrew)
   or failed to link (Linux, apt.llvm.org's flang beside gcc). `$CC` and
   `$CXX` still choose.
+- On macOS, the `openmp` preset gives each compiler its own flags. With
+  `$CC` naming Homebrew's clang and C++ left to Apple's, the C compiler
+  got Apple clang's `-Xclang -fopenmp` and Homebrew's `libomp` too.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named
