@@ -114,6 +114,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reject an option it would only warn about, as `-Werror` does for the
   others, and the header, type, function and macro checks raise for a tool
   that doesn't compile C rather than report a wrong answer.
+- flang links a macOS framework (`target.public.frameworks`,
+  `env.Framework()`): its driver takes neither `-framework` nor `-F`, so
+  the link failed. GNU-style drivers now pass frameworks and their
+  directories to the linker as `-Wl,-framework,<name>` and `-Wl,-F<dir>`.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named

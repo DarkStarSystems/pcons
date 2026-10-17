@@ -86,7 +86,7 @@ def _link_tail() -> list[object]:
         "${prefix(link.Lprefix, link.libdirs)}",
         "${prefix(link.lprefix, link.libs)}",
         "${prefix(link.Fprefix, link.frameworkdirs)}",
-        "${pairwise(link.fprefix, link.frameworks)}",
+        "${prefix(link.fprefix, link.frameworks)}",
     ]
 
 
@@ -149,10 +149,12 @@ def gnu_link_vars(cmd: str) -> dict[str, object]:
         "libs": [],
         "Lprefix": "-L",
         "libdirs": [],
-        # Framework support (macOS only, but always defined for portability)
-        "Fprefix": "-F",
+        # Framework support (macOS only, but always defined for portability).
+        # Passed to the linker with -Wl, which every GNU-style driver
+        # takes: flang's takes neither -framework nor -F itself.
+        "Fprefix": "-Wl,-F",
         "frameworkdirs": [],
-        "fprefix": "-framework",
+        "fprefix": "-Wl,-framework,",
         "frameworks": [],
         "progcmd": ["$link.cmd", "$link.flags", *_link_tail()],
         "sharedcmd": ["$link.cmd", "$link.sharedflag", "$link.flags", *_link_tail()],

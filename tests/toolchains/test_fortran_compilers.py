@@ -1320,3 +1320,22 @@ def test_an_added_gnu_style_toolchain_adds_no_link_flags_to_link_exe(
     (dll,) = lib.output_nodes
     flags = dll._build_info["context"].link_flags
     assert not any("-Wl," in str(f) for f in flags)
+
+
+def test_flang_links_frameworks_through_the_linker(tmp_path) -> None:
+    """flang's driver takes neither -framework nor -F, so a framework and
+    its directory go to the linker with -Wl, each as one token."""
+    from pcons import Project
+    from pcons.toolchains.flang import FlangCompiler, FlangLinker
+    from pcons.toolchains.llvm import LlvmArchiver
+
+    tc = FlangToolchain()
+    tc._tools = {"fc": FlangCompiler(), "ar": LlvmArchiver(), "link": FlangLinker()}
+    tc._configured = True
+    env = Project("fw", root_dir=tmp_path).Environment(toolchain=tc)
+    env.link.frameworks = ["Accelerate"]
+    env.link.frameworkdirs = ["/opt/frameworks"]
+
+    for name in ("progcmd", "sharedcmd"):
+        command = [str(t) for t in env.subst_list(getattr(env.link, name))]
+        assert command[-2:] == ["-Wl,-F/opt/frameworks", "-Wl,-framework,Accelerate"]
