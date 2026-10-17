@@ -27,6 +27,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matches anything. clang and flang report theirs from their target
   triple, so MSYS2's clang64 compilers count as MinGW.
 
+### Changed
+
+- **A feature preset applies to every compiler in the environment, or
+  raises.** With clang and flang, `apply_preset("sanitize")` is an error
+  naming flang, which has no sanitizer: sanitizing only the C and C++
+  sources isn't a sanitized build. `apply_preset(name, allow_partial=True)`
+  applies it where it can, and `env.explain()` lists what it left out.
+  `env.has_preset()` says whether `apply_preset()` would raise.
+- Each compiler realizes the built-in features with its own flags, checked
+  against the real compilers. gfortran now has all of GCC's (`sanitize`,
+  `lto`, `hardened`, `pthread`, `profile`). ifx gains `sanitize` (address
+  only), `profile`, `hardened` and, on Linux, `lto` and `pthread`. Swift
+  gains `sanitize`, `lto`, `coverage` and `hardened`, and CUDA has a table
+  of its own on `nvcc`. flang's `warnings` is now a deliberate no-op, since
+  its `-Wall` did nothing but warn, and it gains `lto` and `pthread`.
+- `ConanFinder.sync_profile(env=env)` takes the environment's C/C++
+  toolchain, which in a Fortran-primary environment isn't the primary one,
+  and the C++ standard `env.cxx.set_standard()` set.
+
 ### Fixed
 
 - Fortran submodules are compiled after the module (or submodule) they
@@ -40,9 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that set a path on only one of them and worked by luck:** set it on
   both, or on the target (`target.private.include_dirs`), which applies to
   every source.
-- A toolchain added with `add_toolchain()` after `set_variant()` now gets
-  that variant for its tools; before, they kept the toolchain's defaults
-  (no `-O0 -g` for an added CUDA or Fortran compiler under `debug`).
+- A toolchain added with `add_toolchain()` gets everything the script
+  already asked for: the variant, features, cross target and C++
+  standard, as if it had been added first. Before, its tools kept the
+  toolchain's defaults (no `-O0 -g` for an added Fortran compiler under
+  `debug`), and a cross target applied first left its sources built for
+  the host.
 - `set_variant()` on an environment with two toolchains applied only the
   last one's flags: with C++ and Fortran together, `debug` left the C++
   compiles without `-O0 -g`.
@@ -56,7 +78,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A toolchain's variant, feature, C++-standard and cross-target flags now
   reach only the tools it brought into the environment. Before, on Windows
   with flang primary and clang-cl added, `set_variant("debug")` handed
-  flang's link driver link.exe's `/DEBUG`, which flang read as a file.
+  flang's link driver link.exe's `/DEBUG`, which flang read as a file, and
+  gcc with gfortran put `-ffast-math` and `-flto` on the link twice.
+- A cross preset retargets flang's Fortran sources too (`--target=` on
+  `fc`), and with gfortran a preset needs a cross gfortran in its
+  `tool_cmds`. Before, Fortran sources were silently built for the host.
+  `set_target_arch()` with gfortran, flang, Swift or Linux ifx is an
+  error, since none of them retargets the CPU by flag.
+- A CUDA shared library on Linux compiles with nvcc's own
+  `-Xcompiler=-fPIC`, not gcc's bare `-fPIC`, which nvcc rejects.
+- clang and flang targeting the MSVC ABI write a PDB for a debug build:
+  the link now gets `-g` too.
+- ifx on Linux gets its own `-qopenmp` for `openmp`, not `-fopenmp`.
 - A shared library linked by clang or flang for the MSVC ABI comes with
   its import library (`foo.lib`), and that is what targets linking it
   take. Before, they were given `foo.dll`, which link.exe rejects

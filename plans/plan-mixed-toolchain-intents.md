@@ -367,6 +367,13 @@ within this plan:
   links and `clang++` doesn't (to confirm in Phase 4, with the rpath). ifx's `for_main.o` would be one too, but
   see §4.
 - `console`: ifx on Windows.
+- Found in Phase 2, from the audit (`mixed-toolchain-audit.md`): objects
+  built with a feature can need that feature's runtime whoever links them.
+  ifx's ASan objects on Windows need the ASan libraries (`/INFERASANLIBS`
+  on its own link), gfortran's coverage objects need `-lgcov` under
+  clang++, and gfortran's OpenMP objects `GOMP_*` where flang's and ifx's
+  need `__kmpc_*`. These are `libs` needs, stated by the compiling
+  toolchain for the features it realized.
 
 A need with no realization on the linking toolchain is an error, never a
 dropped flag: `frameworks` on link.exe, for example.

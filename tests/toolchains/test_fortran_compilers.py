@@ -634,6 +634,28 @@ def test_ifx_on_windows_variants_use_the_dll_c_runtime() -> None:
         tc._variant_contributions("fastest-ever")
 
 
+def test_an_added_ifx_keeps_msvcs_c_runtime(on_windows, tmp_path) -> None:
+    """Each toolchain's default CRT is its own knob setting: ifx's /MD
+    joins MSVC's rather than replacing it, and debug switches both."""
+    from pcons import Project
+    from pcons.toolchains.ifx import IfxMsvcCompiler
+    from pcons.toolchains.msvc import MsvcLibrarian, MsvcLinker
+
+    ifx = IfxMsvcToolchain()
+    ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
+    ifx._configured = True
+    project = Project("crt", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("msvc").create_toolchain()
+    )
+    env.add_toolchain(ifx)
+    assert "/MD" in env.cc.flags and "/MD" in env.fc.flags
+
+    env.set_variant("debug")
+    assert "/MDd" in env.cc.flags and "/MD" not in env.cc.flags
+    assert "/MDd" in env.fc.flags and "/MD" not in env.fc.flags
+
+
 def test_ifx_on_windows_finds_its_runtime_beside_bin(tmp_path) -> None:
     (tmp_path / "bin").mkdir()
     (tmp_path / "lib").mkdir()
@@ -1037,11 +1059,11 @@ def test_a_clone_keeps_each_toolchains_flags_to_its_own_tools(
     assert "/DEBUG" not in debug.link.flags
 
 
-def test_a_same_style_toolchain_reaches_the_link(
+def test_sanitize_covers_both_compilers_and_the_link(
     tmp_path, monkeypatch, gcc_toolchain
 ) -> None:
-    """gfortran has no sanitize preset, so gcc's link flags are the only
-    ones: without them the C++ objects' sanitizer references go unresolved."""
+    """With gfortran primary and gcc added, each compiler sanitizes its own
+    sources and gfortran, which owns the link, links the sanitizer, once."""
     from pcons import Project
 
     monkeypatch.chdir(tmp_path)
@@ -1053,7 +1075,8 @@ def test_a_same_style_toolchain_reaches_the_link(
     env.apply_preset("sanitize")
 
     assert "-fsanitize=address,undefined" in env.cxx.flags
-    assert "-fsanitize=address,undefined" in env.link.flags
+    assert "-fsanitize=address,undefined" in env.fc.flags
+    assert list(env.link.flags).count("-fsanitize=address,undefined") == 1
 
 
 def test_a_flang_dll_is_linked_through_its_import_library(on_windows, tmp_path) -> None:

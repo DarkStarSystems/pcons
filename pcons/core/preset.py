@@ -59,6 +59,11 @@ class Preset:
             with category "arch" (the ``set_target_arch`` knob) record it on
             the environment as ``env.target_arch``; on other categories it is
             metadata (docs/presets.md, "Preset application").
+        realized_by: The toolchain that realized it, set when the
+            environment applies a toolchain's preset. Each toolchain sets
+            a group's knob for its own tools, so a preset replaces the
+            group's earlier ones from the same toolchain; one applied
+            directly (None) replaces them all.
     """
 
     name: str
@@ -66,6 +71,7 @@ class Preset:
     contributions: tuple[ToolContribution, ...] = ()
     exclusive_group: str | None = None
     arch: str | None = None
+    realized_by: str | None = None
 
 
 @dataclass(frozen=True)

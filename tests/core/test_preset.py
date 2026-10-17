@@ -162,47 +162,61 @@ class TestApply:
         assert names == ["warnings", "release"]
 
 
-class TestFanoutDedup:
-    """Identical resolved presets apply once across the toolchain fan-out.
+class _Toolchain:
+    """Just enough of a toolchain for apply_from: a name."""
 
-    Toolchains share tools (cc/cxx/link); without dedup, two toolchains
-    resolving the same preset would double flags like -Werror or -arch
-    (docs/presets.md, "Preset application").
-    """
+    def __init__(self, name: str) -> None:
+        self.name = name
 
-    def test_identical_presets_apply_once_in_fanout(self, test_project):
-        env = _make_env()
-        p = Preset(
-            name="werror",
+
+def _owned_env(**owners: _Toolchain) -> Environment:
+    """_make_env() whose tools belong to the given toolchains."""
+    env = _make_env()
+    env._tool_owners.update(owners)
+    return env
+
+
+def _variant(name: str, tool: str, flag: str) -> Preset:
+    return Preset(
+        name=name,
+        category="variant",
+        exclusive_group="build_variant",
+        contributions=(ToolContribution(tool, flags=(flag,)),),
+    )
+
+
+class TestOwnership:
+    """Each tool takes presets only from the toolchain that brought it
+    (docs/presets.md, "Preset application")."""
+
+    def test_a_tool_takes_only_its_owners_flags(self, test_project):
+        gcc, gfortran = _Toolchain("gcc"), _Toolchain("gfortran")
+        env = _owned_env(cc=gcc, cxx=gcc, link=gcc, fc=gfortran)
+        both = Preset(
+            name="lto",
             category="feature",
-            contributions=(ToolContribution("cc", flags=("-Werror",)),),
+            contributions=(
+                ToolContribution("cc", flags=("-flto",)),
+                ToolContribution("link", flags=("-flto",)),
+            ),
         )
-        with env._dedup_fanout():
-            env.apply(p)
-            env.apply(p)
-        assert list(env.cc.flags).count("-Werror") == 1
+        env.apply_from(gcc, both)
+        env.apply_from(gfortran, both)
+        assert env.cc.flags == ["-flto"]
+        assert env.link.flags == ["-flto"]
 
-    def test_differing_realizations_both_apply(self, test_project):
-        """Same name, different contributions (e.g. gcc's cc/cxx warnings vs
-        gfortran's fc warnings) are distinct resolutions — both apply."""
-        env = _make_env()
-        with env._dedup_fanout():
-            env.apply(
-                Preset(
-                    name="warnings",
-                    category="feature",
-                    contributions=(ToolContribution("cc", flags=("-Wall",)),),
-                )
-            )
-            env.apply(
-                Preset(
-                    name="warnings",
-                    category="feature",
-                    contributions=(ToolContribution("cxx", flags=("-Wall",)),),
-                )
-            )
-        assert "-Wall" in env.cc.flags
-        assert "-Wall" in env.cxx.flags
+    def test_the_realizing_toolchain_is_recorded(self, test_project):
+        gcc = _Toolchain("gcc")
+        env = _owned_env(cc=gcc)
+        env.apply_from(gcc, _variant("debug", "cc", "-g"))
+        assert env.applied_presets[-1].realized_by == "gcc"
+
+    def test_a_toolchain_with_none_of_the_tools_changes_nothing(self, test_project):
+        gcc, other = _Toolchain("gcc"), _Toolchain("other")
+        env = _owned_env(cc=gcc, cxx=gcc, link=gcc)
+        env.apply_from(other, _variant("debug", "cc", "-g"))
+        assert env.cc.flags == []
+        assert env.applied_presets == ()
 
     def test_user_reapplication_stays_additive(self, test_project):
         """Deliberate re-application outside a fan-out remains additive."""
@@ -289,56 +303,41 @@ class TestExclusiveGroup:
         env.apply(p)
         assert env.cc.flags.count("-g") == 1
 
-    def test_one_fanout_is_one_knob_setting(self, test_project):
-        """Each toolchain realizes a variant for its own tools; the presets
-        one set_variant fans out to must not un-apply each other, and the
-        next set_variant replaces all of them."""
+    def test_each_toolchain_replaces_its_own(self, test_project):
+        """A toolchain's variant replaces its own earlier one and leaves
+        another toolchain's alone, until that one is set too."""
+        gcc, clang = _Toolchain("gcc"), _Toolchain("clang")
+        env = _owned_env(cc=gcc, cxx=clang)
+        env.apply_from(gcc, _variant("debug", "cc", "-g"))
+        env.apply_from(clang, _variant("debug", "cxx", "-g"))
 
-        def variant(name: str, tool: str, flag: str) -> Preset:
-            return Preset(
-                name=name,
-                category="variant",
-                exclusive_group="build_variant",
-                contributions=(ToolContribution(tool, flags=(flag,)),),
-            )
-
-        env = _make_env()
-        with env._dedup_fanout():
-            env.apply(variant("debug", "cc", "-g"))
-            env.apply(variant("debug", "cxx", "-g"))
-        assert env.cc.flags == ["-g"]
+        env.apply_from(gcc, _variant("release", "cc", "-O2"))
+        assert env.cc.flags == ["-O2"]
         assert env.cxx.flags == ["-g"]
 
-        with env._dedup_fanout():
-            env.apply(variant("release", "cc", "-O2"))
-            env.apply(variant("release", "cxx", "-O2"))
-        assert env.cc.flags == ["-O2"]
+        env.apply_from(clang, _variant("release", "cxx", "-O2"))
         assert env.cxx.flags == ["-O2"]
         assert [p.name for p in env.applied_presets] == ["release", "release"]
 
-    def test_joining_fanout_keeps_the_current_setting(self, test_project):
-        """A toolchain added later realizes the knob for its new tools
-        without replacing the setting the others already realize."""
-        env = _make_env()
-        env.apply(
-            Preset(
-                name="default",
-                category="variant",
-                exclusive_group="build_variant",
-                contributions=(ToolContribution("cc", flags=("/MD",)),),
-            )
-        )
-        with env._dedup_fanout(join=True):
-            env.apply(
-                Preset(
-                    name="default",
-                    category="variant",
-                    exclusive_group="build_variant",
-                    contributions=(ToolContribution("cxx", flags=("/MD",)),),
-                )
-            )
-        assert env.cc.flags == ["/MD"]
-        assert env.cxx.flags == ["/MD"]
+    def test_a_variant_replaces_the_toolchains_default(self, test_project):
+        """A toolchain added later sets the variant over its own default
+        (an added ifx's /MD becomes /MDd), not over the others'."""
+        msvc, ifx = _Toolchain("msvc"), _Toolchain("ifx")
+        env = _owned_env(cc=msvc, cxx=ifx)
+        env.apply_from(msvc, _variant("debug", "cc", "/MDd"))
+        env.apply_from(ifx, _variant("default", "cxx", "/MD"))
+        env.apply_from(ifx, _variant("debug", "cxx", "/MDd"))
+        assert env.cc.flags == ["/MDd"]
+        assert env.cxx.flags == ["/MDd"]
+
+    def test_a_preset_applied_directly_replaces_every_toolchains(self, test_project):
+        gcc, clang = _Toolchain("gcc"), _Toolchain("clang")
+        env = _owned_env(cc=gcc, cxx=clang)
+        env.apply_from(gcc, _variant("debug", "cc", "-g"))
+        env.apply_from(clang, _variant("debug", "cxx", "-g"))
+        env.apply(_variant("custom", "cc", "-Og"))
+        assert env.cc.flags == ["-Og"]
+        assert env.cxx.flags == []
 
     def test_clone_then_switch_variant_works(self, test_project):
         """The documented workflow: clone at any point, retune the clone."""

@@ -120,6 +120,12 @@ def _warn_if_source_reads_as_singular(
     )
 
 
+def _names(toolchains: Sequence[Any]) -> str:
+    """Toolchain names for a message: "gfortran", "flang and ifx"."""
+    names = [t.name for t in toolchains]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def _first_repr(value: Any) -> str:
     """repr of a sequence's first element, for use in an example line."""
     items = list(value)
@@ -174,10 +180,8 @@ class Environment(_EnvironmentStubs):
         "_applied_presets",
         "_applied_imperative",
         "_use_origins",
-        "_fanout_seen",
-        "_fanout_applied",
         "_intents",
-        "_replaying",
+        "_partial_presets",
         "_tool_owners",
         "_name",
         "_cross_preset",
@@ -243,14 +247,12 @@ class Environment(_EnvironmentStubs):
         # compute_effective_requirements so `pcons explain` names the package
         # rather than the tool variable the value landed on.
         self._use_origins: dict[tuple[str, str], tuple[str, str]] = {}
-        # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
-        self._fanout_seen: set[Any] | None = None
-        self._fanout_applied: list[Preset] | None = None
         # What the script asked for, in order, for toolchains added later
         self._intents: list[Intent] = []
-        # The toolchain add_toolchain() is realizing the intents for
-        self._replaying: Toolchain | None = None
-        # Tool name -> the toolchain that brought it (see apply_from)
+        # (preset, toolchain) left out by apply_preset(allow_partial=True)
+        self._partial_presets: list[tuple[str, str]] = []
+        # Tool name -> the toolchain that brought it, the only one that
+        # realizes presets for it (see apply_from)
         self._tool_owners: dict[str, Toolchain] = {}
         self._cross_preset: Any = None
         self._target: Platform | None = None
@@ -279,7 +281,7 @@ class Environment(_EnvironmentStubs):
             self._tool_owners = dict.fromkeys(self._get_tools(), toolchain)
             # After the baseline, so explain() attributes these by name.
             for preset in toolchain.setup_presets(self):
-                self.apply(preset)
+                self.apply_from(toolchain, preset)
 
         # Always add standalone tools (install, archive)
         # These are tool-agnostic and always available
@@ -595,25 +597,14 @@ class Environment(_EnvironmentStubs):
         # It configures only the tools it brought: $FC from an added Fortran
         # toolchain must not retarget the primary toolchain's linker. Then it
         # realizes everything the script already asked for, for those tools,
-        # as if it had been there from the start. A recorded intent replaces
-        # the toolchain's own default in its group (an added ifx gets /MDd,
-        # not /MD, under debug), and the environment keeps its variant name.
-        groups = {i.group for i in self._intents if i.group is not None}
-        presets = [
-            p
-            for p in toolchain.setup_presets(self)
-            if p.exclusive_group is None or p.exclusive_group not in groups
-        ]
+        # as if it had been there from the start: a variant replaces its own
+        # default (an added ifx gets /MDd, not /MD, under debug), and the
+        # environment keeps its variant name.
         current_variant = self.variant
-        self._replaying = toolchain
-        try:
-            with self._dedup_fanout(join=True):
-                for preset in presets:
-                    self.apply_from(toolchain, preset)
-                for intent in self._intents:
-                    self._realize(toolchain, intent)
-        finally:
-            self._replaying = None
+        for preset in toolchain.setup_presets(self):
+            self.apply_from(toolchain, preset)
+        for intent in self._intents:
+            self._realize(intent, [toolchain], replaying=True)
         self.variant = current_variant
 
     @property
@@ -798,6 +789,7 @@ class Environment(_EnvironmentStubs):
         new_env._applied_presets = list(self._applied_presets)
         new_env._applied_imperative = list(self._applied_imperative)
         new_env._intents = list(self._intents)
+        new_env._partial_presets = list(self._partial_presets)
         new_env._tool_owners = dict(self._tool_owners)
         new_env._use_origins = dict(self._use_origins)
 
@@ -966,39 +958,34 @@ class Environment(_EnvironmentStubs):
         Extends each contribution's tool flag/define lists; a ``cmd``
         contribution replaces the tool's command. Presets sharing an
         ``exclusive_group`` act as a knob: applying one first un-applies
-        the group members already applied, except those the same fan-out
-        applied — one knob setting, realized by each toolchain. A preset
-        applies fully or raises (docs/presets.md, "Preset application").
+        the group's earlier ones. Each toolchain sets the knob for its own
+        tools, so a toolchain's preset replaces only its own earlier ones
+        (``Preset.realized_by``); one applied directly replaces them all.
+        A preset applies fully or raises (docs/presets.md, "Preset
+        application").
         """
-        if self._fanout_seen is not None:
-            # Identical presets resolved by several toolchains apply once
-            # (shared tools like cc would double flags otherwise).
-            key = (preset.name, preset.category, preset.contributions)
-            if key in self._fanout_seen:
-                return
-            self._fanout_seen.add(key)
-
         # Validate before any mutation, including the un-apply below.
         self._validate_preset(preset)
 
         if preset.exclusive_group is not None:
-            current = self._fanout_applied or []
-            kept: list[Preset] = []
+
+            def replaces(applied: Preset) -> bool:
+                return applied.exclusive_group == preset.exclusive_group and (
+                    preset.realized_by is None
+                    or applied.realized_by in (None, preset.realized_by)
+                )
+
             for applied in self._applied_presets:
-                if applied.exclusive_group == preset.exclusive_group and not any(
-                    applied is c for c in current
-                ):
+                if replaces(applied):
                     self._unapply_contributions(applied)
-                else:
-                    kept.append(applied)
-            self._applied_presets[:] = kept
+            self._applied_presets[:] = [
+                p for p in self._applied_presets if not replaces(p)
+            ]
 
         for contribution in preset.contributions:
             self._apply_contribution(contribution)
 
         self._applied_presets.append(preset)
-        if self._fanout_applied is not None:
-            self._fanout_applied.append(preset)
 
         if preset.category == "variant":
             self.variant = preset.name
@@ -1007,37 +994,29 @@ class Environment(_EnvironmentStubs):
         if preset.category == "arch" and preset.arch is not None:
             self.target_arch = preset.arch
 
-    def apply_from(
-        self, toolchain: Toolchain, preset: Preset, *, own_tools_only: bool = False
-    ) -> None:
-        """Apply *toolchain*'s *preset*: to the tools it brought, and to
-        another toolchain's only when both write flags the same way.
+    def apply_from(self, toolchain: Toolchain, preset: Preset) -> None:
+        """Apply *toolchain*'s *preset* to the tools it owns, and only those.
 
-        Each toolchain realizes a knob (set_variant, apply_preset, ...) in
-        its own flag style (``LINKER_STYLE``): clang-cl's debug ``/DEBUG``
-        would break flang's GNU-style link driver beside it, as an added
-        flang's ``-fopenmp`` would break link.exe. A same-style contribution
-        lands, since the tool's own toolchain may not realize that knob:
-        gcc's ``-fsanitize`` reaches a gfortran link. With *own_tools_only*,
-        and while add_toolchain() replays the recorded intents for
-        *toolchain*, its own tools take everything and others nothing. A
-        tool no toolchain brought takes every contribution.
+        Each tool is realized by the toolchain that brought it: gfortran's
+        ``-O0 -g`` lands on ``fc``, gcc's on ``cc`` and ``cxx``, and
+        neither touches the other's, so nothing is applied twice and no
+        toolchain's flag style reaches a tool that can't read it. A tool no
+        toolchain brought (the script's own ``env.add_tool``) belongs to the
+        primary toolchain, as does a tool the environment lacks, so a
+        command swap to a missing tool still raises; with no primary, to
+        *toolchain* itself.
         """
-        style = getattr(toolchain, "LINKER_STYLE", None)
-        own_tools_only = own_tools_only or self._replaying is toolchain
-
-        def takes(tool: str) -> bool:
-            owner = self._tool_owners.get(tool, toolchain)
-            if owner is toolchain:
-                return True
-            return not own_tools_only and getattr(owner, "LINKER_STYLE", None) == style
-
-        taken = tuple(c for c in preset.contributions if takes(c.tool))
+        default = object.__getattribute__(self, "_toolchain") or toolchain
+        taken = tuple(
+            c
+            for c in preset.contributions
+            if self._tool_owners.get(c.tool, default) is toolchain
+        )
         if not taken and preset.contributions:
             return
-        if len(taken) < len(preset.contributions):
-            preset = dataclasses.replace(preset, contributions=taken)
-        self.apply(preset)
+        self.apply(
+            dataclasses.replace(preset, contributions=taken, realized_by=toolchain.name)
+        )
 
     @property
     def applied_presets(self) -> tuple[Preset, ...]:
@@ -1078,6 +1057,7 @@ class Environment(_EnvironmentStubs):
             self._applied_imperative,
             get_separated_arg_flags_from_toolchains(self.toolchains),
             get_passthrough_flags_from_toolchains(self.toolchains),
+            self._partial_presets,
         )
 
     def _record_toolchain_baseline(
@@ -1172,24 +1152,6 @@ class Environment(_EnvironmentStubs):
                     if d in defines:
                         defines.remove(d)
 
-    @contextmanager
-    def _dedup_fanout(self, *, join: bool = False) -> Generator[None]:
-        """Scope a per-toolchain fan-out: identical presets apply once, and
-        the group presets it applies together are one knob setting, so they
-        don't un-apply each other.
-
-        With *join*, the knob settings already applied count as this
-        fan-out's own: a toolchain added later realizes them for its tools
-        rather than replacing them for everyone else's.
-        """
-        self._fanout_seen = set()
-        self._fanout_applied = list(self._applied_presets) if join else []
-        try:
-            yield
-        finally:
-            self._fanout_seen = None
-            self._fanout_applied = None
-
     def _apply_contribution(self, c: ToolContribution) -> None:
         """Apply a single tool contribution (extend flags/defines, set cmd)."""
         if not self.has_tool(c.tool):
@@ -1213,32 +1175,98 @@ class Environment(_EnvironmentStubs):
             self._intents = [i for i in self._intents if i.group != intent.group]
         self._intents.append(intent)
 
-    def _realize(self, toolchain: Toolchain, intent: Intent) -> bool:
-        """Have *toolchain* realize *intent* here; whether it had a
-        realization (an arch or feature it doesn't know is False)."""
+    def _takes_part(self, toolchain: Toolchain) -> bool:
+        """Whether *toolchain* owns a tool its features and knobs are
+        realized on (gfortran's ``fc``), so must realize each one."""
+        primary = object.__getattribute__(self, "_toolchain")
+        tools = getattr(toolchain, "_feature_preset_tools", tuple)()
+        return any(
+            self.has_tool(t) and self._tool_owners.get(t, primary) is toolchain
+            for t in tools
+        )
+
+    def _realize(
+        self,
+        intent: Intent,
+        toolchains: Sequence[Toolchain],
+        *,
+        replaying: bool = False,
+    ) -> bool:
+        """Have each of *toolchains* realize *intent* for its own tools.
+
+        Whether any had a realization. A toolchain that takes part
+        (``_takes_part``) and can't realize an arch or feature is an error,
+        unless the feature was applied with ``allow_partial``: the intent
+        applies fully or raises. *replaying* is a toolchain added later,
+        which must realize what the rest of the environment already does.
+        """
         kind = intent.kind
         if kind == "variant":
-            toolchain.apply_variant(self, intent.name, **intent.kwargs)
+            for toolchain in toolchains:
+                toolchain.apply_variant(self, intent.name, **intent.kwargs)
+            return True
+        if kind == "target":
+            for toolchain in toolchains:
+                toolchain.apply_cross_preset(self, intent.args[0])
             return True
         if kind == "arch":
-            return toolchain.apply_target_arch(self, intent.name, **intent.kwargs)
-        if kind == "target":
-            toolchain.apply_cross_preset(self, intent.args[0])
-            return True
+            unrealized = [
+                toolchain
+                for toolchain in toolchains
+                if not toolchain.apply_target_arch(self, intent.name, **intent.kwargs)
+            ]
+            missing = [t for t in unrealized if self._takes_part(t)]
+            if missing and (replaying or len(unrealized) < len(toolchains)):
+                raise ValueError(
+                    f"{_names(missing)} can't build for target arch "
+                    f"'{intent.name}', so its sources would be built for the "
+                    f"host. Build them in an environment of their own, or use "
+                    f"a cross preset (see docs/presets.md)."
+                )
+            return len(unrealized) < len(toolchains)
+        if kind == "setting":
+            realized = False
+            for toolchain in toolchains:
+                preset = toolchain.make_setting_preset(intent.name, *intent.args)
+                if preset is not None:
+                    self.apply_from(toolchain, preset)
+                    realized = True
+            return realized
         if kind == "feature":
-            from pcons.core.preset import resolve_registered_feature
+            return self._realize_feature(intent, toolchains, replaying=replaying)
+        raise ValueError(f"Unknown intent kind '{kind}'")
 
-            preset = toolchain.make_feature_preset(intent.name)  # built-in
+    def _realize_feature(
+        self, intent: Intent, toolchains: Sequence[Toolchain], *, replaying: bool
+    ) -> bool:
+        """The feature part of :meth:`_realize`. Nothing is applied unless
+        every toolchain that takes part has a realization."""
+        from pcons.core.preset import is_registered_preset, resolve_registered_feature
+
+        name = intent.name
+        found: list[tuple[Toolchain, Preset]] = []
+        missing: list[Toolchain] = []
+        for toolchain in toolchains:
+            preset = toolchain.make_feature_preset(name)  # built-in
             if preset is None:
-                preset = resolve_registered_feature(intent.name, toolchain)
-        elif kind == "setting":
-            preset = toolchain.make_setting_preset(intent.name, *intent.args)
-        else:
-            raise ValueError(f"Unknown intent kind '{kind}'")
-        if preset is None:
-            return False
-        self.apply_from(toolchain, preset)
-        return True
+                preset = resolve_registered_feature(name, toolchain)  # registry
+            if preset is not None:
+                found.append((toolchain, preset))
+            elif not is_registered_preset(name) and self._takes_part(toolchain):
+                # A registered preset's None is its resolver's decision.
+                missing.append(toolchain)
+        if missing and (found or replaying):
+            if not intent.kwargs.get("allow_partial"):
+                raise ValueError(
+                    f"Preset '{name}' isn't available with {_names(missing)}, "
+                    f"so it can't apply to the whole environment. Apply it "
+                    f"with allow_partial=True to leave out {_names(missing)}'s "
+                    f"tools, or check first with env.has_preset({name!r})."
+                )
+            self._partial_presets.extend((name, t.name) for t in missing)
+        for toolchain, preset in found:
+            self.apply_from(toolchain, preset)
+        return bool(found)
 
     def _apply_setting(self, name: str, *args: Any) -> None:
         """Apply a tool setting (``env.cxx.set_standard``), realized by
@@ -1246,9 +1274,7 @@ class Environment(_EnvironmentStubs):
         from pcons.core.preset import Intent
 
         intent = Intent("setting", name, args)
-        with self._dedup_fanout():
-            for toolchain in self.toolchains:
-                self._realize(toolchain, intent)
+        self._realize(intent, self.toolchains)
         self._record_intent(intent)
 
     def set_variant(self, name: str, **kwargs: Any) -> None:
@@ -1271,9 +1297,7 @@ class Environment(_EnvironmentStubs):
         _record_variant(name)
         intent = Intent("variant", name, kwargs=dict(kwargs), group=VARIANT_GROUP)
         if self.toolchains:
-            with self._dedup_fanout():
-                for toolchain in self.toolchains:
-                    self._realize(toolchain, intent)
+            self._realize(intent, self.toolchains)
         else:
             # No toolchains - just set the variant name
             self.variant = name
@@ -1296,11 +1320,7 @@ class Environment(_EnvironmentStubs):
 
         if self.toolchains:
             intent = Intent("arch", arch, kwargs=dict(kwargs))
-            with self._dedup_fanout():
-                realized = [
-                    self._realize(toolchain, intent) for toolchain in self.toolchains
-                ]
-            if not any(realized):
+            if not self._realize(intent, self.toolchains):
                 names = ", ".join(t.name for t in self.toolchains)
                 raise ValueError(
                     f"No configured toolchain ({names}) realizes target "
@@ -1351,7 +1371,9 @@ class Environment(_EnvironmentStubs):
 
         apply_clang_tidy(self, tool, args)
 
-    def apply_preset(self, name: KnownFeaturePreset | str) -> None:
+    def apply_preset(
+        self, name: KnownFeaturePreset | str, *, allow_partial: bool = False
+    ) -> None:
         """Apply a named feature preset to this environment.
 
         Resolution is **toolchain-first, then registry**: each toolchain's
@@ -1361,12 +1383,20 @@ class Environment(_EnvironmentStubs):
         contributed presets are namespaced (``scope/name``). ``explain()``
         attributes each flag to the preset that added it.
 
+        Every toolchain whose compilers the preset covers must realize it,
+        or this raises: with gcc and gfortran, ``sanitize`` sanitizes both
+        the C and the Fortran sources or neither.
+
         Args:
             name: Preset name (``"warnings"`` or ``"scope/name"``).
+            allow_partial: Apply it with the toolchains that realize it and
+                leave out the tools of those that can't, which
+                ``explain()`` then lists.
 
         Example:
             env.apply_preset("warnings")
             env.apply_preset("mycorp/strict")
+            env.apply_preset("sanitize", allow_partial=True)  # not flang's
         """
         from pcons.core.preset import (
             Intent,
@@ -1378,11 +1408,10 @@ class Environment(_EnvironmentStubs):
             logger.warning("No toolchains configured; cannot apply preset '%s'", name)
             return
 
-        intent = Intent("feature", name)
-        applied = False
-        with self._dedup_fanout():
-            for toolchain in self.toolchains:
-                applied = self._realize(toolchain, intent) or applied
+        intent = Intent(
+            "feature", name, kwargs={"allow_partial": True} if allow_partial else {}
+        )
+        applied = self._realize(intent, self.toolchains)
         # Imperative escape-hatch preset: runs once against the whole env.
         description = apply_imperative_preset(name, self)
         if description is not None:
@@ -1414,13 +1443,15 @@ class Environment(_EnvironmentStubs):
         self._record_intent(intent)
 
     def has_preset(self, name: KnownFeaturePreset | str) -> bool:
-        """Whether ``apply_preset(name)`` would land contributions here.
+        """Whether ``apply_preset(name)`` would apply here, not raise.
 
-        True if any configured toolchain realizes *name* (built-in or
-        contributed declarative), or *name* is a registered imperative
-        preset. False for unknown names and for optional features this
-        system can't provide (e.g. ``openmp`` when no OpenMP runtime is
-        available) — checking never raises.
+        True if the toolchains realize *name* (built-in or contributed
+        declarative): every one whose compilers it covers, or *name* is a
+        registered imperative preset. False for unknown names, for
+        optional features this system can't provide (e.g. ``openmp`` when
+        no OpenMP runtime is available), and for a feature one of the
+        environment's compilers lacks (``sanitize`` with flang beside
+        clang) — checking never raises.
 
         Use it to guard optional features, mirroring CMake's optional
         ``find_package``::
@@ -1434,15 +1465,22 @@ class Environment(_EnvironmentStubs):
         """
         from pcons.core.preset import (
             is_imperative_preset,
+            is_registered_preset,
             resolve_registered_feature,
         )
 
+        if is_imperative_preset(name):
+            return True
+        found = False
         for toolchain in self.toolchains:
-            if toolchain.make_feature_preset(name) is not None:
-                return True
-            if resolve_registered_feature(name, toolchain) is not None:
-                return True
-        return is_imperative_preset(name)
+            if (
+                toolchain.make_feature_preset(name) is not None
+                or resolve_registered_feature(name, toolchain) is not None
+            ):
+                found = True
+            elif not is_registered_preset(name) and self._takes_part(toolchain):
+                return False
+        return found
 
     def apply_cross_preset(self, preset: Any) -> None:
         """Apply a cross-compilation preset to this environment.
@@ -1464,9 +1502,7 @@ class Environment(_EnvironmentStubs):
 
         if self.toolchains:
             intent = Intent("target", getattr(preset, "name", "target"), (preset,))
-            with self._dedup_fanout():
-                for toolchain in self.toolchains:
-                    self._realize(toolchain, intent)
+            self._realize(intent, self.toolchains)
             self._record_intent(intent)
             self._cross_preset = preset
             self._target = getattr(preset, "target_platform", None)

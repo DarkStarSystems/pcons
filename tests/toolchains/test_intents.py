@@ -158,3 +158,95 @@ def test_a_clone_keeps_the_intents(tmp_path) -> None:
     clone = env.clone()
     _add(clone, "gfortran")
     assert "-Wall" in clone.fc.flags
+
+
+# =============================================================================
+# A feature applies fully or raises
+# =============================================================================
+
+
+def _llvm_flang(tmp_path) -> Environment:
+    env = _env(tmp_path, "llvm")
+    _add(env, "flang")
+    return env
+
+
+def test_a_feature_one_compiler_lacks_raises(tmp_path) -> None:
+    """flang has no sanitizer: sanitizing only the C and C++ sources isn't
+    a sanitized build, so it's an error, and nothing is applied."""
+    env = _llvm_flang(tmp_path)
+    with pytest.raises(ValueError, match="'sanitize' isn't available with flang"):
+        env.apply_preset("sanitize")
+    assert not any("sanitize" in str(f) for f in env.cc.flags)
+    assert not env.has_preset("sanitize")
+
+
+def test_allow_partial_leaves_out_that_compiler(tmp_path) -> None:
+    env = _llvm_flang(tmp_path)
+    env.apply_preset("sanitize", allow_partial=True)
+    assert any("-fsanitize" in str(f) for f in env.cc.flags)
+    assert not any("sanitize" in str(f) for f in env.fc.flags)
+    assert "sanitize - flang" in str(env.explain())
+
+
+def test_has_preset_is_whether_apply_preset_would_raise(tmp_path) -> None:
+    alone = _env(tmp_path / "alone", "llvm")
+    assert alone.has_preset("sanitize")
+    mixed = _llvm_flang(tmp_path / "mixed")
+    assert not mixed.has_preset("sanitize")
+    assert mixed.has_preset("werror")
+
+
+def test_a_toolchain_added_later_must_realize_it_too(tmp_path) -> None:
+    env = _env(tmp_path, "llvm")
+    env.apply_preset("sanitize")
+    with pytest.raises(ValueError, match="'sanitize' isn't available with flang"):
+        _add(env, "flang")
+
+
+def test_allow_partial_holds_for_a_toolchain_added_later(tmp_path) -> None:
+    env = _env(tmp_path, "llvm")
+    env.apply_preset("sanitize", allow_partial=True)
+    _add(env, "flang")
+    assert "sanitize - flang" in str(env.explain())
+
+
+def test_a_contributed_preset_decides_for_itself(tmp_path) -> None:
+    """A registry resolver returning None for a toolchain is its decision,
+    not a gap."""
+    from pcons.core import preset as preset_mod
+    from pcons.core.preset import ToolContribution, register_preset
+
+    def resolve(toolchain):
+        if toolchain.name != "llvm":
+            return None
+        return [ToolContribution("cc", flags=("-DCLANG_ONLY",))]
+
+    register_preset("test/clang-only", resolve)
+    try:
+        env = _llvm_flang(tmp_path)
+        env.apply_preset("test/clang-only")
+        assert "-DCLANG_ONLY" in env.cc.flags
+    finally:
+        preset_mod._PRESET_REGISTRY.pop("test/clang-only")
+
+
+def test_an_arch_one_compiler_cant_build_for_raises(tmp_path, monkeypatch) -> None:
+    """swiftc can't take set_target_arch's arch; its sources would be
+    built for the host."""
+    mac = platform_mod.Platform(
+        os="darwin",
+        arch="arm64",
+        is_64bit=True,
+        exe_suffix="",
+        shared_lib_suffix=".dylib",
+        shared_lib_prefix="lib",
+        static_lib_suffix=".a",
+        static_lib_prefix="lib",
+        object_suffix=".o",
+    )
+    monkeypatch.setattr(platform_mod, "_platform", mac)
+    env = _env(tmp_path, "swiftc")
+    _add(env, "llvm")
+    with pytest.raises(ValueError, match="swift can't build for target arch"):
+        env.set_target_arch("x86_64")

@@ -390,17 +390,16 @@ class CompileLinkFactory:
             target, env, for_compilation=True, tool_name=tool_name
         )
 
-        # Target-type compile flags (e.g. -fPIC for shared libs on Linux):
-        # the environment's toolchain's, plus what a toolchain added beside
-        # it needs for its own sources (ifx's -fPIE in a C++ program).
-        if target.target_type is not None:
-            toolchains = [env._toolchain, compiling_toolchain]
-            for toolchain in dict.fromkeys(t for t in toolchains if t is not None):
-                for flag in toolchain.get_compile_flags_for_target_type(
-                    str(target.target_type), env=env
-                ):
-                    if flag not in effective.compile_flags:
-                        effective.compile_flags.append(flag)
+        # Target-type compile flags (e.g. -fPIC for shared libs on Linux),
+        # from the toolchain compiling this source: its own form of them
+        # (nvcc's -Xcompiler=-fPIC, ifx's -fPIE), never another's.
+        toolchain = compiling_toolchain or env._toolchain
+        if target.target_type is not None and toolchain is not None:
+            for flag in toolchain.get_compile_flags_for_target_type(
+                str(target.target_type), env=env
+            ):
+                if flag not in effective.compile_flags:
+                    effective.compile_flags.append(flag)
 
         return effective
 
