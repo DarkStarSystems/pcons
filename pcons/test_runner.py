@@ -582,8 +582,10 @@ def run_all(
     Scheduler:
       - A test becomes *ready* when every entry in its ``depends_on`` has
         a final result.
-      - A ready test whose dependency failed is reported as ``SKIP`` with
-        ``message="dep failed: ..."``; the runner does not invoke it.
+      - A ready test whose dependency failed, or was skipped because one
+        of its own failed, is reported as ``SKIP`` with
+        ``message="dep failed: ..."`` naming the failures; the runner does
+        not invoke it. A disabled dependency blocks nothing.
       - A ready test marked ``serial`` runs alone (no other tests in
         flight). Non-serial tests share a pool of ``jobs`` workers.
       - With ``stop_on_fail``, after the first failure no new tests are
@@ -605,6 +607,8 @@ def run_all(
     effective_jobs = jobs if jobs > 0 else max(len(tests), 1)
 
     results: dict[str, TestResult] = {}
+    # A test skipped for failed dependencies -> the failed tests behind it.
+    blocked_by: dict[str, list[str]] = {}
     pending: set[str] = set(by_name)
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=effective_jobs)
     running: dict[concurrent.futures.Future, str] = {}
@@ -638,9 +642,18 @@ def run_all(
             unmet = [d for d in deps if d not in results]
             if unmet:
                 continue
-            failed = [d for d in deps if _is_failed(results[d])]
+            failed = list(
+                dict.fromkeys(
+                    cause
+                    for d in deps
+                    for cause in (
+                        [d] if _is_failed(results[d]) else blocked_by.get(d, [])
+                    )
+                )
+            )
             if failed:
                 pending.discard(name)
+                blocked_by[name] = failed
                 r = TestResult(
                     name=name,
                     status=SKIP,
@@ -740,8 +753,10 @@ def print_summary(
     skipped = [r for r in results if r.status == SKIP]
 
     print()
-    pct = (100 * passed // total) if total else 0
-    summary = f"{pct}% tests passed, {len(failed)} tests failed out of {total}"
+    # As CTest counts: out of the tests that ran, skips listed apart.
+    ran = total - len(skipped)
+    pct = (100 * passed // ran) if ran else 0
+    summary = f"{pct}% tests passed, {len(failed)} tests failed out of {ran}"
     if skipped:
         summary += f" ({len(skipped)} skipped)"
     print(summary)
