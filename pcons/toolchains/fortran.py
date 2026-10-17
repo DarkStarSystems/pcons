@@ -30,6 +30,7 @@ from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
+    from pcons.core.environment import Environment
     from pcons.core.node import FileNode
     from pcons.core.preset import ToolContribution
     from pcons.core.project import Project
@@ -290,7 +291,11 @@ class FortranToolchainBase(BaseToolchain):
         return None
 
     def link_needs(
-        self, target: Target, languages: set[str], link_language: str
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
     ) -> LinkNeeds:
         """Fortran objects linked by another language's driver need the
         Fortran runtime, and its directory where that driver won't look.
@@ -298,7 +303,7 @@ class FortranToolchainBase(BaseToolchain):
         only the directory. What the driver itself knows comes first: a
         GNU-style driver knows the C++ runtime, for an imported C++ library
         with no C++ toolchain beside it."""
-        needs = super().link_needs(target, languages, link_language)
+        needs = super().link_needs(target, languages, link_language, env)
         if "fortran" not in languages:
             return needs
         libdirs = (self.runtime_libdir,) if self.runtime_libdir else ()

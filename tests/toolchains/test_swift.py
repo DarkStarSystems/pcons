@@ -372,16 +372,16 @@ class TestRuntimeInjection:
     def program(self, test_project):  # noqa: F811
         from pcons.core.target import Target
 
-        return Target("app", target_type="program")
+        return Target("app", target_type="program", env=test_project.Environment())
 
     def test_cxx_links_swift_objects(self, swift_toolchain, program) -> None:
-        needs = swift_toolchain.link_needs(program, {"swift"}, "cxx")
+        needs = swift_toolchain.link_needs(program, {"swift"}, "cxx", program._env)
         assert "swiftCore" in needs.libs
 
     def test_swiftc_links_its_own(self, swift_toolchain, program) -> None:
         """swiftc links Swift objects itself; the C++ runtime for C++
         objects beside them is the C++ toolchain's need to state."""
-        needs = swift_toolchain.link_needs(program, {"swift"}, "swift")
+        needs = swift_toolchain.link_needs(program, {"swift"}, "swift", program._env)
         assert needs.libs == ()
 
 

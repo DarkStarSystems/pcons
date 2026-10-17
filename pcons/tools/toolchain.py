@@ -934,7 +934,11 @@ class Toolchain(Protocol):
         ...
 
     def link_needs(
-        self, target: Target, languages: set[str], link_language: str
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
     ) -> LinkNeeds:
         """What this toolchain's objects of *languages* need from a link
         led by *link_language*."""
@@ -1330,7 +1334,11 @@ class BaseToolchain(ABC):
         return [ToolContribution(t, flags=(flag,)) for t in tools]
 
     def link_needs(
-        self, target: Target, languages: set[str], link_language: str
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
     ) -> LinkNeeds:
         """What this toolchain's objects need from the link, when they're
         objects of *languages* and *link_language*'s driver links: the

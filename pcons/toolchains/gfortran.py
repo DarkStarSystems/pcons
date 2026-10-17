@@ -13,9 +13,11 @@ from pcons.toolchains.fortran import (
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.gnu_common import require_cross_binaries
 from pcons.toolchains.unix import UnixToolchain
+from pcons.tools.toolchain import LinkNeeds
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+    from pcons.core.target import Target
 
 _GCC_HARDENED = UnixToolchain.FEATURE_PRESETS["hardened"]
 
@@ -68,6 +70,24 @@ class GfortranToolchain(FortranToolchain):
 
     def __init__(self) -> None:
         super().__init__("gfortran")
+
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """Built with ``coverage``, gfortran's objects need libgcov, which
+        a non-GCC driver (clang++) doesn't add for its own --coverage."""
+        needs = super().link_needs(target, languages, link_language, env)
+        if (
+            "fortran" in languages
+            and link_language != "fortran"
+            and env.feature_realized("coverage", self)
+        ):
+            needs = needs | LinkNeeds(libs=("gcov",))
+        return needs
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross preset, requiring a cross gfortran for a triple."""

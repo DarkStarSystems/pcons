@@ -116,6 +116,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   archive gets the C++ runtime, and a C program linking a Fortran one the
   Fortran runtime. Before, the link failed with undefined symbols.
 - ifx on Linux gets its own `-qopenmp` for `openmp`, not `-fopenmp`.
+- A C or C++ program linking Swift objects on Linux gets what swiftc's
+  own driver would add: `swiftrt.o`, an rpath to the Swift runtime, and
+  the Swift libraries its objects autolink. Before, a debug build failed
+  to link, and a release one could link with Swift's runtime metadata
+  never registered, so casts to a protocol failed at run time. On macOS
+  it gets the `/usr/lib/swift` rpath that older deployment targets need.
+- Objects built with a feature get its runtime whichever driver links
+  them: gfortran's `coverage` objects get libgcov under clang++, and
+  ifx's `openmp` objects Intel's OpenMP runtime under g++.
 - clang targeting the MSVC ABI beside ifx links a Fortran program as a
   console program (`-Wl,/SUBSYSTEM:CONSOLE`). Before, link.exe failed with
   `LNK1561`, since ifx's `main` is in its runtime. (clang's static C

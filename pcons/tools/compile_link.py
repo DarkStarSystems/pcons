@@ -1024,7 +1024,8 @@ class CompileLinkFactory:
         # the link pulls in, with their languages, for what they need.
         langs: set[str] = set(declared) | target.required_languages
         compiled_by: dict[str, Toolchain] = {}
-        compilers: dict[Toolchain, set[str]] = {}
+        # (toolchain, the environment it compiled in) -> languages
+        compilers: dict[tuple[Toolchain, Environment], set[str]] = {}
         for node in objects:
             bi = getattr(node, "_build_info", None) or {}
             lang = bi.get("language")
@@ -1033,7 +1034,8 @@ class CompileLinkFactory:
             langs.add(lang)
             toolchain = bi.get("toolchain")
             if toolchain is not None:
-                compilers.setdefault(toolchain, set()).add(lang)
+                compiled_in = bi.get("env") or env
+                compilers.setdefault((toolchain, compiled_in), set()).add(lang)
                 if toolchain in env.toolchains:
                     compiled_by.setdefault(lang, toolchain)
 
@@ -1050,7 +1052,7 @@ class CompileLinkFactory:
                 (tc for tc in env.toolchains if _compiles(tc, lang)), linker
             )
             if toolchain is not None:
-                compilers.setdefault(toolchain, set()).add(lang)
+                compilers.setdefault((toolchain, env), set()).add(lang)
         owner = env._tool_owners.get("link", env._toolchain)
         link_base_flags = (
             env.flags_realized_by("link", linker)
@@ -1061,8 +1063,10 @@ class CompileLinkFactory:
         # What the objects need from this link, which the linking
         # toolchain writes its own way (see LinkNeeds).
         needs = LinkNeeds()
-        for toolchain, languages in compilers.items():
-            needs = needs | toolchain.link_needs(target, languages, link_language)
+        for (toolchain, compiled_in), languages in compilers.items():
+            needs = needs | toolchain.link_needs(
+                target, languages, link_language, compiled_in
+            )
         effective_link.link_libs = [*effective_link.link_libs, *needs.libs]
         effective_link.link_dirs = [
             *effective_link.link_dirs,

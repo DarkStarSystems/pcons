@@ -181,7 +181,15 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
         clang_cl_mod.ClangClToolchain, "_libomp_dir", lambda self: "/rt/libomp"
     )
     monkeypatch.setattr(
-        swift_mod.SwiftToolchain, "_runtime_libdirs", lambda self: ["/rt/swift"]
+        swift_mod.SwiftToolchain,
+        "_target_info_json",
+        lambda self: {
+            "target": {"arch": "x86_64"},
+            "paths": {
+                "runtimeLibraryPaths": ["/rt/swift"],
+                "runtimeResourcePath": "/rt/swift-resources",
+            },
+        },
     )
     # GccArchiver takes the gcc-ar beside gcc where there is one.
     from pcons.toolchains import gcc as gcc_mod

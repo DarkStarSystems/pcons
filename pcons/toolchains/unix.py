@@ -658,7 +658,11 @@ class UnixToolchain(BaseToolchain):
         return contribs
 
     def link_needs(
-        self, target: Target, languages: set[str], link_language: str
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
     ) -> LinkNeeds:
         """C++ objects linked by another language's driver (gfortran's,
         swiftc's) need the C++ runtime that g++ or clang++ would add.

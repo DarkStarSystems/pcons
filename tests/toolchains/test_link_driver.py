@@ -274,3 +274,76 @@ def test_package_compile_flags_follow_its_languages(
     project.resolve()
     assert ("-pkg-flag" in _compile_flags(prog, ".cpp.o")) == on_cxx
     assert ("-pkg-flag" in _compile_flags(prog, ".f90.o")) == on_fc
+
+
+# =============================================================================
+# Runtimes a feature's objects need from another driver
+# =============================================================================
+
+
+def test_gfortran_coverage_objects_need_gcov_from_clang(tmp_path) -> None:
+    """clang++'s --coverage doesn't bring libgcov, which gfortran's
+    --coverage objects need (checked on macOS and Linux)."""
+    project = _project(tmp_path)
+    env = _env(project, "llvm", "gfortran")
+    env.apply_preset("coverage")
+    prog = project.Program("prog", env, sources=["main.f90", "helper.cpp"])
+    plain = project.Program("plain", env, sources=["main.f90"])
+    project.resolve()
+    assert "gcov" in _link(prog)[2]
+    assert "gcov" not in _link(plain)[2]  # gfortran links its own
+
+
+def test_ifx_openmp_objects_need_intels_runtime_from_gcc(tmp_path) -> None:
+    from pcons.toolchains.gcc import GccArchiver
+    from pcons.toolchains.ifx import IfxCompiler, IfxLinker, IfxToolchain
+
+    ifx = IfxToolchain()
+    ifx._tools = {"fc": IfxCompiler(), "ar": GccArchiver(), "link": IfxLinker()}
+    ifx._configured = True
+    project = _project(tmp_path)
+    env = _env(project, "gcc")
+    env.add_toolchain(ifx)
+    env.apply_preset("openmp")
+    prog = project.Program("prog", env, sources=["main.f90", "helper.cpp"])
+    project.resolve()
+    assert "iomp5" in _link(prog)[2]
+
+
+@pytest.mark.parametrize(
+    "variant, onone", [("release", False), ("debug", True), (None, True)]
+)
+def test_swift_objects_linked_by_clang_on_linux(
+    tmp_path, monkeypatch, variant, onone
+) -> None:
+    """swiftrt.o registers the runtime metadata, the rpath finds the
+    runtime, and the autolinked libraries come along, as swiftc's driver
+    adds them (checked with Swift 6.2 in Docker). swiftSwiftOnoneSupport
+    is for -Onone objects, swiftc's default."""
+    from pcons.toolchains import swift as swift_mod
+
+    monkeypatch.setattr(
+        swift_mod.SwiftToolchain,
+        "_target_info_json",
+        lambda self: {
+            "target": {"arch": "x86_64"},
+            "paths": {
+                "runtimeLibraryPaths": ["/usr/lib/swift/linux"],
+                "runtimeResourcePath": "/usr/lib/swift",
+            },
+        },
+    )
+    (tmp_path / "lib.swift").write_text("public func f() {}\n")
+    project = _project(tmp_path)
+    env = _env(project, "llvm", "swiftc")
+    if variant:
+        env.set_variant(variant)
+    lib = project.StaticLibrary("swiftlib", env, sources=["lib.swift"])
+    prog = project.Program("prog", env, sources=["helper.cpp"]).link(lib)
+    project.resolve()
+    cmd, flags, libs = _link(prog)
+    assert cmd.startswith("clang++")
+    assert "/usr/lib/swift/linux/x86_64/swiftrt.o" in flags
+    assert "-Wl,-rpath,/usr/lib/swift/linux" in flags
+    assert {"swiftCore", "swift_Concurrency"} <= set(libs)
+    assert ("swiftSwiftOnoneSupport" in libs) == onone

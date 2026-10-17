@@ -168,3 +168,13 @@ comma, so a flag whose value has a comma needs its own `-Xcompiler=`.
   ignores `/inferasanlibs`. It links with
   `clang_rt.asan_dynamic-x86_64.lib
   /wholearchive:clang_rt.asan_dynamic_runtime_thunk-x86_64.lib`.
+
+## Swift objects linked by clang++ on Linux, after Phase 4 (Docker, Swift 6.2)
+
+A C++ program linking a Swift static library whose code casts to a
+protocol: with pcons's link (`swiftrt.o`, `-Wl,-rpath,/usr/lib/swift/linux`,
+`-lswiftCore -lswift_Concurrency -lswift_StringProcessing
+-lswift_RegexParser`, plus `-lswiftSwiftOnoneSupport` for `-Onone`) it
+links and prints 42 in both release and debug. With main's pcons
+(b5ee04a1) the debug build fails to link (`swift_dynamicCast` undefined);
+the release build links only because the optimizer removed the cast.

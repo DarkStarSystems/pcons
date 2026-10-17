@@ -1317,6 +1317,13 @@ class Environment(_EnvironmentStubs):
                     flags.extend(c.flags)
         return flags
 
+    def feature_realized(self, name: str, toolchain: Toolchain) -> bool:
+        """Whether feature preset *name* was applied here and realized for
+        *toolchain*'s tools (not left out by ``allow_partial``): whether
+        its objects carry it, so may need its runtime from a link."""
+        applied = any(i.kind == "feature" and i.name == name for i in self._intents)
+        return applied and (name, toolchain.name) not in self._partial_presets
+
     def _apply_setting(self, name: str, *args: Any) -> None:
         """Apply a tool setting (``env.cxx.set_standard``), realized by
         each toolchain that has one by that name."""

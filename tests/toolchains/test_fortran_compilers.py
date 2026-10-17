@@ -99,7 +99,7 @@ def program(test_project):  # noqa: F811
     """A program target, which link_needs reads its type from."""
     from pcons.core.target import Target
 
-    return Target("app", target_type="program")
+    return Target("app", target_type="program", env=test_project.Environment())
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
@@ -107,7 +107,7 @@ def test_cxx_link_gets_the_fortran_runtime(
     cls: type[FortranToolchainBase], program
 ) -> None:
     tc = cls()
-    needs = tc.link_needs(program, {"fortran"}, "cxx")
+    needs = tc.link_needs(program, {"fortran"}, "cxx", program._env)
     # MSVC-ABI objects name their runtimes (/DEFAULTLIB) themselves.
     assert needs.libs == (() if tc.objects_name_runtimes else cls.RUNTIME_LIBS)
 
@@ -115,9 +115,9 @@ def test_cxx_link_gets_the_fortran_runtime(
 def test_fortran_link_gets_the_cxx_runtime(gcc_toolchain, program) -> None:
     """The C++ toolchain states its own runtime when another driver links
     its objects (an ifx Fortran main program, link_language "fortran")."""
-    needs = gcc_toolchain.link_needs(program, {"cxx"}, "fortran")
+    needs = gcc_toolchain.link_needs(program, {"cxx"}, "fortran", program._env)
     assert needs.libs in (("c++",), ("stdc++",))
-    assert gcc_toolchain.link_needs(program, {"cxx"}, "cxx").libs == ()
+    assert gcc_toolchain.link_needs(program, {"cxx"}, "cxx", program._env).libs == ()
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
@@ -125,7 +125,7 @@ def test_its_own_driver_needs_no_runtime_named(
     cls: type[FortranToolchainBase], program
 ) -> None:
     tc = cls()
-    needs = tc.link_needs(program, {"fortran"}, "fortran")
+    needs = tc.link_needs(program, {"fortran"}, "fortran", program._env)
     assert needs.libs == ()
     if not tc.objects_name_runtimes:
         assert needs.libdirs == ()
@@ -628,7 +628,7 @@ def test_ifx_on_windows_is_msvc_style(program) -> None:
     tc = IfxMsvcToolchain()
     assert tc.TOOL_NAMES == ("fc", "lib", "link")
     assert tc.objects_name_runtimes
-    assert tc.link_needs(program, {"fortran"}, "cxx").libs == ()
+    assert tc.link_needs(program, {"fortran"}, "cxx", program._env).libs == ()
 
 
 def test_ifx_on_windows_variants_use_the_dll_c_runtime() -> None:
@@ -710,10 +710,10 @@ def test_ifx_on_windows_links_console_programs(on_windows, program) -> None:
 
     tc = IfxMsvcToolchain()
     prog = program
-    needs = tc.link_needs(prog, {"fortran"}, "fortran")
+    needs = tc.link_needs(prog, {"fortran"}, "fortran", prog._env)
     assert needs.console
     lib = Target("lib", target_type="shared_library")
-    assert not tc.link_needs(lib, {"fortran"}, "fortran").console
+    assert not tc.link_needs(lib, {"fortran"}, "fortran", lib._env).console
 
     link_exe = ClangClToolchain()
     assert link_exe.realize_link_needs(needs, prog, []) == ["/SUBSYSTEM:CONSOLE"]
@@ -933,7 +933,9 @@ def test_msys2_clang64_compilers_are_mingw(on_windows, monkeypatch, program) -> 
     # Targeting MinGW, flang links its runtime by name, as on Linux, and
     # takes no MSVC C runtime flag.
     assert not flang.objects_name_runtimes
-    assert flang.link_needs(program, {"fortran"}, "cxx").libs == ("flang_rt.runtime",)
+    assert flang.link_needs(program, {"fortran"}, "cxx", program._env).libs == (
+        "flang_rt.runtime",
+    )
     assert all(
         "-fms-runtime-lib" not in flag
         for c in flang._variant_contributions("debug")

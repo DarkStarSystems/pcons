@@ -84,6 +84,25 @@ class IfxToolchain(FortranToolchain):
     def __init__(self) -> None:
         super().__init__("ifx")
 
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """Built with ``openmp``, ifx's objects need Intel's OpenMP runtime,
+        which another driver's -fopenmp doesn't bring (g++'s is libgomp)."""
+        needs = super().link_needs(target, languages, link_language, env)
+        if (
+            "fortran" in languages
+            and link_language != "fortran"
+            and env.feature_realized("openmp", self)
+        ):
+            libdirs = (self.runtime_libdir,) if self.runtime_libdir else ()
+            needs = needs | LinkNeeds(libs=("iomp5",), libdirs=libdirs)
+        return needs
+
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Raise for a preset with a triple: ifx builds for its host only."""
         triple = str(getattr(preset, "triple", None) or "")
@@ -218,7 +237,11 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
         use_msvc_tool_paths(env, {t: e for t, e in exes.items() if t not in before})
 
     def link_needs(
-        self, target: Target, languages: set[str], link_language: str
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
     ) -> LinkNeeds:
         """A program with ifx objects is a console program, as the ifx
         driver links one: a Fortran main program defines ``MAIN__``, and
@@ -226,7 +249,7 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
         the subsystem from the objects (LNK1561). Which object holds the
         entry point isn't known when the build is described, so every
         such program is a console one, as CMake makes every executable."""
-        needs = super().link_needs(target, languages, link_language)
+        needs = super().link_needs(target, languages, link_language, env)
         if target.target_type == "program" and "fortran" in languages:
             needs = needs | LinkNeeds(console=True)
         return needs
