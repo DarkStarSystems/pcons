@@ -36,6 +36,9 @@ register_target_option(
     "automatic default",
 )
 
+#: Systems whose dynamic loader reads $ORIGIN in an ELF rpath.
+_ORIGIN_SYSTEMS = frozenset({"linux", "android", "freebsd", "openbsd", "netbsd"})
+
 
 def abi_from_triple(triple: str) -> str | None:
     """The Windows ABI a target triple names: "msvc" for ``*-msvc``,
@@ -681,12 +684,26 @@ class UnixToolchain(BaseToolchain):
     def realize_link_needs(
         self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
     ) -> list[FlagToken]:
-        """rpaths as ``-Wl,-rpath,``, objects as they are; a console entry
-        point needs saying only to link.exe or lld-link, for the MSVC ABI."""
+        """rpaths as ``-Wl,-rpath,``, a relative one from ``@loader_path``
+        (Mach-O) or ``$ORIGIN`` (ELF), unless the script gave it already;
+        objects as they are; a console entry point needs saying only to
+        link.exe or lld-link, for the MSVC ABI."""
         platform = self._target_platform(target)
         flags: list[FlagToken] = list(needs.objects)
         if not platform.is_windows:
             flags += [f"-Wl,-rpath,{d}" for d in needs.rpaths]
+        origin = (
+            "@loader_path"
+            if platform.is_apple
+            else "$$ORIGIN"
+            if platform.os in _ORIGIN_SYSTEMS
+            else None
+        )
+        if origin is not None:
+            for d in needs.relative_rpaths:
+                rpath = f"-Wl,-rpath,{origin}" + ("" if d == "." else f"/{d}")
+                if rpath not in existing_flags and rpath not in flags:
+                    flags.append(rpath)
         if needs.console and self.abi == "msvc":
             if not _chooses_subsystem(existing_flags):
                 flags.append("-Wl,/SUBSYSTEM:CONSOLE")

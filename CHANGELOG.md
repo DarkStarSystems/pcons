@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Each is written as the test sees it from where it runs, so a test can
   run a script that drives a built program, like Meson's `test()` with an
   executable among its arguments.
+- A program or shared library that links the build's own shared libraries
+  runs from the build tree on Linux and macOS, with no `LD_LIBRARY_PATH` or
+  `DYLD_LIBRARY_PATH`: it gets an rpath to each library's directory,
+  relative to itself, as CMake and Meson give one. A C program linking a
+  Fortran shared library didn't load on macOS before. Turn it off with
+  `target.set_option("build_rpath", False)`.
 - LLVM flang (21 or newer) and Intel ifx join gfortran as Fortran
   toolchains: `toolchain="flang"` or `"ifx"`, or `toolchain="fortran"` to
   find whichever is installed (gfortran first). `$FC` steers that choice,
