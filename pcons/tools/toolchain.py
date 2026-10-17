@@ -1153,13 +1153,14 @@ class BaseToolchain(ABC):
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
         """Apply target architecture flags to the environment.
 
-        Returns True if this toolchain realized the arch (produced
-        contributions). An empty realization returns False and applies
-        nothing; the environment raises if *no* configured toolchain
-        realized the arch (docs/presets.md, "Preset application"), so a
-        custom toolchain that simply doesn't handle an arch is fail-fast
-        by default. A toolchain for which an arch is legitimately a no-op
-        declares that by overriding this method (see WasmToolchain).
+        Returns True if this toolchain realized the arch. The
+        realization is ``make_arch_preset``'s, which the environment asks
+        of every toolchain before it applies any; override that, not this,
+        to realize, refuse (raise) or declare a no-op (return a preset
+        with no contributions, as WasmToolchain does for wasm32). An empty
+        realization applies nothing and the environment raises, so a
+        custom toolchain that doesn't handle an arch is fail-fast by
+        default (docs/presets.md, "Preset application").
         """
         preset = self.make_arch_preset(arch)
         if preset is None:

@@ -8,6 +8,8 @@ its own realization of the variant and features with it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pcons import Project
@@ -386,16 +388,22 @@ def test_cxx_objects_beside_swift_primary_need_the_cxx_runtime(
 
 
 def test_a_toolchain_left_out_of_a_preset_doesnt_take_over(tmp_path) -> None:
-    """flang, left out of sanitize, would link the program without the
-    sanitizer runtime the C objects need: clang links instead."""
+    """flang, left out of sanitize, would link the C helper's sanitized
+    objects without their runtime: clang links instead, adding flang's
+    runtime. A Fortran-only program has no such objects, so flang links it."""
     project = _project(tmp_path)
     env = _env(project, "llvm", "flang")
     env.apply_preset("sanitize", allow_partial=True)
-    prog = project.Program("prog", env, sources=["main.f90"])
+    mixed = project.Program("mixed", env, sources=["main.f90", "util.c"])
+    mixed.link_language = "fortran"
+    alone = project.Program("alone", env, sources=["main.f90"])
     project.resolve()
-    cmd, flags, _ = _link(prog)
+
+    cmd, flags, libs = _link(mixed)
     assert cmd.startswith("clang")
     assert any("-fsanitize" in f for f in flags)
+    assert "flang_rt.runtime" in libs
+    assert _link(alone)[0].startswith("flang")
 
 
 def test_the_gcov_need_says_where_libgcov_is(tmp_path, monkeypatch) -> None:
@@ -411,4 +419,4 @@ def test_the_gcov_need_says_where_libgcov_is(tmp_path, monkeypatch) -> None:
     project.resolve()
     (node,) = prog.output_nodes
     libdirs = node._build_info["context"].get_env_overrides()["libdirs"]
-    assert "/gcc/lib" in [str(getattr(d, "path", d)) for d in libdirs]
+    assert Path("/gcc/lib") in [Path(str(getattr(d, "path", d))) for d in libdirs]

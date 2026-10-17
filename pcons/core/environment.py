@@ -1037,18 +1037,25 @@ class Environment(_EnvironmentStubs):
         command swap to a missing tool still raises; with no primary, to
         *toolchain* itself. Whether any of it landed.
         """
-        default = object.__getattribute__(self, "_toolchain") or toolchain
-        taken = tuple(
-            c
-            for c in preset.contributions
-            if self._tool_owners.get(c.tool, default) is toolchain
-        )
+        taken = self._owned_contributions(toolchain, preset)
         if not taken and preset.contributions:
             return False
         self.apply(
             dataclasses.replace(preset, contributions=taken, realized_by=toolchain.name)
         )
         return True
+
+    def _owned_contributions(
+        self, toolchain: Toolchain, preset: Preset
+    ) -> tuple[ToolContribution, ...]:
+        """*preset*'s contributions to the tools *toolchain* realizes (see
+        apply_from)."""
+        default = object.__getattribute__(self, "_toolchain") or toolchain
+        return tuple(
+            c
+            for c in preset.contributions
+            if self._tool_owners.get(c.tool, default) is toolchain
+        )
 
     @property
     def applied_presets(self) -> tuple[Preset, ...]:
@@ -1586,16 +1593,20 @@ class Environment(_EnvironmentStubs):
 
         if is_imperative_preset(name):
             return True
-        found = False
+        found = lands = False
         for toolchain in self.toolchains:
-            if (
-                toolchain.make_feature_preset(name) is not None
-                or resolve_registered_feature(name, toolchain) is not None
-            ):
+            preset = toolchain.make_feature_preset(name)
+            if preset is None:
+                preset = resolve_registered_feature(name, toolchain)
+            if preset is not None:
                 found = True
+                lands = lands or (
+                    not preset.contributions
+                    or bool(self._owned_contributions(toolchain, preset))
+                )
             elif not is_registered_preset(name) and self._takes_part(toolchain):
                 return False
-        return found
+        return found and lands
 
     def apply_cross_preset(self, preset: Any) -> None:
         """Apply a cross-compilation preset to this environment.

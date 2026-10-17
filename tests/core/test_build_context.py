@@ -355,7 +355,9 @@ class TestCompileLinkContext:
         project = Project("test", root_dir=tmp_project, build_dir=tmp_project / "build")
         env = project.Environment(toolchain=gcc_toolchain)
 
-        found, linker, cmd = _link_driver(Target("app"), env, {"c", language}, {})
+        found, linker, cmd = _link_driver(
+            Target("app"), env, {"c", language}, {}, {gcc_toolchain}
+        )
 
         assert (found, linker) == (language, gcc_toolchain)
         assert cmd == env.cxx.cmd

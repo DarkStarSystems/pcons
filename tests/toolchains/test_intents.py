@@ -325,6 +325,7 @@ def test_a_preset_whose_flags_all_land_on_others_tools_raises(tmp_path) -> None:
     try:
         env = _env(tmp_path, "llvm")
         _add(env, "gfortran")
+        assert not env.has_preset("test/static-fortran")
         with pytest.raises(ValueError, match="would have no effect"):
             env.apply_preset("test/static-fortran")
     finally:

@@ -21,6 +21,7 @@ from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
+    tool_language,
 )
 from pcons.tools.toolchain import LinkNeeds, link_language_rank
 
@@ -218,6 +219,7 @@ def _link_driver(
     env: Environment,
     languages: set[str],
     compiled_by: dict[str, Toolchain],
+    compilers: set[Toolchain],
 ) -> tuple[str, Toolchain | None, str | None]:
     """(link language, linking toolchain, its driver command or None).
 
@@ -228,7 +230,10 @@ def _link_driver(
     objects name their runtimes) passes to the next. A link tool set to
     something other than a compiler driver (link.exe, or a command the
     script chose) links as it is. ``target.link_language`` overrides the
-    order.
+    order. When the link tool's own driver links, the language is the one
+    that driver compiles, so each toolchain states its objects' needs for
+    the driver that really links. *compilers* are the toolchains whose
+    objects the link pulls in.
     """
     owner = env._tool_owners.get("link", env._toolchain)
     if target.link_language is not None:
@@ -254,7 +259,7 @@ def _link_driver(
     if link_cmd is None or link_cmd not in drivers:
         return ranked[0], owner, None
     # A toolchain a preset left out (allow_partial) would link without that
-    # preset's runtime, which the other objects need: the owner links.
+    # preset's runtime, which other toolchains' objects need: the owner links.
     left_out = {name for _, name in env._partial_presets}
     for language in ranked:
         compiler = compiled_by.get(language) or next(
@@ -262,13 +267,24 @@ def _link_driver(
         )
         for toolchain in dict.fromkeys(t for t in (compiler, owner) if t is not None):
             if toolchain is not owner and (
-                toolchain.name in left_out or not _reads_link_command(toolchain, env)
+                not _reads_link_command(toolchain, env)
+                or (toolchain.name in left_out and compilers - {toolchain})
             ):
                 continue
             cmd = toolchain.link_driver(language, env)
             if cmd:
                 return language, toolchain, None if cmd == link_cmd else cmd
-    return ranked[0], owner, None
+    driving = next(
+        (
+            lang
+            for name in env.tool_names()
+            if name != "link"
+            and getattr(env, name).get("cmd") == link_cmd
+            and (lang := tool_language(env, name)) is not None
+        ),
+        ranked[0],
+    )
+    return driving, owner, None
 
 
 class CompileLinkFactory:
@@ -1054,7 +1070,7 @@ class CompileLinkFactory:
                     compiled_by.setdefault(lang, toolchain)
 
         link_language, linker, linker_cmd = _link_driver(
-            target, env, langs, compiled_by
+            target, env, langs, compiled_by, {tc for tc, _ in compilers}
         )
         # An imported library's declared languages need what that language's
         # toolchain here says, else what the linking toolchain knows of it

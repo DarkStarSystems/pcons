@@ -161,11 +161,15 @@ The entire authoring obligation remains the two rules already documented
 above: return `None` when a preset doesn't apply to a toolchain, and
 return contributions when it does — the machinery treats what a resolver
 returns as the complete realization. Custom *toolchains* that override the
-realization hooks (`_arch_contributions`, `apply_cross_preset`, …) keep
-their freedom, but the base classes default to fail-fast — e.g. an empty
-arch realization raises from the base `apply_target_arch` unless the
+realization hooks (`make_arch_preset`, `make_target_preset`,
+`_arch_contributions`, …) keep their freedom, but the base classes default
+to fail-fast — e.g. an empty arch realization is an error unless the
 toolchain explicitly declares the no-op — so an extension that simply
-doesn't handle a case is safe by default rather than silently wrong.
+doesn't handle a case is safe by default rather than silently wrong. A
+toolchain refuses an arch or a cross target by raising from
+`make_arch_preset` or `make_target_preset`: the environment builds every
+toolchain's realization before applying any, so a refusal leaves the
+environment as it was.
 
 ### Apply fully or raise
 
@@ -189,10 +193,11 @@ When a preset is applied, exactly one of three things happens:
      no-op the user didn't ask for. Flag/define contributions to a subset
      of missing tools are tolerated (broadcast semantics); losing *all* of
      them is not.
-   - A **knob value the toolchain cannot realize** is an error, enforced in
-     the *base* `apply_target_arch` when the realization comes back empty —
-     so custom toolchains inherit fail-fast without remembering to raise.
-     A toolchain that legitimately wants a no-op declares it explicitly.
+   - A **knob value the toolchain cannot realize** is an error, enforced
+     when the base `make_arch_preset` comes back empty — so custom
+     toolchains inherit fail-fast without remembering to raise. A
+     toolchain that legitimately wants a no-op declares it by returning an
+     arch preset with no contributions (wasm32 on the wasm toolchains).
      Concretely: on Linux, `set_target_arch` cannot retarget GCC/LLVM (use
      `linux_cross(triple=...)`) and says so; wasm toolchains reject any
      arch other than `wasm32` rather than silently coercing.
