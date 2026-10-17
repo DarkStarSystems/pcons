@@ -12,7 +12,7 @@ import pytest
 from pcons import Project
 from pcons.configure import platform as platform_mod
 from pcons.core.environment import Environment
-from pcons.toolchains.presets import linux_cross
+from pcons.toolchains.presets import CrossPreset, linux_cross
 from pcons.tools.toolchain import toolchain_registry
 
 
@@ -121,8 +121,15 @@ def test_a_toolchain_that_cant_take_the_cross_target_fails(tmp_path) -> None:
     """gcc can't retarget by flag; added to a cross environment, it says
     so rather than quietly compiling for the host."""
     env = _env(tmp_path, "gfortran")
-    env.apply_cross_preset(linux_cross("aarch64-linux-gnu"))
-    with pytest.raises(ValueError, match="selects targets by binary"):
+    env.apply_cross_preset(
+        CrossPreset(
+            name="linux-aarch64",
+            arch="aarch64",
+            triple="aarch64-linux-gnu",
+            tool_cmds={"fc": "aarch64-linux-gnu-gfortran"},
+        )
+    )
+    with pytest.raises(ValueError, match="GCC selects targets by binary"):
         _add(env, "gcc")
 
 

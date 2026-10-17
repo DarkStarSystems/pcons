@@ -278,11 +278,26 @@ class SwiftToolchain(UnixToolchain):
 
     TOOL_NAMES = ("swiftc", "ar", "link")
 
-    # swiftc enables most diagnostics by default; "warnings" is an
-    # intentional no-op so generic scripts can apply it everywhere.
+    # No profile, fast-math or openmp. warnings is a deliberate no-op (Swift
+    # 6 has warning groups only), and so is pthread, which Glibc autolinks.
     FEATURE_PRESETS = {
         "warnings": {"compile_flags": []},
+        # Bare -Werror takes a warning group.
         "werror": {"compile_flags": ["-warnings-as-errors"]},
+        # "undefined" is unsupported on Linux.
+        "sanitize": {
+            "compile_flags": ["-sanitize=address"],
+            "link_flags": ["-sanitize=address"],
+        },
+        "lto": {"compile_flags": ["-lto=llvm-full"], "link_flags": ["-lto=llvm-full"]},
+        # Realized in make_feature_preset: the link flags are ELF's.
+        "hardened": {},
+        "pthread": {"compile_flags": []},
+        # LLVM's coverage format, not gcov's.
+        "coverage": {
+            "compile_flags": ["-profile-generate", "-profile-coverage-mapping"],
+            "link_flags": ["-profile-generate"],
+        },
     }
 
     SWIFT_VARIANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
@@ -307,6 +322,36 @@ class SwiftToolchain(UnixToolchain):
 
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("swiftc",)
+
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """Realize feature presets; ``hardened`` follows the platform.
+
+        Stack protection and PIE are swiftc's defaults, so what's left is
+        RELRO and immediate binding on an ELF link; macOS needs nothing.
+        Windows is unverified, so unavailable.
+        """
+        if name != "hardened":
+            return super().make_feature_preset(name)
+        platform = get_platform()
+        if platform.is_windows:
+            return None
+        contribs: tuple[ToolContribution, ...] = ()
+        if not platform.is_apple:
+            relro_now = ("-Xlinker", "-z", "-Xlinker", "relro")
+            relro_now += ("-Xlinker", "-z", "-Xlinker", "now")
+            contribs = (ToolContribution("link", flags=relro_now),)
+        return Preset(name=name, category="feature", contributions=contribs)
+
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """Raise: swiftc has no -arch; the CPU is part of its -target triple."""
+        raise ValueError(
+            f"{self.name} can't build for target arch '{arch}' by flag; use a "
+            f"cross preset (swiftc takes a -target triple)."
+        )
+
+    def _sysroot_contributions(self, cross: Any) -> list[ToolContribution]:
+        """None: swiftc takes the sysroot as ``-sdk`` (_target_contributions)."""
+        return []
 
     def _variant_contributions(
         self, variant: str, **kwargs: Any

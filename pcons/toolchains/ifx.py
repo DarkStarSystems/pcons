@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from pcons.core.environment import Environment
     from pcons.core.flags import FlagToken
+    from pcons.core.preset import ToolContribution
     from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
 
@@ -62,15 +63,40 @@ class IfxToolchain(FortranToolchain):
     # In the order ifx itself links them.
     RUNTIME_LIBS = ("ifport", "ifcoremt", "imf", "svml", "irc")
 
+    # No coverage: ifx accepts --coverage and does nothing with it.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {"compile_flags": ["-warn", "all"]},
         "werror": {"compile_flags": ["-warn", "errors"]},
+        # Address only: given "address,undefined", ifx silently drops both.
+        "sanitize": {
+            "compile_flags": ["-fsanitize=address", "-fno-omit-frame-pointer"],
+            "link_flags": ["-fsanitize=address"],
+        },
+        "profile": {"compile_flags": ["-pg", "-g"], "link_flags": ["-pg"]},
+        "lto": {"compile_flags": ["-flto"], "link_flags": ["-flto"]},
+        "hardened": {
+            "compile_flags": ["-fstack-protector-strong", "-fPIE"],
+            "link_flags": ["-pie", "-Wl,-z,relro,-z,now"],
+        },
+        "pthread": {"compile_flags": ["-pthread"], "link_flags": ["-pthread"]},
         "openmp": {"compile_flags": ["-qopenmp"], "link_flags": ["-qopenmp"]},
         "fast-math": {"compile_flags": ["-ffast-math"], "link_flags": ["-ffast-math"]},
     }
 
     def __init__(self) -> None:
         super().__init__("ifx")
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Raise for a preset with a triple: ifx builds for its host only."""
+        triple = str(getattr(preset, "triple", None) or "")
+        # A wasm triple gets UnixToolchain's "use the dedicated toolchain".
+        if triple and not triple.startswith("wasm32"):
+            name = getattr(preset, "name", preset)
+            raise ValueError(
+                f"Cross preset '{name}' targets triple '{triple}', but {self.name} "
+                f"has no cross targets: it builds for the host it runs on."
+            )
+        super().apply_cross_preset(env, preset)
 
     def get_compile_flags_for_target_type(
         self, target_type: str, env: Environment | None = None
@@ -138,9 +164,18 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
     LINKER = MsvcLinker
     RUNTIME_LIBS = ()
 
+    # No lto: the objects are bitcode only ifx's own lld-link reads. No
+    # pthread, as with MSVC, and no coverage (/Qcov-gen is gone).
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {"compile_flags": ["/warn:all"]},
         "werror": {"compile_flags": ["/warn:errors"]},
+        # Without /INFERASANLIBS, link.exe can't resolve __asan_init.
+        "sanitize": {
+            "compile_flags": ["/fsanitize=address"],
+            "link_flags": ["/INFERASANLIBS"],
+        },
+        "profile": MsvcCompatibleToolchain.FEATURE_PRESETS["profile"],
+        "hardened": MsvcCompatibleToolchain.FEATURE_PRESETS["hardened"],
         # The objects name the OpenMP runtime (/DEFAULTLIB), as cl's do.
         "openmp": {"compile_flags": ["/Qopenmp"]},
         "fast-math": {"compile_flags": ["/fp:fast"]},
@@ -159,6 +194,14 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
     @property
     def objects_name_runtimes(self) -> bool:
         return True
+
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """/MACHINE:X64, the only machine ifx builds for."""
+        if self.MSVC_MACHINE_MAP.get(arch.lower()) != "X64":
+            raise ValueError(
+                f"{self.name} builds x64 only, so it can't target '{arch}'."
+            )
+        return super()._arch_contributions(arch)
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         handler = super().get_source_handler(suffix)

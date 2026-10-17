@@ -1255,14 +1255,15 @@ class BaseToolchain(ABC):
             cmds = dict(getattr(cross, "tool_cmds", None) or {})
         return [ToolContribution(tool, cmd=cmd) for tool, cmd in sorted(cmds.items())]
 
-    @staticmethod
-    def _sysroot_contributions(cross: Any) -> list[ToolContribution]:
-        """--sysroot flag on cc/cxx/link from a CrossPreset."""
+    def _sysroot_contributions(self, cross: Any) -> list[ToolContribution]:
+        """--sysroot flag from a CrossPreset, on this toolchain's compile
+        tools and link."""
         sysroot = getattr(cross, "sysroot", None)
         if not sysroot:
             return []
         flag = f"--sysroot={sysroot}"
-        return [ToolContribution(t, flags=(flag,)) for t in ("cc", "cxx", "link")]
+        tools = (*self._feature_preset_tools(), "link")
+        return [ToolContribution(t, flags=(flag,)) for t in tools]
 
     def get_runtime_libs(
         self, linker_language: str, object_languages: set[str]

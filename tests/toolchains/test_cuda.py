@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for CUDA toolchain."""
 
+import pytest
+
 from pcons.configure.platform import Platform, get_platform
 from pcons.toolchains import CudaCompiler, CudaToolchain, find_cuda_toolchain
 from pcons.tools.toolchain import SourceHandler
@@ -214,3 +216,93 @@ class TestFindCudaToolchain:
         assert result is not None
         assert isinstance(result, CudaToolchain)
         assert "cuda" in result.tools
+
+
+def _on(monkeypatch, platform: Platform) -> None:
+    monkeypatch.setattr("pcons.toolchains.cuda.get_platform", lambda: platform)
+
+
+class TestCudaFeatures:
+    """nvcc's own realization of each feature, compile side only."""
+
+    def test_features_realize_on_nvcc(self, monkeypatch):
+        _on(monkeypatch, _LINUX_PLATFORM)
+        toolchain = CudaToolchain()
+        assert toolchain._feature_preset_tools() == ("cuda",)
+        expected = {
+            "warnings": ("-Xcompiler=-Wall", "-Xcompiler=-Wextra"),
+            "werror": ("-Werror=all-warnings",),
+            "sanitize": (
+                "-Xcompiler=-fsanitize=address",
+                "-Xcompiler=-fsanitize=undefined",
+                "-Xcompiler=-fno-omit-frame-pointer",
+            ),
+            "profile": ("-pg",),
+            "hardened": (
+                "-Xcompiler=-fstack-protector-strong",
+                "-D_FORTIFY_SOURCE=2",
+                "-Xcompiler=-fPIE",
+            ),
+            "pthread": ("-Xcompiler=-pthread",),
+            "coverage": ("-Xcompiler=--coverage",),
+            "fast-math": ("-use_fast_math", "-Xcompiler=-ffast-math"),
+            "openmp": ("-Xcompiler=-fopenmp",),
+        }
+        for name, flags in expected.items():
+            preset = toolchain.make_feature_preset(name)
+            assert preset is not None, name
+            assert [(c.tool, c.flags) for c in preset.contributions] == [
+                ("cuda", flags)
+            ], name
+
+    def test_no_lto(self, monkeypatch):
+        _on(monkeypatch, _LINUX_PLATFORM)
+        assert CudaToolchain().make_feature_preset("lto") is None
+
+    def test_no_host_flags_for_cl_exe(self, monkeypatch):
+        """On Windows the host compiler is cl.exe, which the GCC-style
+        host flags don't suit."""
+        _on(monkeypatch, _WINDOWS_PLATFORM)
+        assert CudaToolchain().make_feature_preset("warnings") is None
+
+    def test_shared_libraries_are_pic_through_xcompiler(self, monkeypatch):
+        _on(monkeypatch, _LINUX_PLATFORM)
+        toolchain = CudaToolchain()
+        assert toolchain.get_compile_flags_for_target_type("shared_library") == [
+            "-Xcompiler=-fPIC"
+        ]
+        assert toolchain.get_compile_flags_for_target_type("program") == []
+
+    def test_no_pic_on_windows(self, monkeypatch):
+        _on(monkeypatch, _WINDOWS_PLATFORM)
+        flags = CudaToolchain().get_compile_flags_for_target_type("shared_library")
+        assert flags == []
+
+
+class TestCudaCrossTargets:
+    def _env(self):
+        from pcons.core.environment import Environment
+
+        toolchain = CudaToolchain()
+        toolchain._tools = {"cuda": CudaCompiler()}
+        toolchain._configured = True
+        env = Environment()
+        toolchain.setup(env)
+        return toolchain, env
+
+    def test_a_triple_is_refused(self, test_project):
+        from pcons.toolchains.presets import linux_cross
+
+        toolchain, env = self._env()
+        with pytest.raises(ValueError, match="CUDA cross targets aren't supported"):
+            toolchain.apply_cross_preset(env, linux_cross("aarch64-linux-gnu"))
+
+    def test_a_preset_without_a_triple_applies(self, test_project):
+        from pcons.toolchains.presets import CrossPreset
+
+        toolchain, env = self._env()
+        preset = CrossPreset(
+            name="pinned-nvcc", arch="x86_64", tool_cmds={"cuda": "/opt/cuda/nvcc"}
+        )
+        toolchain.apply_cross_preset(env, preset)
+        assert env.cuda.cmd == "/opt/cuda/nvcc"

@@ -394,3 +394,81 @@ class TestPresets:
         preset = swift_toolchain.make_feature_preset("werror")
         assert preset is not None
         assert any("-warnings-as-errors" in c.flags for c in preset.contributions)
+
+    @staticmethod
+    def _feature(toolchain, name: str) -> list[tuple[str, tuple[str, ...]]] | None:
+        preset = toolchain.make_feature_preset(name)
+        if preset is None:
+            return None
+        return [(c.tool, c.flags) for c in preset.contributions]
+
+    def test_features(self, swift_toolchain) -> None:
+        assert self._feature(swift_toolchain, "sanitize") == [
+            ("swiftc", ("-sanitize=address",)),
+            ("link", ("-sanitize=address",)),
+        ]
+        assert self._feature(swift_toolchain, "lto") == [
+            ("swiftc", ("-lto=llvm-full",)),
+            ("link", ("-lto=llvm-full",)),
+        ]
+        assert self._feature(swift_toolchain, "coverage") == [
+            ("swiftc", ("-profile-generate", "-profile-coverage-mapping")),
+            ("link", ("-profile-generate",)),
+        ]
+
+    def test_deliberate_no_ops(self, swift_toolchain) -> None:
+        assert self._feature(swift_toolchain, "warnings") == []
+        assert self._feature(swift_toolchain, "pthread") == []
+
+    def test_unavailable(self, swift_toolchain) -> None:
+        for name in ("profile", "fast-math", "openmp"):
+            assert self._feature(swift_toolchain, name) is None, name
+
+    @pytest.mark.parametrize(
+        ("os_name", "expected"),
+        [
+            (
+                "linux",
+                [
+                    (
+                        "link",
+                        ("-Xlinker", "-z", "-Xlinker", "relro")
+                        + ("-Xlinker", "-z", "-Xlinker", "now"),
+                    )
+                ],
+            ),
+            ("darwin", []),  # stack protector and PIE are swiftc's defaults
+            ("windows", None),
+        ],
+    )
+    def test_hardened_follows_the_platform(
+        self, swift_toolchain, monkeypatch, os_name, expected
+    ) -> None:
+        from types import SimpleNamespace
+
+        import pcons.toolchains.swift as swift_mod
+
+        platform = SimpleNamespace(
+            is_windows=os_name == "windows", is_apple=os_name == "darwin"
+        )
+        monkeypatch.setattr(swift_mod, "get_platform", lambda: platform)
+        assert self._feature(swift_toolchain, "hardened") == expected
+
+    def test_no_target_arch_by_flag(self, swift_toolchain) -> None:
+        with pytest.raises(ValueError, match="swift can't build for target arch"):
+            swift_toolchain._arch_contributions("x86_64")
+
+    def test_a_sysroot_is_swiftc_sdk_only(self, swift_toolchain) -> None:
+        from pcons.toolchains.presets import CrossPreset
+
+        cross = CrossPreset(
+            name="linux-aarch64",
+            arch="aarch64",
+            triple="aarch64-unknown-linux-gnu",
+            sysroot="/sysroots/aarch64",
+        )
+        flags = [
+            f for c in swift_toolchain._target_contributions(cross) for f in c.flags
+        ]
+        assert "-sdk" in flags
+        assert not any(f.startswith("--sysroot") for f in flags)

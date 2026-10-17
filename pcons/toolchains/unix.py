@@ -16,7 +16,7 @@ from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 from pcons.toolchains._msvc_compat import module_definition
-from pcons.toolchains.gnu_common import shared_library_flag
+from pcons.toolchains.gnu_common import needs_pic, shared_library_flag
 from pcons.tools.toolchain import BaseToolchain
 from pcons.util.macos import apple_sdk_for_triple
 
@@ -78,13 +78,12 @@ class UnixToolchain(BaseToolchain):
     they handle additional file types.
     """
 
-    # True when this toolchain's declared cc/cxx tools are Clang-family
-    # drivers that accept ``--target=<triple>``. GCC (and GCC-based
-    # toolchains like gfortran) reject --target= and select targets by
-    # binary instead; LlvmToolchain overrides this to True. This describes
-    # the declared cc/cxx tools only — a toolchain with no cc/cxx at all
-    # (e.g. Swift) leaves it False, meaning "nothing to retarget", not
-    # "my compiler isn't clang".
+    # True when this toolchain's compile tools (_feature_preset_tools) are
+    # Clang-family drivers that accept ``--target=<triple>``. GCC (and
+    # GCC-based toolchains like gfortran) reject --target= and select
+    # targets by binary instead; LlvmToolchain and FlangToolchain override
+    # this to True. Swift leaves it False: swiftc takes ``-target``, which
+    # SwiftToolchain realizes itself.
     IS_CLANG_DRIVER: ClassVar[bool] = False
 
     # The ABI this toolchain's objects follow when it runs on Windows, where
@@ -251,8 +250,9 @@ class UnixToolchain(BaseToolchain):
     _is_apple_clang_cache: bool | None = None
 
     def make_feature_preset(self, name: str) -> Preset | None:
-        """Realize feature presets, resolving ``openmp`` dynamically."""
-        if name == "openmp" and "openmp" in self.FEATURE_PRESETS:
+        """Realize feature presets, resolving ``openmp`` dynamically where
+        its entry is empty (a toolchain with its own flags lists them)."""
+        if name == "openmp" and self.FEATURE_PRESETS.get(name) == {}:
             flags = self._openmp_flags()
             if flags is None:
                 return None
@@ -376,13 +376,7 @@ class UnixToolchain(BaseToolchain):
         builds for, when it says.
         """
         platform = env.target if env is not None else get_platform()
-
-        if target_type == "shared_library" and not (
-            platform.is_apple or platform.is_windows
-        ):
-            return ["-fPIC"]
-
-        return []
+        return ["-fPIC"] if needs_pic(target_type, platform) else []
 
     @staticmethod
     def _target_platform(target: Target) -> Platform:
@@ -622,7 +616,7 @@ class UnixToolchain(BaseToolchain):
         if get_platform().is_macos:
             return [
                 ToolContribution(t, flags=("-arch", arch))
-                for t in ("cc", "cxx", "link")
+                for t in (*self._feature_preset_tools(), "link")
             ]
         raise ValueError(
             f"{self.name} cannot retarget the CPU to '{arch}' by flag on "
@@ -636,8 +630,9 @@ class UnixToolchain(BaseToolchain):
 
         GCC uses different toolchain binaries rather than a --target flag, and
         rejects --target= outright, so it's only emitted for Clang-family
-        drivers (see IS_CLANG_DRIVER). Clang also drives the link, so the
-        triple goes on the link command too. For Apple triples with no
+        drivers (see IS_CLANG_DRIVER). It goes on the toolchain's own
+        compile tools (cc and cxx for clang, fc for flang) and, since the
+        driver also links, on the link command too. For Apple triples with no
         explicit sysroot, the matching SDK is resolved via xcrun (mirroring
         the Swift toolchain), so ios() works out of the box for C/C++.
         """
@@ -645,13 +640,14 @@ class UnixToolchain(BaseToolchain):
         contribs.extend(self._sysroot_contributions(cross))
         triple = getattr(cross, "triple", None)
         if triple and self.IS_CLANG_DRIVER:
+            tools = (*self._feature_preset_tools(), "link")
             target_flag = f"--target={triple}"
-            for tool in ("cc", "cxx", "link"):
+            for tool in tools:
                 contribs.append(ToolContribution(tool, flags=(target_flag,)))
             if not getattr(cross, "sysroot", None):
                 sdk = apple_sdk_for_triple(str(triple))
                 if sdk:
-                    for tool in ("cc", "cxx", "link"):
+                    for tool in tools:
                         contribs.append(
                             ToolContribution(tool, flags=("-isysroot", sdk))
                         )
@@ -671,7 +667,11 @@ class UnixToolchain(BaseToolchain):
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
         # Realized on the same compile tools as feature presets, so
         # Fortran-style toolchains (fc) get working variants too.
-        return [
+        contribs = [
             ToolContribution(tool, flags=tuple(flags), defines=tuple(defines))
             for tool in self._feature_preset_tools()
         ]
+        # Targeting MSVC, the driver writes a PDB only when it links with -g.
+        if "-g" in flags and self.abi == "msvc":
+            contribs.append(ToolContribution("link", flags=("-g",)))
+        return contribs

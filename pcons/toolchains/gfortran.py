@@ -3,12 +3,21 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
 from pcons.toolchains.fortran import (
     FortranCompiler,
     FortranLinker,
     FortranToolchain,
 )
 from pcons.toolchains.gcc import GccArchiver
+from pcons.toolchains.gnu_common import require_cross_binaries
+from pcons.toolchains.unix import UnixToolchain
+
+if TYPE_CHECKING:
+    from pcons.core.environment import Environment
+
+_GCC_HARDENED = UnixToolchain.FEATURE_PRESETS["hardened"]
 
 
 class GfortranCompiler(FortranCompiler):
@@ -40,19 +49,32 @@ class GfortranToolchain(FortranToolchain):
     RUNTIME_PROBE_FILE = "libgfortran.a"
     RUNTIME_LIBS = ("gfortran",)
 
-    # Realized on `fc`; -Wpedantic omitted as it is noisy for legal Fortran.
+    # GCC's, realized on `fc`. -Wpedantic is left out as noisy for legal
+    # Fortran, and _FORTIFY_SOURCE does nothing for it.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
+        **UnixToolchain.FEATURE_PRESETS,
         "warnings": {"compile_flags": ["-Wall", "-Wextra"]},
-        "werror": {"compile_flags": ["-Werror"]},
-        # gfortran is always real GCC (no Apple-clang shim concern), so
-        # these realize statically.
+        "hardened": {
+            **_GCC_HARDENED,
+            "compile_flags": [
+                f
+                for f in _GCC_HARDENED["compile_flags"]
+                if not f.startswith("-D_FORTIFY_SOURCE")
+            ],
+        },
+        # gfortran is always real GCC (no Apple-clang shim concern).
         "openmp": {"compile_flags": ["-fopenmp"], "link_flags": ["-fopenmp"]},
-        "coverage": {"compile_flags": ["--coverage"], "link_flags": ["--coverage"]},
-        "fast-math": {"compile_flags": ["-ffast-math"], "link_flags": ["-ffast-math"]},
     }
 
     def __init__(self) -> None:
         super().__init__("gfortran")
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross preset, requiring a cross gfortran for a triple."""
+        require_cross_binaries(
+            preset, "gfortran", ("fc",), "fc={triple}-gfortran", "flang"
+        )
+        super().apply_cross_preset(env, preset)
 
 
 # =============================================================================

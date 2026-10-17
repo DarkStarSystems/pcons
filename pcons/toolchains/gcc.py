@@ -25,6 +25,7 @@ from pcons.toolchains.gnu_common import (
     gnu_compile_vars,
     gnu_link_builders,
     gnu_link_vars,
+    require_cross_binaries,
 )
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool, resolve_env_cmd_override
@@ -314,21 +315,9 @@ class GccToolchain(UnixToolchain):
         binaries, so a preset with a triple but no CC/CXX overrides fails
         fast rather than silently building host-arch objects.
         """
-        triple = getattr(preset, "triple", None)
-        resolve = getattr(preset, "resolved_tool_cmds", None)
-        cmds = resolve() if resolve is not None else {}
-        # wasm triples get the more specific "use the dedicated toolchain"
-        # error from UnixToolchain (via super()), not the binary-retarget one.
-        if triple and str(triple).startswith("wasm32"):
-            triple = None
-        if triple and not ("cc" in cmds or "cxx" in cmds):
-            name = getattr(preset, "name", preset)
-            raise ValueError(
-                f"Cross preset '{name}' targets triple '{triple}', but GCC "
-                f"selects targets by binary, not by flag. Provide cross-compiler "
-                f"commands in the preset's tool_cmds (e.g. cc={triple}-gcc), or "
-                f"use a clang-based toolchain, which retargets via --target."
-            )
+        require_cross_binaries(
+            preset, "GCC", ("cc", "cxx"), "cc={triple}-gcc", "a clang-based toolchain"
+        )
         super().apply_cross_preset(env, preset)
 
     def setup_presets(self, env: Environment) -> list[Preset]:

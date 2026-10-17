@@ -31,6 +31,7 @@ from pcons.tools.toolchain import BaseToolchain
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.node import FileNode
+    from pcons.core.preset import ToolContribution
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.core.toolconfig import ToolConfig
@@ -428,6 +429,16 @@ class FortranToolchainBase(BaseToolchain):
 
 class FortranToolchain(FortranToolchainBase, UnixToolchain):
     """A GNU-style Fortran driver, an archiver, and the driver as linker."""
+
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """None of these drivers retargets the CPU by flag, on any platform:
+        gfortran ignores ``-arch`` (and builds for the host) and flang
+        rejects it."""
+        raise ValueError(
+            f"{self.name} cannot retarget the CPU to '{arch}' by flag. Use a "
+            f"cross preset (e.g. linux_cross(triple=...)) or a cross "
+            f"toolchain instead; see docs/presets.md."
+        )
 
 
 def find_fortran_toolchain(

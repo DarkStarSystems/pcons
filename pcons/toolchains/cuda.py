@@ -12,15 +12,16 @@ import shutil
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
-from pcons.core.preset import ToolContribution
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
+from pcons.toolchains.gnu_common import needs_pic
 from pcons.tools.cuda import CudaCompiler
 from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_registry
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    pass
+    from pcons.core.environment import Environment
 
 
 class CudaToolchain(BaseToolchain):
@@ -45,8 +46,66 @@ class CudaToolchain(BaseToolchain):
 
     TOOL_NAMES = ("cuda",)
 
+    # Compile flags only: the host toolchain realizes the link side. nvcc
+    # rejects bare host flags, so each goes through as one -Xcompiler=
+    # token, with no commas: -Xcompiler splits on them. These are for a
+    # GCC or Clang host. No lto: device LTO needs -dlink, and host -flto
+    # breaks on nvcc's fatbinData. sanitize, coverage and openmp reach
+    # host code only.
+    FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
+        # -Wpedantic floods nvcc's generated code.
+        "warnings": {"compile_flags": ["-Xcompiler=-Wall", "-Xcompiler=-Wextra"]},
+        "werror": {"compile_flags": ["-Werror=all-warnings"]},
+        "sanitize": {
+            "compile_flags": [
+                "-Xcompiler=-fsanitize=address",
+                "-Xcompiler=-fsanitize=undefined",
+                "-Xcompiler=-fno-omit-frame-pointer",
+            ]
+        },
+        "profile": {"compile_flags": ["-pg"]},
+        "hardened": {
+            "compile_flags": [
+                "-Xcompiler=-fstack-protector-strong",
+                "-D_FORTIFY_SOURCE=2",
+                "-Xcompiler=-fPIE",
+            ]
+        },
+        "pthread": {"compile_flags": ["-Xcompiler=-pthread"]},
+        "coverage": {"compile_flags": ["-Xcompiler=--coverage"]},
+        "fast-math": {"compile_flags": ["-use_fast_math", "-Xcompiler=-ffast-math"]},
+        "openmp": {"compile_flags": ["-Xcompiler=-fopenmp"]},
+    }
+
     def __init__(self) -> None:
         super().__init__("cuda")
+
+    def _feature_preset_tools(self) -> tuple[str, ...]:
+        return ("cuda",)
+
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """The table's presets, which are GCC and Clang host flags. On
+        Windows nvcc's host compiler is cl.exe, which none of them suit."""
+        if get_platform().is_windows:
+            return None
+        return super().make_feature_preset(name)
+
+    def get_compile_flags_for_target_type(
+        self, target_type: str, env: Environment | None = None
+    ) -> list[str]:
+        """``-fPIC`` for the host compiler, where GCC and Clang need it."""
+        platform = env.target if env is not None else get_platform()
+        return ["-Xcompiler=-fPIC"] if needs_pic(target_type, platform) else []
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Raise for a preset with a triple; one without applies as usual."""
+        if getattr(preset, "triple", None):
+            name = getattr(preset, "name", preset)
+            raise ValueError(
+                f"Cross preset '{name}' targets triple '{preset.triple}', but "
+                f"CUDA cross targets aren't supported."
+            )
+        super().apply_cross_preset(env, preset)
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for CUDA source files."""
