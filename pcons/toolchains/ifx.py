@@ -26,12 +26,10 @@ from pcons.toolchains.fortran import (
 )
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.msvc import MsvcLibrarian, MsvcLinker, use_msvc_tool_paths
+from pcons.tools.toolchain import LinkNeeds
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from pcons.core.environment import Environment
-    from pcons.core.flags import FlagToken
     from pcons.core.preset import ToolContribution
     from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
@@ -219,32 +217,19 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
         exes = {"link": "link.exe", "lib": "lib.exe"}
         use_msvc_tool_paths(env, {t: e for t, e in exes.items() if t not in before})
 
-    def get_link_flags_for_target(
-        self,
-        target: Target,
-        output_name: str,
-        existing_flags: Sequence[FlagToken],
-    ) -> list[FlagToken]:
-        """A console program, as the ifx driver links one.
-
-        A Fortran main program defines ``MAIN__``; ``main`` itself is in
-        Intel's runtime library, so link.exe can't infer the subsystem from
-        the objects and fails (LNK1561) without one. Which object holds the
+    def link_needs(
+        self, target: Target, languages: set[str], link_language: str
+    ) -> LinkNeeds:
+        """A program with ifx objects is a console program, as the ifx
+        driver links one: a Fortran main program defines ``MAIN__``, and
+        ``main`` itself is in Intel's runtime, so the linker can't infer
+        the subsystem from the objects (LNK1561). Which object holds the
         entry point isn't known when the build is described, so every
-        program with ifx objects is a console one, as CMake makes every
-        executable, unless the project chose a subsystem (a C++ ``WinMain``
-        program sets ``/SUBSYSTEM:WINDOWS``).
-        """
-        flags = super().get_link_flags_for_target(target, output_name, existing_flags)
-        env = getattr(target, "_env", None)
-        chosen = [*existing_flags]
-        if env is not None and env.has_tool("link"):
-            chosen += list(getattr(env.link, "flags", None) or [])
-        if target.target_type == "program" and not any(
-            isinstance(f, str) and f.upper().startswith("/SUBSYSTEM:") for f in chosen
-        ):
-            flags.append("/SUBSYSTEM:CONSOLE")
-        return flags
+        such program is a console one, as CMake makes every executable."""
+        needs = super().link_needs(target, languages, link_language)
+        if target.target_type == "program" and "fortran" in languages:
+            needs = needs | LinkNeeds(console=True)
+        return needs
 
     def _find_runtime_libdir(self, compiler: str) -> str | None:
         """ifx's runtime libraries sit in ``lib`` beside its ``bin``, in a

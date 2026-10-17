@@ -17,7 +17,7 @@ from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 from pcons.toolchains._msvc_compat import module_definition
 from pcons.toolchains.gnu_common import needs_pic, shared_library_flag
-from pcons.tools.toolchain import BaseToolchain
+from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
@@ -71,6 +71,11 @@ _PASSTHROUGH_FLAGS: frozenset[str] = frozenset(
 )
 
 
+def _chooses_subsystem(flags: Sequence[FlagToken]) -> bool:
+    """Whether *flags* already name a Windows subsystem."""
+    return any(isinstance(f, str) and "/SUBSYSTEM:" in f.upper() for f in flags)
+
+
 class UnixToolchain(BaseToolchain):
     """Base class for Unix-like toolchains (GCC, LLVM/Clang).
 
@@ -90,7 +95,6 @@ class UnixToolchain(BaseToolchain):
     # MinGW ("mingw") and MSVC ("msvc") objects can't be linked together.
     # Elsewhere every Unix toolchain links with every other: no tag.
     WINDOWS_ABI: ClassVar[str | None] = None
-    LINKER_STYLE = "gnu"
 
     @property
     def abi(self) -> str | None:
@@ -652,6 +656,33 @@ class UnixToolchain(BaseToolchain):
                             ToolContribution(tool, flags=("-isysroot", sdk))
                         )
         return contribs
+
+    def link_needs(
+        self, target: Target, languages: set[str], link_language: str
+    ) -> LinkNeeds:
+        """C++ objects linked by another language's driver (gfortran's,
+        swiftc's) need the C++ runtime that g++ or clang++ would add.
+        MSVC-ABI objects name theirs."""
+        if self.abi == "msvc" or not languages & {"cxx", "objcxx"}:
+            return LinkNeeds()
+        if link_language in ("cxx", "objcxx", "cuda"):
+            return LinkNeeds()
+        apple = self._target_platform(target).is_apple
+        return LinkNeeds(libs=("c++",) if apple else ("stdc++",))
+
+    def realize_link_needs(
+        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+    ) -> list[FlagToken]:
+        """rpaths as ``-Wl,-rpath,``, objects as they are; a console entry
+        point needs saying only to link.exe or lld-link, for the MSVC ABI."""
+        platform = self._target_platform(target)
+        flags: list[FlagToken] = list(needs.objects)
+        if not platform.is_windows:
+            flags += [f"-Wl,-rpath,{d}" for d in needs.rpaths]
+        if needs.console and self.abi == "msvc":
+            if not _chooses_subsystem(existing_flags):
+                flags.append("-Wl,/SUBSYSTEM:CONSOLE")
+        return flags
 
     #: The compile tool whose driver links each language: C++ objects need
     #: the C++ driver for its runtime, and CUDA links through it too.

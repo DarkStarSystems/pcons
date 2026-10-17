@@ -101,6 +101,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - clang and flang targeting the MSVC ABI write a PDB for a debug build:
   the link now gets `-g` too.
 - ifx on Linux gets its own `-qopenmp` for `openmp`, not `-fopenmp`.
+- clang targeting the MSVC ABI beside ifx links a Fortran program as a
+  console program (`-Wl,/SUBSYSTEM:CONSOLE`). Before, link.exe failed with
+  `LNK1561`, since ifx's `main` is in its runtime. (clang's static C
+  runtime beside ifx's DLL one is still a mismatch.)
 - A shared library linked by clang or flang for the MSVC ABI comes with
   its import library (`foo.lib`), and that is what targets linking it
   take. Before, they were given `foo.dll`, which link.exe rejects

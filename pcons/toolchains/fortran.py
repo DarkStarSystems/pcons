@@ -26,7 +26,7 @@ from pcons.toolchains.fortran_scanner import (
 from pcons.toolchains.gnu_common import gnu_link_builders, gnu_link_vars
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool, resolve_env_cmd_override
-from pcons.tools.toolchain import BaseToolchain
+from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -289,33 +289,21 @@ class FortranToolchainBase(BaseToolchain):
             return str(Path(libfile).resolve().parent)
         return None
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Inject C++ or Fortran runtime for mixed C++/Fortran builds.
-
-        - Fortran linker + C++ objects → C++ runtime (-lc++ or -lstdc++)
-        - C/C++ linker + Fortran objects → this compiler's Fortran runtime
-        """
+    def link_needs(
+        self, target: Target, languages: set[str], link_language: str
+    ) -> LinkNeeds:
+        """Fortran objects linked by another language's driver need the
+        Fortran runtime, and its directory where that driver won't look.
+        MSVC-ABI objects name their runtime themselves, so any link needs
+        only the directory."""
+        if "fortran" not in languages:
+            return LinkNeeds()
+        libdirs = (self.runtime_libdir,) if self.runtime_libdir else ()
         if self.objects_name_runtimes:
-            return []
-        if linker_language == "fortran" and "cxx" in object_languages:
-            return ["c++"] if get_platform().is_macos else ["stdc++"]
-        if linker_language in ("c", "cxx") and "fortran" in object_languages:
-            return list(self.RUNTIME_LIBS)
-        return []
-
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """The Fortran runtime's directory, when C/C++ links Fortran objects
-        — or any link does, when the objects name their runtime and the
-        linker has to find it."""
-        if "fortran" not in object_languages or not self.runtime_libdir:
-            return []
-        if self.objects_name_runtimes or linker_language in ("c", "cxx"):
-            return [self.runtime_libdir]
-        return []
+            return LinkNeeds(libdirs=libdirs)
+        if link_language == "fortran":
+            return LinkNeeds()
+        return LinkNeeds(libs=self.RUNTIME_LIBS, libdirs=libdirs)
 
     def after_resolve(
         self,

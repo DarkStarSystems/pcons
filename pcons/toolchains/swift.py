@@ -26,7 +26,7 @@ from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
-from pcons.tools.toolchain import SourceHandler, toolchain_registry
+from pcons.tools.toolchain import LinkNeeds, SourceHandler, toolchain_registry
 from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
@@ -388,33 +388,14 @@ class SwiftToolchain(UnixToolchain):
             contributions=(ToolContribution("swiftc", flags=tuple(flags)),),
         )
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Inject cross-language runtimes for mixed Swift/C++ links.
-
-        - swiftc linking C++ objects: on Linux add the C++ stdlib (on macOS
-          libc++ is already linked via the Swift runtime).
-        - C/C++ linker with Swift objects: add the core Swift runtime (the
-          library dirs come from get_runtime_libdirs).
-        """
-        platform = get_platform()
-        if linker_language == "swift" and "cxx" in object_languages:
-            return [] if platform.is_macos else ["stdc++"]
-        if linker_language in ("c", "cxx") and "swift" in object_languages:
-            return ["swiftCore"]
-        return []
-
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Swift runtime library dirs when a C/C++ linker links Swift objects.
-
-        Queried from ``swiftc -print-target-info`` (runtimeLibraryPaths).
-        """
-        if linker_language in ("c", "cxx") and "swift" in object_languages:
-            return self._runtime_libdirs()
-        return []
+    def link_needs(
+        self, target: Target, languages: set[str], link_language: str
+    ) -> LinkNeeds:
+        """Swift objects linked by a C or C++ driver need the core Swift
+        runtime, from the directories swiftc reports."""
+        if "swift" not in languages or link_language == "swift":
+            return LinkNeeds()
+        return LinkNeeds(libs=("swiftCore",), libdirs=tuple(self._runtime_libdirs()))
 
     def _runtime_libdirs(self) -> list[str]:
         if self._swift_runtime_libdirs is None:

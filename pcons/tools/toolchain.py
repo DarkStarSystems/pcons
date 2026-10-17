@@ -211,6 +211,52 @@ class AuxiliaryInputHandler:
     extra_flags: list[str] | None = None
 
 
+@dataclass(frozen=True)
+class LinkNeeds:
+    """What a toolchain's objects need from whichever driver links them.
+
+    Neutral facts, not flags: the linking toolchain writes each its own way
+    (``-lgfortran`` or ``libifcoremd.lib``, ``-Wl,-rpath,`` or nothing,
+    ``/SUBSYSTEM:CONSOLE`` or ``-Wl,/SUBSYSTEM:CONSOLE``), so no toolchain
+    ever writes another one's link flags.
+
+    Attributes:
+        libs: Runtime libraries, by name (``gfortran``, ``stdc++``).
+        libdirs: Where they are, when the driver wouldn't look there.
+        frameworks: macOS frameworks.
+        framework_dirs: Where those are.
+        rpaths: Where the runtime is found when the program runs.
+        objects: Files linked as they are (Swift's ``swiftrt.o``).
+        console: The entry point is a console ``main`` the objects don't
+            define (ifx's is in its runtime), so the linker can't infer
+            the subsystem.
+    """
+
+    libs: tuple[str, ...] = ()
+    libdirs: tuple[str, ...] = ()
+    frameworks: tuple[str, ...] = ()
+    framework_dirs: tuple[str, ...] = ()
+    rpaths: tuple[str, ...] = ()
+    objects: tuple[str, ...] = ()
+    console: bool = False
+
+    def __or__(self, other: LinkNeeds) -> LinkNeeds:
+        """Both sets of needs, each value once, in first-seen order."""
+
+        def both(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
+            return tuple(dict.fromkeys((*a, *b)))
+
+        return LinkNeeds(
+            libs=both(self.libs, other.libs),
+            libdirs=both(self.libdirs, other.libdirs),
+            frameworks=both(self.frameworks, other.frameworks),
+            framework_dirs=both(self.framework_dirs, other.framework_dirs),
+            rpaths=both(self.rpaths, other.rpaths),
+            objects=both(self.objects, other.objects),
+            console=self.console or other.console,
+        )
+
+
 # =============================================================================
 # Toolchain Registry
 # =============================================================================
@@ -887,17 +933,18 @@ class Toolchain(Protocol):
         """Return the archiver tool name ("ar" for GCC, "lib" for MSVC)."""
         ...
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return runtime library names (no -l prefix) needed for
-        mixed-language builds."""
+    def link_needs(
+        self, target: Target, languages: set[str], link_language: str
+    ) -> LinkNeeds:
+        """What this toolchain's objects of *languages* need from a link
+        led by *link_language*."""
         ...
 
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return library search dirs for mixed-language runtime libs."""
+    def realize_link_needs(
+        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+    ) -> list[FlagToken]:
+        """Link flags for the needs that aren't libraries, as this
+        toolchain's linker takes them."""
         ...
 
     def create_build_context(
@@ -936,11 +983,6 @@ class BaseToolchain(ABC):
     # Concrete subclasses override this; the generator reads it to build
     # the Environment typing stub.
     TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
-
-    # The command-line conventions of this toolchain's link flags: "gnu" (a
-    # gcc-style driver) or "msvc" (link.exe). A toolchain that compiled a
-    # target's objects adds its link flags to a link tool of the same style.
-    LINKER_STYLE: ClassVar[str | None] = None
 
     def __init__(self, name: str = "") -> None:
         """Initialize a toolchain.
@@ -1287,18 +1329,28 @@ class BaseToolchain(ABC):
         tools = (*self._feature_preset_tools(), "link")
         return [ToolContribution(t, flags=(flag,)) for t in tools]
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return runtime library names (no -l prefix) needed for
-        mixed-language builds. Base: none."""
-        return []
+    def link_needs(
+        self, target: Target, languages: set[str], link_language: str
+    ) -> LinkNeeds:
+        """What this toolchain's objects need from the link, when they're
+        objects of *languages* and *link_language*'s driver links: the
+        Fortran runtime when a C++ driver links gfortran's objects, say.
+        Base: nothing."""
+        return LinkNeeds()
 
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return search dirs for get_runtime_libs() libraries installed in
-        non-standard locations (e.g. Homebrew gfortran). Base: none."""
+    def realize_link_needs(
+        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+    ) -> list[FlagToken]:
+        """Link flags realizing *needs*' rpaths, objects and console entry
+        point, for a link this toolchain's driver runs (libraries and
+        their directories reach the link as ordinary requirements).
+        *existing_flags* are the link's flags so far. Base: none can be
+        realized, so any is an error."""
+        if needs.rpaths or needs.objects or needs.console:
+            raise ValueError(
+                f"Target '{target.name}': {self.name} can't link in what its "
+                f"objects need ({needs})."
+            )
         return []
 
     # =========================================================================

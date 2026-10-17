@@ -368,20 +368,21 @@ class TestWindows:
 
 
 class TestRuntimeInjection:
-    def test_swift_links_cxx_objects(self, swift_toolchain) -> None:
-        libs = swift_toolchain.get_runtime_libs("swift", {"swift", "cxx"})
-        import sys
+    @pytest.fixture
+    def program(self, test_project):  # noqa: F811
+        from pcons.core.target import Target
 
-        if sys.platform == "darwin":
-            assert libs == []  # libc++ comes with the Swift runtime
-        else:
-            assert "stdc++" in libs
+        return Target("app", target_type="program")
 
-    def test_cxx_links_swift_objects(self, swift_toolchain) -> None:
-        assert "swiftCore" in swift_toolchain.get_runtime_libs("cxx", {"swift"})
+    def test_cxx_links_swift_objects(self, swift_toolchain, program) -> None:
+        needs = swift_toolchain.link_needs(program, {"swift"}, "cxx")
+        assert "swiftCore" in needs.libs
 
-    def test_no_injection_for_pure_swift(self, swift_toolchain) -> None:
-        assert swift_toolchain.get_runtime_libs("swift", {"swift"}) == []
+    def test_swiftc_links_its_own(self, swift_toolchain, program) -> None:
+        """swiftc links Swift objects itself; the C++ runtime for C++
+        objects beside them is the C++ toolchain's need to state."""
+        needs = swift_toolchain.link_needs(program, {"swift"}, "swift")
+        assert needs.libs == ()
 
 
 class TestPresets:

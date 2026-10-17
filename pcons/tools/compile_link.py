@@ -22,7 +22,7 @@ from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
 )
-from pcons.tools.toolchain import link_language_rank
+from pcons.tools.toolchain import LinkNeeds, link_language_rank
 
 logger = logging.getLogger(__name__)
 
@@ -1001,14 +1001,18 @@ class CompileLinkFactory:
 
         object_languages: set[str] = set()
         compiled_by: dict[str, Toolchain] = {}
+        # Each toolchain that compiled objects of the link, with their languages
+        compilers: dict[Toolchain, set[str]] = {}
         for node in target.intermediate_nodes:
             bi = getattr(node, "_build_info", None)
             if bi:
                 lang = bi.get("language")
                 if lang:
                     object_languages.add(lang)
-                    if bi.get("toolchain") is not None:
-                        compiled_by.setdefault(lang, bi["toolchain"])
+                    toolchain = bi.get("toolchain")
+                    if toolchain is not None:
+                        compiled_by.setdefault(lang, toolchain)
+                        compilers.setdefault(toolchain, set()).add(lang)
 
         langs = target.get_all_languages() | object_languages
         link_language, linker, linker_cmd = _link_driver(
@@ -1021,15 +1025,27 @@ class CompileLinkFactory:
             else None
         )
 
-        for tc in env.toolchains:
-            runtime_libs = tc.get_runtime_libs(link_language, object_languages)
-            if runtime_libs:
-                effective_link.link_libs = effective_link.link_libs + runtime_libs
-            runtime_libdirs = tc.get_runtime_libdirs(link_language, object_languages)
-            if runtime_libdirs:
-                effective_link.link_dirs = effective_link.link_dirs + [
-                    Path(d) for d in runtime_libdirs
-                ]
+        # What the objects need from this link, which the linking
+        # toolchain writes its own way (see LinkNeeds).
+        needs = LinkNeeds()
+        for toolchain, languages in compilers.items():
+            needs = needs | toolchain.link_needs(target, languages, link_language)
+        effective_link.link_libs = [*effective_link.link_libs, *needs.libs]
+        effective_link.link_dirs = [
+            *effective_link.link_dirs,
+            *(Path(d) for d in needs.libdirs),
+        ]
+        effective_link.frameworks = [*effective_link.frameworks, *needs.frameworks]
+        effective_link.framework_dirs = [
+            *effective_link.framework_dirs,
+            *(Path(d) for d in needs.framework_dirs),
+        ]
+        if linker is not None:
+            base = link_base_flags
+            if base is None and env.has_tool("link"):
+                base = env.link.get("flags")
+            chosen = [*(base or ()), *link_flags]
+            link_flags += linker.realize_link_needs(needs, target, chosen)
 
         effective_link.link_flags = link_flags
         context_class = (
