@@ -29,14 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Presets, variants and linking in environments with several
+  toolchains (`add_toolchain()`) were reworked**, on an intent-based model
+  internally, so that each compiler gets its own toolchain's flags and the
+  result doesn't depend on the order of the calls. The changes you may
+  notice follow.
 - **A feature preset applies to every compiler in the environment, or
   raises.** With clang and flang, `apply_preset("sanitize")` is an error
   naming flang, which has no sanitizer: sanitizing only the C and C++
   sources isn't a sanitized build. `apply_preset(name, allow_partial=True)`
   applies it where it can, and `env.explain()` lists what it left out.
   `env.has_preset()` says whether `apply_preset()` would raise.
-- Each compiler realizes the built-in features with its own flags, checked
-  against the real compilers. gfortran now has all of GCC's (`sanitize`,
+- Each compiler has its own flags for each built-in feature preset,
+  checked against the real compilers. gfortran now has all of GCC's (`sanitize`,
   `lto`, `hardened`, `pthread`, `profile`). ifx gains `sanitize` (address
   only), `profile`, `hardened` and, on Linux, `lto` and `pthread`. Swift
   gains `sanitize`, `lto`, `coverage` and `hardened`, and CUDA has a table
@@ -48,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   program with C++ objects now links with `g++` and the Fortran runtime,
   as it does with gcc primary; before, it was `gfortran` and `-lstdc++`.
   A Fortran-only program in a C++ environment links with the Fortran
-  compiler, which brings its own realization of the variant and features
-  (ifx's `-qopenmp`, not gcc's `-fopenmp`). `target.link_language =
+  compiler, with its own flags for the variant and presets (ifx's
+  `-qopenmp`, not gcc's `-fopenmp`). `target.link_language =
   "fortran"` picks the driver for one target, like CMake's
   `LINKER_LANGUAGE`: an ifx Fortran main program with C++ helpers needs
   it, since ifx's `main` is in its runtime.

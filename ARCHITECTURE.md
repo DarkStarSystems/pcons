@@ -599,21 +599,24 @@ exe = env.Program("myapp", [c_obj, cxx_obj])
 # Automatically: uses g++ to link, adds -lstdc++ if needed
 ```
 
-**Language strength ordering** (configurable per toolchain):
-```python
-# Higher = stronger, wins link-time tool selection
-# Default (BaseToolchain.DEFAULT_LANGUAGE_PRIORITY):
-language_strength = {
-    "c": 1,
-    "cxx": 2,
-    "cuda": 4,  # CUDA requires nvcc link step
-}
-# Fortran toolchains (FortranToolchainBase) add: 'fortran': 3
-# Keeping fortran out of the default prevents C/C++ toolchains from
-# accidentally claiming linker authority over Fortran objects.
-```
+**Language strength ordering** is one fixed order, whichever toolchain is
+primary (`LINK_LANGUAGES` in `pcons/tools/toolchain.py`): Swift, CUDA,
+Objective-C++, C++, Fortran, Objective-C, C, strongest first. CMake's order
+for C, C++ and Fortran. `target.link_language` overrides it for one target.
 
-**Implementation:** `_setup_link_node()` collects actual object languages from `target.intermediate_nodes`, then uses the primary toolchain's `language_priority` to select the link language. Each toolchain's `get_runtime_libs()` / `get_runtime_libdirs()` methods inject any required runtime libraries for mixed-language builds.
+**Implementation:** the link edge collects the objects the link pulls in:
+the target's own and those of the static and object libraries it links,
+from any environment, plus the languages imported packages declare. The
+driver is the compiling toolchain's for the strongest language, when that
+toolchain's driver takes the link tool's command line (same `progcmd` and
+`sharedcmd` templates: every GNU-style driver does), else the link tool's
+own (`Toolchain.link_driver`). A driver that takes over gets its own flags
+for the variant and presets, computed from the environment's recorded
+intents (`Environment.flags_realized_by`). Each compiling toolchain then
+states what its objects need from that link as neutral `LinkNeeds`
+(runtime libraries and directories, rpaths, objects, a console entry
+point), and the linking toolchain writes them its own way
+(`realize_link_needs`).
 
 ### Target (Build Specification with Usage Requirements)
 > **Status: Implemented**
@@ -1316,6 +1319,18 @@ def _variant_contributions(self, variant, **kwargs):
         ]
     ...
 ```
+
+**Several toolchains in one environment** (`add_toolchain()`). Each
+`set_*`/`apply_*` call is recorded as an `Intent` and realized by every
+toolchain through one path (`Environment._realize`); a toolchain added
+later realizes the recorded intents too, so call order doesn't matter.
+Each tool takes presets only from the toolchain that brought it
+(`apply_from`, `_tool_owners`), so no toolchain writes another's flags,
+and an exclusive group is replaced per toolchain (`Preset.realized_by`).
+A toolchain *takes part* in an intent when it owns one of its
+`_feature_preset_tools()`; one that takes part and has no realization is
+an error unless the feature was applied with `allow_partial`. The design
+and the decisions behind it are in `plans/plan-mixed-toolchain-intents.md`.
 
 **Provenance is derived, not recorded.** Because presets are data and `Environment.apply()` keeps the ordered list of applied presets, `env.explain()` / `env.cc.explain()` can replay that list and attribute every flag to its source — no per-flag bookkeeping. Tokens not produced by a preset (toolchain defaults or `env.cc.flags.append(...)`) are labelled `(manual)`:
 ```

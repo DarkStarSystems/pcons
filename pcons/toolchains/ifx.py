@@ -92,7 +92,10 @@ class IfxToolchain(FortranToolchain):
         env: Environment,
     ) -> LinkNeeds:
         """Built with ``openmp``, ifx's objects need Intel's OpenMP runtime,
-        which another driver's -fopenmp doesn't bring (g++'s is libgomp)."""
+        which another driver's -fopenmp doesn't bring (g++'s is libgomp).
+        libiomp5 implements libgomp's interface too, and as a library it
+        comes before the -lgomp g++ adds last, so it serves the C++ side's
+        parallel regions as well and only one runtime runs."""
         needs = super().link_needs(target, languages, link_language, env)
         if (
             "fortran" in languages

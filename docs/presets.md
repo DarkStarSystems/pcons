@@ -233,50 +233,36 @@ cross-target contract below) and must not stamp it onto the environment —
 otherwise the field's value depends on call order and can disagree with the
 flags actually in effect.
 
-### Mixed toolchains: one realizer per tool
+### Mixed toolchains: each compiler realizes its own
 
 An environment can hold several toolchains (`add_toolchain()`): gcc with
 gfortran, clang-cl with flang, swift with clang. Each has its own flags for
-the same request, so the rules are:
+the same request, so:
 
-- **A knob or feature is an intent, recorded once.** `set_variant`,
-  `set_target_arch`, `apply_preset`, `apply_cross_preset` and the tool
-  settings (`env.cxx.set_standard`) record what was asked, in order. A
-  toolchain added later realizes every recorded intent for its tools, so
-  the result doesn't depend on whether a knob came before or after
-  `add_toolchain()`.
-- **Each tool is realized by the toolchain that brought it, and only
-  that one.** gfortran's `-O0 -g` lands on `fc` and gcc's on `cc` and
-  `cxx`, and neither touches the other's. So nothing is applied twice, and
-  no toolchain's flag style reaches a tool that can't read it (clang-cl's
-  `/DEBUG` never reaches flang's link driver). A tool no toolchain brought
-  (the script's own `env.add_tool()`) belongs to the primary toolchain.
-- **An intent applies fully or raises.** A toolchain *takes part* in an
-  intent if it owns one of the compile tools its realizations go on
-  (`_feature_preset_tools()`: `fc` for gfortran). Every toolchain that
-  takes part answers in one of three ways:
-
-  | Answer | How it's declared | Effect |
-  |---|---|---|
-  | realized | the feature's flags | applied to its tools |
-  | deliberate no-op | an entry with no flags (`"warnings": {"compile_flags": []}`) | nothing |
-  | unavailable | no entry, or `make_feature_preset` returns `None` | **error**, naming the toolchain |
-
-  So with clang and flang, `apply_preset("sanitize")` raises, because
-  flang has no sanitizer, and sanitizing only the C and C++ sources isn't a
-  sanitized build. `apply_preset("sanitize", allow_partial=True)` applies
-  it where it can, leaves out flang's tools, and `explain()` lists what it
-  left out. `has_preset()` answers exactly whether `apply_preset()` would
-  raise. A contributed preset's resolver returning `None` stays its own
-  decision, never a gap. A toolchain that takes part and can't realize
-  `set_target_arch`'s arch is an error too: its sources would be built for
-  the host. A cross target is each toolchain's to realize or refuse, as
-  below.
-- **Exclusive groups are per toolchain.** Each toolchain sets a knob for
-  its own tools, so its group preset replaces only its own earlier one (an
-  added ifx's `/MD` default becomes `/MDd` under `debug`, leaving MSVC's
-  alone). A preset applied directly with `env.apply()` replaces every
-  toolchain's.
+- **Each compiler gets its own toolchain's flags, and only those.**
+  gfortran's `-O0 -g` goes to the Fortran compiler and gcc's to the C and
+  C++ compilers; neither touches the other's, and the link gets its
+  driver's. clang-cl's `/DEBUG` never reaches flang's link driver, and
+  nothing is applied twice.
+- **Order doesn't matter.** A variant, preset, cross target or C++
+  standard set before `add_toolchain()` reaches the added toolchain too,
+  as if it had been there from the start.
+- **A preset applies to every compiler, or raises.** Each compiler
+  answers a built-in preset with its flags, with a deliberate no-op (an
+  entry with no flags: Swift's `warnings`), or not at all. Not at all is
+  an error naming that compiler: with clang and flang,
+  `apply_preset("sanitize")` raises, because flang has no sanitizer and a
+  build that sanitizes only the C++ sources isn't a sanitized build.
+  `apply_preset("sanitize", allow_partial=True)` applies it where it can,
+  and `explain()` lists what it left out. `has_preset()` says whether
+  `apply_preset()` would raise. A contributed preset whose resolver returns
+  `None` for a toolchain has decided for itself, and isn't an error.
+  `set_target_arch()` works the same way: a compiler that can't build for
+  the arch is an error, since its sources would be built for the host. A
+  cross target is each toolchain's to realize or refuse, as below.
+- **A variant replaces each toolchain's own earlier one.** An added ifx's
+  default `/MD` becomes `/MDd` under `debug` without touching MSVC's. A
+  preset applied directly with `env.apply()` replaces every toolchain's.
 
 Deliberate *user* re-application is unaffected: applying the same feature
 preset twice on purpose remains additive, as composition requires.
@@ -558,7 +544,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | Cross-preset field contract: triple/sysroot/tool_cmds realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |
 | Preset application contract: apply-fully-or-raise (unknown names, missing-tool cmd, zero-effect presets, unrealizable knobs) | implemented |
 | `env.target_arch` single-writer (knob only; cross presets are metadata) | implemented |
-| Mixed toolchains: recorded intents, one realizer per tool, apply fully or raise (`allow_partial`) | implemented |
+| Mixed toolchains: each compiler gets its own toolchain's flags, in any order; a preset applies to every compiler or raises (`allow_partial`) | implemented |
 | Exclusive groups replace on re-apply (knob semantics; group presets additive-only) | implemented |
 | `CrossPreset.arch` decoupled from flag emission (host-independent) | implemented |
 | `env.target` / `CrossPreset.target_platform`: what the environment builds for | implemented |

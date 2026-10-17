@@ -324,9 +324,10 @@ project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 
 The compilers differ in a few ways:
 
-- **flang** needs LLVM 21 or newer. It has no `-Os`, so `minsizerel` builds use `-O2`, and it has no `coverage` preset.
-- **ifx** needs the oneAPI environment: `source /opt/intel/oneapi/setvars.sh` on Linux, `setvars.bat` on Windows. On Linux it compiles position-independent code, so C and C++ drivers can link its objects. It has no `coverage` preset. It also rewrites every `.mod` file it compiles, even when nothing in it changed, so editing a module's implementation recompiles everything that uses the module. gfortran and flang only recompile those when the module's interface changes.
-- Each compiler realizes `warnings`, `werror`, `openmp` and `fast-math` with its own flags (ifx's `warnings` is `-warn all`).
+- **flang** needs LLVM 21 or newer. It has no `-Os`, so `minsizerel` builds use `-O2`. It has no `sanitize`, `profile`, `hardened` or `coverage`, and its `warnings` preset adds nothing: flang's own warnings are always on, and it ignores `-Wall`.
+- **ifx** needs the oneAPI environment: `source /opt/intel/oneapi/setvars.sh` on Linux, `setvars.bat` on Windows. On Linux it compiles position-independent code, so C and C++ drivers can link its objects. It has no `coverage`, its `sanitize` is AddressSanitizer only, and on Windows it has no `lto`. It also rewrites every `.mod` file it compiles, even when nothing in it changed, so editing a module's implementation recompiles everything that uses the module. gfortran and flang only recompile those when the module's interface changes.
+- **gfortran** has every preset GCC has.
+- Each compiler realizes the presets with its own flags (ifx's `warnings` is `-warn all`).
 
 On Windows, each compiler mixes with the C and C++ compilers that share its ABI:
 
@@ -337,20 +338,28 @@ A Windows DLL exports only what it's told to. flang ignores `!DIR$ ATTRIBUTES DL
 
 `env.add_toolchain()` picks a toolchain with the same ABI as the environment's primary one: `"fortran"` beside MSVC or clang-cl finds flang or ifx, not gfortran, and `"c"` beside gfortran finds MinGW gcc. Naming an incompatible one (by name, or with `$FC`/`$CC`/`$CXX`) is an error that says which toolchains would fit. Only an environment's own toolchains have to match: a project can have a MinGW environment and an MSVC one side by side. For clang and flang, pcons asks the compiler (`-print-target-triple`), so MSYS2's clang64 clang and flang count as MinGW and LLVM's own builds as MSVC.
 
-**Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
+**Mixed-language builds** use `env.add_toolchain()`. A program is linked by the compiler of its strongest language: C++, then Fortran, then C (Swift and CUDA lead any link they're in), whichever toolchain came first. Pcons adds the runtime libraries the other languages' objects need: `-lgfortran` (or flang's or ifx's) for Fortran objects, `-lstdc++` or `-lc++` for C++ objects, Swift's runtime for Swift objects. That holds for objects in static libraries too, even ones built in another environment.
 
 ```python
-# Fortran primary: gfortran links, -lc++ / -lstdc++ injected for C++ objects
-env = project.Environment(toolchain="fortran")
-env.add_toolchain("c")
-
-# C++ primary: g++/clang++ links, with the Fortran compiler's runtime
-# (-lgfortran, flang's -lflang_rt.runtime, or ifx's -lifcoremt etc.)
 env = project.Environment(toolchain="c++")
 env.add_toolchain("fortran")
 
-project.Program("hello", env, sources=["src/main.f90", "src/helper.cpp"])
+# g++ (or clang++) links, adding the Fortran runtime
+project.Program("solver", env, sources=["src/main.cpp", "src/kernel.f90"])
+# Fortran only: the Fortran compiler links it
+project.Program("tool", env, sources=["src/tool.f90"])
 ```
+
+A program whose `main` is in Fortran, with C++ helpers, says so, and the Fortran compiler links it, adding the C++ runtime:
+
+```python
+sim = project.Program("sim", env, sources=["src/main.f90", "src/helper.cpp"])
+sim.link_language = "fortran"
+```
+
+With ifx on Linux this is required: ifx keeps a Fortran program's `main` in its runtime, which only its own driver links, so a C++ link fails with an undefined `main`. gfortran and flang link either way. `link_language` takes any language a toolchain in the environment compiles.
+
+Order doesn't matter: a variant, preset or cross target set before `add_toolchain()` reaches the added toolchain too.
 
 **CUDA** is designed to work alongside a C/C++ toolchain — CUDA handles `.cu` compilation while the host toolchain handles linking:
 
@@ -1657,6 +1666,18 @@ env.apply_preset("warnings")
 env.apply_preset("lto")
 ```
 
+With several compilers in one environment (C++ and Fortran, say), each
+realizes a preset with its own flags, and a preset applies to all of them or
+fails: with clang and flang, `apply_preset("sanitize")` is an error naming
+flang, which has no sanitizer, since a build that sanitizes only the C++
+sources isn't a sanitized build. To apply it to the compilers that can,
+say so, and `pcons explain` lists what it left out. `env.has_preset()`
+says beforehand whether a preset would apply to every compiler.
+
+```python
+env.apply_preset("sanitize", allow_partial=True)  # C++ sanitized, Fortran not
+```
+
 Variants act like a knob: calling `set_variant()` again *replaces* the
 previous variant's flags rather than piling on top of them, so
 `env.set_variant("release")` followed by `env.set_variant("debug")` switches
@@ -2157,6 +2178,14 @@ httplib = ImportedTarget.from_package(
         include_dirs=["/opt/homebrew/include"],
         defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
     )
+)
+```
+
+A package built from C++ (or Fortran) should say so with `languages`. A program that links it then gets that language's runtime, and the package's compile flags reach only that language's compiler. Without it, a package is taken to be C or C++: its compile flags (`-pthread`, say) go to C and C++ compiles, never to Fortran or CUDA ones. Include directories and defines reach every compiler, so a Fortran package's module directories need nothing more.
+
+```python
+fortran_lib = ImportedTarget.from_package(
+    PackageDescription(name="netcdf-fortran", libraries=["netcdff"], languages=["fortran"])
 )
 ```
 

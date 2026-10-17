@@ -1,6 +1,24 @@
 # Plan: intents for mixed-toolchain environments
 
-Status: **decided, ready to implement** (decisions 2026-10-17; see the end). Stacks on PR #221
+Status: **implemented** (2026-10-17, one PR for all phases). Departures
+from the plan as written:
+
+- `explain()` needs no "realized by" column: each tool has one realizer,
+  its owner. `Preset.realized_by` only makes exclusive groups per
+  toolchain.
+- A driver takes over a link only if it reads the link tool's command
+  line (§4 "As built"); swiftc doesn't, so clang keeps Swift-led links and
+  Swift states its runtime needs instead (`swiftrt.o`, rpath, autolinked
+  libraries on Linux).
+- Per-driver link flags are computed from the recorded intents when a
+  target links, so nothing is stored for them.
+- `link_needs` gets the environment that compiled the objects, for the
+  feature runtimes (gcov, Intel's OpenMP runtime).
+- The C++ runtime is the C++ toolchain's need to state, not something each
+  Fortran toolchain knows; a GNU-style Fortran driver still knows it, for
+  an imported C++ package with no C++ toolchain beside it.
+- ifx on Linux keeps `main` in its runtime, so a Fortran main program with
+  C++ sources sets `link_language = "fortran"` (example 27 does). Stacks on PR #221
 (`fortran-compilers`) until that merges.
 
 An environment can hold several toolchains: gcc with gfortran, clang-cl

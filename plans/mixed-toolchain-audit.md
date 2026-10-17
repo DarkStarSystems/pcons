@@ -178,3 +178,14 @@ protocol: with pcons's link (`swiftrt.o`, `-Wl,-rpath,/usr/lib/swift/linux`,
 links and prints 42 in both release and debug. With main's pcons
 (b5ee04a1) the debug build fails to link (`swift_dynamicCast` undefined);
 the release build links only because the optimizer removed the cast.
+
+## ifx OpenMP objects linked by g++ (Docker, ifx 2025.3, g++ 13)
+
+A C++ main with an OpenMP region calling an ifx `-qopenmp` routine, linked
+`g++ -fopenmp ... -liomp5` as pcons does: both regions run 3 threads, and
+`LD_DEBUG=bindings` shows the C++ side's `GOMP_parallel` and the Fortran
+side's `__kmpc_fork_call` both bound to libiomp5, which implements
+libgomp's interface. With Ubuntu's default `--as-needed`, libgomp isn't
+loaded at all; with `--no-as-needed` it's loaded but nothing binds to it.
+This rests on `-liomp5` coming before the `-lgomp` g++ adds after
+everything on its command line, which a requirement library always does.

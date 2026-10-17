@@ -80,7 +80,7 @@ class Explanation:
             for name, desc in self.imperative:
                 lines.append(f"  {name} - {desc}" if desc else f"  {name}")
         if self.partial:
-            lines.append("partial presets (not realized for these toolchains' tools):")
+            lines.append("presets applied with allow_partial, left out for:")
             for name, toolchain in self.partial:
                 lines.append(f"  {name} - {toolchain}")
         return "\n".join(lines) if lines else "(no flags)"
