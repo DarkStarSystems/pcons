@@ -11,7 +11,7 @@ from pcons.configure.checks import ToolChecks
 from pcons.configure.config import Configure
 from pcons.core.errors import PconsError
 from pcons.toolchains.clang_cl import ClangClCxxCompiler
-from pcons.toolchains.flang import FlangCompiler
+from pcons.toolchains.flang import FlangCompiler, _flang_is_available
 from pcons.toolchains.gcc import GccArchiver, GccCCompiler
 from pcons.toolchains.gfortran import (
     GfortranCompiler,
@@ -123,7 +123,16 @@ def test_c_only_checks_refuse_a_fortran_tool(tmp_path, check) -> None:
         check(_fortran_checks(tmp_path))
 
 
-_REAL_FORTRAN = [fc for fc in ("gfortran", "flang") if shutil.which(fc)]
+# As pcons finds them: a flang without its intrinsic modules (Visual
+# Studio's) doesn't count.
+_REAL_FORTRAN = [
+    fc
+    for fc, usable in (
+        ("gfortran", lambda: shutil.which("gfortran") is not None),
+        ("flang", _flang_is_available),
+    )
+    if usable()
+]
 
 
 @pytest.mark.skipif(not _REAL_FORTRAN, reason="needs gfortran or flang")
