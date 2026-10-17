@@ -75,6 +75,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A DLL linked with an import library (MSVC, clang-cl, flang and ifx on
+  Windows) no longer relinks on every build after its objects are rebuilt
+  with the same exports. link.exe leaves such an import library alone, and
+  ninja took it for out of date; the relink then failed with `LNK1104`
+  while a program had the DLL loaded.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named

@@ -956,6 +956,11 @@ class CompileLinkFactory:
                     "suffix": import_lib_path.suffix,
                 },
             }
+            # link.exe leaves an import library alone when the DLL's exports
+            # haven't changed, so it can stay older than the objects for
+            # good; without restat ninja would relink the DLL every build
+            # (and fail while a process has it loaded).
+            info["restat"] = True
 
         target.output_nodes.append(lib_node)
         env.register_node(lib_node)

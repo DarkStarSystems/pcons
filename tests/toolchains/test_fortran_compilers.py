@@ -1056,6 +1056,9 @@ def test_the_import_library_follows_the_platform_built_for(
     assert (found.name if found else None) == implib
     flags = [str(f) for f in node._build_info["context"].link_flags]
     assert any("/IMPLIB:" in f for f in flags) == (implib is not None)
+    # link.exe can leave an unchanged import library older than its inputs,
+    # so a link that writes one restats rather than relinking every build.
+    assert bool(node._build_info.get("restat")) == (implib is not None)
 
 
 def test_a_clone_keeps_each_toolchains_flags_to_its_own_tools(
