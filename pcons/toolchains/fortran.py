@@ -295,15 +295,18 @@ class FortranToolchainBase(BaseToolchain):
         """Fortran objects linked by another language's driver need the
         Fortran runtime, and its directory where that driver won't look.
         MSVC-ABI objects name their runtime themselves, so any link needs
-        only the directory."""
+        only the directory. What the driver itself knows comes first: a
+        GNU-style driver knows the C++ runtime, for an imported C++ library
+        with no C++ toolchain beside it."""
+        needs = super().link_needs(target, languages, link_language)
         if "fortran" not in languages:
-            return LinkNeeds()
+            return needs
         libdirs = (self.runtime_libdir,) if self.runtime_libdir else ()
         if self.objects_name_runtimes:
-            return LinkNeeds(libdirs=libdirs)
+            return needs | LinkNeeds(libdirs=libdirs)
         if link_language == "fortran":
-            return LinkNeeds()
-        return LinkNeeds(libs=self.RUNTIME_LIBS, libdirs=libdirs)
+            return needs
+        return needs | LinkNeeds(libs=self.RUNTIME_LIBS, libdirs=libdirs)
 
     def after_resolve(
         self,

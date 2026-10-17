@@ -194,6 +194,25 @@ def _reads_link_command(toolchain: Toolchain, env: Environment) -> bool:
     return all(own.get(var) == env.link.get(var) for var in ("progcmd", "sharedcmd"))
 
 
+def _link_contents(target: Target) -> tuple[list[FileNode], set[str]]:
+    """The objects a link of *target* pulls in, and the languages imported
+    libraries declare.
+
+    Its own objects, and those of the static and object libraries on its
+    link line, whichever environment built them. A shared library is
+    linked already, with its own runtimes, so it adds neither (CMake
+    propagates link languages through static libraries the same way).
+    """
+    objects = list(target.intermediate_nodes)
+    declared: set[str] = set()
+    for dep in target.transitive_link_dependencies():
+        if getattr(dep, "is_imported", False):
+            declared |= dep.required_languages
+        elif dep.target_type in ("static_library", "object"):
+            objects += dep.intermediate_nodes
+    return objects, declared
+
+
 def _link_driver(
     target: Target,
     env: Environment,
@@ -999,25 +1018,39 @@ class CompileLinkFactory:
                 link_flags.extend(handler.extra_flags)
                 seen_handlers.add(handler.suffix)
 
-        object_languages: set[str] = set()
+        objects, declared = _link_contents(target)
+        # The languages a driver is chosen from, the toolchains of this
+        # environment that compiled them, and every toolchain whose objects
+        # the link pulls in, with their languages, for what they need.
+        langs: set[str] = set(declared) | target.required_languages
         compiled_by: dict[str, Toolchain] = {}
-        # Each toolchain that compiled objects of the link, with their languages
         compilers: dict[Toolchain, set[str]] = {}
-        for node in target.intermediate_nodes:
-            bi = getattr(node, "_build_info", None)
-            if bi:
-                lang = bi.get("language")
-                if lang:
-                    object_languages.add(lang)
-                    toolchain = bi.get("toolchain")
-                    if toolchain is not None:
-                        compiled_by.setdefault(lang, toolchain)
-                        compilers.setdefault(toolchain, set()).add(lang)
+        for node in objects:
+            bi = getattr(node, "_build_info", None) or {}
+            lang = bi.get("language")
+            if not lang:
+                continue
+            langs.add(lang)
+            toolchain = bi.get("toolchain")
+            if toolchain is not None:
+                compilers.setdefault(toolchain, set()).add(lang)
+                if toolchain in env.toolchains:
+                    compiled_by.setdefault(lang, toolchain)
 
-        langs = target.get_all_languages() | object_languages
         link_language, linker, linker_cmd = _link_driver(
             target, env, langs, compiled_by
         )
+        # An imported library's declared languages need what that language's
+        # toolchain here says, else what the linking toolchain knows of it
+        # (gfortran knows the C++ runtime).
+        for lang in sorted(
+            declared - {lang for ls in compilers.values() for lang in ls}
+        ):
+            toolchain = next(
+                (tc for tc in env.toolchains if _compiles(tc, lang)), linker
+            )
+            if toolchain is not None:
+                compilers.setdefault(toolchain, set()).add(lang)
         owner = env._tool_owners.get("link", env._toolchain)
         link_base_flags = (
             env.flags_realized_by("link", linker)

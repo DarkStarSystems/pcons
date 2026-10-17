@@ -713,7 +713,7 @@
   app/app: tool=link cmd=g++ flags=[-Wl,--as-needed] libs=[pkg gfortran] libdirs=[/pkg/lib /rt/gfortran]
 ### linux gfortran+gcc | upstream: static libraries from single-toolchain environments
   app/src.c.o: tool=cc cmd=gcc flags=[]
-  app/app: tool=link cmd=gcc flags=[] libs=[] libdirs=[]
+  app/app: tool=link cmd=gcc flags=[] libs=[gfortran] libdirs=[/rt/gfortran]
 ### linux gfortran+gcc | conan profile from env.toolchain
   [settings]
   arch=x86_64
@@ -1542,7 +1542,7 @@
   app/app: tool=link cmd=clang++ flags=[-Wl,--as-needed] libs=[pkg flang_rt.runtime] libdirs=[/pkg/lib /rt/flang]
 ### linux flang+llvm | upstream: static libraries from single-toolchain environments
   app/src.c.o: tool=cc cmd=clang flags=[]
-  app/app: tool=link cmd=clang flags=[] libs=[] libdirs=[]
+  app/app: tool=link cmd=clang flags=[] libs=[flang_rt.runtime] libdirs=[/rt/flang]
 ### linux flang+llvm | conan profile from env.toolchain
   [settings]
   arch=x86_64

@@ -53,6 +53,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "fortran"` picks the driver for one target, like CMake's
   `LINKER_LANGUAGE`: an ifx Fortran main program with C++ helpers needs
   it, since ifx's `main` is in its runtime.
+- A shared library no longer counts toward the link language: it's
+  linked already, with its own runtime, so a C program linking only a C++
+  shared library links with the C driver. Static libraries count, as in
+  CMake.
+- `PackageDescription.languages` says what a package's libraries are
+  built from (`["cxx"]`). A link that pulls in a C++ package then gets the
+  C++ runtime, from the environment's C++ toolchain or, with none, from
+  the driver.
 - `ConanFinder.sync_profile(env=env)` takes the environment's C/C++
   toolchain, which in a Fortran-primary environment isn't the primary one,
   and the C++ standard `env.cxx.set_standard()` set.
@@ -100,6 +108,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-Xcompiler=-fPIC`, not gcc's bare `-fPIC`, which nvcc rejects.
 - clang and flang targeting the MSVC ABI write a PDB for a debug build:
   the link now gets `-g` too.
+- A program linking a static library built in another environment gets
+  what that library's objects need: a Fortran program linking a C++
+  archive gets the C++ runtime, and a C program linking a Fortran one the
+  Fortran runtime. Before, the link failed with undefined symbols.
 - ifx on Linux gets its own `-qopenmp` for `openmp`, not `-fopenmp`.
 - clang targeting the MSVC ABI beside ifx links a Fortran program as a
   console program (`-Wl,/SUBSYSTEM:CONSOLE`). Before, link.exe failed with

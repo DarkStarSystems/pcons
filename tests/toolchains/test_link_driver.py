@@ -170,3 +170,61 @@ def test_a_driver_with_another_command_line_doesnt_take_over(tmp_path) -> None:
     project.resolve()
     cmd, _, _ = _link(prog)
     assert cmd.startswith("clang")
+
+
+# =============================================================================
+# What the link pulls in: static libraries from anywhere, imported ones
+# =============================================================================
+
+
+def test_a_static_library_from_another_environment_brings_its_runtime(
+    tmp_path,
+) -> None:
+    """A Fortran program linking a C++ archive built in a C++ environment
+    gets the C++ runtime, which g++ would have added. (It failed with
+    undefined std::string symbols before.)"""
+    project = _project(tmp_path)
+    cxx_env = project.Environment(
+        toolchain=toolchain_registry.get("gcc").create_toolchain(), name="cxx"
+    )
+    f_env = project.Environment(
+        toolchain=toolchain_registry.get("gfortran").create_toolchain(), name="f"
+    )
+    lib = project.StaticLibrary("helper", cxx_env, sources=["helper.cpp"])
+    prog = project.Program("prog", f_env, sources=["main.f90"]).link(lib)
+    project.resolve()
+    cmd, _, libs = _link(prog)
+    assert cmd.startswith("gfortran")
+    assert "stdc++" in libs
+
+
+def test_a_shared_library_brings_no_link_language(tmp_path) -> None:
+    """A shared library is linked already, with its own runtime: a C
+    program linking a C++ one links with the C driver."""
+    project = _project(tmp_path)
+    env = _env(project, "gcc")
+    lib = project.SharedLibrary("helper", env, sources=["helper.cpp"])
+    prog = project.Program("prog", env, sources=["util.c"]).link(lib)
+    project.resolve()
+    cmd, _, libs = _link(prog)
+    assert cmd.startswith("gcc")
+    assert "stdc++" not in libs
+
+
+@pytest.mark.parametrize("languages, runtime", [(["cxx"], True), ([], False)])
+def test_an_imported_library_declares_its_languages(
+    tmp_path, languages, runtime
+) -> None:
+    """A package built from C++ needs the C++ runtime; with no C++
+    toolchain in the environment, gfortran's driver knows it."""
+    from pcons.packages.description import PackageDescription
+    from pcons.packages.imported import ImportedTarget
+
+    project = _project(tmp_path)
+    env = _env(project, "gfortran")
+    pkg = PackageDescription(name="cxxlib", libraries=["cxxlib"], languages=languages)
+    prog = project.Program("prog", env, sources=["main.f90"])
+    prog.link(ImportedTarget.from_package(pkg))
+    project.resolve()
+    _, _, libs = _link(prog)
+    assert ("stdc++" in libs) == runtime

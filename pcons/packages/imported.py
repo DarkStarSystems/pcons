@@ -111,6 +111,7 @@ class ImportedTarget(Target):
         # Populate public requirements from package so they propagate to dependents
         if package is not None:
             self._populate_public_from_package(package)
+            self.required_languages |= set(package.languages)
 
     def _populate_public_from_package(self, package: PackageDescription) -> None:
         """Populate public usage requirements from the package description."""
