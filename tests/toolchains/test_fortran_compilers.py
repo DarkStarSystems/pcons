@@ -816,6 +816,30 @@ def test_a_flang_dll_is_linked_through_its_import_library(on_windows, tmp_path) 
     assert "answer.lib" in linked and "answer.dll" not in linked
 
 
+def test_a_flang_dll_exports_through_a_def_file(on_windows, tmp_path) -> None:
+    """flang ignores ``!DIR$ ATTRIBUTES DLLEXPORT``, so a DLL's exports
+    come from exported_symbols, as a .def file the link reads."""
+    from pcons import Project
+    from pcons.core.subst import PathToken
+
+    (tmp_path / "answer.f90").write_text("subroutine answer() bind(c)\nend\n")
+    project = Project("dll", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("flang").create_toolchain()
+    )
+    lib = project.SharedLibrary("answer", env, sources=["answer.f90"])
+    lib.set_option("exported_symbols", ["answer"])
+    project.resolve()
+
+    (dll,) = lib.output_nodes
+    (token,) = [
+        f for f in dll._build_info["context"].link_flags if isinstance(f, PathToken)
+    ]
+    assert token.prefix == "-Wl,/DEF:"
+    written = tmp_path / "build" / token.path
+    assert written.read_text() == "EXPORTS\n    answer\n"
+
+
 def test_a_flang_without_intrinsic_modules_is_not_available(caplog) -> None:
     """Visual Studio's bundled flang.exe has no intrinsic modules."""
     complaint = "error: Source file 'iso_c_binding.mod' was not found"

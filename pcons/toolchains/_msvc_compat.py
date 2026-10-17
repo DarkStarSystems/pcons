@@ -142,11 +142,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         output_name: str,
         existing_flags: Sequence[FlagToken],
     ) -> list[FlagToken]:
-        """A module-definition file for ``exported_symbols``.
-
-        MSVC exports by exact name, so a ``*`` pattern can't be honored and
-        is refused rather than silently exporting nothing.
-        """
+        """A module-definition file for ``exported_symbols``."""
         symbols = (
             target.get_option("exported_symbols")
             if hasattr(target, "get_option")
@@ -154,14 +150,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         )
         if not symbols or target.target_type not in ("shared_library", "program"):
             return []
-        patterns = [s for s in symbols if "*" in s or "?" in s]
-        if patterns:
-            raise ValueError(
-                f"Target '{target.name}': MSVC exports symbols by exact name, "
-                f"so the pattern {patterns[0]!r} in exported_symbols can't be "
-                f"honored. List the names."
-            )
-        text = "EXPORTS\n" + "".join(f"    {s}\n" for s in symbols)
+        text = module_definition(target, symbols)
         return [self._link_input_token(target, ".def", text, "/DEF:")]
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
@@ -310,3 +299,19 @@ class MsvcCompatibleToolchain(BaseToolchain):
         if "/Z7" in flags:
             contribs.append(ToolContribution("link", flags=("/DEBUG",)))
         return contribs
+
+
+def module_definition(target: Target, symbols: Sequence[str]) -> str:
+    """The ``.def`` file text exporting *symbols*, for an MSVC-ABI link.
+
+    MSVC exports by exact name, so a ``*`` pattern can't be honored and
+    is refused rather than silently exporting nothing.
+    """
+    patterns = [s for s in symbols if "*" in s or "?" in s]
+    if patterns:
+        raise ValueError(
+            f"Target '{target.name}': MSVC exports symbols by exact name, "
+            f"so the pattern {patterns[0]!r} in exported_symbols can't be "
+            f"honored. List the names."
+        )
+    return "EXPORTS\n" + "".join(f"    {s}\n" for s in symbols)

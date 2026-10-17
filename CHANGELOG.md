@@ -60,7 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A shared library linked by clang or flang for the MSVC ABI comes with
   its import library (`foo.lib`), and that is what targets linking it
   take. Before, they were given `foo.dll`, which link.exe rejects
-  (LNK1107).
+  (LNK1107). `exported_symbols` now works for these links too, as a
+  `.def` file; before, it only warned.
 - A Fortran source added with `add_sources(env=...)` writes its modules
   to that environment's module directory, which pcons now creates, and the
   build's dependency scan looks for them there. Before, the scan assumed

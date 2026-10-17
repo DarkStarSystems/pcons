@@ -333,6 +333,8 @@ On Windows, each compiler mixes with the C and C++ compilers that share its ABI:
 - **gfortran** (MSYS2's MinGW build) is GNU-ABI, so it mixes only with MinGW's gcc and g++. Pure Fortran works with any setup.
 - **flang** and **ifx** are MSVC-ABI and mix with MSVC and clang-cl. They use the DLL C runtime (`/MD`, `/MDd` for debug), as pcons' MSVC builds do. ifx takes MSVC-style options (`/module:`, `/warn:all`) and links with `link.exe`. A program with ifx-compiled sources is linked as a console program (`/SUBSYSTEM:CONSOLE`), since its Fortran main is in Intel's runtime; a C++ `WinMain` program with Fortran sources sets `/SUBSYSTEM:WINDOWS` in `env.link.flags`. The official LLVM installer for Windows doesn't include flang; conda-forge's `flang` package does. Visual Studio's bundled LLVM has a `flang.exe` without its intrinsic modules, so pcons doesn't use it (and says why).
 
+A Windows DLL exports only what it's told to. flang ignores `!DIR$ ATTRIBUTES DLLEXPORT`, so a flang DLL exports nothing unless its routines are listed: give them `BIND(C)` and name them in `exported_symbols` (see [Exporting Only Some Symbols](#exporting-only-some-symbols)). A DLL that exports nothing has no import library, and a program linking it fails with "no such file" for its `.lib`. ifx honors the directive.
+
 `env.add_toolchain()` picks a toolchain with the same ABI as the environment's primary one: `"fortran"` beside MSVC or clang-cl finds flang or ifx, not gfortran, and `"c"` beside gfortran finds MinGW gcc. Naming an incompatible one (by name, or with `$FC`/`$CC`/`$CXX`) is an error that says which toolchains would fit. Only an environment's own toolchains have to match: a project can have a MinGW environment and an MSVC one side by side. For clang and flang, pcons asks the compiler (`-print-target-triple`), so MSYS2's clang64 clang and flang count as MinGW and LLVM's own builds as MSVC.
 
 **Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
@@ -2717,7 +2719,7 @@ The variables are written into the generated build file, in front of the one com
 
 ### Exporting Only Some Symbols
 
-Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file with MSVC and clang-cl.
+Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file for any MSVC-ABI link (MSVC, clang-cl, and clang or flang targeting the MSVC ABI).
 
 ```python
 plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])

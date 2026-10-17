@@ -15,6 +15,7 @@ from pcons.configure.platform import Platform, get_platform
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
+from pcons.toolchains._msvc_compat import module_definition
 from pcons.toolchains.gnu_common import shared_library_flag
 from pcons.tools.toolchain import BaseToolchain
 from pcons.util.macos import apple_sdk_for_triple
@@ -481,10 +482,11 @@ class UnixToolchain(BaseToolchain):
         For a shared library or an executable that plugins call back into.
         macOS takes a symbol list (``-exported_symbols_list``) for either;
         GNU ld a version script for a library and a dynamic list for an
-        executable. All accept ``*`` patterns. Names are the C names:
-        the Darwin underscore is added here. The file is written in the
-        target's object directory and, being registered, the link depends
-        on it.
+        executable. All accept ``*`` patterns. An MSVC-ABI link (clang or
+        flang targeting it) takes a ``.def`` file, as MSVC's does, and
+        exact names only. Names are the C names: the Darwin underscore is
+        added here. The file is written in the target's object directory
+        and, being registered, the link depends on it.
         """
         symbols = (
             target.get_option("exported_symbols")
@@ -520,6 +522,9 @@ class UnixToolchain(BaseToolchain):
                     target, ".version", text, "-Wl,--version-script="
                 )
             ]
+        if self._writes_import_library(platform):
+            text = module_definition(target, symbols)
+            return [self._link_input_token(target, ".def", text, "-Wl,/DEF:")]
         logger.warning(
             "%s: exported_symbols is not realized for %s targets with %s; "
             "every symbol stays exported",
