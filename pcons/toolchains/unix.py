@@ -311,10 +311,12 @@ class UnixToolchain(BaseToolchain):
             tool = self._tools.get("cxx") or self._tools.get("cc")
             exe: str | None = None
             if tool is not None:
-                # A $CXX/$CC override selects the actual compiler; the
-                # default name (often macOS's g++-is-clang shim) is the
-                # fallback.
-                exe = resolve_env_cmd_override(tool.env_var)
+                # A $CXX/$CC override or a bound command selects the actual
+                # compiler; the default name (often macOS's g++-is-clang
+                # shim) is the fallback.
+                exe = resolve_env_cmd_override(tool.env_var) or (
+                    self._bound_commands.get(tool.env_var) if tool.env_var else None
+                )
                 if exe is None:
                     cmd = tool.default_vars().get("cmd")
                     exe = shutil.which(cmd) if isinstance(cmd, str) else None

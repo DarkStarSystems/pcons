@@ -589,7 +589,14 @@ class Environment(_EnvironmentStubs):
 
         primary = object.__getattribute__(self, "_toolchain")
         abi = getattr(primary, "abi", None) if primary is not None else None
-        if isinstance(toolchain, str):
+        companion = (
+            primary.companion_toolchain(toolchain)
+            if isinstance(toolchain, str) and primary is not None
+            else None
+        )
+        if companion is not None:
+            toolchain = companion
+        elif isinstance(toolchain, str):
             try:
                 toolchain = toolchain_registry.resolve(toolchain, abi=abi)
             except RuntimeError as e:

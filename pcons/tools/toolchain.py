@@ -762,6 +762,12 @@ class Toolchain(Protocol):
         """Presets to apply right after setup (attributed by explain())."""
         ...
 
+    def companion_toolchain(self, name: str) -> Toolchain | None:
+        """The toolchain ``env.add_toolchain(name)`` adds beside this one,
+        when this toolchain's own install provides it, or None for the
+        usual search."""
+        ...
+
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release"); each toolchain
         defines its own semantics."""
@@ -1023,6 +1029,9 @@ class BaseToolchain(ABC):
         self._name = name
         self._tools: dict[str, Tool] = {}
         self._configured = False
+        # Commands bind_commands() gave, by the variable that chooses them.
+        self._bound_commands: dict[str, str] = {}
+        self._bound_source = ""
 
     @property
     def name(self) -> str:
@@ -1114,11 +1123,15 @@ class BaseToolchain(ABC):
         for tool in self._tools.values():
             if tool.env_var:
                 by_var.setdefault(tool.env_var, []).append(tool.name)
+        bound: list[ToolContribution] = []
         for var, tool_names in by_var.items():
             from pcons.tools.tool import resolve_env_cmd_override
 
             path = resolve_env_cmd_override(var)
             if path is None:
+                if var in self._bound_commands:
+                    path = self._bound_commands[var]
+                    bound += [ToolContribution(n, cmd=path) for n in tool_names]
                 continue
             if var in ("CC", "CXX", "FC"):
                 self._validate_compiler_override(var, path)
@@ -1131,7 +1144,27 @@ class BaseToolchain(ABC):
                     ),
                 )
             )
+        if bound:
+            presets.append(
+                Preset(
+                    name=self._bound_source, category="env", contributions=tuple(bound)
+                )
+            )
         return presets
+
+    def bind_commands(self, commands: dict[str, str], source: str) -> None:
+        """Use *commands* for this toolchain's tools, keyed by the variable
+        that would choose them (``CC``, ``CXX``), as if the user had set
+        it; a variable the user did set still wins. *source* names where
+        they came from, for ``explain()``."""
+        self._bound_commands = dict(commands)
+        self._bound_source = source
+
+    def companion_toolchain(self, name: str) -> Toolchain | None:
+        """The toolchain ``env.add_toolchain(name)`` adds beside this one,
+        when this toolchain's own install provides it, or None for the
+        usual search. Base: None."""
+        return None
 
     def _validate_compiler_override(self, var: str, path: str) -> None:
         """Reject a compiler override from a different compiler family.
