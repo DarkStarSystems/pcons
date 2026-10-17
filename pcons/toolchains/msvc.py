@@ -16,7 +16,7 @@ from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
-from pcons.tools.tool import BaseTool
+from pcons.tools.tool import BaseTool, Probe
 from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES, ToolchainContext
 
 logger = logging.getLogger(__name__)
@@ -385,6 +385,10 @@ class MsvcCompiler(BaseTool):
 
     def __init__(self, name: str = "cc", language: str = "c") -> None:
         super().__init__(name, language=language)
+
+    def probe(self) -> Probe | None:
+        base = super().probe()
+        return base.msvc() if base else None
 
     def default_vars(self) -> dict[str, object]:
         return {

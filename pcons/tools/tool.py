@@ -7,8 +7,10 @@ compiling C files). Tools attach to Environments and provide Builders.
 
 from __future__ import annotations
 
+import dataclasses
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -177,6 +179,41 @@ class Tool(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class Probe:
+    """How a configure check compiles a test program with a tool.
+
+    Attributes:
+        suffix: The suffix a probe's source file is written with, which
+            tells the compiler its language.
+        program: The smallest program the tool compiles and links.
+        strict: Flags that make the compiler reject an option it doesn't
+            support, rather than warn about it and carry on.
+        msvc_style: The compiler takes cl.exe's ``/c``, ``/Fo``, ``/Fe``,
+            ``/I`` and ``/D`` rather than ``-c``, ``-o``, ``-I`` and ``-D``.
+    """
+
+    suffix: str
+    program: str
+    strict: tuple[str, ...] = ("-Werror",)
+    msvc_style: bool = False
+
+    def msvc(self) -> Probe:
+        """This probe for a compiler with cl.exe's command line."""
+        return dataclasses.replace(self, strict=("/WX",), msvc_style=True)
+
+
+_C_MAIN = "int main(void) { return 0; }\n"
+
+#: The probe for each language a compiler tool can declare.
+PROBES: dict[str, Probe] = {
+    "c": Probe(".c", _C_MAIN),
+    "cxx": Probe(".cpp", _C_MAIN),
+    "cuda": Probe(".cu", _C_MAIN),
+    "fortran": Probe(".f90", "end\n"),
+}
+
+
 class BaseTool(ABC):
     """Abstract base class for tools.
 
@@ -208,6 +245,11 @@ class BaseTool(ABC):
     @property
     def language(self) -> str | None:
         return self._language
+
+    def probe(self) -> Probe | None:
+        """How configure checks compile with this tool: its language's
+        probe, or None for a tool they can't use."""
+        return PROBES.get(self._language or "")
 
     def configure(self, config: object) -> ToolConfig | None:
         """Default implementation returns None (tool not configured)."""
