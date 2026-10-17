@@ -1678,10 +1678,10 @@ says beforehand whether a preset would apply to every compiler.
 env.apply_preset("sanitize", allow_partial=True)  # C++ sanitized, Fortran not
 ```
 
-Sanitizers can't be shared across compiler families on macOS: Apple
-clang's runtime and GCC's don't mix, so a sanitized build beside gfortran
-uses GCC for C and C++ too (`toolchain="gcc"` with Homebrew's `gcc-16`),
-or flang, which has no sanitizer, with `allow_partial`.
+Mixing languages also mixes compilers' runtimes, and some don't combine
+on some platforms, so a mixed build may need a platform-specific
+workaround. For example, on a Mac, Apple clang's and GCC's sanitizer
+runtimes can't be mixed in one program.
 
 Variants act like a knob: calling `set_variant()` again *replaces* the
 previous variant's flags rather than piling on top of them, so
