@@ -34,7 +34,7 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | LLVM/Clang toolchain | Implemented | Auto-detection, C/C++ |
 | MSVC toolchain | Implemented | Auto-detection, C/C++ |
 | Clang-cl toolchain | Implemented | Clang with MSVC compatibility |
-| GFortran toolchain | Implemented | GNU Fortran; Ninja dyndep for module deps |
+| Fortran toolchains | Implemented | gfortran, flang, ifx (Linux, macOS, Windows); Ninja dyndep for module deps |
 | **Generators** | | |
 | Ninja generator | Implemented | Primary, full support |
 | compile_commands.json | Implemented | For IDE integration |
@@ -309,7 +309,7 @@ env.{tool_name}.{variable}
 # Examples:
 env.cc.flags        # C compiler flags
 env.cxx.flags       # C++ compiler flags
-env.fortran.flags   # Fortran compiler flags
+env.fc.flags        # Fortran compiler flags
 env.link.flags      # Linker flags
 env.ar.flags        # Archiver flags
 env.protoc.flags    # Protobuf compiler flags
@@ -399,7 +399,7 @@ The "Object builder" problem in SCons: multiple tools produce `.o` files (C, C++
 # Explicit tool selection
 c_obj = env.cc.Object("foo.o", "foo.c")  # C compiler
 cxx_obj = env.cxx.Object("bar.o", "bar.cpp")  # C++ compiler
-f_obj = env.fortran.Object("baz.o", "baz.f90")  # Fortran compiler
+f_obj = env.fc.Object("baz.o", "baz.f90")  # Fortran compiler
 cuda_obj = env.cuda.Object("qux.o", "qux.cu")  # CUDA compiler
 ```
 
@@ -412,7 +412,7 @@ env.object_builders = {
     ".c": env.cc,
     ".cpp": env.cxx,
     ".cxx": env.cxx,
-    ".f90": env.fortran,
+    ".f90": env.fc,
     ".cu": env.cuda,
 }
 
@@ -608,7 +608,7 @@ language_strength = {
     "cxx": 2,
     "cuda": 4,  # CUDA requires nvcc link step
 }
-# GfortranToolchain adds: 'fortran': 3
+# Fortran toolchains (FortranToolchainBase) add: 'fortran': 3
 # Keeping fortran out of the default prevents C/C++ toolchains from
 # accidentally claiming linker authority over Fortran objects.
 ```
@@ -1641,7 +1641,10 @@ pcons/
 │   ├── llvm.py              # LLVM/Clang toolchain ............... [Implemented]
 │   ├── msvc.py              # MSVC toolchain ..................... [Implemented]
 │   ├── clang_cl.py          # Clang-cl toolchain ................. [Implemented]
+│   ├── fortran.py           # Shared Fortran toolchain base ...... [Implemented]
 │   ├── gfortran.py          # GNU Fortran toolchain .............. [Implemented]
+│   ├── flang.py             # LLVM Flang toolchain ............... [Implemented]
+│   ├── ifx.py               # Intel Fortran (Linux, Windows) ..... [Implemented]
 │   ├── fortran_scanner.py   # Fortran module dyndep scanner ...... [Implemented]
 │   └── unix.py              # Base Unix toolchain ................ [Implemented]
 ├── generators/

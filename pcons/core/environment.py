@@ -7,6 +7,7 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from collections import UserList
@@ -174,6 +175,9 @@ class Environment(_EnvironmentStubs):
         "_applied_imperative",
         "_use_origins",
         "_fanout_seen",
+        "_fanout_applied",
+        "_variant_request",
+        "_tool_owners",
         "_name",
         "_cross_preset",
         "_target",
@@ -240,6 +244,11 @@ class Environment(_EnvironmentStubs):
         self._use_origins: dict[tuple[str, str], tuple[str, str]] = {}
         # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
         self._fanout_seen: set[Any] | None = None
+        self._fanout_applied: list[Preset] | None = None
+        # The last set_variant() call, for toolchains added after it
+        self._variant_request: tuple[str, dict[str, Any]] | None = None
+        # Tool name -> the toolchain that brought it (see apply_from)
+        self._tool_owners: dict[str, Toolchain] = {}
         self._cross_preset: Any = None
         self._target: Platform | None = None
         if name is not None:
@@ -264,6 +273,7 @@ class Environment(_EnvironmentStubs):
         if toolchain is not None:
             toolchain.setup(self)
             self._record_toolchain_baseline(toolchain, list(self._get_tools().keys()))
+            self._tool_owners = dict.fromkeys(self._get_tools(), toolchain)
             # After the baseline, so explain() attributes these by name.
             for preset in toolchain.setup_presets(self):
                 self.apply(preset)
@@ -534,14 +544,37 @@ class Environment(_EnvironmentStubs):
             toolchain: Toolchain to add. A string is looked up in the
                 toolchain registry, like the Environment constructor.
 
+        Its objects are linked with the primary toolchain's, so it must
+        follow a compatible ABI (Toolchain.abi). A name picks among the
+        compatible toolchains ("fortran" beside MSVC finds flang or ifx,
+        not MinGW gfortran); an incompatible one is an error. Only this
+        environment's primary toolchain counts: other environments in the
+        project may follow other ABIs.
+
         Example:
             env = project.Environment(toolchain="c")
             env.add_toolchain("cuda")  # Adds CUDA support
         """
-        if isinstance(toolchain, str):
-            from pcons.tools.toolchain import toolchain_registry
+        from pcons.tools.toolchain import abi_compatible, toolchain_registry
 
-            toolchain = toolchain_registry.resolve(toolchain)
+        primary = object.__getattribute__(self, "_toolchain")
+        abi = getattr(primary, "abi", None) if primary is not None else None
+        if isinstance(toolchain, str):
+            try:
+                toolchain = toolchain_registry.resolve(toolchain, abi=abi)
+            except RuntimeError as e:
+                if abi is None:
+                    raise
+                raise RuntimeError(
+                    f"Can't add '{toolchain}' beside {primary.name}, whose "
+                    f"objects follow the '{abi}' ABI: {e}"
+                ) from e
+        elif not abi_compatible(getattr(toolchain, "abi", None), abi):
+            raise ValueError(
+                f"Can't add {toolchain.name} beside {primary.name}: it follows "
+                f"the '{toolchain.abi}' ABI and {primary.name} the '{abi}' one, "
+                f"so their objects can't be linked together."
+            )
         additional: list[Toolchain] = object.__getattribute__(
             self, "_additional_toolchains"
         )
@@ -550,8 +583,25 @@ class Environment(_EnvironmentStubs):
         toolchain.setup(self)
         new_tools = [n for n in self._get_tools() if n not in before]
         self._record_toolchain_baseline(toolchain, new_tools)
-        for preset in toolchain.setup_presets(self):
-            self.apply(preset)
+        self._tool_owners.update(dict.fromkeys(new_tools, toolchain))
+        # It configures only the tools it brought: $FC from an added Fortran
+        # toolchain must not retarget the primary toolchain's linker. A
+        # variant the script already set is realized for those tools in place
+        # of the toolchain's own default (an added ifx gets /MDd, not /MD,
+        # under debug), and the environment keeps its variant name.
+        presets = toolchain.setup_presets(self)
+        if self._variant_request is not None:
+            name, kwargs = self._variant_request
+            variant = toolchain.make_variant_preset(name, **kwargs)
+            presets = [
+                p for p in presets if p.exclusive_group != variant.exclusive_group
+            ]
+            presets.append(variant)
+        current_variant = self.variant
+        with self._dedup_fanout(join=True):
+            for preset in presets:
+                self.apply_from(toolchain, preset, own_tools_only=True)
+        self.variant = current_variant
 
     @property
     def toolchains(self) -> list[Toolchain]:
@@ -734,6 +784,8 @@ class Environment(_EnvironmentStubs):
         # Copy applied presets (frozen dataclasses → shallow copy is safe)
         new_env._applied_presets = list(self._applied_presets)
         new_env._applied_imperative = list(self._applied_imperative)
+        new_env._variant_request = self._variant_request
+        new_env._tool_owners = dict(self._tool_owners)
         new_env._use_origins = dict(self._use_origins)
 
         new_env._build_dir_base = self._build_dir_base
@@ -901,8 +953,9 @@ class Environment(_EnvironmentStubs):
         Extends each contribution's tool flag/define lists; a ``cmd``
         contribution replaces the tool's command. Presets sharing an
         ``exclusive_group`` act as a knob: applying one first un-applies
-        any group member already applied. A preset applies fully or
-        raises (docs/presets.md, "Preset application").
+        the group members already applied, except those the same fan-out
+        applied — one knob setting, realized by each toolchain. A preset
+        applies fully or raises (docs/presets.md, "Preset application").
         """
         if self._fanout_seen is not None:
             # Identical presets resolved by several toolchains apply once
@@ -916,16 +969,23 @@ class Environment(_EnvironmentStubs):
         self._validate_preset(preset)
 
         if preset.exclusive_group is not None:
-            for i, applied in enumerate(self._applied_presets):
-                if applied.exclusive_group == preset.exclusive_group:
+            current = self._fanout_applied or []
+            kept: list[Preset] = []
+            for applied in self._applied_presets:
+                if applied.exclusive_group == preset.exclusive_group and not any(
+                    applied is c for c in current
+                ):
                     self._unapply_contributions(applied)
-                    del self._applied_presets[i]
-                    break
+                else:
+                    kept.append(applied)
+            self._applied_presets[:] = kept
 
         for contribution in preset.contributions:
             self._apply_contribution(contribution)
 
         self._applied_presets.append(preset)
+        if self._fanout_applied is not None:
+            self._fanout_applied.append(preset)
 
         if preset.category == "variant":
             self.variant = preset.name
@@ -933,6 +993,36 @@ class Environment(_EnvironmentStubs):
         # presets, arch is metadata.
         if preset.category == "arch" and preset.arch is not None:
             self.target_arch = preset.arch
+
+    def apply_from(
+        self, toolchain: Toolchain, preset: Preset, *, own_tools_only: bool = False
+    ) -> None:
+        """Apply *toolchain*'s *preset*: to the tools it brought, and to
+        another toolchain's only when both write flags the same way.
+
+        Each toolchain realizes a knob (set_variant, apply_preset, ...) in
+        its own flag style (``LINKER_STYLE``): clang-cl's debug ``/DEBUG``
+        would break flang's GNU-style link driver beside it, as an added
+        flang's ``-fopenmp`` would break link.exe. A same-style contribution
+        lands, since the tool's own toolchain may not realize that knob:
+        gcc's ``-fsanitize`` reaches a gfortran link. With *own_tools_only*,
+        the toolchain's own tools take everything and others nothing. A
+        tool no toolchain brought takes every contribution.
+        """
+        style = getattr(toolchain, "LINKER_STYLE", None)
+
+        def takes(tool: str) -> bool:
+            owner = self._tool_owners.get(tool, toolchain)
+            if owner is toolchain:
+                return True
+            return not own_tools_only and getattr(owner, "LINKER_STYLE", None) == style
+
+        taken = tuple(c for c in preset.contributions if takes(c.tool))
+        if not taken and preset.contributions:
+            return
+        if len(taken) < len(preset.contributions):
+            preset = dataclasses.replace(preset, contributions=taken)
+        self.apply(preset)
 
     @property
     def applied_presets(self) -> tuple[Preset, ...]:
@@ -1068,13 +1158,22 @@ class Environment(_EnvironmentStubs):
                         defines.remove(d)
 
     @contextmanager
-    def _dedup_fanout(self) -> Generator[None]:
-        """Scope a per-toolchain fan-out so identical presets apply once."""
+    def _dedup_fanout(self, *, join: bool = False) -> Generator[None]:
+        """Scope a per-toolchain fan-out: identical presets apply once, and
+        the group presets it applies together are one knob setting, so they
+        don't un-apply each other.
+
+        With *join*, the knob settings already applied count as this
+        fan-out's own: a toolchain added later realizes them for its tools
+        rather than replacing them for everyone else's.
+        """
         self._fanout_seen = set()
+        self._fanout_applied = list(self._applied_presets) if join else []
         try:
             yield
         finally:
             self._fanout_seen = None
+            self._fanout_applied = None
 
     def _apply_contribution(self, c: ToolContribution) -> None:
         """Apply a single tool contribution (extend flags/defines, set cmd)."""
@@ -1104,6 +1203,7 @@ class Environment(_EnvironmentStubs):
             env.set_variant("release", extra_flags=["-march=native"])
         """
         trace("env", "Setting variant: %s", name)
+        self._variant_request = (name, dict(kwargs))
         # Recorded whether or not a toolchain realizes it, because this is the
         # only point at which a variant name is observable: `get_variant` takes
         # a string and returns one. The CLI persists the names for completion.
@@ -1219,7 +1319,7 @@ class Environment(_EnvironmentStubs):
                 if preset is None:
                     preset = resolve_registered_feature(name, toolchain)  # registry
                 if preset is not None:
-                    self.apply(preset)
+                    self.apply_from(toolchain, preset)
                     applied = True
         # Imperative escape-hatch preset: runs once against the whole env.
         description = apply_imperative_preset(name, self)
@@ -1410,8 +1510,9 @@ class Environment(_EnvironmentStubs):
         compile and link settings from a PackageDescription or ImportedTarget.
 
         The package's settings are applied to the appropriate tools:
-        - include_dirs → cxx.includes (and cc.includes if present)
-        - defines → cxx.defines (and cc.defines if present)
+        - include_dirs → cxx.includes (and cc.includes, fc.includes if
+          present)
+        - defines → cxx.defines (and cc.defines, fc.defines if present)
         - compile_flags → cxx.flags
         - library_dirs → link.libdirs
         - libraries → link.libs

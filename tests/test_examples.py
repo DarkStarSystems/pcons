@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from tests.support import qt_runtime_env, subprocess_env
+from tests.support import USER_TOOL_ENV, qt_runtime_env, subprocess_env
 
 # Try to import tomllib (Python 3.11+) or tomli as fallback
 try:
@@ -348,6 +348,7 @@ _SKIP_SECTION_KEYS = {
     "requires",
     "require_commands",
     "require_succeeds",
+    "requires_toolchains",
     "requires_any",
     "require_env",
     "requires_cxx_modules",
@@ -543,6 +544,13 @@ def should_skip(config: dict[str, Any]) -> str | None:
             said = (probe.stderr or probe.stdout).strip().splitlines()
             return f"'{command}' failed" + (f": {said[0]}" if said else "")
 
+    # Toolchains that must resolve together, as the example combines them:
+    # the first as an environment's primary, each other one as
+    # add_toolchain() would add it beside it (with a compatible ABI).
+    if names := skip_config.get("requires_toolchains"):
+        if (reason := _toolchains_unavailable(names)) is not None:
+            return reason
+
     # Check requires_any (at least one must be present)
     requires_any = skip_config.get("requires_any", [])
     if requires_any:
@@ -694,6 +702,31 @@ def should_skip(config: dict[str, Any]) -> str | None:
                 if (check := _check_gcc_std_module_support()) is not None:
                     return check
     return None  # not skipped
+
+
+def _toolchains_unavailable(names: list[str]) -> str | None:
+    """Why *names* can't resolve together, or None if they can.
+
+    Resolved with the tool choices pytest was started with (FC=..., CXX=...),
+    which the in-process fixtures otherwise hide.
+    """
+    from pcons.tools.toolchain import toolchain_registry
+
+    saved = {var: os.environ.get(var) for var in USER_TOOL_ENV}
+    os.environ.update(USER_TOOL_ENV)
+    try:
+        primary = toolchain_registry.resolve(names[0])
+        for name in names[1:]:
+            toolchain_registry.resolve(name, abi=primary.abi)
+    except (RuntimeError, ValueError) as e:
+        return f"Toolchains {' + '.join(names)} don't resolve together: {e}"
+    finally:
+        for var, value in saved.items():
+            if value is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = value
+    return None
 
 
 def _toolchain_is_available(toolchain: str, current_platform: str) -> bool:
@@ -959,6 +992,7 @@ def _run_generate(
     Project._clear_tree()
 
     env = subprocess_env(
+        **USER_TOOL_ENV,
         PCONS_BUILD_DIR=str(build_dir),
         PCONS_GENERATOR=generator,
     )
@@ -1747,7 +1781,9 @@ def _invoke_explain(
 
 
 @pytest.mark.parametrize("example_dir", discover_examples(), ids=lambda p: p.name)
-def test_example_explain(example_dir: Path, tmp_path: Path) -> None:
+def test_example_explain(
+    example_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """`pcons explain` runs clean on every runnable example.
 
     In-process, unlike the end-to-end runs above, so the explain rendering
@@ -1758,6 +1794,10 @@ def test_example_explain(example_dir: Path, tmp_path: Path) -> None:
     reason = should_skip(config)
     if reason:
         pytest.skip(reason)
+    # In-process, so the tool choices pytest was started with (FC=flang
+    # pytest ...) are handed back, as the end-to-end runs hand them to pcons.
+    for var, value in USER_TOOL_ENV.items():
+        monkeypatch.setenv(var, value)
 
     # Honor the example's toolchain request (e.g. the C++ modules examples
     # need msvc on Windows; default detection would pick clang-cl), the way

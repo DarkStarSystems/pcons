@@ -5,13 +5,17 @@ compile flags."""
 
 from __future__ import annotations
 
+import functools
 import logging
+import subprocess
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import Platform, get_platform
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
+from pcons.toolchains._msvc_compat import module_definition
 from pcons.toolchains.gnu_common import shared_library_flag
 from pcons.tools.toolchain import BaseToolchain
 from pcons.util.macos import apple_sdk_for_triple
@@ -31,6 +35,33 @@ register_target_option(
     'shared-library install name (macOS) or SONAME (Linux); "" disables the '
     "automatic default",
 )
+
+
+def abi_from_triple(triple: str) -> str | None:
+    """The Windows ABI a target triple names: "msvc" for ``*-msvc``,
+    "mingw" for ``*-gnu`` and ``*-mingw*``; None when it names neither."""
+    if triple.endswith("-msvc"):
+        return "msvc"
+    if triple.endswith("-gnu") or "mingw" in triple:
+        return "mingw"
+    return None
+
+
+@functools.cache
+def target_triple(compiler: str) -> str | None:
+    """*compiler*'s default target triple, from ``-print-target-triple``
+    (clang and flang; GCC has ``-dumpmachine`` instead), or None when it
+    can't be asked."""
+    try:
+        out = subprocess.check_output(
+            [compiler, "-print-target-triple"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.strip() or None
 
 
 #: Driver flags that hand the token after them to a sub-tool. Named here so
@@ -55,6 +86,28 @@ class UnixToolchain(BaseToolchain):
     # (e.g. Swift) leaves it False, meaning "nothing to retarget", not
     # "my compiler isn't clang".
     IS_CLANG_DRIVER: ClassVar[bool] = False
+
+    # The ABI this toolchain's objects follow when it runs on Windows, where
+    # MinGW ("mingw") and MSVC ("msvc") objects can't be linked together.
+    # Elsewhere every Unix toolchain links with every other: no tag.
+    WINDOWS_ABI: ClassVar[str | None] = None
+    LINKER_STYLE = "gnu"
+
+    @property
+    def abi(self) -> str | None:
+        """On Windows, the compiler's target triple's ABI when it says,
+        else WINDOWS_ABI. A clang-driver toolchain may target either: LLVM's
+        own builds target MSVC, MSYS2's clang64 ones MinGW."""
+        if not get_platform().is_windows:
+            return None
+        compiler = self._abi_probe_compiler()
+        triple = target_triple(compiler) if compiler else None
+        return (abi_from_triple(triple) if triple else None) or self.WINDOWS_ABI
+
+    def _abi_probe_compiler(self) -> str | None:
+        """The compiler whose target triple decides this toolchain's ABI,
+        or None when WINDOWS_ABI always holds."""
+        return None
 
     # True for toolchains whose output is WebAssembly (see WasmToolchain).
     # wasm cross presets applied to a non-wasm toolchain fail fast: they
@@ -386,7 +439,31 @@ class UnixToolchain(BaseToolchain):
         flags = self._exported_symbols_flags(target)
         if target.target_type == "shared_library":
             flags = [*self._install_name_flags(target, existing_flags), *flags]
+            if self._writes_import_library(self._target_platform(target)):
+                # Where get_import_library_name says (the link's second output)
+                flags.append(TargetPath(prefix="-Wl,/IMPLIB:", index=1))
         return flags
+
+    def get_import_library_name(
+        self, shared_library_name: str, target: Platform | None = None
+    ) -> str | None:
+        """``foo.lib`` for a DLL linked for the MSVC ABI, as by clang or
+        flang targeting it: their driver hands the link to link.exe or
+        lld-link, which writes the import library a consumer links against.
+        MinGW's ld links a DLL directly and writes none."""
+        if not self._writes_import_library(target or get_platform()):
+            return None
+        return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
+
+    def _writes_import_library(self, platform: Platform) -> bool:
+        """Whether a DLL link for *platform* is an MSVC-ABI one. A cross
+        target says so by its naming (an MSVC triple's archives are .lib, a
+        MinGW one's .a); the host, by what this toolchain's compiler targets."""
+        if not platform.is_windows:
+            return False
+        if platform != get_platform():
+            return platform.static_lib_suffix == ".lib"
+        return self.abi == "msvc"
 
     def link_group_tokens(
         self, archives: Sequence[PathToken], env: Environment | None = None
@@ -405,10 +482,11 @@ class UnixToolchain(BaseToolchain):
         For a shared library or an executable that plugins call back into.
         macOS takes a symbol list (``-exported_symbols_list``) for either;
         GNU ld a version script for a library and a dynamic list for an
-        executable. All accept ``*`` patterns. Names are the C names:
-        the Darwin underscore is added here. The file is written in the
-        target's object directory and, being registered, the link depends
-        on it.
+        executable. All accept ``*`` patterns. An MSVC-ABI link (clang or
+        flang targeting it) takes a ``.def`` file, as MSVC's does, and
+        exact names only. Names are the C names: the Darwin underscore is
+        added here. The file is written in the target's object directory
+        and, being registered, the link depends on it.
         """
         symbols = (
             target.get_option("exported_symbols")
@@ -444,6 +522,9 @@ class UnixToolchain(BaseToolchain):
                     target, ".version", text, "-Wl,--version-script="
                 )
             ]
+        if self._writes_import_library(platform):
+            text = module_definition(target, symbols)
+            return [self._link_input_token(target, ".def", text, "-Wl,/DEF:")]
         logger.warning(
             "%s: exported_symbols is not realized for %s targets with %s; "
             "every symbol stays exported",

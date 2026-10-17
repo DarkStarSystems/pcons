@@ -571,6 +571,22 @@ class TestUseUnifiedWithRequirements:
         assert str(Path("/opt/fancy/lib")) in env.link.libdirs
         assert "-Wl,-rpath,/opt/fancy/lib" in env.link.flags
 
+    @pytest.mark.parametrize("system", [False, True])
+    def test_use_reaches_a_fortran_compiler(self, test_project, system):  # noqa: F811
+        """Fortran finds a package's .mod files on its include path, which
+        has no system form; its compile flags are C-family, so not those."""
+        env = self._env()
+        fc = env.add_tool("fc")
+        for name in ("flags", "includes", "defines"):
+            fc.set(name, [])
+        pkg = self._pkg()
+        pkg.compile_flags = ["-std=c++17"]
+        env.use(pkg, system=system)
+
+        assert str(Path("/opt/fancy/include")) in env.fc.includes
+        assert "USING_FANCY" in env.fc.defines
+        assert env.fc.flags == []
+
     def test_repeated_use_dedups(self, test_project):  # noqa: F811
         """Same merge semantics as target resolution: no duplicate -I/-l on
         repeat application (the old ad-hoc path duplicated them)."""

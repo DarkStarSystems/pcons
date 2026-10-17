@@ -144,3 +144,37 @@ class TestMixedLanguageFlagLeakage:
         assert "-std=c++20" not in c_cmd_str, (
             f"C command must not contain -std=c++20, got: {c_cmd_str}"
         )
+
+
+class TestMixedLanguageIncludesAndDefines:
+    """Each source in a mixed target gets its own tool's env includes and
+    defines. Before, one tool's applied to every source, and which one
+    depended on the order the target's languages were recorded in."""
+
+    @pytest.mark.parametrize("sources", [["app.cpp", "gen.c"], ["gen.c", "app.cpp"]])
+    def test_each_tool_keeps_its_own(self, tmp_path, llvm_toolchain, sources):
+        (tmp_path / "app.cpp").write_text("int main() { return 0; }")
+        (tmp_path / "gen.c").write_text("int helper(void) { return 1; }")
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=llvm_toolchain)
+        env.cc.includes.append(tmp_path / "c_only")
+        env.cc.defines.append("C_ONLY")
+        env.cxx.includes.append(tmp_path / "cxx_only")
+        env.cxx.defines.append("CXX_ONLY")
+
+        target = project.Program("app", env, sources=sources)
+        project.resolve()
+
+        # Keyed by source name: the object suffix is the host's (.obj on
+        # Windows).
+        contexts = {
+            obj.path.name.rsplit(".", 1)[0]: obj._build_info["context"]
+            for obj in target.intermediate_nodes
+        }
+        c, cxx = contexts["gen.c"], contexts["app.cpp"]
+        assert any("c_only" in i for i in c.includes)
+        assert not any("cxx_only" in i for i in c.includes)
+        assert any("cxx_only" in i for i in cxx.includes)
+        assert not any("c_only" in i for i in cxx.includes)
+        assert "C_ONLY" in c.defines and "CXX_ONLY" not in c.defines
+        assert "CXX_ONLY" in cxx.defines and "C_ONLY" not in cxx.defines

@@ -23,6 +23,7 @@ from pcons.toolchains.msvc import (
     _sorted_version_dirs,
     _version_sort_key,
     find_msvc_toolset_version,
+    use_msvc_tool_paths,
 )
 
 
@@ -787,3 +788,54 @@ class TestFindMsvcToolsetVersion:
         monkeypatch.delenv("VCToolsVersion", raising=False)
         monkeypatch.setattr("pcons.toolchains.msvc._find_msvc_install", lambda: None)
         assert find_msvc_toolset_version() is None
+
+
+@pytest.mark.usefixtures("test_project")
+class TestUseMsvcToolPaths:
+    """use_msvc_tool_paths points tools at MSVC's own binaries when PATH
+    would find the wrong ones, or none."""
+
+    TOOLS = {"link": "link.exe", "lib": "lib.exe"}
+
+    @staticmethod
+    def _msvc_bin(tmp_path: Path) -> Path:
+        bin_dir = tmp_path / "msvc" / "bin"
+        bin_dir.mkdir(parents=True)
+        for exe in ("cl.exe", "link.exe", "lib.exe"):
+            (bin_dir / exe).touch()
+        return bin_dir
+
+    def test_a_shadowed_tool_gets_the_one_beside_cl(self, tmp_path, monkeypatch):
+        bin_dir = self._msvc_bin(tmp_path)
+        on_path = {"cl.exe": bin_dir / "cl.exe", "lib.exe": bin_dir / "lib.exe"}
+        # Git's link.exe (a coreutils one) ahead of MSVC's on PATH.
+        on_path["link.exe"] = tmp_path / "git" / "usr" / "bin" / "link.exe"
+        monkeypatch.setattr("shutil.which", lambda name: str(on_path[name]))
+        env = Environment()
+
+        use_msvc_tool_paths(env, self.TOOLS)
+
+        assert env.link.cmd == str(bin_dir / "link.exe")
+        assert not env.has_tool("lib")
+
+    def test_without_cl_on_path_the_tools_come_from_vswhere(
+        self, tmp_path, monkeypatch
+    ):
+        bin_dir = self._msvc_bin(tmp_path)
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setattr("pcons.toolchains.msvc._find_msvc_bin_dir", lambda: bin_dir)
+        env = Environment()
+
+        use_msvc_tool_paths(env, self.TOOLS)
+
+        assert env.link.cmd == str(bin_dir / "link.exe")
+        assert env.lib.cmd == str(bin_dir / "lib.exe")
+
+    def test_without_msvc_nothing_changes(self, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setattr("pcons.toolchains.msvc._find_msvc_bin_dir", lambda: None)
+        env = Environment()
+
+        use_msvc_tool_paths(env, self.TOOLS)
+
+        assert not env.has_tool("link") and not env.has_tool("lib")

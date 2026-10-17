@@ -47,6 +47,13 @@ if TYPE_CHECKING:
         EmscriptenToolchain,
         find_emscripten_toolchain,
     )
+    from pcons.toolchains.flang import FlangCompiler, FlangLinker, FlangToolchain
+    from pcons.toolchains.fortran import (
+        FortranCompiler,
+        FortranLinker,
+        FortranToolchain,
+        find_fortran_toolchain,
+    )
     from pcons.toolchains.gcc import (
         GccArchiver,
         GccCCompiler,
@@ -58,8 +65,8 @@ if TYPE_CHECKING:
         GfortranCompiler,
         GfortranLinker,
         GfortranToolchain,
-        find_fortran_toolchain,
     )
+    from pcons.toolchains.ifx import IfxCompiler, IfxLinker, IfxToolchain
     from pcons.toolchains.llvm import (
         ClangCCompiler,
         ClangCxxCompiler,
@@ -150,10 +157,28 @@ toolchain_registry.register_lazy(
     description="WASI SDK for standalone WebAssembly (.wasm)",
 )
 toolchain_registry.register_lazy(
-    ["gfortran", "fortran"],
+    ["fortran"],
+    "pcons.toolchains.fortran",
+    category="fortran",
+    description="Auto-detect a Fortran toolchain",
+)
+toolchain_registry.register_lazy(
+    ["gfortran"],
     "pcons.toolchains.gfortran",
     category="fortran",
-    description="GNU Fortran compiler",
+    description="GNU Fortran compiler (gfortran)",
+)
+toolchain_registry.register_lazy(
+    ["flang"],
+    "pcons.toolchains.flang",
+    category="fortran",
+    description="LLVM Flang Fortran compiler (flang)",
+)
+toolchain_registry.register_lazy(
+    ["ifx", "intel-fortran"],
+    "pcons.toolchains.ifx",
+    category="fortran",
+    description="Intel Fortran compiler (ifx)",
 )
 toolchain_registry.register_lazy(
     ["swiftc", "swift"],
@@ -169,20 +194,28 @@ toolchain_registry.register_lazy(
 )
 
 
-def _env_selected_c_toolchain() -> BaseToolchain | None:
-    """C/C++ toolchain implied by the $CXX/$CC env vars, or None.
+def env_selected_toolchain(
+    category: str, *env_vars: str, abi: str | None = None
+) -> BaseToolchain | None:
+    """The *category* toolchain the first set of *env_vars* implies, or None.
 
-    When either variable names a classifiable compiler, that compiler's
+    When the variable names a classifiable compiler, that compiler's
     family wins auto-detection outright (bypassing the availability probe
     for the family's default command names — the user's compiler existing
     is the availability proof). An unclassifiable value (a wrapper script)
     returns None: normal detection proceeds, and the override still lands
     on whichever toolchain wins via Tool.env_var.
+
+    Raises:
+        RuntimeError: The variable names a compiler whose toolchain isn't
+            compatible with *abi*: the user's explicit choice can't be
+            honored, and silently picking another compiler would hide that.
     """
     from pcons.configure.compiler_id import compiler_family
     from pcons.tools.tool import resolve_env_cmd_override
+    from pcons.tools.toolchain import abi_compatible
 
-    for var in ("CXX", "CC"):
+    for var in env_vars:
         path = resolve_env_cmd_override(var)
         if path is None:
             continue
@@ -190,13 +223,24 @@ def _env_selected_c_toolchain() -> BaseToolchain | None:
         if family is None:
             return None
         entry = toolchain_registry.get(family)
-        if entry is not None:
-            return entry.create_toolchain()
+        if entry is not None and entry.category == category:
+            toolchain = entry.create_toolchain()
+            if not abi_compatible(toolchain.abi, abi):
+                compatible = toolchain_registry.names_with_abi(category, abi)
+                raise RuntimeError(
+                    f"${var} names {path}, a {family} compiler following the "
+                    f"'{toolchain.abi}' ABI, but the '{abi}' one is required "
+                    f"here: their objects can't be linked together. Unset "
+                    f"${var}, or name a compatible compiler"
+                    + (f" ({', '.join(compatible)})." if compatible else ".")
+                )
+            return toolchain
     return None
 
 
 def find_c_toolchain(
     prefer: list[str] | None = None,
+    abi: str | None = None,
 ) -> BaseToolchain:
     """Find the first available C/C++ toolchain from the registry.
 
@@ -204,6 +248,8 @@ def find_c_toolchain(
         prefer: Toolchain names to try, in order. Defaults to
                 ["clang-cl", "msvc", "llvm", "gcc"] on Windows,
                 ["llvm", "gcc"] elsewhere.
+        abi: Only a toolchain compatible with this ABI qualifies (see
+            BaseToolchain.abi): MinGW gcc for gfortran on Windows, say.
 
     Returns:
         A configured toolchain ready for use.
@@ -220,7 +266,7 @@ def find_c_toolchain(
     if prefer is None:
         # $CXX/$CC steer auto-detection: the user named a compiler, so use
         # the toolchain family that compiler belongs to (see docs).
-        env_toolchain = _env_selected_c_toolchain()
+        env_toolchain = env_selected_toolchain("c", "CXX", "CC", abi=abi)
         if env_toolchain is not None:
             return env_toolchain
         import sys
@@ -230,11 +276,13 @@ def find_c_toolchain(
         else:
             prefer = ["llvm", "gcc"]
 
-    toolchain = toolchain_registry.find_available("c", prefer)
+    toolchain = toolchain_registry.find_available("c", prefer, abi=abi)
     if toolchain is not None:
         return toolchain
 
     tried = toolchain_registry.get_tried_names("c", prefer)
+    if abi is not None:
+        raise toolchain_registry.no_compatible_toolchain("c", "C/C++", abi, tried)
     raise RuntimeError(
         f"No C/C++ toolchain found. Tried: {', '.join(tried)}. "
         "Make sure a compiler (clang, clang-cl, gcc, or MSVC) is installed and in PATH."
@@ -245,6 +293,7 @@ toolchain_registry.register_finder(
     ["c", "c++", "cpp"],
     find_c_toolchain,
     description="Auto-detect a C/C++ toolchain",
+    takes_abi=True,
 )
 
 
@@ -268,11 +317,20 @@ _LAZY_ATTRS = {
     "CythonToolchain": "pcons.toolchains.cython",
     "CythonTranspiler": "pcons.toolchains.cython",
     "find_cython_toolchain": "pcons.toolchains.cython",
-    # GFortran toolchain
+    # Fortran toolchains
+    "FortranCompiler": "pcons.toolchains.fortran",
+    "FortranLinker": "pcons.toolchains.fortran",
+    "FortranToolchain": "pcons.toolchains.fortran",
+    "find_fortran_toolchain": "pcons.toolchains.fortran",
     "GfortranCompiler": "pcons.toolchains.gfortran",
     "GfortranLinker": "pcons.toolchains.gfortran",
     "GfortranToolchain": "pcons.toolchains.gfortran",
-    "find_fortran_toolchain": "pcons.toolchains.gfortran",
+    "FlangCompiler": "pcons.toolchains.flang",
+    "FlangLinker": "pcons.toolchains.flang",
+    "FlangToolchain": "pcons.toolchains.flang",
+    "IfxCompiler": "pcons.toolchains.ifx",
+    "IfxLinker": "pcons.toolchains.ifx",
+    "IfxToolchain": "pcons.toolchains.ifx",
     # Swift toolchain
     "SwiftCompiler": "pcons.toolchains.swift",
     "SwiftLinker": "pcons.toolchains.swift",
@@ -343,6 +401,7 @@ __all__ = [
     "build_tools_program",
     "newest_build_tools",
     # Toolchain finder and registry
+    "env_selected_toolchain",
     "find_c_toolchain",
     "find_fortran_toolchain",
     "find_swift_toolchain",
@@ -363,10 +422,19 @@ __all__ = [
     "CythonLinker",
     "CythonToolchain",
     "CythonTranspiler",
-    # GFortran toolchain
+    # Fortran toolchains
+    "FortranCompiler",
+    "FortranLinker",
+    "FortranToolchain",
     "GfortranCompiler",
     "GfortranLinker",
     "GfortranToolchain",
+    "FlangCompiler",
+    "FlangLinker",
+    "FlangToolchain",
+    "IfxCompiler",
+    "IfxLinker",
+    "IfxToolchain",
     "SwiftCompiler",
     "SwiftLinker",
     "SwiftToolchain",

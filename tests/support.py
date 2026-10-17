@@ -17,6 +17,14 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
 """What a Program's output is called, for a test asserting a build tool name."""
 
+TOOL_ENV_VARS = ("CC", "CXX", "FC", "AR", "SWIFTC", "CUDACXX", "RC")
+"""The conventional tool-selection variables, which pcons honors."""
+
+USER_TOOL_ENV = {var: os.environ[var] for var in TOOL_ENV_VARS if os.environ.get(var)}
+"""The tool choices pytest was started with (``FC=flang pytest ...``),
+captured at import, before conftest hides them from in-process tests.
+Example tests run pcons as a user would, so they hand these back."""
+
 
 def qt_runtime_env() -> dict[str, str]:
     """Environment for running a program linked against Qt.

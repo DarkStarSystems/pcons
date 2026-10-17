@@ -109,6 +109,9 @@ class BuildInfo(TypedDict, total=False):
     # The target whose resolution declared this edge, where a second one
     # declaring it would be a collision rather than a merge.
     producer: Any  # Target, but avoid circular import
+    # The toolchain whose handler compiled this object, beside the
+    # environment's own: it has a say in how its objects link.
+    toolchain: Any  # Toolchain, but avoid circular import
 
 
 class Node(ABC):

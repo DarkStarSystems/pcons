@@ -443,14 +443,15 @@ class UnixToolchain(BaseToolchain):
 A Fortran toolchain owns its own flags and target tool:
 
 ```python
-class GfortranToolchain(UnixToolchain):
+class FortranToolchain(UnixToolchain):
+    def _feature_preset_tools(self):
+        return ("fc",)
+
+class GfortranToolchain(FortranToolchain):
     FEATURE_PRESETS = {
         "warnings": {"compile_flags": ["-Wall", "-Wextra"]},
         "werror": {"compile_flags": ["-Werror"]},
     }
-
-    def _feature_preset_tools(self):
-        return ("fc",)
 ```
 
 **Contributed (external).** Register a resolver under a scope. The resolver

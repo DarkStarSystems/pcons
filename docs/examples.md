@@ -42,7 +42,7 @@ uvx pcons
 | [`22_wasm_wasi`](https://github.com/DarkStarSystems/pcons/tree/main/examples/22_wasm_wasi) | Demonstrates compiling a C program to WebAssembly via wasi-sdk |
 | [`23_wasm_emscripten`](https://github.com/DarkStarSystems/pcons/tree/main/examples/23_wasm_emscripten) | Demonstrates compiling a C program to WebAssembly via Emscripten |
 | [`24_configure_file`](https://github.com/DarkStarSystems/pcons/tree/main/examples/24_configure_file) | Demonstrates compiler feature checks feeding configure_file() |
-| [`25_fortran_hello`](https://github.com/DarkStarSystems/pcons/tree/main/examples/25_fortran_hello) | Demonstrates compiling a simple Fortran program with gfortran |
+| [`25_fortran_hello`](https://github.com/DarkStarSystems/pcons/tree/main/examples/25_fortran_hello) | Demonstrates compiling a simple Fortran program with whichever compiler is found (gfortran, flang or ifx) |
 | [`26_fortran_modules`](https://github.com/DarkStarSystems/pcons/tree/main/examples/26_fortran_modules) | Demonstrates Fortran modules with correct dyndep dependency ordering |
 | [`27_fortran_calls_cxx`](https://github.com/DarkStarSystems/pcons/tree/main/examples/27_fortran_calls_cxx) | Fortran primary calling C++ via BIND(C) interface, with automatic C++ runtime injection |
 | [`28_cxx_calls_fortran`](https://github.com/DarkStarSystems/pcons/tree/main/examples/28_cxx_calls_fortran) | C++ primary calling Fortran via BIND(C), with automatic Fortran runtime injection |
@@ -110,3 +110,4 @@ uvx pcons
 | [`91_python_builder_pipeline`](https://github.com/DarkStarSystems/pcons/tree/main/examples/91_python_builder_pipeline) | Two PyBuilders, each called twice, feeding a C compile and link: one fetches a document, one embeds it as a byte array |
 | [`92_python_builder_emitter`](https://github.com/DarkStarSystems/pcons/tree/main/examples/92_python_builder_emitter) | A PyBuilder emitter names the edge's output after a program's real file name, which only resolve knows |
 | [`93_vendored_subdirectory`](https://github.com/DarkStarSystems/pcons/tree/main/examples/93_vendored_subdirectory) | A dependency's source tree pulled in with add_subdirectory(build_tier="manual"): its library builds because the app needs it, its demo doesn't, and its own Default() doesn't decide this project's build |
+| [`94_fortran_submodules`](https://github.com/DarkStarSystems/pcons/tree/main/examples/94_fortran_submodules) | Demonstrates Fortran submodules, nested, compiled in dependency order |

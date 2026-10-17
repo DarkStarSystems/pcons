@@ -28,6 +28,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
     toolchains differ.
     """
 
+    LINKER_STYLE = "msvc"
+
     # Named feature presets; see docs/presets.md.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {
@@ -85,6 +87,11 @@ class MsvcCompatibleToolchain(BaseToolchain):
         ]
     )
 
+    @property
+    def abi(self) -> str | None:
+        """MSVC's, which clang-cl, flang and ifx share on Windows."""
+        return "msvc"
+
     def compile_link_context_class(self) -> type[CompileLinkContext]:
         """MSVC and clang-cl both use MSVC-style command formatting.
 
@@ -135,11 +142,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         output_name: str,
         existing_flags: Sequence[FlagToken],
     ) -> list[FlagToken]:
-        """A module-definition file for ``exported_symbols``.
-
-        MSVC exports by exact name, so a ``*`` pattern can't be honored and
-        is refused rather than silently exporting nothing.
-        """
+        """A module-definition file for ``exported_symbols``."""
         symbols = (
             target.get_option("exported_symbols")
             if hasattr(target, "get_option")
@@ -147,14 +150,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         )
         if not symbols or target.target_type not in ("shared_library", "program"):
             return []
-        patterns = [s for s in symbols if "*" in s or "?" in s]
-        if patterns:
-            raise ValueError(
-                f"Target '{target.name}': MSVC exports symbols by exact name, "
-                f"so the pattern {patterns[0]!r} in exported_symbols can't be "
-                f"honored. List the names."
-            )
-        text = "EXPORTS\n" + "".join(f"    {s}\n" for s in symbols)
+        text = module_definition(target, symbols)
         return [self._link_input_token(target, ".def", text, "/DEF:")]
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
@@ -277,7 +273,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
             exclusive_group="build_variant",
             contributions=tuple(
                 ToolContribution(tool, flags=("/MD",))
-                for tool in ("cc", "cxx")
+                for tool in self._feature_preset_tools()
                 if env.has_tool(tool)
             ),
         )
@@ -290,15 +286,32 @@ class MsvcCompatibleToolchain(BaseToolchain):
         if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
-                f"Supported variants: debug, release, release-fastest, "
-                f"relwithdebinfo, minsizerel."
+                f"Supported variants: {', '.join(self.MSVC_VARIANTS)}."
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
+        # Realized on the same compile tools as feature presets, so an
+        # MSVC-style Fortran compiler (ifx's fc) gets working variants too.
         contribs = [
-            ToolContribution("cc", flags=tuple(flags), defines=tuple(defines)),
-            ToolContribution("cxx", flags=tuple(flags), defines=tuple(defines)),
+            ToolContribution(tool, flags=tuple(flags), defines=tuple(defines))
+            for tool in self._feature_preset_tools()
         ]
         if "/Z7" in flags:
             contribs.append(ToolContribution("link", flags=("/DEBUG",)))
         return contribs
+
+
+def module_definition(target: Target, symbols: Sequence[str]) -> str:
+    """The ``.def`` file text exporting *symbols*, for an MSVC-ABI link.
+
+    MSVC exports by exact name, so a ``*`` pattern can't be honored and
+    is refused rather than silently exporting nothing.
+    """
+    patterns = [s for s in symbols if "*" in s or "?" in s]
+    if patterns:
+        raise ValueError(
+            f"Target '{target.name}': MSVC exports symbols by exact name, "
+            f"so the pattern {patterns[0]!r} in exported_symbols can't be "
+            f"honored. List the names."
+        )
+    return "EXPORTS\n" + "".join(f"    {s}\n" for s in symbols)

@@ -319,12 +319,14 @@ class TestCompileLinkContext:
 
         class _StubEnv:
             _toolchain = _StubToolchain()
+            _tool_owners: dict[str, object] = {}
 
             def has_tool(self, name: str) -> bool:
                 return False
 
         class _StubTarget:
             name = "foo"
+            intermediate_nodes: list[object] = []
 
         effective = EffectiveRequirements(link_flags=["-Wl,-soname,libfoo.so"])
         ctx = CompileLinkContext.from_effective_requirements(

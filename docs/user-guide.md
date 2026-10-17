@@ -189,6 +189,8 @@ IDE autocompletion for these names comes from the generated `KnownToolchain` typ
 - **Windows**: clang-cl → msvc → llvm → gcc
 - **Linux / macOS**: llvm → gcc
 
+**Default Fortran search order:** gfortran → flang → ifx
+
 ### Selecting compilers with environment variables
 
 Pcons honors the conventional tool-selection environment variables, same as
@@ -204,7 +206,7 @@ $ CXX=/opt/llvm/bin/clang++ pcons
 |----------|---------|------------|
 | `CC` | C compiler (and the link driver) | gcc, llvm, msvc, clang-cl |
 | `CXX` | C++ compiler | gcc, llvm, msvc, clang-cl |
-| `FC` | Fortran compiler | gfortran |
+| `FC` | Fortran compiler (and the link driver) | gfortran, flang, ifx |
 | `AR` | archiver | gcc, llvm, swift |
 | `SWIFTC` | Swift compiler | swift |
 | `CUDACXX` | CUDA compiler (nvcc) | cuda |
@@ -218,6 +220,8 @@ error. Specifically, the rules are as follows:
   named compiler's *family* — `CXX=g++-15` selects the gcc toolchain even
   where clang would normally win. Classification checks `--version`, so
   macOS's `g++`-that-is-really-Apple-clang is identified correctly.
+- With `toolchain="fortran"`, `$FC` does the same for Fortran:
+  `FC=flang-21` selects the flang toolchain.
 - An explicitly requested toolchain that *contradicts* the variable
   (`CXX=g++-15` with `toolchain="msvc"`) is an error.
 - Values a compiler-id can't classify (e.g. wrapper scripts) are used
@@ -311,12 +315,27 @@ env = project.Environment(toolchain="swift")
 env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
 ```
 
-**Fortran** (`gfortran`) is available as `toolchain="fortran"`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
+**Fortran** is available as `toolchain="fortran"`, which finds gfortran, LLVM's flang or Intel's ifx (`$FC` picks one; see above). Name one to require it: `toolchain="flang"`. All standard Fortran source extensions work. Modules and submodules are ordered at build time by Ninja dyndep (requires Ninja ≥ 1.10), so sources can be listed in any order:
 
 ```python
 env = project.Environment(toolchain="fortran")
 project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 ```
+
+The compilers differ in a few ways:
+
+- **flang** needs LLVM 21 or newer. It has no `-Os`, so `minsizerel` builds use `-O2`, and it has no `coverage` preset.
+- **ifx** needs the oneAPI environment: `source /opt/intel/oneapi/setvars.sh` on Linux, `setvars.bat` on Windows. On Linux it compiles position-independent code, so C and C++ drivers can link its objects. It has no `coverage` preset. It also rewrites every `.mod` file it compiles, even when nothing in it changed, so editing a module's implementation recompiles everything that uses the module. gfortran and flang only recompile those when the module's interface changes.
+- Each compiler realizes `warnings`, `werror`, `openmp` and `fast-math` with its own flags (ifx's `warnings` is `-warn all`).
+
+On Windows, each compiler mixes with the C and C++ compilers that share its ABI:
+
+- **gfortran** (MSYS2's MinGW build) is GNU-ABI, so it mixes only with MinGW's gcc and g++. Pure Fortran works with any setup.
+- **flang** and **ifx** are MSVC-ABI and mix with MSVC and clang-cl. They use the DLL C runtime (`/MD`, `/MDd` for debug), as pcons' MSVC builds do. ifx takes MSVC-style options (`/module:`, `/warn:all`) and links with `link.exe`. A program with ifx-compiled sources is linked as a console program (`/SUBSYSTEM:CONSOLE`), since its Fortran main is in Intel's runtime; a C++ `WinMain` program with Fortran sources sets `/SUBSYSTEM:WINDOWS` in `env.link.flags`. The official LLVM installer for Windows doesn't include flang; conda-forge's `flang` package does. Visual Studio's bundled LLVM has a `flang.exe` without its intrinsic modules, so pcons doesn't use it (and says why).
+
+A Windows DLL exports only what it's told to. flang ignores `!DIR$ ATTRIBUTES DLLEXPORT`, so a flang DLL exports nothing unless its routines are listed: give them `BIND(C)` and name them in `exported_symbols` (see [Exporting Only Some Symbols](#exporting-only-some-symbols)). A DLL that exports nothing has no import library, and a program linking it fails with "no such file" for its `.lib`. ifx honors the directive.
+
+`env.add_toolchain()` picks a toolchain with the same ABI as the environment's primary one: `"fortran"` beside MSVC or clang-cl finds flang or ifx, not gfortran, and `"c"` beside gfortran finds MinGW gcc. Naming an incompatible one (by name, or with `$FC`/`$CC`/`$CXX`) is an error that says which toolchains would fit. Only an environment's own toolchains have to match: a project can have a MinGW environment and an MSVC one side by side. For clang and flang, pcons asks the compiler (`-print-target-triple`), so MSYS2's clang64 clang and flang count as MinGW and LLVM's own builds as MSVC.
 
 **Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
 
@@ -325,7 +344,8 @@ project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 env = project.Environment(toolchain="fortran")
 env.add_toolchain("c")
 
-# C++ primary: g++/clang++ links, -lgfortran injected for Fortran objects
+# C++ primary: g++/clang++ links, with the Fortran compiler's runtime
+# (-lgfortran, flang's -lflang_rt.runtime, or ifx's -lifcoremt etc.)
 env = project.Environment(toolchain="c++")
 env.add_toolchain("fortran")
 
@@ -663,6 +683,8 @@ Each environment has namespaced tool configurations:
 - `env.cc` - C compiler settings
 - `env.cxx` - C++ compiler settings
 - `env.link` - Linker settings
+
+Each source compiles with its own tool's settings, even in a target that mixes languages: a `.c` file gets `env.cc.includes`, a `.cpp` file `env.cxx.includes`. For a path every source needs, set it on both, or on the target (`target.private.include_dirs`).
 
 Environments can be cloned and then the clone modified, to set up multiple variants; see [Environment Cloning](#environment-cloning).
 
@@ -2697,7 +2719,7 @@ The variables are written into the generated build file, in front of the one com
 
 ### Exporting Only Some Symbols
 
-Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file with MSVC and clang-cl.
+Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file for any MSVC-ABI link (MSVC, clang-cl, and clang or flang targeting the MSVC ABI).
 
 ```python
 plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])

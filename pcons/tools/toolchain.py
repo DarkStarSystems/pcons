@@ -70,7 +70,7 @@ def _cxx_set_standard(env: Environment, standard: int | str) -> None:
         for toolchain in env.toolchains:
             preset = toolchain.make_cxx_standard_preset(n)
             if preset is not None:
-                env.apply(preset)
+                env.apply_from(toolchain, preset)
 
 
 # =============================================================================
@@ -202,12 +202,20 @@ class AuxiliaryInputHandler:
 # =============================================================================
 
 
+def abi_compatible(abi: str | None, required: str | None) -> bool:
+    """Whether a toolchain with *abi* can join one requiring *required*:
+    equal tags, or either one undeclared (see BaseToolchain.abi)."""
+    return abi is None or required is None or abi == required
+
+
 @dataclass
 class _FinderEntry:
     """A registered auto-detection finder (see ToolchainRegistry.register_finder)."""
 
-    finder: Callable[[], BaseToolchain | None]
+    finder: Callable[..., BaseToolchain | None]
     description: str = ""
+    # Whether the finder takes ``abi=`` to choose among compatible toolchains.
+    takes_abi: bool = False
 
 
 @dataclass(frozen=True)
@@ -289,9 +297,10 @@ class ToolchainRegistry:
     def register_finder(
         self,
         names: Sequence[str],
-        finder: Callable[[], BaseToolchain | None],
+        finder: Callable[..., BaseToolchain | None],
         *,
         description: str = "",
+        takes_abi: bool = False,
     ) -> None:
         """Register an auto-detection finder under one or more names.
 
@@ -306,8 +315,13 @@ class ToolchainRegistry:
                 nothing suitable is available (resolve() turns that into an
                 error). May also raise with a descriptive message.
             description: Short human-readable description for listings.
+            takes_abi: The finder takes ``abi=``, to choose among the
+                toolchains compatible with an environment's (see
+                BaseToolchain.abi).
         """
-        entry = _FinderEntry(finder=finder, description=description)
+        entry = _FinderEntry(
+            finder=finder, description=description, takes_abi=takes_abi
+        )
         for name in names:
             self._finders[name.lower()] = entry
 
@@ -327,7 +341,9 @@ class ToolchainRegistry:
             names[name] = f_entry.description
         return dict(sorted(names.items()))
 
-    def resolve(self, spec: str | Sequence[str]) -> BaseToolchain:
+    def resolve(
+        self, spec: str | Sequence[str], *, abi: str | None = None
+    ) -> BaseToolchain:
         """Resolve a toolchain name (or preference list) to a toolchain.
 
         A single string is either a finder name ("c", "fortran", ...) for
@@ -337,21 +353,26 @@ class ToolchainRegistry:
 
         Args:
             spec: Toolchain name, or a preference-ordered list of names.
+            abi: The ABI the toolchain must be compatible with (see
+                BaseToolchain.abi). A finder picks among the compatible
+                toolchains; a name that resolves to an incompatible one
+                is an error.
 
         Returns:
             A configured toolchain ready for use.
 
         Raises:
             ValueError: If a name is unknown (lists all known names).
-            RuntimeError: If the named toolchain(s) are not available.
+            RuntimeError: If the named toolchain(s) are not available, or
+                not compatible with *abi*.
         """
         if isinstance(spec, str):
-            return self._resolve_one(spec)
+            return self._resolve_one(spec, abi)
 
         errors: list[str] = []
         for name in spec:
             try:
-                return self._resolve_one(name)
+                return self._resolve_one(name, abi)
             except (RuntimeError, ValueError) as e:
                 errors.append(f"{name}: {e}")
         raise RuntimeError(
@@ -359,14 +380,35 @@ class ToolchainRegistry:
             f"{list(spec)}:\n  " + "\n  ".join(errors)
         )
 
-    def _resolve_one(self, name: str) -> BaseToolchain:
+    def _resolve_one(self, name: str, abi: str | None = None) -> BaseToolchain:
+        toolchain = self._find_one(name, abi)
+        if not abi_compatible(toolchain.abi, abi):
+            category = self._category_of(toolchain)
+            compatible = self.names_with_abi(category, abi) if category else []
+            raise RuntimeError(
+                f"Toolchain '{name}' ({toolchain.name}) follows the "
+                f"'{toolchain.abi}' ABI, not the '{abi}' one required here: "
+                f"their objects can't be linked together."
+                + (
+                    f" Compatible {category} toolchains: {', '.join(compatible)}."
+                    if compatible
+                    else ""
+                )
+            )
+        return toolchain
+
+    def _find_one(self, name: str, abi: str | None) -> BaseToolchain:
         key = name.lower()
         if key not in self._finders and key not in self._toolchains:
             self._materialize(key)
 
         finder = self._finders.get(key)
         if finder is not None:
-            toolchain = finder.finder()
+            toolchain = (
+                finder.finder(abi=abi)
+                if finder.takes_abi and abi is not None
+                else finder.finder()
+            )
             if toolchain is None:
                 raise RuntimeError(f"No '{name}' toolchain found on this system")
             return toolchain
@@ -442,12 +484,15 @@ class ToolchainRegistry:
         self,
         category: str,
         prefer: list[str] | None = None,
+        abi: str | None = None,
     ) -> BaseToolchain | None:
         """Find the first available toolchain in a category.
 
         Args:
             category: Category to search (e.g., "c").
             prefer: Ordered list of toolchain names to try first.
+            abi: Only toolchains compatible with this ABI qualify (see
+                BaseToolchain.abi).
 
         Returns:
             A configured toolchain, or None if none available.
@@ -477,11 +522,48 @@ class ToolchainRegistry:
         # Try each entry
         for entry in entries_to_try:
             if entry.is_available is not None:
-                if entry.is_available():
-                    return entry.create_toolchain()
-            elif shutil.which(entry.check_command) is not None:
-                return entry.create_toolchain()
+                available = entry.is_available()
+            else:
+                available = shutil.which(entry.check_command) is not None
+            if available:
+                toolchain = entry.create_toolchain()
+                if abi_compatible(toolchain.abi, abi):
+                    return toolchain
 
+        return None
+
+    def no_compatible_toolchain(
+        self, category: str, label: str, abi: str, tried: list[str]
+    ) -> RuntimeError:
+        """The error for finding no *category* toolchain compatible with
+        *abi*, naming the ones that would be."""
+        compatible = self.names_with_abi(category, abi)
+        return RuntimeError(
+            f"No {label} toolchain compatible with the '{abi}' ABI found. "
+            f"Tried: {', '.join(tried)}. Install one that is"
+            + (f" ({', '.join(compatible)})" if compatible else "")
+            + ", and put it on PATH."
+        )
+
+    def names_with_abi(self, category: str, abi: str | None) -> list[str]:
+        """The registered *category* toolchains compatible with *abi*, by
+        their first alias: what to suggest when one doesn't match."""
+        self._materialize_category(category)
+        names: list[str] = []
+        seen: set[type] = set()
+        for entry in self._toolchains.values():
+            if entry.category != category or entry.toolchain_class in seen:
+                continue
+            seen.add(entry.toolchain_class)
+            if abi_compatible(entry.create_toolchain().abi, abi):
+                names.append(entry.aliases[0])
+        return names
+
+    def _category_of(self, toolchain: BaseToolchain) -> str | None:
+        """The registered category of *toolchain*'s class, if any."""
+        for entry in self._toolchains.values():
+            if entry.toolchain_class is type(toolchain):
+                return entry.category
         return None
 
     def get_tried_names(
@@ -581,6 +663,12 @@ class Toolchain(Protocol):
         """
         ...
 
+    @property
+    def abi(self) -> str | None:
+        """Which binary interface this toolchain's objects follow, as an
+        opaque tag (see BaseToolchain.abi)."""
+        ...
+
     def configure(self, config: object) -> bool:
         """Configure all tools in this toolchain.
 
@@ -607,6 +695,10 @@ class Toolchain(Protocol):
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release"); each toolchain
         defines its own semantics."""
+        ...
+
+    def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
+        """Build the Preset that apply_variant() applies."""
         ...
 
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
@@ -824,6 +916,11 @@ class BaseToolchain(ABC):
     # the Environment typing stub.
     TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
 
+    # The command-line conventions of this toolchain's link flags: "gnu" (a
+    # gcc-style driver) or "msvc" (link.exe). A toolchain that compiled a
+    # target's objects adds its link flags to a link tool of the same style.
+    LINKER_STYLE: ClassVar[str | None] = None
+
     # Default language priorities (higher = stronger).
     # Fortran is NOT listed here so that C/C++ toolchains don't claim
     # priority over Fortran objects. GfortranToolchain overrides this
@@ -858,6 +955,19 @@ class BaseToolchain(ABC):
     def language_priority(self) -> dict[str, int]:
         """Override in subclasses if needed."""
         return self.DEFAULT_LANGUAGE_PRIORITY
+
+    @property
+    def abi(self) -> str | None:
+        """Which binary interface this toolchain's objects follow.
+
+        An opaque tag: toolchains whose objects link together share one
+        (on Windows, "msvc" for MSVC, clang-cl, flang and ifx; "mingw" for
+        gcc and gfortran). Only equality matters, and None — the default —
+        means "links with anything", so a toolchain that never meets an
+        incompatible one needs no tag. A toolchain added to an environment
+        must match the environment's primary one (Environment.add_toolchain).
+        """
+        return None
 
     def configure(self, config: object) -> bool:
         """Configure all tools.
@@ -901,9 +1011,9 @@ class BaseToolchain(ABC):
     # The apply_*() methods are thin wrappers kept for call-site readability.
     # =========================================================================
 
-    # Compiler family this toolchain's cc/cxx belong to ("gcc", "llvm",
-    # "msvc", "clang-cl"), used to validate $CC/$CXX overrides. None skips
-    # validation.
+    # Compiler family this toolchain's compilers belong to ("gcc", "llvm",
+    # "msvc", "clang-cl", "gfortran", ...), used to validate $CC/$CXX/$FC
+    # overrides. None skips validation.
     ENV_COMPILER_FAMILY: str | None = None
 
     def setup_presets(self, env: Environment) -> list[Preset]:
@@ -934,7 +1044,7 @@ class BaseToolchain(ABC):
             path = resolve_env_cmd_override(var)
             if path is None:
                 continue
-            if var in ("CC", "CXX"):
+            if var in ("CC", "CXX", "FC"):
                 self._validate_compiler_override(var, path)
             presets.append(
                 Preset(
@@ -948,7 +1058,7 @@ class BaseToolchain(ABC):
         return presets
 
     def _validate_compiler_override(self, var: str, path: str) -> None:
-        """Reject a $CC/$CXX override from a different compiler family.
+        """Reject a compiler override from a different compiler family.
 
         The user asked for two contradictory things (e.g. ``CXX=g++-15``
         with ``toolchain="msvc"``); applying one silently would misbuild.
@@ -965,13 +1075,13 @@ class BaseToolchain(ABC):
                 f"${var} is set to '{path}', which is a {family}-family "
                 f"compiler, but the requested toolchain is '{self.name}' "
                 f"({expected} family). Unset ${var} or use the matching "
-                f"toolchain (e.g. toolchain=\"{family}\" or the 'c' "
-                f"auto-detector, which follows ${var})."
+                f'toolchain (e.g. toolchain="{family}", or auto-detection, '
+                f"which follows ${var})."
             )
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release") to the environment."""
-        env.apply(self.make_variant_preset(variant, **kwargs))
+        env.apply_from(self, self.make_variant_preset(variant, **kwargs))
 
     def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
         """Build a variant Preset. Base contributes no flags."""
@@ -1002,7 +1112,9 @@ class BaseToolchain(ABC):
         contribs = tuple(self._arch_contributions(arch))
         if not contribs:
             return False
-        env.apply(Preset(name=arch, category="arch", arch=arch, contributions=contribs))
+        env.apply_from(
+            self, Preset(name=arch, category="arch", arch=arch, contributions=contribs)
+        )
         return True
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
@@ -1015,7 +1127,7 @@ class BaseToolchain(ABC):
         if preset is None:
             logger.warning("Unknown preset '%s' for toolchain '%s'", name, self.name)
             return
-        env.apply(preset)
+        env.apply_from(self, preset)
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
         """Build a C++-standard Preset, or None if this toolchain has no C++.
@@ -1084,7 +1196,7 @@ class BaseToolchain(ABC):
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross-compilation target preset (a CrossPreset)."""
-        env.apply(self.make_target_preset(preset))
+        env.apply_from(self, self.make_target_preset(preset))
 
     def make_target_preset(self, cross: Any) -> Preset:
         """Convert a CrossPreset descriptor into a Preset."""

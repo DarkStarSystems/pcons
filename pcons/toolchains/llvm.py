@@ -386,6 +386,22 @@ class LlvmToolchain(UnixToolchain):
     """
 
     ENV_COMPILER_FAMILY = "llvm"
+    # Clang's default target on Windows, unless its triple says otherwise
+    # (MSYS2's clang64 targets MinGW).
+    WINDOWS_ABI = "msvc"
+
+    def _abi_probe_compiler(self) -> str | None:
+        """$CXX or $CC when set, as for the compilers that will build;
+        else clang on PATH."""
+        import shutil
+
+        from pcons.tools.tool import resolve_env_cmd_override
+
+        for var in ("CXX", "CC"):
+            override = resolve_env_cmd_override(var)
+            if override is not None:
+                return override
+        return shutil.which("clang")
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
 

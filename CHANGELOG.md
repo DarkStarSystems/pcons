@@ -7,7 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- LLVM flang (21 or newer) and Intel ifx join gfortran as Fortran
+  toolchains: `toolchain="flang"` or `"ifx"`, or `toolchain="fortran"` to
+  find whichever is installed (gfortran first). `$FC` steers that choice,
+  like `$CC`/`$CXX` for C/C++. Mixed C++/Fortran builds link each
+  compiler's own runtime.
+- Fortran builds on Windows, with all three compilers: MinGW gfortran,
+  and flang and ifx (MSVC ABI, so they mix with MSVC and clang-cl C++).
+- A flang that can't find its intrinsic modules (Visual Studio's bundled
+  `flang.exe`) doesn't count as available; pcons warns and looks further.
+- `env.add_toolchain()` picks a toolchain whose ABI matches the
+  environment's primary one: on Windows, `"fortran"` beside MSVC or
+  clang-cl finds flang or ifx rather than MinGW gfortran, and `"c"` beside
+  gfortran finds MinGW gcc. An incompatible toolchain, named or chosen
+  with `$FC`/`$CC`/`$CXX`, is an error naming the ones that would fit.
+  Toolchains declare their ABI with the `abi` property; undeclared (None)
+  matches anything. clang and flang report theirs from their target
+  triple, so MSYS2's clang64 compilers count as MinGW.
+
 ### Fixed
+
+- Fortran submodules are compiled after the module (or submodule) they
+  extend. Before, nothing ordered them, and a separate module procedure
+  with a prefix (`module pure function f()`) was read as a module named
+  `pure`.
+- In a target with both C and C++ sources, each source now gets its own
+  compiler's environment includes and defines: `env.cc.includes` for C,
+  `env.cxx.includes` for C++. Before, every source got one compiler's,
+  and which one depended on internal ordering. **This can break a build
+  that set a path on only one of them and worked by luck:** set it on
+  both, or on the target (`target.private.include_dirs`), which applies to
+  every source.
+- A toolchain added with `add_toolchain()` after `set_variant()` now gets
+  that variant for its tools; before, they kept the toolchain's defaults
+  (no `-O0 -g` for an added CUDA or Fortran compiler under `debug`).
+- `set_variant()` on an environment with two toolchains applied only the
+  last one's flags: with C++ and Fortran together, `debug` left the C++
+  compiles without `-O0 -g`.
+- A Fortran-primary environment no longer compiles C and C++ sources
+  itself (GNU-style, even beside clang-cl); the C/C++ toolchain added to
+  it does.
+- `$FC` (or any other variable a toolchain added with `add_toolchain()`
+  honors) no longer replaces the primary toolchain's tools: with C++
+  primary and Fortran added, `FC=gfortran-15` changed the link driver to
+  gfortran.
+- A toolchain's variant, feature, C++-standard and cross-target flags now
+  reach only the tools it brought into the environment. Before, on Windows
+  with flang primary and clang-cl added, `set_variant("debug")` handed
+  flang's link driver link.exe's `/DEBUG`, which flang read as a file.
+- A shared library linked by clang or flang for the MSVC ABI comes with
+  its import library (`foo.lib`), and that is what targets linking it
+  take. Before, they were given `foo.dll`, which link.exe rejects
+  (LNK1107). `exported_symbols` now works for these links too, as a
+  `.def` file; before, it only warned.
+- A Fortran source added with `add_sources(env=...)` writes its modules
+  to that environment's module directory, which pcons now creates, and the
+  build's dependency scan looks for them there. Before, the scan assumed
+  the target's own directory.
 
 - The gcc toolchain archives with `gcc-ar` instead of `ar`, so static
   libraries built with the `lto` preset get a symbol index even when

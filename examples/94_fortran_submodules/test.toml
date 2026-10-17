@@ -1,0 +1,47 @@
+# Test configuration for the fortran_submodules example
+
+[test]
+description = "Demonstrates Fortran submodules, nested, compiled in dependency order"
+
+expected_outputs = [
+    "build/obj.circles/src/circle.f90.o",
+    "build/obj.circles/src/circle_math.f90.o",
+    "build/obj.circles/src/circle_format.f90.o",
+    "build/circles",
+]
+
+[verify]
+commands = [
+    { run = "./build/circles", expect_stdout = "Circle area: 12.57" },
+]
+
+[skip]
+requires_toolchains = ["fortran"]
+# Xcode generator does not support Fortran
+# Make generator doesn't support Ninja dyndep for Fortran module ordering
+generators = ["xcode", "make"]
+
+# A submodule sees its parent's private entities, which gfortran keeps out
+# of circle.mod (so main.f90 needn't recompile) and puts in circle.smod.
+[[rebuild]]
+description = "Changing the parent's private pi recompiles the submodule that uses it"
+write."src/circle.f90" = """
+MODULE circle
+  IMPLICIT NONE
+  PRIVATE :: pi
+  REAL, PARAMETER :: pi = 3.0
+  INTERFACE
+    MODULE PURE FUNCTION area(r) RESULT(a)
+      REAL, INTENT(IN) :: r
+      REAL :: a
+    END FUNCTION area
+    MODULE FUNCTION describe(r) RESULT(text)
+      REAL, INTENT(IN) :: r
+      CHARACTER(LEN=40) :: text
+    END FUNCTION describe
+  END INTERFACE
+END MODULE circle
+"""
+expect_rebuild = ["obj.circles/src/circle_math.f90.o", "circles"]
+run = "./build/circles"
+expect_stdout = "Circle area: 12.00"

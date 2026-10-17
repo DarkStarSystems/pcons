@@ -145,7 +145,7 @@ jobs:
   test-examples-windows:
     name: "test examples (windows-latest, ${{ matrix.python-version }})"
     needs: lint
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -175,7 +175,7 @@ jobs:
           key: conan2-${{ runner.os }}-${{ hashFiles('examples/**/conanfile.*') }}
           restore-keys: conan2-${{ runner.os }}-
       - name: Run example tests
-        run: uv run pytest tests/test_examples.py -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
+        run: uv run pytest tests/test_examples.py -n auto --durations=20 --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
@@ -261,6 +261,57 @@ jobs:
         run: echo "::warning::swiftc not found on ${{ matrix.os }} runner image; Swift example tests skipped"
       - name: Upload coverage to Codecov
         if: steps.verify-swift.outcome == 'success'
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  test-fortran:
+    name: "test fortran examples (${{ matrix.compiler }})"
+    # gfortran is on every Linux and macOS runner, so the test job covers
+    # it; these build the same examples with the other Fortran compilers,
+    # selected through $FC.
+    needs: lint
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [flang, ifx]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "latest"
+      - name: Install flang
+        if: matrix.compiler == 'flang'
+        # apt.llvm.org's packages, not Ubuntu's: Ubuntu's flang lacks its
+        # runtime library, so nothing links.
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q flang-21 libflang-21-dev
+          echo "FC=/usr/bin/flang-21" >> "$GITHUB_ENV"
+      - name: Install ifx
+        if: matrix.compiler == 'ifx'
+        run: |
+          curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | sudo gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q intel-oneapi-compiler-fortran
+          # ifx and its runtime are found through the oneAPI environment.
+          source /opt/intel/oneapi/setvars.sh
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "FC=ifx" >> "$GITHUB_ENV"
+      - name: Show compiler version
+        run: $FC --version
+      - name: Install dependencies
+        run: uv sync
+      - name: Run Fortran example and toolchain tests
+        run: uv run pytest -n auto --cov=pcons --cov-report=xml -v -rs -k "fortran" tests/test_examples.py tests/toolchains/test_fortran_compilers.py
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage.xml
@@ -688,7 +739,7 @@ jobs:
     # whatever the platform — a rolling :latest canary included; if one
     # breaks for upstream reasons, fixing or consciously skipping it is
     # part of cutting the release.
-    needs: [docs, test, test-examples-windows, test-fedora, test-swift, test-qt, test-wasm, test-msvcup, test-cxx-modules, test-rez]
+    needs: [docs, test, test-examples-windows, test-fedora, test-swift, test-fortran, test-qt, test-wasm, test-msvcup, test-cxx-modules, test-rez]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

@@ -257,15 +257,26 @@ class CompileLinkFactory:
             )
 
         # Sources added with add_sources(..., env=...) compile with their own
-        # environment; everything else uses the target's. Requirements are
-        # computed once per distinct environment.
-        requirements: dict[int, EffectiveRequirements] = {}
+        # environment; everything else uses the target's. Each source's
+        # requirements start from its own tool's environment settings (a C
+        # source gets env.cc's includes, not env.cxx's), and are computed
+        # once per environment, tool and compiling toolchain.
+        requirements: dict[tuple[int, str | None, int], EffectiveRequirements] = {}
 
-        def effective_for(source_env: Environment) -> EffectiveRequirements:
-            cached = requirements.get(id(source_env))
+        def effective_for(
+            source_env: Environment,
+            found: tuple[SourceHandler, Toolchain] | None = None,
+        ) -> EffectiveRequirements:
+            tool_name, toolchain = (
+                (found[0].tool_name, found[1]) if found else (None, None)
+            )
+            key = (id(source_env), tool_name, id(toolchain))
+            cached = requirements.get(key)
             if cached is None:
-                cached = self._compute_requirements(target, source_env)
-                requirements[id(source_env)] = cached
+                cached = self._compute_requirements(
+                    target, source_env, tool_name, toolchain
+                )
+                requirements[key] = cached
             return cached
 
         effective = effective_for(env)
@@ -314,7 +325,10 @@ class CompileLinkFactory:
                     continue
 
                 obj_node = self._create_object_node(
-                    target, source, effective_for(source_env), source_env
+                    target,
+                    source,
+                    effective_for(source_env, found),
+                    source_env,
                 )
                 if obj_node:
                     target.intermediate_nodes.append(obj_node)
@@ -322,7 +336,12 @@ class CompileLinkFactory:
 
         for handler, toolchain, group_env, sources in grouped.values():
             obj_node = self._create_grouped_object_node(
-                target, sources, handler, toolchain, effective_for(group_env), group_env
+                target,
+                sources,
+                handler,
+                toolchain,
+                effective_for(group_env, (handler, toolchain)),
+                group_env,
             )
             target.intermediate_nodes.append(obj_node)
             trace(
@@ -354,25 +373,34 @@ class CompileLinkFactory:
             trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
 
     def _compute_requirements(
-        self, target: Target, env: Environment
+        self,
+        target: Target,
+        env: Environment,
+        tool_name: str | None = None,
+        compiling_toolchain: Toolchain | None = None,
     ) -> EffectiveRequirements:
-        """Effective compile requirements for *target* under *env*.
+        """Effective compile requirements for a source of *target* that
+        *tool_name* compiles under *env*, on *compiling_toolchain*.
 
         The target's own requirements and its dependencies' are the same
-        whichever environment a given source compiles with; only the
-        environment layer differs (see ``add_sources(..., env=...)``).
+        whichever environment and tool a given source compiles with; only
+        the environment layer differs (see ``add_sources(..., env=...)``).
         """
-        effective = compute_effective_requirements(target, env, for_compilation=True)
+        effective = compute_effective_requirements(
+            target, env, for_compilation=True, tool_name=tool_name
+        )
 
-        # Target-type compile flags (e.g. -fPIC for shared libs on Linux)
-        toolchain = env._toolchain
-        if toolchain is not None and target.target_type is not None:
-            target_type_flags = toolchain.get_compile_flags_for_target_type(
-                str(target.target_type), env=env
-            )
-            for flag in target_type_flags:
-                if flag not in effective.compile_flags:
-                    effective.compile_flags.append(flag)
+        # Target-type compile flags (e.g. -fPIC for shared libs on Linux):
+        # the environment's toolchain's, plus what a toolchain added beside
+        # it needs for its own sources (ifx's -fPIE in a C++ program).
+        if target.target_type is not None:
+            toolchains = [env._toolchain, compiling_toolchain]
+            for toolchain in dict.fromkeys(t for t in toolchains if t is not None):
+                for flag in toolchain.get_compile_flags_for_target_type(
+                    str(target.target_type), env=env
+                ):
+                    if flag not in effective.compile_flags:
+                        effective.compile_flags.append(flag)
 
         return effective
 
@@ -507,13 +535,14 @@ class CompileLinkFactory:
         compiler command with the same effective requirements, the same object
         node is reused.
         """
-        handler = self._get_source_handler(source.path, env)
-        if handler is None:
+        found = self._get_source_handler_with_toolchain(source.path, env)
+        if found is None:
             if _is_linker_passthrough(source.path):
                 # A prebuilt object, library or linker script: not compiled,
                 # but a legitimate input to the link step.
                 return source
             raise _unhandled_source_error(target, source.path, env)
+        handler, toolchain = found
 
         tool_name = handler.tool_name
         language = handler.language
@@ -563,6 +592,7 @@ class CompileLinkFactory:
             "context": context,
             "env": env,
             "producer": target,
+            "toolchain": toolchain,
         }
 
         self._object_cache[cache_key] = obj_node
@@ -631,6 +661,7 @@ class CompileLinkFactory:
             "context": context,
             "env": env,
             "producer": target,
+            "toolchain": toolchain,
         }
 
         toolchain.setup_group_node(obj_node, target, env)
