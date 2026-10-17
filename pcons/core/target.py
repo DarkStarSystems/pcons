@@ -1386,10 +1386,12 @@ class Target:
             result.merge(dep.public)
 
     def get_all_languages(self) -> set[str]:
-        """The languages linked into this target (e.g. {'c', 'cxx'}), which
-        pick the linker: its own, those of the targets whose outputs are its
-        sources, and those of the libraries it links, all the way down. A
-        depends() target is built first but not linked, so it has no say.
+        """The languages of this target and everything it links (e.g.
+        {'c', 'cxx'}): its own, those of the targets whose outputs are its
+        sources, and those of the libraries it links, all the way down,
+        shared ones included. A depends() target is built first but not
+        linked, so it has no say. (The link itself counts only what it pulls
+        in: static libraries, not shared ones.)
         """
         languages = set(self.required_languages)
         visited: set[str] = {self.qualified_name}

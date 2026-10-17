@@ -18,7 +18,13 @@ from the plan as written:
   Fortran toolchain knows; a GNU-style Fortran driver still knows it, for
   an imported C++ package with no C++ toolchain beside it.
 - ifx on Linux keeps `main` in its runtime, so a Fortran main program with
-  C++ sources sets `link_language = "fortran"` (example 27 does). Stacks on PR #221
+  C or C++ sources sets `link_language = "fortran"` (example 27 does).
+- D2's order became Meson's (C++, then C, then Fortran) after review: with
+  Fortran above C, a Fortran driver linked C objects built with
+  `sanitize` or `coverage` whose runtimes it can't supply.
+- A toolchain left out of a preset by `allow_partial` doesn't take over a
+  link, and `add_toolchain()` and `set_target_arch()` check everything
+  before changing anything. Stacks on PR #221
 (`fortran-compilers`) until that merges.
 
 An environment can hold several toolchains: gcc with gfortran, clang-cl

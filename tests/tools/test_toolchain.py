@@ -179,11 +179,11 @@ class TestNamingFollowsTheTarget:
 
 class TestLinkLanguageOrder:
     def test_one_order_whichever_toolchain_is_primary(self):
-        """C++ over Fortran over C (CMake's order); Swift's and CUDA's
-        drivers lead any link they're in."""
+        """C++ over C over Fortran (Meson's order): a C or C++ driver takes
+        the Fortran runtime as libraries."""
         from pcons.tools.toolchain import link_language_rank
 
-        order = ["c", "objc", "fortran", "cxx", "objcxx", "cuda", "swift"]
+        order = ["fortran", "c", "objc", "cxx", "objcxx", "cuda", "swift"]
         ranks = [link_language_rank(lang) for lang in order]
         assert ranks == sorted(ranks) and len(set(ranks)) == len(ranks)
         assert link_language_rank("cobol") == 0

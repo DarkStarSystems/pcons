@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
 from pcons.toolchains.fortran import (
@@ -17,6 +18,7 @@ from pcons.tools.toolchain import LinkNeeds
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+    from pcons.core.preset import Preset
     from pcons.core.target import Target
 
 _GCC_HARDENED = UnixToolchain.FEATURE_PRESETS["hardened"]
@@ -86,15 +88,23 @@ class GfortranToolchain(FortranToolchain):
             and link_language != "fortran"
             and env.feature_realized("coverage", self)
         ):
-            needs = needs | LinkNeeds(libs=("gcov",))
+            libdirs = (self.gcov_libdir,) if self.gcov_libdir else ()
+            needs = needs | LinkNeeds(libs=("gcov",), libdirs=libdirs)
         return needs
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross preset, requiring a cross gfortran for a triple."""
+    @cached_property
+    def gcov_libdir(self) -> str | None:
+        """Where gfortran's libgcov is: under its own GCC's directory, where
+        another driver doesn't look (Homebrew's lib/gcc/current/gcc/...)."""
+        exe = self.compiler_path
+        return self._library_dir(exe, "libgcov.a") if exe else None
+
+    def make_target_preset(self, cross: Any) -> Preset:
+        """A cross preset, requiring a cross gfortran for a triple."""
         require_cross_binaries(
-            preset, "gfortran", ("fc",), "fc={triple}-gfortran", "flang"
+            cross, "gfortran", ("fc",), "fc={triple}-gfortran", "flang"
         )
-        super().apply_cross_preset(env, preset)
+        return super().make_target_preset(cross)
 
 
 # =============================================================================

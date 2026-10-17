@@ -45,19 +45,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `lto`, `hardened`, `pthread`, `profile`). ifx gains `sanitize` (address
   only), `profile`, `hardened` and, on Linux, `lto` and `pthread`. Swift
   gains `sanitize`, `lto`, `coverage` and `hardened`, and CUDA has a table
-  of its own on `nvcc`. flang's `warnings` is now a deliberate no-op, since
+  of its own on `nvcc` (no `lto`, so `lto` beside CUDA raises). flang's `warnings` is now a deliberate no-op, since
   its `-Wall` did nothing but warn, and it gains `lto` and `pthread`.
 - **A program is linked by the driver of its strongest language, in one
-  order for every environment: C++, then Fortran, then C** (Swift and CUDA
-  lead any link they're in). So with gfortran primary and gcc added, a
-  program with C++ objects now links with `g++` and the Fortran runtime,
-  as it does with gcc primary; before, it was `gfortran` and `-lstdc++`.
-  A Fortran-only program in a C++ environment links with the Fortran
-  compiler, with its own flags for the variant and presets (ifx's
-  `-qopenmp`, not gcc's `-fopenmp`). `target.link_language =
-  "fortran"` picks the driver for one target, like CMake's
-  `LINKER_LANGUAGE`: an ifx Fortran main program with C++ helpers needs
-  it, since ifx's `main` is in its runtime.
+  order for every environment: C++, then C, then Fortran** (Meson's
+  order), since a C or C++ driver can take the Fortran runtime as
+  libraries. So with gfortran primary and gcc added, a program with C++
+  objects now links with `g++` and the Fortran runtime, as it does with
+  gcc primary; before, it was `gfortran` and `-lstdc++`. A Fortran-only
+  program in a C or C++ environment links with the Fortran compiler, with
+  its own flags for the variant and presets (ifx's `-qopenmp`, not gcc's
+  `-fopenmp`). `target.link_language = "fortran"` picks the driver for one
+  target, like CMake's `LINKER_LANGUAGE`: an ifx Fortran main program with
+  C or C++ helpers needs it, since ifx's `main` is in its runtime.
 - A shared library no longer counts toward the link language: it's
   linked already, with its own runtime, so a C program linking only a C++
   shared library links with the C driver. Static libraries count, as in
@@ -111,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fc`), and with gfortran a preset needs a cross gfortran in its
   `tool_cmds`. Before, Fortran sources were silently built for the host.
   `set_target_arch()` with gfortran, flang, Swift or Linux ifx is an
-  error, since none of them retargets the CPU by flag.
+  error, since none of them retargets the CPU by flag, and so is one other
+  than the host's with CUDA.
 - A CUDA shared library on Linux compiles with nvcc's own
   `-Xcompiler=-fPIC`, not gcc's bare `-fPIC`, which nvcc rejects.
 - clang and flang targeting the MSVC ABI write a PDB for a debug build:

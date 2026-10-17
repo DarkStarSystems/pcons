@@ -250,3 +250,100 @@ def test_an_arch_one_compiler_cant_build_for_raises(tmp_path, monkeypatch) -> No
     _add(env, "llvm")
     with pytest.raises(ValueError, match="swift can't build for target arch"):
         env.set_target_arch("x86_64")
+
+
+# =============================================================================
+# From the review of the redesign
+# =============================================================================
+
+
+def test_a_failed_add_toolchain_changes_nothing(tmp_path) -> None:
+    """flang can't take sanitize: adding it raises before it registers or
+    configures anything, so a script can try another compiler."""
+    env = _env(tmp_path, "llvm")
+    env.apply_preset("sanitize")
+    tools = set(env.tool_names())
+    with pytest.raises(ValueError, match="'sanitize' isn't available with flang"):
+        _add(env, "flang")
+    assert [t.name for t in env.toolchains] == ["llvm"]
+    assert set(env.tool_names()) == tools
+    _add(env, "gfortran")  # which can
+    assert any("-fsanitize" in str(f) for f in env.fc.flags)
+
+
+def test_a_refused_cross_target_changes_nothing(tmp_path) -> None:
+    env = _env(tmp_path, "llvm")
+    env.apply_cross_preset(linux_cross("aarch64-linux-gnu"))
+    with pytest.raises(ValueError, match="selects targets by binary"):
+        _add(env, "gfortran")
+    assert not env.has_tool("fc")
+
+
+def test_set_target_arch_changes_nothing_when_it_raises(tmp_path, monkeypatch) -> None:
+    mac = platform_mod.Platform(
+        os="darwin",
+        arch="arm64",
+        is_64bit=True,
+        exe_suffix="",
+        shared_lib_suffix=".dylib",
+        shared_lib_prefix="lib",
+        static_lib_suffix=".a",
+        static_lib_prefix="lib",
+        object_suffix=".o",
+    )
+    monkeypatch.setattr(platform_mod, "_platform", mac)
+    env = _env(tmp_path, "llvm")
+    _add(env, "gfortran")
+    with pytest.raises(ValueError, match="cannot retarget"):
+        env.set_target_arch("x86_64")
+    assert "-arch" not in env.cc.flags
+    assert env.get("target_arch") is None
+
+
+def test_cuda_builds_for_the_host_arch(tmp_path) -> None:
+    """nvcc builds for the host CPU, so the host's arch is a no-op and
+    another one an error."""
+    env = _env(tmp_path, "gcc")
+    _add(env, "cuda")
+    with pytest.raises(ValueError, match="cannot retarget|can't build"):
+        env.set_target_arch("arm64")
+    from pcons.toolchains.cuda import CudaToolchain
+
+    assert CudaToolchain().make_arch_preset("x64") is not None  # host: x86_64
+
+
+def test_a_preset_whose_flags_all_land_on_others_tools_raises(tmp_path) -> None:
+    from pcons.core import preset as preset_mod
+    from pcons.core.preset import ToolContribution, register_preset
+
+    def resolve(toolchain):
+        if toolchain.name != "gfortran":
+            return None
+        return [ToolContribution("link", flags=("-static-libgfortran",))]
+
+    register_preset("test/static-fortran", resolve)
+    try:
+        env = _env(tmp_path, "llvm")
+        _add(env, "gfortran")
+        with pytest.raises(ValueError, match="would have no effect"):
+            env.apply_preset("test/static-fortran")
+    finally:
+        preset_mod._PRESET_REGISTRY.pop("test/static-fortran")
+
+
+def test_add_toolchain_keeps_a_group_preset_applied_directly(tmp_path) -> None:
+    from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
+
+    env = _env(tmp_path, "gcc")
+    env.set_variant("release")  # replayed for gfortran when it's added
+    env.apply(
+        Preset(
+            name="fastbuild",
+            category="variant",
+            exclusive_group=VARIANT_GROUP,
+            contributions=(ToolContribution("cxx", flags=("-O1",)),),
+        )
+    )
+    _add(env, "gfortran")
+    assert "-O1" in env.cxx.flags
+    assert env.variant == "fastbuild"

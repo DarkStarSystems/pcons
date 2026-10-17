@@ -253,12 +253,17 @@ def _link_driver(
     link_cmd = env.link.get("cmd") if env.has_tool("link") else None
     if link_cmd is None or link_cmd not in drivers:
         return ranked[0], owner, None
+    # A toolchain a preset left out (allow_partial) would link without that
+    # preset's runtime, which the other objects need: the owner links.
+    left_out = {name for _, name in env._partial_presets}
     for language in ranked:
         compiler = compiled_by.get(language) or next(
             (tc for tc in env.toolchains if _compiles(tc, language)), None
         )
         for toolchain in dict.fromkeys(t for t in (compiler, owner) if t is not None):
-            if toolchain is not owner and not _reads_link_command(toolchain, env):
+            if toolchain is not owner and (
+                toolchain.name in left_out or not _reads_link_command(toolchain, env)
+            ):
                 continue
             cmd = toolchain.link_driver(language, env)
             if cmd:
@@ -529,6 +534,15 @@ class CompileLinkFactory:
         for toolchain in env.toolchains:
             handler = toolchain.get_source_handler(source.suffix)
             if handler is not None and env.has_tool(handler.tool_name):
+                # The compiler's own toolchain, when it's another one that
+                # handles the source too: Swift inherits C++ handlers, but
+                # beside clang, clang's cxx compiles the .cpp, and its
+                # objects need what clang's do.
+                owner = env._tool_owners.get(handler.tool_name, toolchain)
+                if owner is not toolchain:
+                    own = owner.get_source_handler(source.suffix)
+                    if own is not None and own.tool_name == handler.tool_name:
+                        return own, owner
                 return handler, toolchain
         return None
 

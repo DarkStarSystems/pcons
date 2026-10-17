@@ -42,18 +42,20 @@ if TYPE_CHECKING:
 # Realization stays per-toolchain (make_cxx_standard_preset).
 # =============================================================================
 
-# The languages a link can be led by, strongest first: a program with C++
-# and Fortran objects links as C++, with the Fortran runtime added (CMake's
-# order for C, C++ and Fortran). Swift's driver handles the Swift runtime,
-# and CUDA links through the host C++ driver.
+# The languages a link can be led by, strongest first (Meson's order): a
+# program with C or C++ objects links with their driver, which takes the
+# Fortran runtime as libraries, as a Fortran driver can't take a C
+# compiler's sanitizer or profile runtimes. A Fortran-only program links
+# with the Fortran driver. Swift's driver handles the Swift runtime, and
+# CUDA links through the host C++ driver.
 LINK_LANGUAGES: tuple[str, ...] = (
     "swift",
     "cuda",
     "objcxx",
     "cxx",
-    "fortran",
     "objc",
     "c",
+    "fortran",
 )
 
 

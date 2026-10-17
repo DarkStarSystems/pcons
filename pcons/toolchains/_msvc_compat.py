@@ -258,10 +258,10 @@ class MsvcCompatibleToolchain(BaseToolchain):
             return "/std:c++14"
         return f"/std:c++{standard}"
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+    def make_target_preset(self, cross: Any) -> Preset:
         """Raise: these toolchains target only Windows; CPU selection is
         set_target_arch's job."""
-        name = getattr(preset, "name", preset)
+        name = getattr(cross, "name", cross)
         raise ValueError(
             f"Cross preset '{name}' does not apply to the {self.name} toolchain: "
             f"it targets only Windows. To select the CPU, use "

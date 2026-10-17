@@ -221,7 +221,9 @@ def apply_requirements_to_env(
 ) -> None:
     """Apply usage requirements env-wide onto tool variables (``env.use()``).
 
-    Compile requirements land on cc/cxx; link requirements on link, with
+    Includes and defines land on cc, cxx and fc; compile flags on cc and
+    cxx, or on the compilers of *languages* when given; link requirements
+    on link, with
     the same merge semantics as :meth:`EffectiveRequirements.merge`. A
     ``Target`` in ``link_libs`` is an error here: linking a build target
     is per-target dependency information — use ``target.link(...)``.
@@ -298,13 +300,19 @@ def apply_requirements_to_env(
         extend_unique(fc, "includes", (str(inc) for inc in includes))
         extend_unique(fc, "defines", eff.defines)
 
-    # Compile flags go to the compilers of the languages they're for.
+    # Compile flags go to the compilers of the languages they're for: C and
+    # C++ unless the package says otherwise.
     if eff.compile_flags:
-        scope = set(languages) or C_FAMILY
-        for tool_name in env.tool_names():
-            if tool_language(env, tool_name) in scope:
-                tool = getattr(env, tool_name)
-                merge_flags(var(tool, "flags"), eff.compile_flags, sep, through)
+        scope = set(languages)
+        tools = (
+            [t for t in env.tool_names() if tool_language(env, t) in scope]
+            if scope
+            else [t for t in ("cc", "cxx") if env.has_tool(t)]
+        )
+        for tool_name in tools:
+            merge_flags(
+                var(getattr(env, tool_name), "flags"), eff.compile_flags, sep, through
+            )
 
     if env.has_tool("link"):
         link = env.link

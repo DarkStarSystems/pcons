@@ -308,17 +308,17 @@ class GccToolchain(UnixToolchain):
     def __init__(self) -> None:
         super().__init__("gcc")
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross preset, requiring cross binaries for foreign triples.
+    def make_target_preset(self, cross: Any) -> Preset:
+        """A cross preset, requiring cross binaries for foreign triples.
 
         GCC rejects --target=; a different-triple build needs different tool
         binaries, so a preset with a triple but no CC/CXX overrides fails
         fast rather than silently building host-arch objects.
         """
         require_cross_binaries(
-            preset, "GCC", ("cc", "cxx"), "cc={triple}-gcc", "a clang-based toolchain"
+            cross, "GCC", ("cc", "cxx"), "cc={triple}-gcc", "a clang-based toolchain"
         )
-        super().apply_cross_preset(env, preset)
+        return super().make_target_preset(cross)
 
     def setup_presets(self, env: Environment) -> list[Preset]:
         """The $CC/$CXX presets, with the archiver of the driver they pick.

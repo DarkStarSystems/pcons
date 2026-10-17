@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.configure.platform import get_platform
@@ -415,16 +415,17 @@ class SwiftToolchain(UnixToolchain):
         deployment target 26 the program finds the runtime through
         ``/usr/lib/swift``.
         """
+        needs = super().link_needs(target, languages, link_language, env)
         if "swift" not in languages or link_language == "swift":
-            return LinkNeeds()
+            return needs
         libdirs = tuple(self._runtime_libdirs())
         platform = self._target_platform(target)
         if platform.is_apple:
-            return LinkNeeds(
+            return needs | LinkNeeds(
                 libs=("swiftCore",), libdirs=libdirs, rpaths=("/usr/lib/swift",)
             )
         if platform.is_windows:
-            return LinkNeeds(libs=("swiftCore",), libdirs=libdirs)
+            return needs | LinkNeeds(libs=("swiftCore",), libdirs=libdirs)
         libs = self.LINUX_AUTOLINK_LIBS
         # -Onone is swiftc's default, so it's what a variant that doesn't
         # optimize (or none at all) compiles with.
@@ -432,7 +433,7 @@ class SwiftToolchain(UnixToolchain):
         if variant is None or "-Onone" in variant[0]:
             libs = (*libs, "swiftSwiftOnoneSupport")
         swiftrt = self._swiftrt_object()
-        return LinkNeeds(
+        return needs | LinkNeeds(
             libs=libs,
             libdirs=libdirs,
             rpaths=libdirs,
@@ -473,7 +474,7 @@ class SwiftToolchain(UnixToolchain):
         arch = info.get("target", {}).get("arch")
         if not resource or not arch:
             return None
-        return str(Path(resource) / "linux" / arch / "swiftrt.o")
+        return str(PurePosixPath(resource) / "linux" / arch / "swiftrt.o")
 
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
         """Add swiftc/link -target and -sdk for cross targets (e.g. ios()).

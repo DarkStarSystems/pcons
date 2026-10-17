@@ -276,7 +276,12 @@ class FortranToolchainBase(BaseToolchain):
     def _find_runtime_libdir(self, compiler: str) -> str | None:
         """Ask *compiler* where RUNTIME_PROBE_FILE is (e.g. Homebrew's
         libgfortran, on macOS)."""
-        name = self.RUNTIME_PROBE_FILE
+        return self._library_dir(compiler, self.RUNTIME_PROBE_FILE)
+
+    @staticmethod
+    def _library_dir(compiler: str, name: str) -> str | None:
+        """The directory *compiler* links library file *name* from, if it
+        knows (``-print-file-name``)."""
         try:
             libfile = subprocess.check_output(
                 [compiler, f"-print-file-name={name}"],

@@ -601,8 +601,10 @@ exe = env.Program("myapp", [c_obj, cxx_obj])
 
 **Language strength ordering** is one fixed order, whichever toolchain is
 primary (`LINK_LANGUAGES` in `pcons/tools/toolchain.py`): Swift, CUDA,
-Objective-C++, C++, Fortran, Objective-C, C, strongest first. CMake's order
-for C, C++ and Fortran. `target.link_language` overrides it for one target.
+Objective-C++, C++, Objective-C, C, Fortran, strongest first, as in Meson:
+a C or C++ driver takes the Fortran runtime as libraries, where a Fortran
+driver can't take a C compiler's sanitizer or coverage runtimes.
+`target.link_language` overrides it for one target.
 
 **Implementation:** the link edge collects the objects the link pulls in:
 the target's own and those of the static and object libraries it links,

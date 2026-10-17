@@ -126,6 +126,23 @@ def _names(toolchains: Sequence[Any]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
+def _unrealized_arch(arch: str, missing: Sequence[Any]) -> ValueError:
+    return ValueError(
+        f"{_names(missing)} can't build for target arch '{arch}', so its "
+        f"sources would be built for the host. Build them in an environment "
+        f"of their own, or use a cross preset (see docs/presets.md)."
+    )
+
+
+def _unrealized_feature(name: str, missing: Sequence[Any]) -> ValueError:
+    return ValueError(
+        f"Preset '{name}' isn't available with {_names(missing)}, so it can't "
+        f"apply to the whole environment. Apply it with allow_partial=True to "
+        f"leave out {_names(missing)}'s tools, or check first with "
+        f"env.has_preset({name!r})."
+    )
+
+
 def _first_repr(value: Any) -> str:
     """repr of a sequence's first element, for use in an example line."""
     items = list(value)
@@ -181,6 +198,7 @@ class Environment(_EnvironmentStubs):
         "_applied_imperative",
         "_use_origins",
         "_intents",
+        "_replaying",
         "_partial_presets",
         "_tool_owners",
         "_name",
@@ -249,6 +267,8 @@ class Environment(_EnvironmentStubs):
         self._use_origins: dict[tuple[str, str], tuple[str, str]] = {}
         # What the script asked for, in order, for toolchains added later
         self._intents: list[Intent] = []
+        # Set while add_toolchain() configures the toolchain it adds
+        self._replaying = False
         # (preset, toolchain) left out by apply_preset(allow_partial=True)
         self._partial_presets: list[tuple[str, str]] = []
         # Tool name -> the toolchain that brought it, the only one that
@@ -585,6 +605,7 @@ class Environment(_EnvironmentStubs):
                 f"the '{toolchain.abi}' ABI and {primary.name} the '{abi}' one, "
                 f"so their objects can't be linked together."
             )
+        self._check_replay(toolchain)
         additional: list[Toolchain] = object.__getattribute__(
             self, "_additional_toolchains"
         )
@@ -601,10 +622,14 @@ class Environment(_EnvironmentStubs):
         # default (an added ifx gets /MDd, not /MD, under debug), and the
         # environment keeps its variant name.
         current_variant = self.variant
-        for preset in toolchain.setup_presets(self):
-            self.apply_from(toolchain, preset)
-        for intent in self._intents:
-            self._realize(intent, [toolchain], replaying=True)
+        self._replaying = True
+        try:
+            for preset in toolchain.setup_presets(self):
+                self.apply_from(toolchain, preset)
+            for intent in self._intents:
+                self._realize(intent, [toolchain], replaying=True)
+        finally:
+            self._replaying = False
         self.variant = current_variant
 
     @property
@@ -959,8 +984,11 @@ class Environment(_EnvironmentStubs):
         contribution replaces the tool's command. Presets sharing an
         ``exclusive_group`` act as a knob: applying one first un-applies
         the group's earlier ones. Each toolchain sets the knob for its own
-        tools, so a toolchain's preset replaces only its own earlier ones
-        (``Preset.realized_by``); one applied directly replaces them all.
+        tools, so a toolchain's preset replaces its own earlier ones
+        (``Preset.realized_by``) and any applied directly, and one applied
+        directly replaces them all. While add_toolchain() configures the
+        toolchain it adds, that toolchain's presets replace only its own:
+        the knob the script set stays.
         A preset applies fully or raises (docs/presets.md, "Preset
         application").
         """
@@ -970,10 +998,13 @@ class Environment(_EnvironmentStubs):
         if preset.exclusive_group is not None:
 
             def replaces(applied: Preset) -> bool:
-                return applied.exclusive_group == preset.exclusive_group and (
-                    preset.realized_by is None
-                    or applied.realized_by in (None, preset.realized_by)
-                )
+                if applied.exclusive_group != preset.exclusive_group:
+                    return False
+                if preset.realized_by is None:
+                    return True
+                if applied.realized_by is None:
+                    return not self._replaying
+                return applied.realized_by == preset.realized_by
 
             for applied in self._applied_presets:
                 if replaces(applied):
@@ -994,7 +1025,7 @@ class Environment(_EnvironmentStubs):
         if preset.category == "arch" and preset.arch is not None:
             self.target_arch = preset.arch
 
-    def apply_from(self, toolchain: Toolchain, preset: Preset) -> None:
+    def apply_from(self, toolchain: Toolchain, preset: Preset) -> bool:
         """Apply *toolchain*'s *preset* to the tools it owns, and only those.
 
         Each tool is realized by the toolchain that brought it: gfortran's
@@ -1004,7 +1035,7 @@ class Environment(_EnvironmentStubs):
         toolchain brought (the script's own ``env.add_tool``) belongs to the
         primary toolchain, as does a tool the environment lacks, so a
         command swap to a missing tool still raises; with no primary, to
-        *toolchain* itself.
+        *toolchain* itself. Whether any of it landed.
         """
         default = object.__getattribute__(self, "_toolchain") or toolchain
         taken = tuple(
@@ -1013,10 +1044,11 @@ class Environment(_EnvironmentStubs):
             if self._tool_owners.get(c.tool, default) is toolchain
         )
         if not taken and preset.contributions:
-            return
+            return False
         self.apply(
             dataclasses.replace(preset, contributions=taken, realized_by=toolchain.name)
         )
+        return True
 
     @property
     def applied_presets(self) -> tuple[Preset, ...]:
@@ -1175,6 +1207,28 @@ class Environment(_EnvironmentStubs):
             self._intents = [i for i in self._intents if i.group != intent.group]
         self._intents.append(intent)
 
+    def _check_replay(self, toolchain: Toolchain) -> None:
+        """Raise now, before *toolchain* changes anything, if it can't
+        realize what the script already asked for: an unknown variant, a
+        cross target it refuses, or an arch or feature it lacks for the
+        compilers it would bring."""
+        from pcons.core.preset import is_registered_preset
+
+        tools = getattr(toolchain, "_feature_preset_tools", tuple)()
+        takes_part = any(t in toolchain.tools and not self.has_tool(t) for t in tools)
+        for intent in self._intents:
+            preset = self._preset_for(toolchain, intent)
+            if preset is not None or not takes_part:
+                continue
+            if intent.kind == "arch":
+                raise _unrealized_arch(intent.name, [toolchain])
+            if (
+                intent.kind == "feature"
+                and not intent.kwargs.get("allow_partial")
+                and not is_registered_preset(intent.name)
+            ):
+                raise _unrealized_feature(intent.name, [toolchain])
+
     def _takes_part(self, toolchain: Toolchain) -> bool:
         """Whether *toolchain* owns a tool its features and knobs are
         realized on (gfortran's ``fc``), so must realize each one."""
@@ -1201,29 +1255,33 @@ class Environment(_EnvironmentStubs):
         which must realize what the rest of the environment already does.
         """
         kind = intent.kind
+        # Each kind is built for every toolchain first, so one that can't
+        # realize it raises before any of them has changed the environment;
+        # then each toolchain applies it its own way.
         if kind == "variant":
+            for toolchain in toolchains:
+                toolchain.make_variant_preset(intent.name, **intent.kwargs)
             for toolchain in toolchains:
                 toolchain.apply_variant(self, intent.name, **intent.kwargs)
             return True
         if kind == "target":
+            cross = intent.args[0]
             for toolchain in toolchains:
-                toolchain.apply_cross_preset(self, intent.args[0])
+                toolchain.make_target_preset(cross)  # raises if it can't
+            for toolchain in toolchains:
+                toolchain.apply_cross_preset(self, cross)
             return True
         if kind == "arch":
-            unrealized = [
-                toolchain
-                for toolchain in toolchains
-                if not toolchain.apply_target_arch(self, intent.name, **intent.kwargs)
+            arches = [(t, t.make_arch_preset(intent.name)) for t in toolchains]
+            realized = [t for t, preset in arches if preset is not None]
+            missing = [
+                t for t, preset in arches if preset is None and self._takes_part(t)
             ]
-            missing = [t for t in unrealized if self._takes_part(t)]
-            if missing and (replaying or len(unrealized) < len(toolchains)):
-                raise ValueError(
-                    f"{_names(missing)} can't build for target arch "
-                    f"'{intent.name}', so its sources would be built for the "
-                    f"host. Build them in an environment of their own, or use "
-                    f"a cross preset (see docs/presets.md)."
-                )
-            return len(unrealized) < len(toolchains)
+            if missing and (replaying or realized):
+                raise _unrealized_arch(intent.name, missing)
+            for toolchain in realized:
+                toolchain.apply_target_arch(self, intent.name, **intent.kwargs)
+            return bool(realized)
         if kind == "setting":
             realized = False
             for toolchain in toolchains:
@@ -1255,15 +1313,16 @@ class Environment(_EnvironmentStubs):
                 missing.append(toolchain)
         if missing and (found or replaying):
             if not intent.kwargs.get("allow_partial"):
-                raise ValueError(
-                    f"Preset '{name}' isn't available with {_names(missing)}, "
-                    f"so it can't apply to the whole environment. Apply it "
-                    f"with allow_partial=True to leave out {_names(missing)}'s "
-                    f"tools, or check first with env.has_preset({name!r})."
-                )
+                raise _unrealized_feature(name, missing)
             self._partial_presets.extend((name, t.name) for t in missing)
-        for toolchain, preset in found:
-            self.apply_from(toolchain, preset)
+        landed = [self.apply_from(toolchain, preset) for toolchain, preset in found]
+        if found and not any(landed) and not replaying:
+            owners = sorted({c.tool for _, p in found for c in p.contributions})
+            raise ValueError(
+                f"Preset '{name}' would have no effect: its flags are for "
+                f"{', '.join(owners)}, which other toolchains in this "
+                f"environment own."
+            )
         return bool(found)
 
     def _preset_for(self, toolchain: Toolchain, intent: Intent) -> Preset | None:

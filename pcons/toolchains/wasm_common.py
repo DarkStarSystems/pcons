@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.preset import ToolContribution
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.toolchains.unix import UnixToolchain
 
@@ -110,21 +110,18 @@ class WasmToolchain(UnixToolchain):
 
     # -- Variant / arch overrides -------------------------------------------
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
+    def make_arch_preset(self, arch: str) -> Preset | None:
         """wasm32 is the only architecture; anything else is an error.
 
         wasm32 needs no flags (the tools imply it), so this is a declared
-        no-op realization: it records the arch and returns True rather than
-        letting the empty realization read as "unrealized" (docs/presets.md).
+        no-op realization, an arch preset with no contributions, rather than
+        an empty realization that reads as "unrealized" (docs/presets.md).
         """
-        from pcons.core.preset import Preset
-
         if arch.lower() != "wasm32":
             raise ValueError(
                 f"{self.name} targets wasm32 only; cannot set target arch '{arch}'."
             )
-        env.apply(Preset(name="wasm32", category="arch", arch="wasm32"))
-        return True
+        return Preset(name="wasm32", category="arch", arch="wasm32")
 
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
         # Sysroot/triple are handled by setup(); only extra flags apply here.

@@ -30,7 +30,7 @@ from pcons.tools.toolchain import LinkNeeds
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
-    from pcons.core.preset import ToolContribution
+    from pcons.core.preset import Preset, ToolContribution
     from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
 
@@ -106,17 +106,17 @@ class IfxToolchain(FortranToolchain):
             needs = needs | LinkNeeds(libs=("iomp5",), libdirs=libdirs)
         return needs
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+    def make_target_preset(self, cross: Any) -> Preset:
         """Raise for a preset with a triple: ifx builds for its host only."""
-        triple = str(getattr(preset, "triple", None) or "")
+        triple = str(getattr(cross, "triple", None) or "")
         # A wasm triple gets UnixToolchain's "use the dedicated toolchain".
         if triple and not triple.startswith("wasm32"):
-            name = getattr(preset, "name", preset)
+            name = getattr(cross, "name", cross)
             raise ValueError(
                 f"Cross preset '{name}' targets triple '{triple}', but {self.name} "
                 f"has no cross targets: it builds for the host it runs on."
             )
-        super().apply_cross_preset(env, preset)
+        return super().make_target_preset(cross)
 
     def get_compile_flags_for_target_type(
         self, target_type: str, env: Environment | None = None

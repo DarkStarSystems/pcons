@@ -338,7 +338,7 @@ A Windows DLL exports only what it's told to. flang ignores `!DIR$ ATTRIBUTES DL
 
 `env.add_toolchain()` picks a toolchain with the same ABI as the environment's primary one: `"fortran"` beside MSVC or clang-cl finds flang or ifx, not gfortran, and `"c"` beside gfortran finds MinGW gcc. Naming an incompatible one (by name, or with `$FC`/`$CC`/`$CXX`) is an error that says which toolchains would fit. Only an environment's own toolchains have to match: a project can have a MinGW environment and an MSVC one side by side. For clang and flang, pcons asks the compiler (`-print-target-triple`), so MSYS2's clang64 clang and flang count as MinGW and LLVM's own builds as MSVC.
 
-**Mixed-language builds** use `env.add_toolchain()`. A program is linked by the compiler of its strongest language: C++, then Fortran, then C (Swift and CUDA lead any link they're in), whichever toolchain came first. Pcons adds the runtime libraries the other languages' objects need: `-lgfortran` (or flang's or ifx's) for Fortran objects, `-lstdc++` or `-lc++` for C++ objects, Swift's runtime for Swift objects. That holds for objects in static libraries too, even ones built in another environment.
+**Mixed-language builds** use `env.add_toolchain()`. A program is linked by the compiler of its strongest language, C++, then C, then Fortran, whichever toolchain came first: a C or C++ driver can take the Fortran runtime as libraries, which a Fortran driver can't do for a C compiler's sanitizer or coverage runtimes. CUDA links through the C++ driver, and Swift objects link with swiftc where Swift is the primary toolchain, else with clang++ and the Swift runtime. Pcons adds the runtime libraries the other languages' objects need: `-lgfortran` (or flang's or ifx's) for Fortran objects, `-lstdc++` or `-lc++` for C++ objects, Swift's runtime for Swift objects. That holds for objects in static libraries too, even ones built in another environment.
 
 ```python
 env = project.Environment(toolchain="c++")
@@ -350,14 +350,14 @@ project.Program("solver", env, sources=["src/main.cpp", "src/kernel.f90"])
 project.Program("tool", env, sources=["src/tool.f90"])
 ```
 
-A program whose `main` is in Fortran, with C++ helpers, says so, and the Fortran compiler links it, adding the C++ runtime:
+A program whose `main` is in Fortran, with C or C++ helpers, can say so, and the Fortran compiler links it, adding the C++ runtime where there are C++ objects:
 
 ```python
 sim = project.Program("sim", env, sources=["src/main.f90", "src/helper.cpp"])
 sim.link_language = "fortran"
 ```
 
-With ifx on Linux this is required: ifx keeps a Fortran program's `main` in its runtime, which only its own driver links, so a C++ link fails with an undefined `main`. gfortran and flang link either way. `link_language` takes any language a toolchain in the environment compiles.
+With ifx on Linux this is required: ifx keeps a Fortran program's `main` in its runtime, which only its own driver links, so a C or C++ link fails with an undefined `main`. gfortran and flang link either way. `link_language` takes any language a toolchain in the environment compiles.
 
 Order doesn't matter: a variant, preset or cross target set before `add_toolchain()` reaches the added toolchain too.
 

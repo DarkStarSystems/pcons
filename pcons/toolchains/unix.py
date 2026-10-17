@@ -118,22 +118,26 @@ class UnixToolchain(BaseToolchain):
     # rules, or link driver, which live in the dedicated toolchains.
     TARGETS_WASM: ClassVar[bool] = False
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross preset, rejecting wasm targets on native toolchains.
+    def make_target_preset(self, cross: Any) -> Preset:
+        """A cross preset, rejecting wasm targets on native toolchains.
 
         A wasm preset on a native toolchain would half-apply (compile with
         emcc, link with the host driver) — output suffixes, shared-library
         rules, and the link driver live in the dedicated wasm toolchains.
         """
-        triple = str(getattr(preset, "triple", None) or "")
+        triple = str(getattr(cross, "triple", None) or "")
         if triple.startswith("wasm32") and not self.TARGETS_WASM:
-            name = getattr(preset, "name", preset)
+            name = getattr(cross, "name", cross)
             raise ValueError(
                 f"Cross preset '{name}' targets WebAssembly, which needs its "
                 f"dedicated toolchain rather than {self.name}: use "
                 f'project.Environment(toolchain="emscripten") or '
                 f'toolchain="wasi".'
             )
+        return super().make_target_preset(cross)
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross preset, and the target's shared-library flag."""
         super().apply_cross_preset(env, preset)
         # The shared-library flag is the target's, not the host's: an Android
         # library linked on a Mac takes -shared, not -dynamiclib.
@@ -700,9 +704,13 @@ class UnixToolchain(BaseToolchain):
 
     def link_driver(self, language: str, env: Environment) -> str | None:
         """The driver of this toolchain's own compile tool for *language*.
-        Targeting MSVC there's none: the objects name their runtimes."""
+        Targeting MSVC, only for its own link tool (clang++ for C++, as
+        always): its objects name their runtimes, so another toolchain's
+        link takes them as they are."""
         tool = self.LINK_DRIVER_TOOLS.get(language)
-        if tool is None or self.abi == "msvc" or not env.has_tool(tool):
+        if tool is None or not env.has_tool(tool):
+            return None
+        if self.abi == "msvc" and env._tool_owners.get("link") is not self:
             return None
         if env._tool_owners.get(tool) is not self:
             return None

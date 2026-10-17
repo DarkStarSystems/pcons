@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import shutil
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import get_platform
 from pcons.core.preset import Preset, ToolContribution
@@ -117,15 +117,37 @@ class CudaToolchain(BaseToolchain):
         platform = env.target if env is not None else get_platform()
         return ["-Xcompiler=-fPIC"] if needs_pic(target_type, platform) else []
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+    def make_target_preset(self, cross: Any) -> Preset:
         """Raise for a preset with a triple; one without applies as usual."""
-        if getattr(preset, "triple", None):
-            name = getattr(preset, "name", preset)
+        if getattr(cross, "triple", None):
+            name = getattr(cross, "name", cross)
             raise ValueError(
-                f"Cross preset '{name}' targets triple '{preset.triple}', but "
+                f"Cross preset '{name}' targets triple '{cross.triple}', but "
                 f"CUDA cross targets aren't supported."
             )
-        super().apply_cross_preset(env, preset)
+        return super().make_target_preset(cross)
+
+    #: Names one CPU goes by.
+    _ARCH_ALIASES: ClassVar[dict[str, str]] = {
+        "x64": "x86_64",
+        "amd64": "x86_64",
+        "aarch64": "arm64",
+    }
+
+    def make_arch_preset(self, arch: str) -> Preset | None:
+        """The host's CPU needs nothing (nvcc builds for it); another one
+        needs a cross nvcc, so it's an error."""
+
+        def canonical(name: str) -> str:
+            return self._ARCH_ALIASES.get(name.lower(), name.lower())
+
+        host = get_platform().arch
+        if canonical(arch) != canonical(host):
+            raise ValueError(
+                f"{self.name} can't build for target arch '{arch}': nvcc builds "
+                f"for the host's ({host})."
+            )
+        return Preset(name=arch, category="arch", arch=arch)
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for CUDA source files."""

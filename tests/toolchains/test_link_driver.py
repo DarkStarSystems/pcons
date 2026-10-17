@@ -76,7 +76,7 @@ def _link(target) -> tuple[str, list[str], list[str]]:
     cmd = overrides.get("cmd", env.link.cmd)
     flags = [str(f) for f in overrides.get("flags", env.link.flags)]
     libs = [str(lib) for lib in overrides.get("libs", env.link.libs)]
-    return str(cmd).rsplit("/", 1)[-1], flags, libs
+    return str(cmd).replace("\\", "/").rsplit("/", 1)[-1], flags, libs
 
 
 def test_a_fortran_program_is_linked_by_the_fortran_driver(tmp_path) -> None:
@@ -347,3 +347,68 @@ def test_swift_objects_linked_by_clang_on_linux(
     assert "-Wl,-rpath,/usr/lib/swift/linux" in flags
     assert {"swiftCore", "swift_Concurrency"} <= set(libs)
     assert ("swiftSwiftOnoneSupport" in libs) == onone
+
+
+# =============================================================================
+# From the review of the redesign
+# =============================================================================
+
+
+def test_fortran_and_c_link_with_the_c_driver(tmp_path) -> None:
+    """C leads Fortran (Meson's order): a C driver takes the Fortran
+    runtime as libraries, as a Fortran driver can't take C's sanitizer or
+    coverage runtimes."""
+    project = _project(tmp_path)
+    env = _env(project, "gcc", "gfortran")
+    prog = project.Program("prog", env, sources=["main.f90", "util.c"])
+    project.resolve()
+    cmd, _, libs = _link(prog)
+    assert cmd.startswith("gcc")
+    assert "gfortran" in libs
+
+
+def test_cxx_objects_beside_swift_primary_need_the_cxx_runtime(
+    tmp_path, monkeypatch
+) -> None:
+    """Swift inherits the C++ handlers, but clang's cxx compiles the .cpp,
+    so its objects are clang's and need the C++ runtime under swiftc."""
+    from pcons.toolchains import swift as swift_mod
+
+    monkeypatch.setattr(swift_mod.SwiftToolchain, "_target_info_json", lambda self: {})
+    (tmp_path / "main.swift").write_text("print(1)\n")
+    project = _project(tmp_path)
+    env = _env(project, "swiftc", "llvm")
+    prog = project.Program("prog", env, sources=["main.swift", "helper.cpp"])
+    project.resolve()
+    (cpp,) = [n for n in prog.intermediate_nodes if n.path.name.endswith(".cpp.o")]
+    assert cpp._build_info["toolchain"].name == "llvm"
+    assert "stdc++" in _link(prog)[2]
+
+
+def test_a_toolchain_left_out_of_a_preset_doesnt_take_over(tmp_path) -> None:
+    """flang, left out of sanitize, would link the program without the
+    sanitizer runtime the C objects need: clang links instead."""
+    project = _project(tmp_path)
+    env = _env(project, "llvm", "flang")
+    env.apply_preset("sanitize", allow_partial=True)
+    prog = project.Program("prog", env, sources=["main.f90"])
+    project.resolve()
+    cmd, flags, _ = _link(prog)
+    assert cmd.startswith("clang")
+    assert any("-fsanitize" in f for f in flags)
+
+
+def test_the_gcov_need_says_where_libgcov_is(tmp_path, monkeypatch) -> None:
+    from pcons.toolchains.gfortran import GfortranToolchain
+
+    monkeypatch.setattr(
+        GfortranToolchain, "gcov_libdir", property(lambda self: "/gcc/lib")
+    )
+    project = _project(tmp_path)
+    env = _env(project, "llvm", "gfortran")
+    env.apply_preset("coverage")
+    prog = project.Program("prog", env, sources=["main.f90", "helper.cpp"])
+    project.resolve()
+    (node,) = prog.output_nodes
+    libdirs = node._build_info["context"].get_env_overrides()["libdirs"]
+    assert "/gcc/lib" in [str(getattr(d, "path", d)) for d in libdirs]
