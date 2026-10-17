@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.preset import Preset, ToolContribution
+from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
 from pcons.toolchains.fortran import (
     FortranCompiler,
     FortranLinker,
@@ -92,7 +92,7 @@ class FlangToolchain(FortranToolchain):
         crt = Preset(
             name="default",
             category="variant",
-            exclusive_group="build_variant",
+            exclusive_group=VARIANT_GROUP,
             contributions=(self._crt_flag(self.WINDOWS_DEFAULT_CRT),),
         )
         return [*presets, crt]

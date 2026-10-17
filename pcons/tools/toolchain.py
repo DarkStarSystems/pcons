@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
-from pcons.core.preset import Preset, ToolContribution
+from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 
@@ -62,15 +62,7 @@ def _parse_cxx_standard(standard: int | str) -> int:
 
 def _cxx_set_standard(env: Environment, standard: int | str) -> None:
     """``env.cxx.set_standard(...)`` — select the C++ language standard."""
-    n = _parse_cxx_standard(standard)
-    # Deduped like every set_*/apply_* fan-out: toolchains sharing the cxx
-    # tool (swift + llvm in C++-interop envs) realize identical presets, and
-    # without the guard both would apply, doubling -std=c++NN.
-    with env._dedup_fanout():
-        for toolchain in env.toolchains:
-            preset = toolchain.make_cxx_standard_preset(n)
-            if preset is not None:
-                env.apply_from(toolchain, preset)
+    env._apply_setting("cxx.standard", _parse_cxx_standard(standard))
 
 
 # =============================================================================
@@ -727,6 +719,10 @@ class Toolchain(Protocol):
         if not C++."""
         ...
 
+    def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
+        """Realize tool setting *name* (``"cxx.standard"``), or None."""
+        ...
+
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
         """Return a setting method for ``env.<tool>.<name>``, or None."""
         ...
@@ -1088,7 +1084,7 @@ class BaseToolchain(ABC):
         return Preset(
             name=variant,
             category="variant",
-            exclusive_group="build_variant",
+            exclusive_group=VARIANT_GROUP,
             contributions=tuple(self._variant_contributions(variant, **kwargs)),
         )
 
@@ -1146,6 +1142,15 @@ class BaseToolchain(ABC):
 
     def _cxx_standard_flag(self, standard: int) -> str | None:
         """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
+        return None
+
+    def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
+        """Realize the tool setting *name* with *args*, or None if this
+        toolchain has no such setting. ``"cxx.standard"`` is
+        ``env.cxx.set_standard``; toolchains add their own (Swift's
+        ``"swiftc.cxx_interop"``)."""
+        if name == "cxx.standard":
+            return self.make_cxx_standard_preset(*args)
         return None
 
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:

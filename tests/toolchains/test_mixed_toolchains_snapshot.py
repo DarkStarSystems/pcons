@@ -468,32 +468,36 @@ def _upstream_section(tmp_path: Path, row: Row) -> Iterator[str]:
 
 
 def _conan_section(tmp_path: Path, row: Row) -> Iterator[str]:
-    """The Conan profile a script gets by passing env.toolchain."""
+    """The Conan profile a script gets, passing env.toolchain or env alone."""
     from pcons.packages.finders import conan as conan_mod
 
     if row.os_name != "linux" or len(row.toolchains) < 2:
         return
-    lines = [f"### {row.title} | conan profile from env.toolchain"]
+    for i, how in enumerate(("env.toolchain", "env")):
+        lines = [f"### {row.title} | conan profile from {how}"]
 
-    def run() -> Iterator[str]:
-        project = _new_project(tmp_path, "c")
-        env = _environment(project, row)
-        env.set_variant("debug")
-        env.cxx.set_standard("c++20") if env.has_tool("cxx") else None
-        finder = conan_mod.ConanFinder(output_folder=tmp_path / "c" / "deps")
-        finder._platform = _platform("linux")
-        finder._detect_compiler_version = lambda *a, **k: "16"  # type: ignore[method-assign]
-        profile = finder.sync_profile(env.toolchain, env=env)
-        for text in profile.read_text().splitlines():
-            if text.strip():
-                yield "  " + (
-                    text.split("=", 1)[0] + "=" + _cmd(text.split("=", 1)[1])
-                    if text.startswith(("CC=", "CXX="))
-                    else text
-                )
+        def run(i: int = i, how: str = how) -> Iterator[str]:
+            project = _new_project(tmp_path, f"c{i}")
+            env = _environment(project, row)
+            env.set_variant("debug")
+            if env.has_tool("cxx"):
+                env.cxx.set_standard("c++20")
+            finder = conan_mod.ConanFinder(output_folder=tmp_path / f"c{i}" / "deps")
+            finder._platform = _platform("linux")
+            finder._detect_compiler_version = lambda *a, **k: "16"  # type: ignore[method-assign]
+            toolchain = env.toolchain if how == "env.toolchain" else None
+            profile = finder.sync_profile(toolchain, env=env)
+            for text in profile.read_text().splitlines():
+                if text.strip():
+                    key, _, value = text.partition("=")
+                    yield (
+                        f"  {key}={_cmd(value)}"
+                        if key in ("CC", "CXX")
+                        else f"  {text}"
+                    )
 
-    _attempt(lines, run)
-    yield from lines
+        _attempt(lines, run)
+        yield from lines
 
 
 def _snapshot(tmp_path: Path, set_platform: Callable[[str], None]) -> str:

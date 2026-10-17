@@ -52,12 +52,7 @@ def _swift_set_cxx_interop(env: Environment, standard: str | int | None = None) 
     An optional C++ standard (``"c++20"`` or ``20``) is passed through to the
     clang importer via ``-Xcc -std=...``.
     """
-    for toolchain in env.toolchains:
-        maker = getattr(toolchain, "make_cxx_interop_preset", None)
-        if maker is not None:
-            preset = maker(standard)
-            if preset is not None:
-                env.apply_from(toolchain, preset)
+    env._apply_setting("swiftc.cxx_interop", standard)
 
 
 def module_name_for(target_name: str) -> str:
@@ -332,6 +327,11 @@ class SwiftToolchain(UnixToolchain):
         if tool == "swiftc" and name == "set_cxx_interop":
             return _swift_set_cxx_interop
         return super().tool_setting(tool, name)
+
+    def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
+        if name == "swiftc.cxx_interop":
+            return self.make_cxx_interop_preset(*args)
+        return super().make_setting_preset(name, *args)
 
     def make_cxx_interop_preset(self, standard: str | int | None = None) -> Preset:
         """Realize C++-interop mode as a preset (visible to env.explain())."""

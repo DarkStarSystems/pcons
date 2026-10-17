@@ -377,7 +377,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=g++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=gfortran
+  fc: cmd=gfortran flags=[-Wall -Wextra]
   link: cmd=gcc
 ### linux gcc+gfortran | before add_toolchain: cross aarch64-linux-gnu
   ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
@@ -400,6 +400,18 @@
   app/src.f90.o: tool=fc cmd=gfortran flags=[]
   app/app: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gcc+gfortran | conan profile from env.toolchain
+  [settings]
+  arch=x86_64
+  build_type=Debug
+  compiler=gcc
+  compiler.cppstd=20
+  compiler.libcxx=libstdc++11
+  compiler.version=16
+  os=Linux
+  [buildenv]
+  CC=gcc
+  CXX=g++
+### linux gcc+gfortran | conan profile from env
   [settings]
   arch=x86_64
   build_type=Debug
@@ -618,16 +630,12 @@
   link: cmd=gfortran
 ### linux gfortran+gcc | before add_toolchain: feature warnings
   ar: cmd=ar flags=[rcs]
-  cc: cmd=gcc
-  cxx: cmd=g++
+  cc: cmd=gcc flags=[-Wall -Wextra -Wpedantic]
+  cxx: cmd=g++ flags=[-Wall -Wextra -Wpedantic]
   fc: cmd=gfortran flags=[-Wall -Wextra]
   link: cmd=gfortran
 ### linux gfortran+gcc | before add_toolchain: cross aarch64-linux-gnu
-  ar: cmd=ar flags=[rcs]
-  cc: cmd=gcc
-  cxx: cmd=g++
-  fc: cmd=gfortran
-  link: cmd=gfortran
+  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gfortran+gcc | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
@@ -652,6 +660,18 @@
   build_type=Debug
   compiler.cppstd=20
   os=Linux
+### linux gfortran+gcc | conan profile from env
+  [settings]
+  arch=x86_64
+  build_type=Debug
+  compiler=gcc
+  compiler.cppstd=20
+  compiler.libcxx=libstdc++11
+  compiler.version=16
+  os=Linux
+  [buildenv]
+  CC=gcc
+  CXX=g++
 
 ## linux llvm+gfortran
 ### linux llvm+gfortran | baseline
@@ -889,7 +909,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=gfortran
+  fc: cmd=gfortran flags=[-Wall -Wextra]
   link: cmd=clang
   metal: cmd=xcrun
 ### linux llvm+gfortran | before add_toolchain: cross aarch64-linux-gnu
@@ -919,6 +939,18 @@
   app/src.f90.o: tool=fc cmd=gfortran flags=[]
   app/app: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux llvm+gfortran | conan profile from env.toolchain
+  [settings]
+  arch=x86_64
+  build_type=Debug
+  compiler=clang
+  compiler.cppstd=20
+  compiler.libcxx=libstdc++11
+  compiler.version=16
+  os=Linux
+  [buildenv]
+  CC=clang
+  CXX=clang++
+### linux llvm+gfortran | conan profile from env
   [settings]
   arch=x86_64
   build_type=Debug
@@ -1167,7 +1199,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=flang
+  fc: cmd=flang flags=[-Wall]
   link: cmd=clang
   metal: cmd=xcrun
 ### linux llvm+flang | before add_toolchain: cross aarch64-linux-gnu
@@ -1197,6 +1229,18 @@
   app/src.f90.o: tool=fc cmd=flang flags=[]
   app/app: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | conan profile from env.toolchain
+  [settings]
+  arch=x86_64
+  build_type=Debug
+  compiler=clang
+  compiler.cppstd=20
+  compiler.libcxx=libstdc++11
+  compiler.version=16
+  os=Linux
+  [buildenv]
+  CC=clang
+  CXX=clang++
+### linux llvm+flang | conan profile from env
   [settings]
   arch=x86_64
   build_type=Debug
@@ -1443,15 +1487,15 @@
   metal: cmd=xcrun
 ### linux flang+llvm | before add_toolchain: feature warnings
   ar: cmd=ar flags=[rcs]
-  cc: cmd=clang
-  cxx: cmd=clang++
+  cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
+  cxx: cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
   fc: cmd=flang flags=[-Wall]
   link: cmd=flang
   metal: cmd=xcrun
 ### linux flang+llvm | before add_toolchain: cross aarch64-linux-gnu
   ar: cmd=ar flags=[rcs]
-  cc: cmd=clang
-  cxx: cmd=clang++
+  cc: cmd=clang flags=[--target=aarch64-linux-gnu]
+  cxx: cmd=clang++ flags=[--target=aarch64-linux-gnu]
   fc: cmd=flang
   link: cmd=flang
   metal: cmd=xcrun
@@ -1480,6 +1524,18 @@
   build_type=Debug
   compiler.cppstd=20
   os=Linux
+### linux flang+llvm | conan profile from env
+  [settings]
+  arch=x86_64
+  build_type=Debug
+  compiler=clang
+  compiler.cppstd=20
+  compiler.libcxx=libstdc++11
+  compiler.version=16
+  os=Linux
+  [buildenv]
+  CC=clang
+  CXX=clang++
 
 ## linux gcc+ifx
 ### linux gcc+ifx | baseline
@@ -1689,7 +1745,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=g++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=ifx
+  fc: cmd=ifx flags=[-warn all]
   link: cmd=gcc
 ### linux gcc+ifx | before add_toolchain: cross aarch64-linux-gnu
   ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
@@ -1712,6 +1768,18 @@
   app/src.f90.o: tool=fc cmd=ifx flags=[-fPIE]
   app/app: tool=link cmd=ifx flags=[] libs=[] libdirs=[]
 ### linux gcc+ifx | conan profile from env.toolchain
+  [settings]
+  arch=x86_64
+  build_type=Debug
+  compiler=gcc
+  compiler.cppstd=20
+  compiler.libcxx=libstdc++11
+  compiler.version=16
+  os=Linux
+  [buildenv]
+  CC=gcc
+  CXX=g++
+### linux gcc+ifx | conan profile from env
   [settings]
   arch=x86_64
   build_type=Debug
@@ -1981,6 +2049,18 @@
   [buildenv]
   CC=gcc
   CXX=g++
+### linux gcc+cuda | conan profile from env
+  [settings]
+  arch=x86_64
+  build_type=Debug
+  compiler=gcc
+  compiler.cppstd=20
+  compiler.libcxx=libstdc++11
+  compiler.version=16
+  os=Linux
+  [buildenv]
+  CC=gcc
+  CXX=g++
 
 ## darwin llvm+gfortran
 ### darwin llvm+gfortran | baseline
@@ -2232,7 +2312,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=gfortran
+  fc: cmd=gfortran flags=[-Wall -Wextra]
   link: cmd=clang
   metal: cmd=xcrun
 ### darwin llvm+gfortran | before add_toolchain: cross aarch64-linux-gnu
@@ -2493,7 +2573,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=flang
+  fc: cmd=flang flags=[-Wall]
   link: cmd=clang
   metal: cmd=xcrun
 ### darwin llvm+flang | before add_toolchain: cross aarch64-linux-gnu
@@ -2769,15 +2849,15 @@
   swiftc: cmd=swiftc flags=[-Onone -g] defines=[DEBUG]
 ### darwin swift+llvm | before add_toolchain: feature warnings
   ar: cmd=ar flags=[rcs]
-  cc: cmd=clang
-  cxx: cmd=clang++
+  cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
+  cxx: cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
   link: cmd=swiftc
   metal: cmd=xcrun
   swiftc: cmd=swiftc
 ### darwin swift+llvm | before add_toolchain: cross aarch64-linux-gnu
   ar: cmd=ar flags=[rcs]
-  cc: cmd=clang
-  cxx: cmd=clang++
+  cc: cmd=clang flags=[--target=aarch64-linux-gnu]
+  cxx: cmd=clang++ flags=[--target=aarch64-linux-gnu]
   link: cmd=swiftc flags=[-target aarch64-linux-gnu]
   metal: cmd=xcrun
   swiftc: cmd=swiftc flags=[-target aarch64-linux-gnu]
@@ -2988,7 +3068,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=g++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=gfortran
+  fc: cmd=gfortran flags=[-Wall -Wextra]
   link: cmd=gcc
 
 ## windows clang-cl+flang
@@ -3217,7 +3297,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /W4]
   cxx: cmd=clang-cl flags=[/nologo /MD /W4]
-  fc: cmd=flang flags=[-fms-runtime-lib=dll]
+  fc: cmd=flang flags=[-fms-runtime-lib=dll -Wall]
   lib: cmd=llvm-lib flags=[/nologo]
   link: cmd=lld-link flags=[/nologo]
   ml: cmd=ml64 flags=[/nologo]
@@ -3447,8 +3527,8 @@
   rc: cmd=rc flags=[/nologo]
 ### windows flang+clang-cl | before add_toolchain: feature warnings
   ar: cmd=ar flags=[rcs]
-  cc: cmd=clang-cl flags=[/nologo /MD]
-  cxx: cmd=clang-cl flags=[/nologo /MD]
+  cc: cmd=clang-cl flags=[/nologo /MD /W4]
+  cxx: cmd=clang-cl flags=[/nologo /MD /W4]
   fc: cmd=flang flags=[-fms-runtime-lib=dll -Wall]
   lib: cmd=llvm-lib flags=[/nologo]
   link: cmd=flang
@@ -3666,7 +3746,7 @@
 ### windows msvc+ifx-msvc | before add_toolchain: feature warnings
   cc: cmd=cl flags=[/nologo /MD /W4]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD /W4]
-  fc: cmd=ifx flags=[/nologo /MD]
+  fc: cmd=ifx flags=[/nologo /MD /warn:all]
   lib: cmd=lib flags=[/nologo]
   link: cmd=link flags=[/nologo]
   ml: cmd=ml64 flags=[/nologo]
@@ -3883,7 +3963,7 @@
 ### windows clang-cl+ifx-msvc | before add_toolchain: feature warnings
   cc: cmd=clang-cl flags=[/nologo /MD /W4]
   cxx: cmd=clang-cl flags=[/nologo /MD /W4]
-  fc: cmd=ifx flags=[/nologo /MD]
+  fc: cmd=ifx flags=[/nologo /MD /warn:all]
   lib: cmd=llvm-lib flags=[/nologo]
   link: cmd=lld-link flags=[/nologo]
   ml: cmd=ml64 flags=[/nologo]
@@ -4127,7 +4207,7 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=ifx flags=[/nologo /MD]
+  fc: cmd=ifx flags=[/nologo /MD /warn:all]
   lib: cmd=lib flags=[/nologo]
   link: cmd=clang
   metal: cmd=xcrun
@@ -4354,6 +4434,6 @@
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
   cxx: cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
-  fc: cmd=flang flags=[-fms-runtime-lib=dll]
+  fc: cmd=flang flags=[-fms-runtime-lib=dll -Wall]
   link: cmd=clang
   metal: cmd=xcrun

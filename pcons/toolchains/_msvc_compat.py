@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.preset import Preset, ToolContribution
+from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
@@ -270,7 +270,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         crt = Preset(
             name="default",
             category="variant",
-            exclusive_group="build_variant",
+            exclusive_group=VARIANT_GROUP,
             contributions=tuple(
                 ToolContribution(tool, flags=("/MD",))
                 for tool in self._feature_preset_tools()

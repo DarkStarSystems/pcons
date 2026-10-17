@@ -348,10 +348,11 @@ class ConanFinder(BaseFinder):
 
     @staticmethod
     def _infer_cppstd(env: Any) -> str | None:
-        """Infer C++ standard from environment flags.
+        """The C++ standard *env* compiles with.
 
-        Parses -std=c++XX (GCC/Clang) or /std:c++XX (MSVC) from
-        env.cxx.flags to determine the C++ standard version.
+        The one ``env.cxx.set_standard()`` asked for, else one parsed from
+        a -std=c++XX (GCC/Clang) or /std:c++XX (MSVC) in env.cxx.flags,
+        which a script may have added by hand.
 
         Args:
             env: Environment with cxx.flags, or None.
@@ -361,6 +362,13 @@ class ConanFinder(BaseFinder):
         """
         if env is None:
             return None
+        asked = [
+            i.args[0]
+            for i in getattr(env, "_intents", ())
+            if i.kind == "setting" and i.name == "cxx.standard"
+        ]
+        if asked:
+            return str(asked[-1])
         cxx_config = getattr(env, "cxx", None)
         if cxx_config is None:
             return None
@@ -520,7 +528,11 @@ class ConanFinder(BaseFinder):
         """Generate or update Conan profile from pcons settings.
 
         Args:
-            toolchain: Toolchain to use for compiler settings.
+            toolchain: Toolchain to use for compiler settings. Left out,
+                it's *env*'s C/C++ toolchain: the one whose ``cxx`` (else
+                ``cc``) the environment compiles with, which in a mixed
+                environment needn't be its primary toolchain. With neither,
+                the settings are the platform's usual compiler.
             env: Environment for additional settings (optional).
             build_type: Build type (Release, Debug, etc.). Left out, it
                 follows *env*'s variant: ``debug`` is Debug, the release
@@ -528,14 +540,18 @@ class ConanFinder(BaseFinder):
                 their Conan names; no environment or variant means Release.
             cppstd: C++ standard (e.g., "17", "20", "23"). Sets
                 compiler.cppstd in the profile. Many Conan packages
-                require this. If not provided, inferred from
-                env.cxx.flags if a -std=c++XX or /std:c++XX flag
-                is present.
+                require this. If not provided, it's the standard the
+                script set with ``env.cxx.set_standard()``, else one
+                read from a -std=c++XX or /std:c++XX in env.cxx.flags.
 
         Returns:
             Path to the generated profile.
         """
         self.output_folder.mkdir(parents=True, exist_ok=True)
+
+        if toolchain is None and env is not None:
+            owners = getattr(env, "_tool_owners", {})
+            toolchain = owners.get("cxx") or owners.get("cc")
 
         cc_cmd = cxx_cmd = None
         if toolchain is not None:
