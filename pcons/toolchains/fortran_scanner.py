@@ -31,9 +31,17 @@ instead, so a change to a private entity recompiles it. Module names are
 lowercased throughout: Fortran is case-insensitive and compilers write
 lowercase module files.
 
-Limitations: Fortran ``INCLUDE`` lines are not followed, so a module
-declaration reached only through an include is invisible here; and the
-preprocessor doesn't run, so a declaration ``#if`` leaves out still counts.
+``#include`` and Fortran ``INCLUDE`` lines are followed through the
+including file's directory (except for ``#include <...>``) and then the
+``-I`` directories, as the compilers search them, and each file found is
+read in place of its include line. The files found are the edge's
+``extra_deps``, so editing one recompiles every source that includes it,
+and with ``--depfile`` they also rerun this scan. An include found nowhere
+is skipped: the compiler reports it if it matters, and ``#if`` may leave
+it out.
+
+Limitation: the preprocessor doesn't run, so a declaration or include
+``#if`` leaves out still counts.
 
 Paths in the output are relative to the build directory, where Ninja runs.
 """
@@ -45,8 +53,10 @@ from __future__ import annotations
 # own toolchains.
 import argparse
 import json
+import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 from pcons.core.collate import SCAN_INFO_VERSION, write_text_if_changed
@@ -89,6 +99,13 @@ _SEPARATE_PROCEDURE_RE = re.compile(
 # Does not match USE statements inside string literals (good enough for real code)
 _USE_RE = re.compile(
     r"^\s*USE\s+(?:::\s*)?(\w+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# A preprocessor #include or a Fortran INCLUDE line, each one line long.
+_INCLUDE_RE = re.compile(
+    r"""^[ \t]*(?:\#[ \t]*include[ \t]*(?P<open>["<])(?P<cpp>[^">\n]+)[">]"""
+    r"""|include[ \t]*(?P<quote>['"])(?P<fortran>[^'"\n]+)(?P=quote))""",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -195,13 +212,48 @@ def _modules_declaring_separate_procedures(
     return list(found)
 
 
+def expand_includes(
+    source: Path, text: str, include_dirs: Sequence[Path]
+) -> tuple[str, list[Path]]:
+    """*text*, the contents of *source*, with each file it includes read in
+    place of its include line, and the files found, in order.
+
+    A file is read once, at its first include: repeating it adds no
+    dependency, and a file including itself would never end.
+    """
+    source = Path(os.path.normpath(source))
+    found: dict[Path, None] = {}
+
+    def expand(text: str, directory: Path) -> str:
+        def splice(match: re.Match[str]) -> str:
+            name = match.group("cpp") or match.group("fortran")
+            local = [] if match.group("open") == "<" else [directory]
+            for base in [*local, *include_dirs]:
+                path = Path(os.path.normpath(base / name))
+                if path in found or path == source:
+                    return ""
+                try:
+                    included = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                found[path] = None
+                return expand(included, path.parent) + "\n"
+            return ""
+
+        return _INCLUDE_RE.sub(splice, text)
+
+    return expand(text, source.parent), list(found)
+
+
 def scan_info(
     source_text: str,
     moddir: str,
     submodule_file: str = DEFAULT_SUBMODULE_FILE,
     ancestor_file: str = DEFAULT_ANCESTOR_FILE,
+    included: Sequence[str] = (),
 ) -> dict[str, object]:
-    """The scan-info document for one Fortran source.
+    """The scan-info document for one Fortran source, *source_text* with
+    its includes expanded, and *included* the files they read.
 
     Each provided module's file appears in both ``provides`` (so requiring
     edges can depend on it) and ``extra_outputs`` (so the dyndep file claims
@@ -228,8 +280,18 @@ def scan_info(
             for name, path in zip(provided, mod_paths, strict=True)
         ],
         "requires": consumes,
+        "extra_deps": list(included),
         "extra_outputs": mod_paths,
     }
+
+
+def depfile_text(target: str, prerequisites: Sequence[str]) -> str:
+    """A make-style depfile: *target* depends on *prerequisites*."""
+
+    def escape(path: str) -> str:
+        return path.replace("$", "$$").replace("#", "\\#").replace(" ", "\\ ")
+
+    return " ".join([f"{escape(target)}:", *map(escape, prerequisites)]) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -262,22 +324,42 @@ def main(argv: list[str] | None = None) -> int:
         f"(default: {DEFAULT_ANCESTOR_FILE})",
     )
     parser.add_argument(
+        "-I",
+        dest="include_dirs",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help="directory searched for included files, after the including "
+        "file's own; repeatable",
+    )
+    parser.add_argument(
         "--out",
         required=True,
         help="scan-info JSON file to write",
     )
+    parser.add_argument(
+        "--depfile",
+        help="depfile to write, naming the included files as --out's inputs",
+    )
     args = parser.parse_args(argv)
 
+    source = Path(args.scan_one)
     try:
-        text = Path(args.scan_one).read_text(encoding="utf-8", errors="replace")
+        text = source.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
-        print(f"pcons fortran scan: cannot read {args.scan_one}: {e}", file=sys.stderr)
+        print(f"pcons fortran scan: cannot read {source}: {e}", file=sys.stderr)
         return 1
 
-    info = scan_info(text, args.moddir, args.submodule_file, args.ancestor_file)
+    text, found = expand_includes(source, text, [Path(d) for d in args.include_dirs])
+    included = [path.as_posix() for path in found]
+    info = scan_info(
+        text, args.moddir, args.submodule_file, args.ancestor_file, included
+    )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     write_text_if_changed(out, json.dumps(info, indent=1, sort_keys=True) + "\n")
+    if args.depfile:
+        Path(args.depfile).write_text(depfile_text(args.out, included))
     return 0
 
 

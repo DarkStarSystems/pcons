@@ -289,9 +289,12 @@ logical module names to keyed BMIs and writes each compile a modmap
 standard-library edges, and nothing builds or links unless some translation
 unit's scan reports the import. Fortran declares a `"fortran-modules"` scanner
 over its `MODULE`/`SUBMODULE`/`USE` scan and uses the generic collate unchanged.
+Its scan follows `#include` and `INCLUDE` through the compile's include path:
+the files it reads are the compile's `extra_deps`, and its depfile reruns the
+scan when one of them changes.
 
 The examples: `examples/29_cxx_modules`, `30_cxx_partitions`,
 `32_cxx_import_std`, `35_cxx_modules_deps`, `36_cxx_modules_multi_level_subdirs`,
 `39_bmi_compat`, `71_cxx_modules_codegen`, `72_cxx_modules_codegen_interface`,
-`26_fortran_modules` and `94_fortran_submodules`. The user-facing rules are in
-[C++20 modules](user-guide.md#c20-modules).
+`26_fortran_modules`, `94_fortran_submodules` and `95_fortran_includes`. The
+user-facing rules are in [C++20 modules](user-guide.md#c20-modules).

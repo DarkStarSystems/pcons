@@ -322,6 +322,8 @@ env = project.Environment(toolchain="fortran")
 project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 ```
 
+Files included with `#include` or Fortran's `INCLUDE` are found the way the compiler finds them: beside the including file, then in `env.fc.includes` and the include directories of linked targets and packages. Editing one recompiles every source that includes it. Pcons doesn't run the preprocessor to find them, so an include inside an `#if` counts even when the condition is false.
+
 The compilers differ in a few ways:
 
 - **flang** needs LLVM 21 or newer. It has no `-Os`, so `minsizerel` builds use `-O2`. It has no `sanitize`, `profile`, `hardened` or `coverage`, and its `warnings` preset adds nothing: flang's own warnings are always on, and it ignores `-Wall`.
