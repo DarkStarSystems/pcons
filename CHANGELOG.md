@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A test's `args` can name files: a `Target` is the file it builds, which
+  the test then depends on, and a `Path` is a file in the source tree.
+  Each is written as the test sees it from where it runs, so a test can
+  run a script that drives a built program, like Meson's `test()` with an
+  executable among its arguments.
 - LLVM flang (21 or newer) and Intel ifx join gfortran as Fortran
   toolchains: `toolchain="flang"` or `"ifx"`, or `toolchain="fortran"` to
   find whichever is installed (gfortran first). `$FC` steers that choice,

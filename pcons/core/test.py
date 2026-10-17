@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -167,12 +168,35 @@ def set_test_property(target: Target, key: str, value: Any) -> None:
     elif key == "env":
         value = dict(value)
     elif key == "args":
-        value = [str(a) for a in value]
+        value = test_args(target, value)
     elif key == "data":
         value = tuple(value)
     elif key == "depends_on":
         value = tuple(str(d) for d in value)
     partial[key] = value
+
+
+def test_args(target: Target, args: Iterable[object]) -> list[str | Path | Target]:
+    """A test's arguments as its spec keeps them until resolve.
+
+    Text stays as given. A ``Path`` is a file, read like ``sources=``: a
+    relative one from the declaring script's directory. A ``Target`` is
+    the file it builds, which the test then depends on, so ``test-build``
+    builds it. Resolve writes both as the test sees them from where it
+    runs.
+    """
+    from pcons.core.target import Target
+
+    result: list[str | Path | Target] = []
+    for arg in args:
+        if isinstance(arg, Target):
+            target.depends(arg)
+            result.append(arg)
+        elif isinstance(arg, Path):
+            result.append(target.project._script_path(arg))
+        else:
+            result.append(str(arg))
+    return result
 
 
 def set_test_properties(*targets: Target, **properties: Any) -> None:

@@ -33,7 +33,7 @@ The full set of fields (all keyword-only):
 
 | Field | Type | Purpose |
 |---|---|---|
-| `args` | `Sequence[str]` | Arguments passed after the program. |
+| `args` | `Sequence[str \| Path \| Target]` | Arguments passed after the program; a `Path` or `Target` is a file (see below). |
 | `cwd` | `Path \| str \| None` | Working directory; defaults to the build dir. |
 | `env` | `dict[str, str] \| None` | Extra environment variables for the test process. |
 | `labels` | `Sequence[str]` | Tags for filtering (`unit`, `integration`, `slow`, `fuzz`, ...). |
@@ -49,6 +49,20 @@ The full set of fields (all keyword-only):
 `program` can be a `Target` (the typical case — depending on it ensures
 `ninja test-build` compiles it first), or a `Path` / `str` to an
 existing script or external binary.
+
+An argument can be a file too. A `Target` is the file it builds, and the
+test depends on it like its program. A `Path` is a file in the source
+tree, read from the script's directory like `sources=`. Both are written as
+the test sees them from where it runs (its `cwd`, or the build directory),
+so a test can run a script that drives a built program:
+
+```python
+project.Test(
+    "math.cases",
+    sys.executable,
+    args=[Path("check_cases.py"), test_prog, Path("cases.txt")],
+)
+```
 
 ## Skipping at Run Time: `skip_returncode`
 
