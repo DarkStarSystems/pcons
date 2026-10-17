@@ -183,6 +183,10 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     monkeypatch.setattr(
         swift_mod.SwiftToolchain, "_runtime_libdirs", lambda self: ["/rt/swift"]
     )
+    # GccArchiver takes the gcc-ar beside gcc where there is one.
+    from pcons.toolchains import gcc as gcc_mod
+
+    monkeypatch.setattr(gcc_mod, "gcc_archiver_for", lambda driver: None)
     # LlvmArchiver takes llvm-ar where PATH has one.
     which = shutil.which
     monkeypatch.setattr(
