@@ -163,6 +163,11 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
         "runtime_libdir",
         property(lambda self: f"/rt/{self.name}"),
     )
+    from pcons.toolchains import gfortran as gfortran_mod
+
+    monkeypatch.setattr(
+        gfortran_mod.GfortranToolchain, "gcov_libdir", property(lambda self: None)
+    )
     monkeypatch.setattr(
         fortran_mod.FortranToolchainBase,
         "compiler_path",
