@@ -90,11 +90,6 @@ def _link_tail() -> list[object]:
     ]
 
 
-def shared_library_flag(platform: Platform) -> str:
-    """The driver flag that links a shared library for *platform*."""
-    return "-dynamiclib" if platform.is_apple else "-shared"
-
-
 def needs_pic(target_type: str, platform: Platform) -> bool:
     """Whether *target_type* compiles as position-independent code for
     *platform*: a shared library on Linux, Android and the BSDs. 64-bit
@@ -135,16 +130,15 @@ def require_cross_binaries(
 def gnu_link_vars(cmd: str) -> dict[str, object]:
     """Default vars for a GNU-style link tool (gcc/clang/gfortran).
 
-    ``sharedflag`` is the host's; a cross preset that names its target
-    platform sets it for that platform (UnixToolchain.apply_cross_preset).
-
     Args:
         cmd: Default linker command (e.g. "gcc", "clang", "gfortran").
     """
     return {
         "cmd": cmd,
         "flags": [],
-        "sharedflag": shared_library_flag(get_platform()),
+        # Every GNU-style driver takes -shared, for Mach-O too (flang
+        # takes nothing else).
+        "sharedflag": "-shared",
         "lprefix": "-l",
         "libs": [],
         "Lprefix": "-L",
