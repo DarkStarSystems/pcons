@@ -6,8 +6,8 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.preset import Preset, ToolContribution
-from pcons.tools.toolchain import BaseToolchain
+from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
+from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -27,8 +27,6 @@ class MsvcCompatibleToolchain(BaseToolchain):
     arch flags, and build variants; subclasses override where the two
     toolchains differ.
     """
-
-    LINKER_STYLE = "msvc"
 
     # Named feature presets; see docs/presets.md.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
@@ -136,6 +134,27 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """
         return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
 
+    def realize_link_needs(
+        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+    ) -> list[FlagToken]:
+        """Objects as they are, and ``/SUBSYSTEM:CONSOLE`` for a console
+        entry point the objects don't define (ifx's ``main`` is in its
+        runtime, so link.exe can't infer one), unless the project chose a
+        subsystem: a C++ ``WinMain`` program sets ``/SUBSYSTEM:WINDOWS``.
+        Windows has no rpaths or frameworks."""
+        if needs.rpaths or needs.frameworks:
+            raise ValueError(
+                f"Target '{target.name}': {self.name} links for Windows, which "
+                f"has no rpaths or frameworks, but its objects need {needs}."
+            )
+        flags: list[FlagToken] = list(needs.objects)
+        if needs.console and not any(
+            isinstance(f, str) and f.upper().startswith("/SUBSYSTEM:")
+            for f in existing_flags
+        ):
+            flags.append("/SUBSYSTEM:CONSOLE")
+        return flags
+
     def get_link_flags_for_target(
         self,
         target: Target,
@@ -239,10 +258,10 @@ class MsvcCompatibleToolchain(BaseToolchain):
             return "/std:c++14"
         return f"/std:c++{standard}"
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+    def make_target_preset(self, cross: Any) -> Preset:
         """Raise: these toolchains target only Windows; CPU selection is
         set_target_arch's job."""
-        name = getattr(preset, "name", preset)
+        name = getattr(cross, "name", cross)
         raise ValueError(
             f"Cross preset '{name}' does not apply to the {self.name} toolchain: "
             f"it targets only Windows. To select the CPU, use "
@@ -270,7 +289,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         crt = Preset(
             name="default",
             category="variant",
-            exclusive_group="build_variant",
+            exclusive_group=VARIANT_GROUP,
             contributions=tuple(
                 ToolContribution(tool, flags=("/MD",))
                 for tool in self._feature_preset_tools()

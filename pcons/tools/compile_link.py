@@ -21,7 +21,9 @@ from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
+    tool_language,
 )
+from pcons.tools.toolchain import LinkNeeds, link_language_rank
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +90,6 @@ def _compilers_by_language_priority(env: Environment) -> list[str]:
     an unrecognized extension is the environment's most capable one (C++
     ahead of C) rather than whichever was configured first.
     """
-    priority = getattr(env._toolchain, "language_priority", {}) or {}
 
     def rank(name: str) -> int:
         for toolchain in env.toolchains:
@@ -96,7 +97,7 @@ def _compilers_by_language_priority(env: Environment) -> list[str]:
             if tool is not None:
                 builder = tool.builders().get("Object")
                 if builder is not None:
-                    return -priority.get(builder.language or "", 0)
+                    return -link_language_rank(builder.language or "")
         return 0
 
     names = [
@@ -174,16 +175,129 @@ def _propagate_declared_deps(source: FileNode, obj_node: FileNode) -> None:
     obj_node.implicit_deps.extend(source.implicit_deps)
 
 
-def _context_class_for(env: Environment) -> type[CompileLinkContext]:
-    """The CompileLinkContext subclass the env's toolchain uses.
+def _compiles(toolchain: Toolchain, language: str) -> bool:
+    """Whether *toolchain* has a source handler for *language*."""
+    for suffix in toolchain.source_suffixes():
+        handler = toolchain.get_source_handler(suffix)
+        if handler is not None and handler.language == language:
+            return True
+    return False
 
-    Lets MSVC-compatible toolchains (MSVC, clang-cl) format libraries as
-    ``foo.lib`` instead of the GNU-style bare ``foo``.
+
+def _reads_link_command(toolchain: Toolchain, env: Environment) -> bool:
+    """Whether *toolchain*'s driver takes the command line *env*'s link
+    tool writes: every GNU-style driver shares one (gcc's, clang's,
+    gfortran's, flang's), while swiftc and link.exe each have their own."""
+    link = toolchain.tools.get("link")
+    if link is None or not env.has_tool("link"):
+        return False
+    own = link.default_vars()
+    return all(own.get(var) == env.link.get(var) for var in ("progcmd", "sharedcmd"))
+
+
+def _link_contents(target: Target) -> tuple[list[FileNode], set[str]]:
+    """The objects a link of *target* pulls in, and the languages imported
+    libraries declare.
+
+    Its own objects, and those of the static and object libraries on its
+    link line, whichever environment built them. A shared library is
+    linked already, with its own runtimes, so it adds neither (CMake
+    propagates link languages through static libraries the same way).
     """
-    toolchain = env._toolchain
-    if toolchain is not None:
-        return toolchain.compile_link_context_class()
-    return CompileLinkContext
+    objects = list(target.intermediate_nodes)
+    declared: set[str] = set()
+    for dep in target.transitive_link_dependencies():
+        if getattr(dep, "is_imported", False):
+            declared |= dep.required_languages
+        elif dep.target_type in ("static_library", "object"):
+            objects += dep.intermediate_nodes
+    return objects, declared
+
+
+def _link_driver(
+    target: Target,
+    env: Environment,
+    languages: set[str],
+    compiled_by: dict[str, Toolchain],
+    compilers: set[Toolchain],
+) -> tuple[str, Toolchain | None, str | None]:
+    """(link language, linking toolchain, its driver command or None).
+
+    A target is linked by the driver of its strongest language: the
+    toolchain that compiled those objects, when its driver takes the link
+    tool's command line, else the link tool's own toolchain (``g++`` for
+    C++, ``gfortran`` for Fortran). A language with no driver (MSVC-ABI
+    objects name their runtimes) passes to the next. A link tool set to
+    something other than a compiler driver (link.exe, or a command the
+    script chose) links as it is. ``target.link_language`` overrides the
+    order. When the link tool's own driver links, the language is the one
+    that driver compiles, so each toolchain states its objects' needs for
+    the driver that really links. *compilers* are the toolchains whose
+    objects the link pulls in.
+    """
+    owner = env._tool_owners.get("link", env._toolchain)
+    if target.link_language is not None:
+        language = target.link_language
+        if not any(_compiles(tc, language) for tc in env.toolchains):
+            names = ", ".join(tc.name for tc in env.toolchains) or "(none)"
+            raise PconsError(
+                f"Target '{target.name}' has link_language '{language}', but "
+                f"none of its environment's toolchains ({names}) compiles it.",
+                location=target.defined_at,
+            )
+        ranked = [language]
+    else:
+        ranked = sorted(languages, key=link_language_rank, reverse=True)
+    if not ranked:
+        return "c", owner, None
+    drivers = {
+        getattr(env, name).get("cmd")
+        for name in env.tool_names()
+        if name != "link" and hasattr(getattr(env, name, None), "Object")
+    }
+    link_cmd = env.link.get("cmd") if env.has_tool("link") else None
+    if link_cmd is None or link_cmd not in drivers:
+        return ranked[0], owner, None
+    # A toolchain a preset left out (allow_partial) would link without that
+    # preset's runtime, which other toolchains' objects need: the owner links.
+    left_out = {name for _, name in env._partial_presets}
+    for language in ranked:
+        compiler = compiled_by.get(language) or next(
+            (tc for tc in env.toolchains if _compiles(tc, language)), None
+        )
+        for toolchain in dict.fromkeys(t for t in (compiler, owner) if t is not None):
+            if toolchain is not owner and (
+                not _reads_link_command(toolchain, env)
+                or (toolchain.name in left_out and compilers - {toolchain})
+            ):
+                if target.link_language is not None and toolchain is compiler:
+                    presets = sorted(
+                        p for p, n in env._partial_presets if n == toolchain.name
+                    )
+                    raise PconsError(
+                        f"Target '{target.name}' asks to link with "
+                        f"{toolchain.name} (link_language '{language}'), but "
+                        f"{', '.join(presets)} left {toolchain.name} out "
+                        f"(allow_partial), so its driver can't link the runtime "
+                        f"the other objects need for {', '.join(presets)}. Drop "
+                        f"link_language, or the preset.",
+                        location=target.defined_at,
+                    )
+                continue
+            cmd = toolchain.link_driver(language, env)
+            if cmd:
+                return language, toolchain, None if cmd == link_cmd else cmd
+    driving = next(
+        (
+            lang
+            for name in env.tool_names()
+            if name != "link"
+            and getattr(env, name).get("cmd") == link_cmd
+            and (lang := tool_language(env, name)) is not None
+        ),
+        ranked[0],
+    )
+    return driving, owner, None
 
 
 class CompileLinkFactory:
@@ -390,17 +504,16 @@ class CompileLinkFactory:
             target, env, for_compilation=True, tool_name=tool_name
         )
 
-        # Target-type compile flags (e.g. -fPIC for shared libs on Linux):
-        # the environment's toolchain's, plus what a toolchain added beside
-        # it needs for its own sources (ifx's -fPIE in a C++ program).
-        if target.target_type is not None:
-            toolchains = [env._toolchain, compiling_toolchain]
-            for toolchain in dict.fromkeys(t for t in toolchains if t is not None):
-                for flag in toolchain.get_compile_flags_for_target_type(
-                    str(target.target_type), env=env
-                ):
-                    if flag not in effective.compile_flags:
-                        effective.compile_flags.append(flag)
+        # Target-type compile flags (e.g. -fPIC for shared libs on Linux),
+        # from the toolchain compiling this source: its own form of them
+        # (nvcc's -Xcompiler=-fPIC, ifx's -fPIE), never another's.
+        toolchain = compiling_toolchain or env._toolchain
+        if target.target_type is not None and toolchain is not None:
+            for flag in toolchain.get_compile_flags_for_target_type(
+                str(target.target_type), env=env
+            ):
+                if flag not in effective.compile_flags:
+                    effective.compile_flags.append(flag)
 
         return effective
 
@@ -450,6 +563,15 @@ class CompileLinkFactory:
         for toolchain in env.toolchains:
             handler = toolchain.get_source_handler(source.suffix)
             if handler is not None and env.has_tool(handler.tool_name):
+                # The compiler's own toolchain, when it's another one that
+                # handles the source too: Swift inherits C++ handlers, but
+                # beside clang, clang's cxx compiles the .cpp, and its
+                # objects need what clang's do.
+                owner = env._tool_owners.get(handler.tool_name, toolchain)
+                if owner is not toolchain:
+                    own = owner.get_source_handler(source.suffix)
+                    if own is not None and own.tool_name == handler.tool_name:
+                        return own, owner
                 return handler, toolchain
         return None
 
@@ -939,39 +1061,88 @@ class CompileLinkFactory:
                 link_flags.extend(handler.extra_flags)
                 seen_handlers.add(handler.suffix)
 
-        object_languages: set[str] = set()
-        for node in target.intermediate_nodes:
-            bi = getattr(node, "_build_info", None)
-            if bi:
-                lang = bi.get("language")
-                if lang:
-                    object_languages.add(lang)
+        objects, declared = _link_contents(target)
+        # The languages a driver is chosen from, the toolchains of this
+        # environment that compiled them, and every toolchain whose objects
+        # the link pulls in, with their languages, for what they need.
+        langs: set[str] = set(declared) | target.required_languages
+        compiled_by: dict[str, Toolchain] = {}
+        # (toolchain, the environment it compiled in) -> languages
+        compilers: dict[tuple[Toolchain, Environment], set[str]] = {}
+        for node in objects:
+            bi = getattr(node, "_build_info", None) or {}
+            lang = bi.get("language")
+            if not lang:
+                continue
+            langs.add(lang)
+            toolchain = bi.get("toolchain")
+            if toolchain is not None:
+                compiled_in = bi.get("env") or env
+                compilers.setdefault((toolchain, compiled_in), set()).add(lang)
+                if toolchain in env.toolchains:
+                    compiled_by.setdefault(lang, toolchain)
 
-        langs = target.get_all_languages() | object_languages
-        primary_tc = env._toolchain
-        priority = getattr(primary_tc, "language_priority", {}) if primary_tc else {}
-        link_language = (
-            max(langs, key=lambda lang: priority.get(lang, 0)) if langs else "c"
+        link_language, linker, linker_cmd = _link_driver(
+            target, env, langs, compiled_by, {tc for tc, _ in compilers}
+        )
+        # An imported library's declared languages need what that language's
+        # toolchain here says, else what the linking toolchain knows of it
+        # (gfortran knows the C++ runtime).
+        for lang in sorted(
+            declared - {lang for ls in compilers.values() for lang in ls}
+        ):
+            toolchain = next(
+                (tc for tc in env.toolchains if _compiles(tc, lang)), linker
+            )
+            if toolchain is not None:
+                compilers.setdefault((toolchain, env), set()).add(lang)
+        owner = env._tool_owners.get("link", env._toolchain)
+        link_base_flags = (
+            env.flags_realized_by("link", linker)
+            if linker is not None and linker is not owner and env.has_tool("link")
+            else None
         )
 
-        for tc in env.toolchains:
-            runtime_libs = tc.get_runtime_libs(link_language, object_languages)
-            if runtime_libs:
-                effective_link.link_libs = effective_link.link_libs + runtime_libs
-            runtime_libdirs = tc.get_runtime_libdirs(link_language, object_languages)
-            if runtime_libdirs:
-                effective_link.link_dirs = effective_link.link_dirs + [
-                    Path(d) for d in runtime_libdirs
-                ]
+        # What the objects need from this link, which the linking
+        # toolchain writes its own way (see LinkNeeds).
+        needs = LinkNeeds()
+        for (toolchain, compiled_in), languages in compilers.items():
+            needs = needs | toolchain.link_needs(
+                target, languages, link_language, compiled_in
+            )
+        effective_link.link_libs = [*effective_link.link_libs, *needs.libs]
+        effective_link.link_dirs = [
+            *effective_link.link_dirs,
+            *(Path(d) for d in needs.libdirs),
+        ]
+        effective_link.frameworks = [*effective_link.frameworks, *needs.frameworks]
+        effective_link.framework_dirs = [
+            *effective_link.framework_dirs,
+            *(Path(d) for d in needs.framework_dirs),
+        ]
+        if linker is not None:
+            base = link_base_flags
+            if base is None and env.has_tool("link"):
+                base = env.link.get("flags")
+            chosen = [*(base or ()), *link_flags]
+            link_flags += linker.realize_link_needs(needs, target, chosen)
 
         effective_link.link_flags = link_flags
-        context = _context_class_for(env).from_effective_requirements(
+        context_class = (
+            linker.compile_link_context_class()
+            if linker is not None
+            else CompileLinkContext
+        )
+        context = context_class.from_effective_requirements(
             effective_link,
             mode="link",
             language=link_language,
             env=env,
             target=target,
             output_name=output_node.path.name,
+            linker=linker,
+            linker_cmd=linker_cmd,
+            link_base_flags=link_base_flags,
         )
 
         info: BuildInfo = {
@@ -1120,19 +1291,4 @@ class CompileLinkFactory:
 
         if not languages:
             return None
-
-        primary_toolchain = env._toolchain
-        if primary_toolchain is None:
-            return next(iter(languages))
-
-        priority = getattr(primary_toolchain, "language_priority", {})
-        max_priority = -1
-        max_lang: str | None = None
-
-        for lang in languages:
-            p = priority.get(lang, 0)
-            if p > max_priority:
-                max_priority = p
-                max_lang = lang
-
-        return max_lang
+        return max(sorted(languages), key=link_language_rank)

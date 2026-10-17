@@ -1340,3 +1340,36 @@ class TestBuildTypeFollowsTheVariant:
         finder = ConanFinder(output_folder=tmp_path)
         finder.sync_profile(env=env, build_type="Release")
         assert "build_type=Release" in finder.profile_path.read_text()
+
+
+class TestProfileFromAMixedEnvironment:
+    """In a mixed environment the profile is the C/C++ toolchain's, and the
+    C++ standard is the one the script asked for."""
+
+    def _fortran_primary(self, test_project):  # noqa: F811
+        from pcons.tools.toolchain import toolchain_registry
+
+        env = test_project.Environment(
+            toolchain=toolchain_registry.get("gfortran").create_toolchain()
+        )
+        env.add_toolchain(toolchain_registry.get("gcc").create_toolchain())
+        return env
+
+    def test_the_cxx_toolchain_not_the_primary(self, tmp_path: Path, test_project):  # noqa: F811
+        env = self._fortran_primary(test_project)
+        finder = ConanFinder(output_folder=tmp_path)
+        with patch.object(finder, "_detect_compiler_version", return_value="16"):
+            finder.sync_profile(env=env)
+        profile = finder.profile_path.read_text()
+        cxx = re.search(r"^CXX=(.*)$", profile, re.M)
+        assert cxx is not None and Path(cxx.group(1)).name.startswith("g++")
+
+    def test_the_standard_the_script_set(self, tmp_path: Path, test_project):  # noqa: F811
+        env = self._fortran_primary(test_project)
+        env.cxx.set_standard("c++23")
+        # A hand-written one ahead of it: the compiler takes the last.
+        env.cxx.flags.insert(0, "-std=c++17")
+        finder = ConanFinder(output_folder=tmp_path)
+        with patch.object(finder, "_detect_compiler_version", return_value="16"):
+            finder.sync_profile(env=env)
+        assert "compiler.cppstd=23" in finder.profile_path.read_text()

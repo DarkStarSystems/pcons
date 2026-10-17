@@ -10,13 +10,15 @@ command name and any extra keys).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import Platform, get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.subst import NodeVar, SourcePath, TargetPath
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pcons.core.builder import Builder
 
 
@@ -91,6 +93,43 @@ def _link_tail() -> list[object]:
 def shared_library_flag(platform: Platform) -> str:
     """The driver flag that links a shared library for *platform*."""
     return "-dynamiclib" if platform.is_apple else "-shared"
+
+
+def needs_pic(target_type: str, platform: Platform) -> bool:
+    """Whether *target_type* compiles as position-independent code for
+    *platform*: a shared library on Linux, Android and the BSDs. 64-bit
+    macOS code is PIC already, and Windows DLLs don't use it."""
+    return target_type == "shared_library" and not (
+        platform.is_apple or platform.is_windows
+    )
+
+
+def require_cross_binaries(
+    preset: Any, compiler: str, tools: Sequence[str], example: str, instead: str
+) -> None:
+    """Raise if *preset* targets a triple but repoints none of *tools*.
+
+    GCC-family compilers (*compiler*) reject --target= and select targets
+    by binary, so without cross-compiler commands the build would silently
+    target the host. *example* is a tool_cmds entry, with ``{triple}`` in
+    it; *instead* the toolchain that retargets by flag. A wasm triple is
+    let through, for UnixToolchain's "use the dedicated toolchain" error.
+    """
+    triple = str(getattr(preset, "triple", None) or "")
+    if not triple or triple.startswith("wasm32"):
+        return
+    resolve = getattr(preset, "resolved_tool_cmds", None)
+    cmds = resolve() if resolve is not None else {}
+    if any(tool in cmds for tool in tools):
+        return
+    name = getattr(preset, "name", preset)
+    raise ValueError(
+        f"Cross preset '{name}' targets triple '{triple}', but {compiler} "
+        f"selects targets by binary, not by flag. Provide cross-compiler "
+        f"commands in the preset's tool_cmds (e.g. "
+        f"{example.format(triple=triple)}), or use {instead}, which "
+        f"retargets via --target."
+    )
 
 
 def gnu_link_vars(cmd: str) -> dict[str, object]:

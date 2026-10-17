@@ -14,14 +14,14 @@ toolchain — guard optional features with `env.has_preset(name)`."""
 from typing import Literal
 
 KnownFeaturePreset = Literal[
-    "coverage",  # EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, WasiToolchain
-    "fast-math",  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
-    "hardened",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
-    "lto",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
-    "openmp",  # ClangClToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain
-    "profile",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
-    "pthread",  # EmscriptenToolchain, GccToolchain, LlvmToolchain, WasiToolchain
-    "sanitize",  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
-    "warnings",  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
-    "werror",  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
+    "coverage",  # CudaToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, SwiftToolchain, WasiToolchain
+    "fast-math",  # ClangClToolchain, CudaToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
+    "hardened",  # ClangClToolchain, CudaToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
+    "lto",  # ClangClToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
+    "openmp",  # ClangClToolchain, CudaToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain
+    "profile",  # ClangClToolchain, CudaToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
+    "pthread",  # CudaToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxToolchain, LlvmToolchain, SwiftToolchain, WasiToolchain
+    "sanitize",  # ClangClToolchain, CudaToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
+    "warnings",  # ClangClToolchain, CudaToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
+    "werror",  # ClangClToolchain, CudaToolchain, EmscriptenToolchain, FlangToolchain, GccToolchain, GfortranToolchain, IfxMsvcToolchain, IfxToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
 ]

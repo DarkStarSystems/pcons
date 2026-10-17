@@ -25,6 +25,7 @@ from pcons.toolchains.gnu_common import (
     gnu_compile_vars,
     gnu_link_builders,
     gnu_link_vars,
+    require_cross_binaries,
 )
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool, resolve_env_cmd_override
@@ -307,29 +308,17 @@ class GccToolchain(UnixToolchain):
     def __init__(self) -> None:
         super().__init__("gcc")
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross preset, requiring cross binaries for foreign triples.
+    def make_target_preset(self, cross: Any) -> Preset:
+        """A cross preset, requiring cross binaries for foreign triples.
 
         GCC rejects --target=; a different-triple build needs different tool
         binaries, so a preset with a triple but no CC/CXX overrides fails
         fast rather than silently building host-arch objects.
         """
-        triple = getattr(preset, "triple", None)
-        resolve = getattr(preset, "resolved_tool_cmds", None)
-        cmds = resolve() if resolve is not None else {}
-        # wasm triples get the more specific "use the dedicated toolchain"
-        # error from UnixToolchain (via super()), not the binary-retarget one.
-        if triple and str(triple).startswith("wasm32"):
-            triple = None
-        if triple and not ("cc" in cmds or "cxx" in cmds):
-            name = getattr(preset, "name", preset)
-            raise ValueError(
-                f"Cross preset '{name}' targets triple '{triple}', but GCC "
-                f"selects targets by binary, not by flag. Provide cross-compiler "
-                f"commands in the preset's tool_cmds (e.g. cc={triple}-gcc), or "
-                f"use a clang-based toolchain, which retargets via --target."
-            )
-        super().apply_cross_preset(env, preset)
+        require_cross_binaries(
+            cross, "GCC", ("cc", "cxx"), "cc={triple}-gcc", "a clang-based toolchain"
+        )
+        return super().make_target_preset(cross)
 
     def setup_presets(self, env: Environment) -> list[Preset]:
         """The $CC/$CXX presets, with the archiver of the driver they pick.

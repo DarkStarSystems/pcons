@@ -8,10 +8,11 @@ import logging
 import shutil
 import subprocess
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.preset import Preset, ToolContribution
+from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
 from pcons.toolchains.fortran import (
     FortranCompiler,
     FortranLinker,
@@ -57,13 +58,21 @@ class FlangToolchain(FortranToolchain):
     LINKER = FlangLinker
     RUNTIME_LIBS = ("flang_rt.runtime",)
 
-    # Flang ignores -Wextra (with a warning) and has no --coverage.
+    # Flang has no sanitizers, gprof, stack protector or coverage. Its -Wall
+    # does nothing but warn that it's ignored, so warnings is a deliberate
+    # no-op. -pthread matters only to the link: the compile calls it unused.
+    # Targeting MSVC, make_feature_preset adjusts profile, lto and pthread.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
-        "warnings": {"compile_flags": ["-Wall"]},
+        "warnings": {"compile_flags": []},
         "werror": {"compile_flags": ["-Werror"]},
+        "lto": {"compile_flags": ["-flto"], "link_flags": ["-flto"]},
+        "pthread": {"link_flags": ["-pthread"]},
         "openmp": {"compile_flags": ["-fopenmp"], "link_flags": ["-fopenmp"]},
         "fast-math": {"compile_flags": ["-ffast-math"], "link_flags": ["-ffast-math"]},
     }
+
+    # A clang-family driver: --target= retargets it.
+    IS_CLANG_DRIVER = True
 
     # Flang has no -Os, so minsizerel optimizes as release does.
     UNIX_VARIANTS = {
@@ -92,7 +101,7 @@ class FlangToolchain(FortranToolchain):
         crt = Preset(
             name="default",
             category="variant",
-            exclusive_group="build_variant",
+            exclusive_group=VARIANT_GROUP,
             contributions=(self._crt_flag(self.WINDOWS_DEFAULT_CRT),),
         )
         return [*presets, crt]
@@ -105,6 +114,22 @@ class FlangToolchain(FortranToolchain):
             crt = self.WINDOWS_CRT.get(variant.lower(), self.WINDOWS_DEFAULT_CRT)
             contribs.append(self._crt_flag(crt))
         return contribs
+
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """Targeting MSVC, profile and pthread are as MSVC's presets have
+        them, and LTO links with lld, the linker that reads flang's bitcode."""
+        if self.abi != "msvc":
+            return super().make_feature_preset(name)
+        if name == "pthread":
+            return None
+        if name == "profile":
+            link = ToolContribution("link", flags=("-Wl,/PROFILE",))
+            return Preset(name=name, category="feature", contributions=(link,))
+        preset = super().make_feature_preset(name)
+        if preset is not None and name == "lto":
+            lld = ToolContribution("link", flags=("-fuse-ld=lld",))
+            preset = replace(preset, contributions=(*preset.contributions, lld))
+        return preset
 
     @property
     def objects_name_runtimes(self) -> bool:

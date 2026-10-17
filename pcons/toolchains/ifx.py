@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
@@ -26,12 +26,11 @@ from pcons.toolchains.fortran import (
 )
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.msvc import MsvcLibrarian, MsvcLinker, use_msvc_tool_paths
+from pcons.tools.toolchain import LinkNeeds
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from pcons.core.environment import Environment
-    from pcons.core.flags import FlagToken
+    from pcons.core.preset import Preset, ToolContribution
     from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
 
@@ -62,15 +61,62 @@ class IfxToolchain(FortranToolchain):
     # In the order ifx itself links them.
     RUNTIME_LIBS = ("ifport", "ifcoremt", "imf", "svml", "irc")
 
+    # No coverage: ifx accepts --coverage and does nothing with it.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {"compile_flags": ["-warn", "all"]},
         "werror": {"compile_flags": ["-warn", "errors"]},
+        # Address only: given "address,undefined", ifx silently drops both.
+        "sanitize": {
+            "compile_flags": ["-fsanitize=address", "-fno-omit-frame-pointer"],
+            "link_flags": ["-fsanitize=address"],
+        },
+        "profile": {"compile_flags": ["-pg", "-g"], "link_flags": ["-pg"]},
+        "lto": {"compile_flags": ["-flto"], "link_flags": ["-flto"]},
+        "hardened": {
+            "compile_flags": ["-fstack-protector-strong", "-fPIE"],
+            "link_flags": ["-pie", "-Wl,-z,relro,-z,now"],
+        },
+        "pthread": {"compile_flags": ["-pthread"], "link_flags": ["-pthread"]},
         "openmp": {"compile_flags": ["-qopenmp"], "link_flags": ["-qopenmp"]},
         "fast-math": {"compile_flags": ["-ffast-math"], "link_flags": ["-ffast-math"]},
     }
 
     def __init__(self) -> None:
         super().__init__("ifx")
+
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """Built with ``openmp``, ifx's objects need Intel's OpenMP runtime,
+        which another driver's -fopenmp doesn't bring (g++'s is libgomp).
+        libiomp5 implements libgomp's interface too, and as a library it
+        comes before the -lgomp g++ adds last, so it serves the C++ side's
+        parallel regions as well and only one runtime runs."""
+        needs = super().link_needs(target, languages, link_language, env)
+        if (
+            "fortran" in languages
+            and link_language != "fortran"
+            and env.feature_realized("openmp", self)
+        ):
+            libdirs = (self.runtime_libdir,) if self.runtime_libdir else ()
+            needs = needs | LinkNeeds(libs=("iomp5",), libdirs=libdirs)
+        return needs
+
+    def make_target_preset(self, cross: Any) -> Preset:
+        """Raise for a preset with a triple: ifx builds for its host only."""
+        triple = str(getattr(cross, "triple", None) or "")
+        # A wasm triple gets UnixToolchain's "use the dedicated toolchain".
+        if triple and not triple.startswith("wasm32"):
+            name = getattr(cross, "name", cross)
+            raise ValueError(
+                f"Cross preset '{name}' targets triple '{triple}', but {self.name} "
+                f"has no cross targets: it builds for the host it runs on."
+            )
+        return super().make_target_preset(cross)
 
     def get_compile_flags_for_target_type(
         self, target_type: str, env: Environment | None = None
@@ -138,9 +184,18 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
     LINKER = MsvcLinker
     RUNTIME_LIBS = ()
 
+    # No lto: the objects are bitcode only ifx's own lld-link reads. No
+    # pthread, as with MSVC, and no coverage (/Qcov-gen is gone).
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {"compile_flags": ["/warn:all"]},
         "werror": {"compile_flags": ["/warn:errors"]},
+        # Without /INFERASANLIBS, link.exe can't resolve __asan_init.
+        "sanitize": {
+            "compile_flags": ["/fsanitize=address"],
+            "link_flags": ["/INFERASANLIBS"],
+        },
+        "profile": MsvcCompatibleToolchain.FEATURE_PRESETS["profile"],
+        "hardened": MsvcCompatibleToolchain.FEATURE_PRESETS["hardened"],
         # The objects name the OpenMP runtime (/DEFAULTLIB), as cl's do.
         "openmp": {"compile_flags": ["/Qopenmp"]},
         "fast-math": {"compile_flags": ["/fp:fast"]},
@@ -160,6 +215,14 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
     def objects_name_runtimes(self) -> bool:
         return True
 
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """/MACHINE:X64, the only machine ifx builds for."""
+        if self.MSVC_MACHINE_MAP.get(arch.lower()) != "X64":
+            raise ValueError(
+                f"{self.name} builds x64 only, so it can't target '{arch}'."
+            )
+        return super()._arch_contributions(arch)
+
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         handler = super().get_source_handler(suffix)
         if handler is not None and suffix in FORTRAN_PREPROCESSED:
@@ -176,32 +239,23 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
         exes = {"link": "link.exe", "lib": "lib.exe"}
         use_msvc_tool_paths(env, {t: e for t, e in exes.items() if t not in before})
 
-    def get_link_flags_for_target(
+    def link_needs(
         self,
         target: Target,
-        output_name: str,
-        existing_flags: Sequence[FlagToken],
-    ) -> list[FlagToken]:
-        """A console program, as the ifx driver links one.
-
-        A Fortran main program defines ``MAIN__``; ``main`` itself is in
-        Intel's runtime library, so link.exe can't infer the subsystem from
-        the objects and fails (LNK1561) without one. Which object holds the
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """A program with ifx objects is a console program, as the ifx
+        driver links one: a Fortran main program defines ``MAIN__``, and
+        ``main`` itself is in Intel's runtime, so the linker can't infer
+        the subsystem from the objects (LNK1561). Which object holds the
         entry point isn't known when the build is described, so every
-        program with ifx objects is a console one, as CMake makes every
-        executable, unless the project chose a subsystem (a C++ ``WinMain``
-        program sets ``/SUBSYSTEM:WINDOWS``).
-        """
-        flags = super().get_link_flags_for_target(target, output_name, existing_flags)
-        env = getattr(target, "_env", None)
-        chosen = [*existing_flags]
-        if env is not None and env.has_tool("link"):
-            chosen += list(getattr(env.link, "flags", None) or [])
-        if target.target_type == "program" and not any(
-            isinstance(f, str) and f.upper().startswith("/SUBSYSTEM:") for f in chosen
-        ):
-            flags.append("/SUBSYSTEM:CONSOLE")
-        return flags
+        such program is a console one, as CMake makes every executable."""
+        needs = super().link_needs(target, languages, link_language, env)
+        if target.target_type == "program" and "fortran" in languages:
+            needs = needs | LinkNeeds(console=True)
+        return needs
 
     def _find_runtime_libdir(self, compiler: str) -> str | None:
         """ifx's runtime libraries sit in ``lib`` beside its ``bin``, in a

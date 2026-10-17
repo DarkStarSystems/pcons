@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
@@ -26,7 +26,7 @@ from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
-from pcons.tools.toolchain import SourceHandler, toolchain_registry
+from pcons.tools.toolchain import LinkNeeds, SourceHandler, toolchain_registry
 from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
@@ -52,12 +52,7 @@ def _swift_set_cxx_interop(env: Environment, standard: str | int | None = None) 
     An optional C++ standard (``"c++20"`` or ``20``) is passed through to the
     clang importer via ``-Xcc -std=...``.
     """
-    for toolchain in env.toolchains:
-        maker = getattr(toolchain, "make_cxx_interop_preset", None)
-        if maker is not None:
-            preset = maker(standard)
-            if preset is not None:
-                env.apply_from(toolchain, preset)
+    env._apply_setting("swiftc.cxx_interop", standard)
 
 
 def module_name_for(target_name: str) -> str:
@@ -283,11 +278,26 @@ class SwiftToolchain(UnixToolchain):
 
     TOOL_NAMES = ("swiftc", "ar", "link")
 
-    # swiftc enables most diagnostics by default; "warnings" is an
-    # intentional no-op so generic scripts can apply it everywhere.
+    # No profile, fast-math or openmp. warnings is a deliberate no-op (Swift
+    # 6 has warning groups only), and so is pthread, which Glibc autolinks.
     FEATURE_PRESETS = {
         "warnings": {"compile_flags": []},
+        # Bare -Werror takes a warning group.
         "werror": {"compile_flags": ["-warnings-as-errors"]},
+        # "undefined" is unsupported on Linux.
+        "sanitize": {
+            "compile_flags": ["-sanitize=address"],
+            "link_flags": ["-sanitize=address"],
+        },
+        "lto": {"compile_flags": ["-lto=llvm-full"], "link_flags": ["-lto=llvm-full"]},
+        # Realized in make_feature_preset: the link flags are ELF's.
+        "hardened": {},
+        "pthread": {"compile_flags": []},
+        # LLVM's coverage format, not gcov's.
+        "coverage": {
+            "compile_flags": ["-profile-generate", "-profile-coverage-mapping"],
+            "link_flags": ["-profile-generate"],
+        },
     }
 
     SWIFT_VARIANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
@@ -302,16 +312,42 @@ class SwiftToolchain(UnixToolchain):
 
     def __init__(self) -> None:
         super().__init__("swift")
-        self._swift_runtime_libdirs: list[str] | None = None
+        self._target_info: dict[str, Any] | None = None
 
-    @property
-    def language_priority(self) -> dict[str, int]:
-        # Swift wins linker selection over C/C++ when it's the primary
-        # toolchain: swiftc-as-linker handles the Swift runtime.
-        return {**self.DEFAULT_LANGUAGE_PRIORITY, "swift": 3}
+    LINK_DRIVER_TOOLS: ClassVar[dict[str, str]] = {"swift": "swiftc"}
 
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("swiftc",)
+
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """Realize feature presets; ``hardened`` follows the platform.
+
+        Stack protection and PIE are swiftc's defaults, so what's left is
+        RELRO and immediate binding on an ELF link; macOS needs nothing.
+        Windows is unverified, so unavailable.
+        """
+        if name != "hardened":
+            return super().make_feature_preset(name)
+        platform = get_platform()
+        if platform.is_windows:
+            return None
+        contribs: tuple[ToolContribution, ...] = ()
+        if not platform.is_apple:
+            relro_now = ("-Xlinker", "-z", "-Xlinker", "relro")
+            relro_now += ("-Xlinker", "-z", "-Xlinker", "now")
+            contribs = (ToolContribution("link", flags=relro_now),)
+        return Preset(name=name, category="feature", contributions=contribs)
+
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """Raise: swiftc has no -arch; the CPU is part of its -target triple."""
+        raise ValueError(
+            f"{self.name} can't build for target arch '{arch}' by flag; use a "
+            f"cross preset (swiftc takes a -target triple)."
+        )
+
+    def _sysroot_contributions(self, cross: Any) -> list[ToolContribution]:
+        """None: swiftc takes the sysroot as ``-sdk`` (_target_contributions)."""
+        return []
 
     def _variant_contributions(
         self, variant: str, **kwargs: Any
@@ -333,6 +369,11 @@ class SwiftToolchain(UnixToolchain):
             return _swift_set_cxx_interop
         return super().tool_setting(tool, name)
 
+    def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
+        if name == "swiftc.cxx_interop":
+            return self.make_cxx_interop_preset(*args)
+        return super().make_setting_preset(name, *args)
+
     def make_cxx_interop_preset(self, standard: str | int | None = None) -> Preset:
         """Realize C++-interop mode as a preset (visible to env.explain())."""
         flags: list[str] = ["-cxx-interoperability-mode=default"]
@@ -347,40 +388,65 @@ class SwiftToolchain(UnixToolchain):
             contributions=(ToolContribution("swiftc", flags=tuple(flags)),),
         )
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Inject cross-language runtimes for mixed Swift/C++ links.
+    #: The libraries every Swift object autolinks, which an ELF linker
+    #: ignores (swiftc's driver extracts them). -Onone objects need
+    #: swiftSwiftOnoneSupport too.
+    LINUX_AUTOLINK_LIBS: ClassVar[tuple[str, ...]] = (
+        "swiftCore",
+        "swift_Concurrency",
+        "swift_StringProcessing",
+        "swift_RegexParser",
+    )
 
-        - swiftc linking C++ objects: on Linux add the C++ stdlib (on macOS
-          libc++ is already linked via the Swift runtime).
-        - C/C++ linker with Swift objects: add the core Swift runtime (the
-          library dirs come from get_runtime_libdirs).
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """Swift objects linked by a C or C++ driver need the Swift runtime,
+        from the directories swiftc reports, found there at run time too.
+
+        On Linux they also need ``swiftrt.o``, without which the runtime
+        metadata is silently never registered (a cast to a protocol then
+        fails), and the libraries their autolink entries list, which an
+        ELF linker ignores. On macOS the objects autolink; below
+        deployment target 26 the program finds the runtime through
+        ``/usr/lib/swift``.
         """
-        platform = get_platform()
-        if linker_language == "swift" and "cxx" in object_languages:
-            return [] if platform.is_macos else ["stdc++"]
-        if linker_language in ("c", "cxx") and "swift" in object_languages:
-            return ["swiftCore"]
-        return []
+        needs = super().link_needs(target, languages, link_language, env)
+        if "swift" not in languages or link_language == "swift":
+            return needs
+        libdirs = tuple(self._runtime_libdirs())
+        platform = self._target_platform(target)
+        if platform.is_apple:
+            return needs | LinkNeeds(
+                libs=("swiftCore",), libdirs=libdirs, rpaths=("/usr/lib/swift",)
+            )
+        if platform.is_windows:
+            return needs | LinkNeeds(libs=("swiftCore",), libdirs=libdirs)
+        libs = self.LINUX_AUTOLINK_LIBS
+        # -Onone is swiftc's default, so it's what a variant that doesn't
+        # optimize (or none at all) compiles with.
+        variant = self.SWIFT_VARIANTS.get(str(env.variant).lower())
+        if variant is None or "-Onone" in variant[0]:
+            libs = (*libs, "swiftSwiftOnoneSupport")
+        swiftrt = self._swiftrt_object()
+        return needs | LinkNeeds(
+            libs=libs,
+            libdirs=libdirs,
+            rpaths=libdirs,
+            objects=(swiftrt,) if swiftrt else (),
+        )
 
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Swift runtime library dirs when a C/C++ linker links Swift objects.
-
-        Queried from ``swiftc -print-target-info`` (runtimeLibraryPaths).
-        """
-        if linker_language in ("c", "cxx") and "swift" in object_languages:
-            return self._runtime_libdirs()
-        return []
-
-    def _runtime_libdirs(self) -> list[str]:
-        if self._swift_runtime_libdirs is None:
+    def _target_info_json(self) -> dict[str, Any]:
+        """``swiftc -print-target-info``, asked once."""
+        if self._target_info is None:
             import json
             import subprocess
 
-            self._swift_runtime_libdirs = []
+            self._target_info = {}
             try:
                 out = subprocess.run(
                     ["swiftc", "-print-target-info"],
@@ -389,15 +455,26 @@ class SwiftToolchain(UnixToolchain):
                     timeout=30,
                     check=True,
                 ).stdout
-                paths = json.loads(out).get("paths", {})
-                self._swift_runtime_libdirs = list(paths.get("runtimeLibraryPaths", []))
+                self._target_info = json.loads(out)
             except (OSError, subprocess.SubprocessError, ValueError):
                 logger.warning(
-                    "Could not query swiftc -print-target-info for runtime "
-                    "library paths; mixed C++/Swift links may need -L set "
-                    "manually"
+                    "Could not query swiftc -print-target-info for the Swift "
+                    "runtime; mixed C++/Swift links may need it set manually"
                 )
-        return self._swift_runtime_libdirs
+        return self._target_info
+
+    def _runtime_libdirs(self) -> list[str]:
+        paths = self._target_info_json().get("paths", {})
+        return list(paths.get("runtimeLibraryPaths", []))
+
+    def _swiftrt_object(self) -> str | None:
+        """``<runtimeResourcePath>/linux/<arch>/swiftrt.o``, if swiftc says."""
+        info = self._target_info_json()
+        resource = info.get("paths", {}).get("runtimeResourcePath")
+        arch = info.get("target", {}).get("arch")
+        if not resource or not arch:
+            return None
+        return str(PurePosixPath(resource) / "linux" / arch / "swiftrt.o")
 
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
         """Add swiftc/link -target and -sdk for cross targets (e.g. ios()).

@@ -16,8 +16,8 @@ from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 from pcons.toolchains._msvc_compat import module_definition
-from pcons.toolchains.gnu_common import shared_library_flag
-from pcons.tools.toolchain import BaseToolchain
+from pcons.toolchains.gnu_common import needs_pic, shared_library_flag
+from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
@@ -71,6 +71,11 @@ _PASSTHROUGH_FLAGS: frozenset[str] = frozenset(
 )
 
 
+def _chooses_subsystem(flags: Sequence[FlagToken]) -> bool:
+    """Whether *flags* already name a Windows subsystem."""
+    return any(isinstance(f, str) and "/SUBSYSTEM:" in f.upper() for f in flags)
+
+
 class UnixToolchain(BaseToolchain):
     """Base class for Unix-like toolchains (GCC, LLVM/Clang).
 
@@ -78,20 +83,18 @@ class UnixToolchain(BaseToolchain):
     they handle additional file types.
     """
 
-    # True when this toolchain's declared cc/cxx tools are Clang-family
-    # drivers that accept ``--target=<triple>``. GCC (and GCC-based
-    # toolchains like gfortran) reject --target= and select targets by
-    # binary instead; LlvmToolchain overrides this to True. This describes
-    # the declared cc/cxx tools only — a toolchain with no cc/cxx at all
-    # (e.g. Swift) leaves it False, meaning "nothing to retarget", not
-    # "my compiler isn't clang".
+    # True when this toolchain's compile tools (_feature_preset_tools) are
+    # Clang-family drivers that accept ``--target=<triple>``. GCC (and
+    # GCC-based toolchains like gfortran) reject --target= and select
+    # targets by binary instead; LlvmToolchain and FlangToolchain override
+    # this to True. Swift leaves it False: swiftc takes ``-target``, which
+    # SwiftToolchain realizes itself.
     IS_CLANG_DRIVER: ClassVar[bool] = False
 
     # The ABI this toolchain's objects follow when it runs on Windows, where
     # MinGW ("mingw") and MSVC ("msvc") objects can't be linked together.
     # Elsewhere every Unix toolchain links with every other: no tag.
     WINDOWS_ABI: ClassVar[str | None] = None
-    LINKER_STYLE = "gnu"
 
     @property
     def abi(self) -> str | None:
@@ -115,22 +118,26 @@ class UnixToolchain(BaseToolchain):
     # rules, or link driver, which live in the dedicated toolchains.
     TARGETS_WASM: ClassVar[bool] = False
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross preset, rejecting wasm targets on native toolchains.
+    def make_target_preset(self, cross: Any) -> Preset:
+        """A cross preset, rejecting wasm targets on native toolchains.
 
         A wasm preset on a native toolchain would half-apply (compile with
         emcc, link with the host driver) — output suffixes, shared-library
         rules, and the link driver live in the dedicated wasm toolchains.
         """
-        triple = str(getattr(preset, "triple", None) or "")
+        triple = str(getattr(cross, "triple", None) or "")
         if triple.startswith("wasm32") and not self.TARGETS_WASM:
-            name = getattr(preset, "name", preset)
+            name = getattr(cross, "name", cross)
             raise ValueError(
                 f"Cross preset '{name}' targets WebAssembly, which needs its "
                 f"dedicated toolchain rather than {self.name}: use "
                 f'project.Environment(toolchain="emscripten") or '
                 f'toolchain="wasi".'
             )
+        return super().make_target_preset(cross)
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross preset, and the target's shared-library flag."""
         super().apply_cross_preset(env, preset)
         # The shared-library flag is the target's, not the host's: an Android
         # library linked on a Mac takes -shared, not -dynamiclib.
@@ -251,8 +258,9 @@ class UnixToolchain(BaseToolchain):
     _is_apple_clang_cache: bool | None = None
 
     def make_feature_preset(self, name: str) -> Preset | None:
-        """Realize feature presets, resolving ``openmp`` dynamically."""
-        if name == "openmp" and "openmp" in self.FEATURE_PRESETS:
+        """Realize feature presets, resolving ``openmp`` dynamically where
+        its entry is empty (a toolchain with its own flags lists them)."""
+        if name == "openmp" and self.FEATURE_PRESETS.get(name) == {}:
             flags = self._openmp_flags()
             if flags is None:
                 return None
@@ -376,13 +384,7 @@ class UnixToolchain(BaseToolchain):
         builds for, when it says.
         """
         platform = env.target if env is not None else get_platform()
-
-        if target_type == "shared_library" and not (
-            platform.is_apple or platform.is_windows
-        ):
-            return ["-fPIC"]
-
-        return []
+        return ["-fPIC"] if needs_pic(target_type, platform) else []
 
     @staticmethod
     def _target_platform(target: Target) -> Platform:
@@ -622,7 +624,7 @@ class UnixToolchain(BaseToolchain):
         if get_platform().is_macos:
             return [
                 ToolContribution(t, flags=("-arch", arch))
-                for t in ("cc", "cxx", "link")
+                for t in (*self._feature_preset_tools(), "link")
             ]
         raise ValueError(
             f"{self.name} cannot retarget the CPU to '{arch}' by flag on "
@@ -636,8 +638,9 @@ class UnixToolchain(BaseToolchain):
 
         GCC uses different toolchain binaries rather than a --target flag, and
         rejects --target= outright, so it's only emitted for Clang-family
-        drivers (see IS_CLANG_DRIVER). Clang also drives the link, so the
-        triple goes on the link command too. For Apple triples with no
+        drivers (see IS_CLANG_DRIVER). It goes on the toolchain's own
+        compile tools (cc and cxx for clang, fc for flang) and, since the
+        driver also links, on the link command too. For Apple triples with no
         explicit sysroot, the matching SDK is resolved via xcrun (mirroring
         the Swift toolchain), so ios() works out of the box for C/C++.
         """
@@ -645,17 +648,74 @@ class UnixToolchain(BaseToolchain):
         contribs.extend(self._sysroot_contributions(cross))
         triple = getattr(cross, "triple", None)
         if triple and self.IS_CLANG_DRIVER:
+            tools = (*self._feature_preset_tools(), "link")
             target_flag = f"--target={triple}"
-            for tool in ("cc", "cxx", "link"):
+            for tool in tools:
                 contribs.append(ToolContribution(tool, flags=(target_flag,)))
             if not getattr(cross, "sysroot", None):
                 sdk = apple_sdk_for_triple(str(triple))
                 if sdk:
-                    for tool in ("cc", "cxx", "link"):
+                    for tool in tools:
                         contribs.append(
                             ToolContribution(tool, flags=("-isysroot", sdk))
                         )
         return contribs
+
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """C++ objects linked by another language's driver (gfortran's,
+        swiftc's) need the C++ runtime that g++ or clang++ would add.
+        MSVC-ABI objects name theirs."""
+        if self.abi == "msvc" or not languages & {"cxx", "objcxx"}:
+            return LinkNeeds()
+        if link_language in ("cxx", "objcxx", "cuda"):
+            return LinkNeeds()
+        apple = self._target_platform(target).is_apple
+        return LinkNeeds(libs=("c++",) if apple else ("stdc++",))
+
+    def realize_link_needs(
+        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+    ) -> list[FlagToken]:
+        """rpaths as ``-Wl,-rpath,``, objects as they are; a console entry
+        point needs saying only to link.exe or lld-link, for the MSVC ABI."""
+        platform = self._target_platform(target)
+        flags: list[FlagToken] = list(needs.objects)
+        if not platform.is_windows:
+            flags += [f"-Wl,-rpath,{d}" for d in needs.rpaths]
+        if needs.console and self.abi == "msvc":
+            if not _chooses_subsystem(existing_flags):
+                flags.append("-Wl,/SUBSYSTEM:CONSOLE")
+        return flags
+
+    #: The compile tool whose driver links each language: C++ objects need
+    #: the C++ driver for its runtime, and CUDA links through it too.
+    LINK_DRIVER_TOOLS: ClassVar[dict[str, str]] = {
+        "c": "cc",
+        "objc": "cc",
+        "cxx": "cxx",
+        "objcxx": "cxx",
+        "cuda": "cxx",
+    }
+
+    def link_driver(self, language: str, env: Environment) -> str | None:
+        """The driver of this toolchain's own compile tool for *language*.
+        Targeting MSVC, only for its own link tool (clang++ for C++, as
+        always): its objects name their runtimes, so another toolchain's
+        link takes them as they are."""
+        tool = self.LINK_DRIVER_TOOLS.get(language)
+        if tool is None or not env.has_tool(tool):
+            return None
+        if self.abi == "msvc" and env._tool_owners.get("link") is not self:
+            return None
+        if env._tool_owners.get(tool) is not self:
+            return None
+        cmd = getattr(env, tool).cmd
+        return str(cmd) if cmd else None
 
     def _variant_contributions(
         self, variant: str, **kwargs: Any
@@ -671,7 +731,11 @@ class UnixToolchain(BaseToolchain):
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
         # Realized on the same compile tools as feature presets, so
         # Fortran-style toolchains (fc) get working variants too.
-        return [
+        contribs = [
             ToolContribution(tool, flags=tuple(flags), defines=tuple(defines))
             for tool in self._feature_preset_tools()
         ]
+        # Targeting MSVC, the driver writes a PDB only when it links with -g.
+        if "-g" in flags and self.abi == "msvc":
+            contribs.append(ToolContribution("link", flags=("-g",)))
+        return contribs

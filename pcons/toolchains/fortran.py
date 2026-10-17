@@ -26,11 +26,13 @@ from pcons.toolchains.fortran_scanner import (
 from pcons.toolchains.gnu_common import gnu_link_builders, gnu_link_vars
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool, resolve_env_cmd_override
-from pcons.tools.toolchain import BaseToolchain
+from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
+    from pcons.core.environment import Environment
     from pcons.core.node import FileNode
+    from pcons.core.preset import ToolContribution
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.core.toolconfig import ToolConfig
@@ -205,11 +207,6 @@ class FortranToolchainBase(BaseToolchain):
         Windows for every Fortran compiler, MinGW's included."""
         return get_platform().object_suffix
 
-    # Priority 3 so Fortran wins over C/C++ when this is the primary toolchain.
-    @property
-    def language_priority(self) -> dict[str, int]:
-        return {**self.DEFAULT_LANGUAGE_PRIORITY, "fortran": 3}
-
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
 
@@ -279,7 +276,12 @@ class FortranToolchainBase(BaseToolchain):
     def _find_runtime_libdir(self, compiler: str) -> str | None:
         """Ask *compiler* where RUNTIME_PROBE_FILE is (e.g. Homebrew's
         libgfortran, on macOS)."""
-        name = self.RUNTIME_PROBE_FILE
+        return self._library_dir(compiler, self.RUNTIME_PROBE_FILE)
+
+    @staticmethod
+    def _library_dir(compiler: str, name: str) -> str | None:
+        """The directory *compiler* links library file *name* from, if it
+        knows (``-print-file-name``)."""
         try:
             libfile = subprocess.check_output(
                 [compiler, f"-print-file-name={name}"],
@@ -293,33 +295,28 @@ class FortranToolchainBase(BaseToolchain):
             return str(Path(libfile).resolve().parent)
         return None
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Inject C++ or Fortran runtime for mixed C++/Fortran builds.
-
-        - Fortran linker + C++ objects → C++ runtime (-lc++ or -lstdc++)
-        - C/C++ linker + Fortran objects → this compiler's Fortran runtime
-        """
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """Fortran objects linked by another language's driver need the
+        Fortran runtime, and its directory where that driver won't look.
+        MSVC-ABI objects name their runtime themselves, so any link needs
+        only the directory. What the driver itself knows comes first: a
+        GNU-style driver knows the C++ runtime, for an imported C++ library
+        with no C++ toolchain beside it."""
+        needs = super().link_needs(target, languages, link_language, env)
+        if "fortran" not in languages:
+            return needs
+        libdirs = (self.runtime_libdir,) if self.runtime_libdir else ()
         if self.objects_name_runtimes:
-            return []
-        if linker_language == "fortran" and "cxx" in object_languages:
-            return ["c++"] if get_platform().is_macos else ["stdc++"]
-        if linker_language in ("c", "cxx") and "fortran" in object_languages:
-            return list(self.RUNTIME_LIBS)
-        return []
-
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """The Fortran runtime's directory, when C/C++ links Fortran objects
-        — or any link does, when the objects name their runtime and the
-        linker has to find it."""
-        if "fortran" not in object_languages or not self.runtime_libdir:
-            return []
-        if self.objects_name_runtimes or linker_language in ("c", "cxx"):
-            return [self.runtime_libdir]
-        return []
+            return needs | LinkNeeds(libdirs=libdirs)
+        if link_language == "fortran":
+            return needs
+        return needs | LinkNeeds(libs=self.RUNTIME_LIBS, libdirs=libdirs)
 
     def after_resolve(
         self,
@@ -428,6 +425,18 @@ class FortranToolchainBase(BaseToolchain):
 
 class FortranToolchain(FortranToolchainBase, UnixToolchain):
     """A GNU-style Fortran driver, an archiver, and the driver as linker."""
+
+    LINK_DRIVER_TOOLS: ClassVar[dict[str, str]] = {"fortran": "fc"}
+
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """None of these drivers retargets the CPU by flag, on any platform:
+        gfortran ignores ``-arch`` (and builds for the host) and flang
+        rejects it."""
+        raise ValueError(
+            f"{self.name} cannot retarget the CPU to '{arch}' by flag. Use a "
+            f"cross preset (e.g. linux_cross(triple=...)) or a cross "
+            f"toolchain instead; see docs/presets.md."
+        )
 
 
 def find_fortran_toolchain(

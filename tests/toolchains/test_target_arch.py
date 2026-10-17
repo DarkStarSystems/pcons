@@ -168,6 +168,19 @@ class TestLlvmTargetArch:
         assert "-arch" in link.flags
         assert "arm64" in link.flags
 
+    def test_macos_arch_goes_on_the_toolchains_own_compile_tools(self) -> None:
+        class ObjcOnly(LlvmToolchain):
+            def _feature_preset_tools(self) -> tuple[str, ...]:
+                return ("objc",)
+
+        with patch("pcons.toolchains.unix.get_platform") as mock_platform:
+            mock_platform.return_value.is_macos = True
+            contribs = ObjcOnly()._arch_contributions("arm64")
+        assert [(c.tool, c.flags) for c in contribs] == [
+            ("objc", ("-arch", "arm64")),
+            ("link", ("-arch", "arm64")),
+        ]
+
 
 @pytest.mark.usefixtures("flags_only")
 class TestMsvcTargetArch:

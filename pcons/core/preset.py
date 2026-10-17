@@ -15,13 +15,16 @@ build presets (``make_variant_preset``/``make_feature_preset``/
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+
+#: The exclusive group every build variant's presets share.
+VARIANT_GROUP = "build_variant"
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,11 @@ class Preset:
             with category "arch" (the ``set_target_arch`` knob) record it on
             the environment as ``env.target_arch``; on other categories it is
             metadata (docs/presets.md, "Preset application").
+        realized_by: The toolchain that realized it, set when the
+            environment applies a toolchain's preset. Each toolchain sets
+            a group's knob for its own tools, so a preset replaces the
+            group's earlier ones from the same toolchain; one applied
+            directly (None) replaces them all.
     """
 
     name: str
@@ -63,6 +71,35 @@ class Preset:
     contributions: tuple[ToolContribution, ...] = ()
     exclusive_group: str | None = None
     arch: str | None = None
+    realized_by: str | None = None
+
+
+@dataclass(frozen=True)
+class Intent:
+    """What a script asked an environment for, which each toolchain then
+    realizes as presets for its own tools.
+
+    The environment keeps its intents in order, so that a toolchain added
+    later realizes them all, exactly as if it had been there from the
+    start. What an intent means stays in the toolchains: the core only
+    records it and hands it on.
+
+    Attributes:
+        kind: "variant", "arch", "feature", "target" or "setting".
+        name: The variant, arch, feature or setting name ("debug",
+            "arm64", "lto", "cxx.standard"); a cross target's preset name.
+        args: Positional values: the cross preset for "target", the
+            setting's arguments for "setting".
+        kwargs: Keyword options (``set_variant(extra_flags=...)``).
+        group: An intent with a group replaces the group's earlier one
+            (one build variant at a time). Without one, each is kept.
+    """
+
+    kind: str
+    name: str
+    args: tuple[Any, ...] = ()
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    group: str | None = None
 
 
 # =============================================================================

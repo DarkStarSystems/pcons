@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
-from pcons.core.preset import Preset, ToolContribution
+from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 
@@ -42,6 +42,30 @@ if TYPE_CHECKING:
 # Realization stays per-toolchain (make_cxx_standard_preset).
 # =============================================================================
 
+# The languages a link can be led by, strongest first (Meson's order): a
+# program with C or C++ objects links with their driver, which takes the
+# Fortran runtime as libraries, as a Fortran driver can't take a C
+# compiler's sanitizer or profile runtimes. A Fortran-only program links
+# with the Fortran driver. Swift's driver handles the Swift runtime, and
+# CUDA links through the host C++ driver.
+LINK_LANGUAGES: tuple[str, ...] = (
+    "swift",
+    "cuda",
+    "objcxx",
+    "cxx",
+    "objc",
+    "c",
+    "fortran",
+)
+
+
+def link_language_rank(language: str) -> int:
+    """How strongly *language* leads a link: higher wins, unknown is 0."""
+    if language not in LINK_LANGUAGES:
+        return 0
+    return len(LINK_LANGUAGES) - LINK_LANGUAGES.index(language)
+
+
 _CXX_STANDARDS: frozenset[int] = frozenset({11, 14, 17, 20, 23, 26})
 
 
@@ -62,15 +86,7 @@ def _parse_cxx_standard(standard: int | str) -> int:
 
 def _cxx_set_standard(env: Environment, standard: int | str) -> None:
     """``env.cxx.set_standard(...)`` — select the C++ language standard."""
-    n = _parse_cxx_standard(standard)
-    # Deduped like every set_*/apply_* fan-out: toolchains sharing the cxx
-    # tool (swift + llvm in C++-interop envs) realize identical presets, and
-    # without the guard both would apply, doubling -std=c++NN.
-    with env._dedup_fanout():
-        for toolchain in env.toolchains:
-            preset = toolchain.make_cxx_standard_preset(n)
-            if preset is not None:
-                env.apply_from(toolchain, preset)
+    env._apply_setting("cxx.standard", _parse_cxx_standard(standard))
 
 
 # =============================================================================
@@ -195,6 +211,52 @@ class AuxiliaryInputHandler:
     flag_template: str
     tool: str = "link"
     extra_flags: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class LinkNeeds:
+    """What a toolchain's objects need from whichever driver links them.
+
+    Neutral facts, not flags: the linking toolchain writes each its own way
+    (``-lgfortran`` or ``libifcoremd.lib``, ``-Wl,-rpath,`` or nothing,
+    ``/SUBSYSTEM:CONSOLE`` or ``-Wl,/SUBSYSTEM:CONSOLE``), so no toolchain
+    ever writes another one's link flags.
+
+    Attributes:
+        libs: Runtime libraries, by name (``gfortran``, ``stdc++``).
+        libdirs: Where they are, when the driver wouldn't look there.
+        frameworks: macOS frameworks.
+        framework_dirs: Where those are.
+        rpaths: Where the runtime is found when the program runs.
+        objects: Files linked as they are (Swift's ``swiftrt.o``).
+        console: The entry point is a console ``main`` the objects don't
+            define (ifx's is in its runtime), so the linker can't infer
+            the subsystem.
+    """
+
+    libs: tuple[str, ...] = ()
+    libdirs: tuple[str, ...] = ()
+    frameworks: tuple[str, ...] = ()
+    framework_dirs: tuple[str, ...] = ()
+    rpaths: tuple[str, ...] = ()
+    objects: tuple[str, ...] = ()
+    console: bool = False
+
+    def __or__(self, other: LinkNeeds) -> LinkNeeds:
+        """Both sets of needs, each value once, in first-seen order."""
+
+        def both(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
+            return tuple(dict.fromkeys((*a, *b)))
+
+        return LinkNeeds(
+            libs=both(self.libs, other.libs),
+            libdirs=both(self.libdirs, other.libdirs),
+            frameworks=both(self.frameworks, other.frameworks),
+            framework_dirs=both(self.framework_dirs, other.framework_dirs),
+            rpaths=both(self.rpaths, other.rpaths),
+            objects=both(self.objects, other.objects),
+            console=self.console or other.console,
+        )
 
 
 # =============================================================================
@@ -654,16 +716,6 @@ class Toolchain(Protocol):
         ...
 
     @property
-    def language_priority(self) -> dict[str, int]:
-        """Language priority for linker selection.
-
-        Higher values = stronger language. When linking objects from
-        multiple languages, use the linker for the highest-priority
-        language.
-        """
-        ...
-
-    @property
     def abi(self) -> str | None:
         """Which binary interface this toolchain's objects follow, as an
         opaque tag (see BaseToolchain.abi)."""
@@ -725,6 +777,23 @@ class Toolchain(Protocol):
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
         """Build a Preset selecting the C++ *standard* (e.g. 20), or None
         if not C++."""
+        ...
+
+    def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
+        """Realize tool setting *name* (``"cxx.standard"``), or None."""
+        ...
+
+    def make_arch_preset(self, arch: str) -> Preset | None:
+        """The target-arch Preset for *arch*, or None if it has none."""
+        ...
+
+    def make_target_preset(self, cross: Any) -> Preset:
+        """The Preset realizing cross target *cross* (a CrossPreset)."""
+        ...
+
+    def link_driver(self, language: str, env: Environment) -> str | None:
+        """The command that links a program whose strongest language is
+        *language*, compiled by this toolchain in *env*, or None."""
         ...
 
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
@@ -866,17 +935,22 @@ class Toolchain(Protocol):
         """Return the archiver tool name ("ar" for GCC, "lib" for MSVC)."""
         ...
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return runtime library names (no -l prefix) needed for
-        mixed-language builds."""
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """What this toolchain's objects of *languages* need from a link
+        led by *link_language*."""
         ...
 
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return library search dirs for mixed-language runtime libs."""
+    def realize_link_needs(
+        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+    ) -> list[FlagToken]:
+        """Link flags for the needs that aren't libraries, as this
+        toolchain's linker takes them."""
         ...
 
     def create_build_context(
@@ -916,23 +990,6 @@ class BaseToolchain(ABC):
     # the Environment typing stub.
     TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
 
-    # The command-line conventions of this toolchain's link flags: "gnu" (a
-    # gcc-style driver) or "msvc" (link.exe). A toolchain that compiled a
-    # target's objects adds its link flags to a link tool of the same style.
-    LINKER_STYLE: ClassVar[str | None] = None
-
-    # Default language priorities (higher = stronger).
-    # Fortran is NOT listed here so that C/C++ toolchains don't claim
-    # priority over Fortran objects. GfortranToolchain overrides this
-    # to add "fortran": 3 when it is the primary toolchain.
-    DEFAULT_LANGUAGE_PRIORITY: dict[str, int] = {
-        "c": 1,
-        "cxx": 2,
-        "objc": 2,
-        "objcxx": 3,
-        "cuda": 4,
-    }
-
     def __init__(self, name: str = "") -> None:
         """Initialize a toolchain.
 
@@ -950,11 +1007,6 @@ class BaseToolchain(ABC):
     @property
     def tools(self) -> dict[str, Tool]:
         return self._tools
-
-    @property
-    def language_priority(self) -> dict[str, int]:
-        """Override in subclasses if needed."""
-        return self.DEFAULT_LANGUAGE_PRIORITY
 
     @property
     def abi(self) -> str | None:
@@ -1088,7 +1140,7 @@ class BaseToolchain(ABC):
         return Preset(
             name=variant,
             category="variant",
-            exclusive_group="build_variant",
+            exclusive_group=VARIANT_GROUP,
             contributions=tuple(self._variant_contributions(variant, **kwargs)),
         )
 
@@ -1101,21 +1153,28 @@ class BaseToolchain(ABC):
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
         """Apply target architecture flags to the environment.
 
-        Returns True if this toolchain realized the arch (produced
-        contributions). An empty realization returns False and applies
-        nothing; the environment raises if *no* configured toolchain
-        realized the arch (docs/presets.md, "Preset application"), so a
-        custom toolchain that simply doesn't handle an arch is fail-fast
-        by default. A toolchain for which an arch is legitimately a no-op
-        declares that by overriding this method (see WasmToolchain).
+        Returns True if this toolchain realized the arch. The
+        realization is ``make_arch_preset``'s, which the environment asks
+        of every toolchain before it applies any; override that, not this,
+        to realize, refuse (raise) or declare a no-op (return a preset
+        with no contributions, as WasmToolchain does for wasm32). An empty
+        realization applies nothing and the environment raises, so a
+        custom toolchain that doesn't handle an arch is fail-fast by
+        default (docs/presets.md, "Preset application").
         """
+        preset = self.make_arch_preset(arch)
+        if preset is None:
+            return False
+        env.apply_from(self, preset)
+        return True
+
+    def make_arch_preset(self, arch: str) -> Preset | None:
+        """The target-arch Preset for *arch*, or None if this toolchain
+        realizes none (it may raise instead, for an arch it can't)."""
         contribs = tuple(self._arch_contributions(arch))
         if not contribs:
-            return False
-        env.apply_from(
-            self, Preset(name=arch, category="arch", arch=arch, contributions=contribs)
-        )
-        return True
+            return None
+        return Preset(name=arch, category="arch", arch=arch, contributions=contribs)
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Tool contributions for a target arch. Base realizes none."""
@@ -1146,6 +1205,23 @@ class BaseToolchain(ABC):
 
     def _cxx_standard_flag(self, standard: int) -> str | None:
         """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
+        return None
+
+    def link_driver(self, language: str, env: Environment) -> str | None:
+        """The command that links a program whose strongest language is
+        *language*, when this toolchain compiled those objects in *env*:
+        ``g++`` for C++, ``gfortran`` for Fortran. None when its objects
+        need no driver of their own, as an MSVC-ABI compiler's, whose
+        objects name their runtimes. Base: None."""
+        return None
+
+    def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
+        """Realize the tool setting *name* with *args*, or None if this
+        toolchain has no such setting. ``"cxx.standard"`` is
+        ``env.cxx.set_standard``; toolchains add their own (Swift's
+        ``"swiftc.cxx_interop"``)."""
+        if name == "cxx.standard":
+            return self.make_cxx_standard_preset(*args)
         return None
 
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
@@ -1250,27 +1326,42 @@ class BaseToolchain(ABC):
             cmds = dict(getattr(cross, "tool_cmds", None) or {})
         return [ToolContribution(tool, cmd=cmd) for tool, cmd in sorted(cmds.items())]
 
-    @staticmethod
-    def _sysroot_contributions(cross: Any) -> list[ToolContribution]:
-        """--sysroot flag on cc/cxx/link from a CrossPreset."""
+    def _sysroot_contributions(self, cross: Any) -> list[ToolContribution]:
+        """--sysroot flag from a CrossPreset, on this toolchain's compile
+        tools and link."""
         sysroot = getattr(cross, "sysroot", None)
         if not sysroot:
             return []
         flag = f"--sysroot={sysroot}"
-        return [ToolContribution(t, flags=(flag,)) for t in ("cc", "cxx", "link")]
+        tools = (*self._feature_preset_tools(), "link")
+        return [ToolContribution(t, flags=(flag,)) for t in tools]
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return runtime library names (no -l prefix) needed for
-        mixed-language builds. Base: none."""
-        return []
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """What this toolchain's objects need from the link, when they're
+        objects of *languages* and *link_language*'s driver links: the
+        Fortran runtime when a C++ driver links gfortran's objects, say.
+        Base: nothing."""
+        return LinkNeeds()
 
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return search dirs for get_runtime_libs() libraries installed in
-        non-standard locations (e.g. Homebrew gfortran). Base: none."""
+    def realize_link_needs(
+        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+    ) -> list[FlagToken]:
+        """Link flags realizing *needs*' rpaths, objects and console entry
+        point, for a link this toolchain's driver runs (libraries and
+        their directories reach the link as ordinary requirements).
+        *existing_flags* are the link's flags so far. Base: none can be
+        realized, so any is an error."""
+        if needs.rpaths or needs.objects or needs.console:
+            raise ValueError(
+                f"Target '{target.name}': {self.name} can't link in what its "
+                f"objects need ({needs})."
+            )
         return []
 
     # =========================================================================

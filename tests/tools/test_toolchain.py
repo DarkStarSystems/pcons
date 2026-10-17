@@ -177,9 +177,13 @@ class TestNamingFollowsTheTarget:
         assert tc.get_install_dir("shared_library", android) == "bin"
 
 
-class TestLanguagePriority:
-    def test_default_priorities(self):
-        tc = MockToolchain()
-        priority = tc.language_priority
-        assert priority["c"] < priority["cxx"]
-        assert priority["cxx"] < priority["cuda"]
+class TestLinkLanguageOrder:
+    def test_one_order_whichever_toolchain_is_primary(self):
+        """C++ over C over Fortran (Meson's order): a C or C++ driver takes
+        the Fortran runtime as libraries."""
+        from pcons.tools.toolchain import link_language_rank
+
+        order = ["fortran", "c", "objc", "cxx", "objcxx", "cuda", "swift"]
+        ranks = [link_language_rank(lang) for lang in order]
+        assert ranks == sorted(ranks) and len(set(ranks)) == len(ranks)
+        assert link_language_rank("cobol") == 0

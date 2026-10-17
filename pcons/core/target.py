@@ -464,6 +464,9 @@ class Target:
         public: Usage requirements that propagate to dependents.
         private: Usage requirements for this target only.
         required_languages: Languages used by this target (set by toolchains).
+        link_language: The language whose driver links this target, in
+            place of the strongest one among its objects (CMake's
+            ``LINKER_LANGUAGE``). None, the default, lets the objects decide.
         defined_at: Where this target was created in user code.
         target_type: Type of target (e.g., "program", "static_library").
         intermediate_nodes: Intermediate build artifacts (e.g., object files).
@@ -479,6 +482,7 @@ class Target:
         "public",
         "private",
         "required_languages",
+        "link_language",
         "defined_at",
         "_collected_requirements",
         # NEW for target-centric build model:
@@ -573,6 +577,7 @@ class Target:
         self.public = _make_default_requirements(self.__link_libs_validator)
         self.private = _make_default_requirements(self.__link_libs_validator)
         self.required_languages: set[str] = set()
+        self.link_language: str | None = None
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
         self.target_type: str | None = target_type
@@ -1381,10 +1386,12 @@ class Target:
             result.merge(dep.public)
 
     def get_all_languages(self) -> set[str]:
-        """The languages linked into this target (e.g. {'c', 'cxx'}), which
-        pick the linker: its own, those of the targets whose outputs are its
-        sources, and those of the libraries it links, all the way down. A
-        depends() target is built first but not linked, so it has no say.
+        """The languages of this target and everything it links (e.g.
+        {'c', 'cxx'}): its own, those of the targets whose outputs are its
+        sources, and those of the libraries it links, all the way down,
+        shared ones included. A depends() target is built first but not
+        linked, so it has no say. (The link itself counts only what it pulls
+        in: static libraries, not shared ones.)
         """
         languages = set(self.required_languages)
         visited: set[str] = {self.qualified_name}

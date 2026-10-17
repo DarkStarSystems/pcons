@@ -161,11 +161,15 @@ The entire authoring obligation remains the two rules already documented
 above: return `None` when a preset doesn't apply to a toolchain, and
 return contributions when it does — the machinery treats what a resolver
 returns as the complete realization. Custom *toolchains* that override the
-realization hooks (`_arch_contributions`, `apply_cross_preset`, …) keep
-their freedom, but the base classes default to fail-fast — e.g. an empty
-arch realization raises from the base `apply_target_arch` unless the
+realization hooks (`make_arch_preset`, `make_target_preset`,
+`_arch_contributions`, …) keep their freedom, but the base classes default
+to fail-fast — e.g. an empty arch realization is an error unless the
 toolchain explicitly declares the no-op — so an extension that simply
-doesn't handle a case is safe by default rather than silently wrong.
+doesn't handle a case is safe by default rather than silently wrong. A
+toolchain refuses an arch or a cross target by raising from
+`make_arch_preset` or `make_target_preset`: the environment builds every
+toolchain's realization before applying any, so a refusal leaves the
+environment as it was.
 
 ### Apply fully or raise
 
@@ -189,10 +193,11 @@ When a preset is applied, exactly one of three things happens:
      no-op the user didn't ask for. Flag/define contributions to a subset
      of missing tools are tolerated (broadcast semantics); losing *all* of
      them is not.
-   - A **knob value the toolchain cannot realize** is an error, enforced in
-     the *base* `apply_target_arch` when the realization comes back empty —
-     so custom toolchains inherit fail-fast without remembering to raise.
-     A toolchain that legitimately wants a no-op declares it explicitly.
+   - A **knob value the toolchain cannot realize** is an error, enforced
+     when the base `make_arch_preset` comes back empty — so custom
+     toolchains inherit fail-fast without remembering to raise. A
+     toolchain that legitimately wants a no-op declares it by returning an
+     arch preset with no contributions (wasm32 on the wasm toolchains).
      Concretely: on Linux, `set_target_arch` cannot retarget GCC/LLVM (use
      `linux_cross(triple=...)`) and says so; wasm toolchains reject any
      arch other than `wasm32` rather than silently coercing.
@@ -233,14 +238,36 @@ cross-target contract below) and must not stamp it onto the environment —
 otherwise the field's value depends on call order and can disagree with the
 flags actually in effect.
 
-### One application per resolution
+### Mixed toolchains: each compiler realizes its own
 
-The `set_*`/`apply_*` surfaces resolve a preset against each configured
-toolchain, but toolchains share tools (`cc`, `cxx`, `link`), so resolution
-and application are distinct steps: a resolved preset is applied **at most
-once per environment**, however many toolchains resolved it. Applying per
-toolchain would double flags (`-arch arm64 -arch arm64`, `-Werror
--Werror`) on any env with `add_toolchain()`.
+An environment can hold several toolchains (`add_toolchain()`): gcc with
+gfortran, clang-cl with flang, swift with clang. Each has its own flags for
+the same request, so:
+
+- **Each compiler gets its own toolchain's flags, and only those.**
+  gfortran's `-O0 -g` goes to the Fortran compiler and gcc's to the C and
+  C++ compilers; neither touches the other's, and the link gets its
+  driver's. clang-cl's `/DEBUG` never reaches flang's link driver, and
+  nothing is applied twice.
+- **Order doesn't matter.** A variant, preset, cross target or C++
+  standard set before `add_toolchain()` reaches the added toolchain too,
+  as if it had been there from the start.
+- **A preset applies to every compiler, or raises.** Each compiler
+  answers a built-in preset with its flags, with a deliberate no-op (an
+  entry with no flags: Swift's `warnings`), or not at all. Not at all is
+  an error naming that compiler: with clang and flang,
+  `apply_preset("sanitize")` raises, because flang has no sanitizer and a
+  build that sanitizes only the C++ sources isn't a sanitized build.
+  `apply_preset("sanitize", allow_partial=True)` applies it where it can,
+  and `explain()` lists what it left out. `has_preset()` says whether
+  `apply_preset()` would raise. A contributed preset whose resolver returns
+  `None` for a toolchain has decided for itself, and isn't an error.
+  `set_target_arch()` works the same way: a compiler that can't build for
+  the arch is an error, since its sources would be built for the host. A
+  cross target is each toolchain's to realize or refuse, as below.
+- **A variant replaces each toolchain's own earlier one.** An added ifx's
+  default `/MD` becomes `/MDd` under `debug` without touching MSVC's. A
+  preset applied directly with `env.apply()` replaces every toolchain's.
 
 Deliberate *user* re-application is unaffected: applying the same feature
 preset twice on purpose remains additive, as composition requires.
@@ -522,7 +549,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | Cross-preset field contract: triple/sysroot/tool_cmds realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |
 | Preset application contract: apply-fully-or-raise (unknown names, missing-tool cmd, zero-effect presets, unrealizable knobs) | implemented |
 | `env.target_arch` single-writer (knob only; cross presets are metadata) | implemented |
-| One application per resolution (no per-toolchain double-apply) | implemented |
+| Mixed toolchains: each compiler gets its own toolchain's flags, in any order; a preset applies to every compiler or raises (`allow_partial`) | implemented |
 | Exclusive groups replace on re-apply (knob semantics; group presets additive-only) | implemented |
 | `CrossPreset.arch` decoupled from flag emission (host-independent) | implemented |
 | `env.target` / `CrossPreset.target_platform`: what the environment builds for | implemented |

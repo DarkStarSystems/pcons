@@ -28,6 +28,7 @@ from pcons.toolchains.ifx import (
     IfxMsvcToolchain,
     IfxToolchain,
 )
+from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.toolchain import toolchain_registry
 
 TOOLCHAINS = [GfortranToolchain, FlangToolchain, IfxToolchain, IfxMsvcToolchain]
@@ -51,12 +52,11 @@ def test_registered_as_fortran(alias, cls) -> None:
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_fortran_sources_and_priority(cls: type[FortranToolchainBase]) -> None:
+def test_fortran_sources(cls: type[FortranToolchainBase]) -> None:
     tc = cls()
     for ext in FORTRAN_EXTENSIONS:
         handler = tc.get_source_handler(ext)
         assert handler is not None and handler.tool_name == "fc"
-    assert tc.language_priority["fortran"] > tc.language_priority["cxx"]
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
@@ -94,32 +94,41 @@ def test_compile_and_link_commands(cls, cmd, moddir_flag) -> None:
 # =============================================================================
 
 
-@pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_cxx_link_gets_the_fortran_runtime(cls: type[FortranToolchainBase]) -> None:
-    tc = cls()
-    libs = tc.get_runtime_libs("cxx", {"cxx", "fortran"})
-    # MSVC-ABI objects name their runtimes (/DEFAULTLIB) themselves.
-    assert libs == ([] if tc.objects_name_runtimes else list(cls.RUNTIME_LIBS))
+@pytest.fixture
+def program(test_project):  # noqa: F811
+    """A program target, which link_needs reads its type from."""
+    from pcons.core.target import Target
+
+    return Target("app", target_type="program", env=test_project.Environment())
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_fortran_link_gets_the_cxx_runtime(cls: type[FortranToolchainBase]) -> None:
-    tc = cls()
-    libs = tc.get_runtime_libs("fortran", {"cxx", "fortran"})
-    if tc.objects_name_runtimes:
-        assert libs == []
-    else:
-        assert libs in (["c++"], ["stdc++"])
-
-
-@pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_single_language_links_need_nothing(
-    cls: type[FortranToolchainBase],
+def test_cxx_link_gets_the_fortran_runtime(
+    cls: type[FortranToolchainBase], program
 ) -> None:
     tc = cls()
-    assert tc.get_runtime_libs("fortran", {"fortran"}) == []
+    needs = tc.link_needs(program, {"fortran"}, "cxx", program._env)
+    # MSVC-ABI objects name their runtimes (/DEFAULTLIB) themselves.
+    assert needs.libs == (() if tc.objects_name_runtimes else cls.RUNTIME_LIBS)
+
+
+def test_fortran_link_gets_the_cxx_runtime(gcc_toolchain, program) -> None:
+    """The C++ toolchain states its own runtime when another driver links
+    its objects (an ifx Fortran main program, link_language "fortran")."""
+    needs = gcc_toolchain.link_needs(program, {"cxx"}, "fortran", program._env)
+    assert needs.libs in (("c++",), ("stdc++",))
+    assert gcc_toolchain.link_needs(program, {"cxx"}, "cxx", program._env).libs == ()
+
+
+@pytest.mark.parametrize("cls", TOOLCHAINS)
+def test_its_own_driver_needs_no_runtime_named(
+    cls: type[FortranToolchainBase], program
+) -> None:
+    tc = cls()
+    needs = tc.link_needs(program, {"fortran"}, "fortran", program._env)
+    assert needs.libs == ()
     if not tc.objects_name_runtimes:
-        assert tc.get_runtime_libdirs("fortran", {"fortran"}) == []
+        assert needs.libdirs == ()
 
 
 @pytest.mark.parametrize(
@@ -200,16 +209,282 @@ def test_no_flang_runtime_libdir_without_the_runtime(tmp_path) -> None:
 # =============================================================================
 
 
-def test_presets_are_per_compiler() -> None:
-    assert FlangToolchain.FEATURE_PRESETS["warnings"]["compile_flags"] == ["-Wall"]
-    assert IfxToolchain.FEATURE_PRESETS["warnings"]["compile_flags"] == [
-        "-warn",
-        "all",
+def _by_tool(contribs) -> dict[str, tuple[str, ...]]:
+    """Each tool's flags, from *contribs* in order."""
+    flags: dict[str, tuple[str, ...]] = {}
+    for c in contribs:
+        flags[c.tool] = flags.get(c.tool, ()) + c.flags
+    return flags
+
+
+def _feature(tc: FortranToolchainBase, name: str) -> dict[str, tuple[str, ...]] | None:
+    """What *tc* puts on each tool for feature *name*: None when it's
+    unavailable, {} when it's a deliberate no-op."""
+    preset = tc.make_feature_preset(name)
+    return None if preset is None else _by_tool(preset.contributions)
+
+
+@pytest.fixture
+def on_linux(monkeypatch):
+    from pcons.configure import platform as platform_mod
+
+    linux = platform_mod.Platform(
+        os="linux",
+        arch="x86_64",
+        is_64bit=True,
+        exe_suffix="",
+        shared_lib_suffix=".so",
+        shared_lib_prefix="lib",
+        static_lib_suffix=".a",
+        static_lib_prefix="lib",
+        object_suffix=".o",
+    )
+    monkeypatch.setattr(platform_mod, "_platform", linux)
+    return linux
+
+
+@pytest.mark.parametrize(
+    "name", ["werror", "sanitize", "profile", "lto", "pthread", "coverage", "fast-math"]
+)
+def test_gfortran_realizes_what_gcc_does(name) -> None:
+    spec = UnixToolchain.FEATURE_PRESETS[name]
+    expected = {"fc": spec["compile_flags"], "link": spec.get("link_flags", [])}
+    assert _feature(GfortranToolchain(), name) == {
+        tool: tuple(flags) for tool, flags in expected.items() if flags
+    }
+
+
+def test_gfortran_leaves_out_what_does_nothing_for_fortran() -> None:
+    tc = GfortranToolchain()
+    assert _feature(tc, "warnings") == {"fc": ("-Wall", "-Wextra")}
+    assert _feature(tc, "hardened") == {
+        "fc": ("-fstack-protector-strong", "-fPIE"),
+        "link": ("-pie", "-Wl,-z,relro,-z,now"),
+    }
+    assert _feature(tc, "openmp") == {"fc": ("-fopenmp",), "link": ("-fopenmp",)}
+
+
+def test_flang_features(on_linux) -> None:
+    tc = FlangToolchain()
+    assert _feature(tc, "warnings") == {}
+    assert _feature(tc, "werror") == {"fc": ("-Werror",)}
+    assert _feature(tc, "lto") == {"fc": ("-flto",), "link": ("-flto",)}
+    assert _feature(tc, "pthread") == {"link": ("-pthread",)}
+    assert _feature(tc, "fast-math") == {
+        "fc": ("-ffast-math",),
+        "link": ("-ffast-math",),
+    }
+    assert _feature(tc, "openmp") == {"fc": ("-fopenmp",), "link": ("-fopenmp",)}
+    for name in ("sanitize", "profile", "hardened", "coverage"):
+        assert _feature(tc, name) is None, name
+
+
+def test_flang_features_for_the_msvc_abi(on_windows) -> None:
+    tc = FlangToolchain()
+    assert _feature(tc, "lto") == {"fc": ("-flto",), "link": ("-flto", "-fuse-ld=lld")}
+    assert _feature(tc, "profile") == {"link": ("-Wl,/PROFILE",)}
+    assert _feature(tc, "pthread") is None
+    assert _feature(tc, "warnings") == {}
+    for name in ("sanitize", "hardened", "coverage"):
+        assert _feature(tc, name) is None, name
+
+
+def test_ifx_features() -> None:
+    tc = IfxToolchain()
+    assert _feature(tc, "warnings") == {"fc": ("-warn", "all")}
+    assert _feature(tc, "werror") == {"fc": ("-warn", "errors")}
+    # Address only: ifx drops every sanitizer given "address,undefined".
+    assert _feature(tc, "sanitize") == {
+        "fc": ("-fsanitize=address", "-fno-omit-frame-pointer"),
+        "link": ("-fsanitize=address",),
+    }
+    assert _feature(tc, "profile") == {"fc": ("-pg", "-g"), "link": ("-pg",)}
+    assert _feature(tc, "lto") == {"fc": ("-flto",), "link": ("-flto",)}
+    assert _feature(tc, "hardened") == {
+        "fc": ("-fstack-protector-strong", "-fPIE"),
+        "link": ("-pie", "-Wl,-z,relro,-z,now"),
+    }
+    assert _feature(tc, "pthread") == {"fc": ("-pthread",), "link": ("-pthread",)}
+    assert _feature(tc, "openmp") == {"fc": ("-qopenmp",), "link": ("-qopenmp",)}
+    assert _feature(tc, "coverage") is None
+
+
+def test_ifx_on_windows_features() -> None:
+    tc = IfxMsvcToolchain()
+    assert _feature(tc, "warnings") == {"fc": ("/warn:all",)}
+    assert _feature(tc, "sanitize") == {
+        "fc": ("/fsanitize=address",),
+        "link": ("/INFERASANLIBS",),
+    }
+    assert _feature(tc, "profile") == {"link": ("/PROFILE",)}
+    hardened = _feature(tc, "hardened")
+    assert hardened is not None
+    assert hardened["fc"] == ("/GS", "/guard:cf")
+    assert sorted(hardened["link"]) == ["/DYNAMICBASE", "/NXCOMPAT", "/guard:cf"]
+    assert _feature(tc, "fast-math") == {"fc": ("/fp:fast",)}
+    assert _feature(tc, "openmp") == {"fc": ("/Qopenmp",)}
+    for name in ("lto", "pthread", "coverage"):
+        assert _feature(tc, name) is None, name
+
+
+# =============================================================================
+# Arch and cross targets
+# =============================================================================
+
+
+@pytest.mark.parametrize("cls", [GfortranToolchain, FlangToolchain, IfxToolchain])
+def test_gnu_style_fortran_cant_retarget_the_cpu(cls, on_linux) -> None:
+    tc = cls()
+    with pytest.raises(ValueError, match=f"{tc.name} cannot retarget the CPU"):
+        tc._arch_contributions("arm64")
+
+
+def test_an_arch_a_fortran_toolchain_cant_build_raises(tmp_path, monkeypatch) -> None:
+    """On macOS clang takes -arch; gfortran ignores it and would build
+    for the host, so the environment raises."""
+    from pcons import Project
+    from pcons.configure import platform as platform_mod
+
+    mac = platform_mod.Platform(
+        os="darwin",
+        arch="arm64",
+        is_64bit=True,
+        exe_suffix="",
+        shared_lib_suffix=".dylib",
+        shared_lib_prefix="lib",
+        static_lib_suffix=".a",
+        static_lib_prefix="lib",
+        object_suffix=".o",
+    )
+    monkeypatch.setattr(platform_mod, "_platform", mac)
+    project = Project("arch", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("llvm").create_toolchain()
+    )
+    env.add_toolchain(toolchain_registry.get("gfortran").create_toolchain())
+    with pytest.raises(ValueError, match="gfortran cannot retarget the CPU"):
+        env.set_target_arch("x86_64")
+
+
+@pytest.mark.parametrize("arch", ["x64", "x86_64", "amd64"])
+def test_ifx_on_windows_builds_x64(arch) -> None:
+    contribs = IfxMsvcToolchain()._arch_contributions(arch)
+    assert [(c.tool, c.flags) for c in contribs] == [
+        ("link", ("/MACHINE:X64",)),
+        ("lib", ("/MACHINE:X64",)),
     ]
-    # Neither has gfortran's --coverage, nor inherits C presets.
-    for cls in (FlangToolchain, IfxToolchain):
-        assert "coverage" not in cls.FEATURE_PRESETS
-        assert "sanitize" not in cls.FEATURE_PRESETS
+
+
+@pytest.mark.parametrize("arch", ["arm64", "x86"])
+def test_ifx_on_windows_builds_x64_only(arch) -> None:
+    with pytest.raises(ValueError, match="ifx builds x64 only"):
+        IfxMsvcToolchain()._arch_contributions(arch)
+
+
+def test_flang_retargets_fc_and_link() -> None:
+    from pcons.toolchains.presets import CrossPreset
+
+    cross = CrossPreset(
+        name="linux-aarch64",
+        arch="aarch64",
+        triple="aarch64-linux-gnu",
+        sysroot="/sysroots/aarch64",
+        extra_compile_flags=("-mfoo",),
+    )
+    flags = _by_tool(FlangToolchain()._target_contributions(cross))
+    for tool in ("fc", "link"):
+        assert "--target=aarch64-linux-gnu" in flags[tool]
+        assert "--sysroot=/sysroots/aarch64" in flags[tool]
+    # A preset's extra_compile_flags are C-family flags: cc and cxx only.
+    assert flags["cc"] == flags["cxx"] == ("-mfoo",)
+    assert "-mfoo" not in flags["fc"]
+
+
+def test_flang_takes_the_apple_sdk(monkeypatch) -> None:
+    from pcons.toolchains.presets import CrossPreset
+
+    monkeypatch.setattr(unix_mod, "apple_sdk_for_triple", lambda triple: "/SDKs/iOS")
+    cross = CrossPreset(name="ios", arch="arm64", triple="arm64-apple-ios15.0")
+    flags = _by_tool(FlangToolchain()._target_contributions(cross))
+    for tool in ("fc", "link"):
+        assert flags[tool] == ("--target=arm64-apple-ios15.0", "-isysroot", "/SDKs/iOS")
+    assert "cc" not in flags and "cxx" not in flags
+
+
+def _fortran_env(tmp_path, name: str):
+    """An environment of gfortran, or of ifx with its Linux conventions
+    whatever the host."""
+    from pcons import Project
+
+    if name == "ifx":
+        toolchain = IfxToolchain()
+        toolchain._tools = {
+            "fc": IfxCompiler(),
+            "ar": GccArchiver(),
+            "link": IfxLinker(),
+        }
+        toolchain._configured = True
+    else:
+        toolchain = toolchain_registry.get(name).create_toolchain()
+    project = Project("cross", root_dir=tmp_path, build_dir="build")
+    return project.Environment(toolchain=toolchain)
+
+
+def test_gfortran_needs_a_cross_binary(tmp_path, on_linux) -> None:
+    from pcons.toolchains.presets import linux_cross
+
+    env = _fortran_env(tmp_path, "gfortran")
+    with pytest.raises(ValueError, match="gfortran selects targets by binary"):
+        env.apply_cross_preset(linux_cross("aarch64-linux-gnu"))
+
+
+def test_gfortran_retargets_by_binary(tmp_path, on_linux) -> None:
+    from pcons.toolchains.presets import CrossPreset
+
+    env = _fortran_env(tmp_path, "gfortran")
+    env.apply_cross_preset(
+        CrossPreset(
+            name="linux-aarch64",
+            arch="aarch64",
+            triple="aarch64-linux-gnu",
+            tool_cmds={"fc": "aarch64-linux-gnu-gfortran"},
+        )
+    )
+    assert env.fc.cmd == "aarch64-linux-gnu-gfortran"
+    assert not any(str(f).startswith("--target") for f in env.fc.flags)
+
+
+def test_ifx_has_no_cross_targets(tmp_path, on_linux) -> None:
+    from pcons.toolchains.presets import linux_cross
+
+    env = _fortran_env(tmp_path, "ifx")
+    with pytest.raises(ValueError, match="ifx has no cross targets"):
+        env.apply_cross_preset(linux_cross("aarch64-linux-gnu"))
+
+
+@pytest.mark.parametrize("name", ["gfortran", "ifx"])
+def test_a_wasm_target_says_to_use_the_wasm_toolchain(tmp_path, on_linux, name) -> None:
+    from pcons.toolchains.presets import CrossPreset
+
+    env = _fortran_env(tmp_path, name)
+    wasm = CrossPreset(name="wasm", arch="wasm32", triple="wasm32-unknown-emscripten")
+    with pytest.raises(ValueError, match="targets WebAssembly"):
+        env.apply_cross_preset(wasm)
+
+
+def test_a_debug_link_writes_a_pdb_for_the_msvc_abi(on_windows) -> None:
+    """flang (and clang) targeting MSVC write a PDB only when linking with -g."""
+    tc = FlangToolchain()
+    assert ("link", ("-g",)) in [
+        (c.tool, c.flags) for c in tc._variant_contributions("debug")
+    ]
+    assert all(c.tool != "link" for c in tc._variant_contributions("release"))
+
+
+def test_a_debug_link_is_unchanged_elsewhere(on_linux) -> None:
+    assert all(
+        c.tool != "link" for c in FlangToolchain()._variant_contributions("debug")
+    )
 
 
 def test_flang_minsizerel_has_no_os() -> None:
@@ -344,7 +619,7 @@ def test_flang_elsewhere_names_its_runtime() -> None:
     assert all(c.tool == "fc" for c in tc._variant_contributions("debug"))
 
 
-def test_ifx_on_windows_is_msvc_style() -> None:
+def test_ifx_on_windows_is_msvc_style(program) -> None:
     fc_vars = IfxMsvcToolchain.COMPILER().default_vars()
     objcmd = fc_vars["objcmd"]
     assert fc_vars["cmd"] == "ifx"
@@ -353,7 +628,7 @@ def test_ifx_on_windows_is_msvc_style() -> None:
     tc = IfxMsvcToolchain()
     assert tc.TOOL_NAMES == ("fc", "lib", "link")
     assert tc.objects_name_runtimes
-    assert tc.get_runtime_libs("cxx", {"cxx", "fortran"}) == []
+    assert tc.link_needs(program, {"fortran"}, "cxx", program._env).libs == ()
 
 
 def test_ifx_on_windows_variants_use_the_dll_c_runtime() -> None:
@@ -365,6 +640,28 @@ def test_ifx_on_windows_variants_use_the_dll_c_runtime() -> None:
     assert "/MD" in release.flags
     with pytest.raises(ValueError, match="Unknown variant"):
         tc._variant_contributions("fastest-ever")
+
+
+def test_an_added_ifx_keeps_msvcs_c_runtime(on_windows, tmp_path) -> None:
+    """Each toolchain's default CRT is its own knob setting: ifx's /MD
+    joins MSVC's rather than replacing it, and debug switches both."""
+    from pcons import Project
+    from pcons.toolchains.ifx import IfxMsvcCompiler
+    from pcons.toolchains.msvc import MsvcLibrarian, MsvcLinker
+
+    ifx = IfxMsvcToolchain()
+    ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
+    ifx._configured = True
+    project = Project("crt", root_dir=tmp_path, build_dir="build")
+    env = project.Environment(
+        toolchain=toolchain_registry.get("msvc").create_toolchain()
+    )
+    env.add_toolchain(ifx)
+    assert "/MD" in env.cc.flags and "/MD" in env.fc.flags
+
+    env.set_variant("debug")
+    assert "/MDd" in env.cc.flags and "/MD" not in env.cc.flags
+    assert "/MDd" in env.fc.flags and "/MD" not in env.fc.flags
 
 
 def test_ifx_on_windows_finds_its_runtime_beside_bin(tmp_path) -> None:
@@ -403,22 +700,28 @@ def test_ifx_on_windows_preprocesses_capitalized_sources(on_windows, tmp_path) -
     assert "/fpp" in env.fc.fppcmd and "/fpp" not in env.fc.objcmd
 
 
-def test_ifx_on_windows_links_console_programs(tmp_path, monkeypatch) -> None:
-    """link.exe can't infer the subsystem: main is in Intel's runtime."""
-    from pcons import Project
+def test_ifx_on_windows_links_console_programs(on_windows, program) -> None:
+    """link.exe can't infer the subsystem: main is in Intel's runtime. ifx
+    says its programs need a console entry point, and the linker writes
+    it its own way, unless the project chose a subsystem."""
+    from pcons.core.target import Target
+    from pcons.toolchains.clang_cl import ClangClToolchain
+    from pcons.toolchains.llvm import LlvmToolchain
 
-    monkeypatch.chdir(tmp_path)
-    project = Project("p", root_dir=tmp_path, build_dir="build")
-    env = project.Environment()
-    prog = project.Program("app", env)
-    lib = project.StaticLibrary("lib", env)
     tc = IfxMsvcToolchain()
-    assert tc.get_link_flags_for_target(prog, "app.exe", []) == ["/SUBSYSTEM:CONSOLE"]
-    assert tc.get_link_flags_for_target(prog, "app.exe", ["/SUBSYSTEM:WINDOWS"]) == []
-    assert tc.get_link_flags_for_target(lib, "lib.lib", []) == []
-    # A WinMain program says so in the environment's link flags.
-    env.add_tool("link").set("flags", ["/SUBSYSTEM:WINDOWS"])
-    assert tc.get_link_flags_for_target(prog, "app.exe", []) == []
+    prog = program
+    needs = tc.link_needs(prog, {"fortran"}, "fortran", prog._env)
+    assert needs.console
+    lib = Target("lib", target_type="shared_library")
+    assert not tc.link_needs(lib, {"fortran"}, "fortran", lib._env).console
+
+    link_exe = ClangClToolchain()
+    assert link_exe.realize_link_needs(needs, prog, []) == ["/SUBSYSTEM:CONSOLE"]
+    assert link_exe.realize_link_needs(needs, prog, ["/SUBSYSTEM:WINDOWS"]) == []
+    # clang targeting MSVC drives link.exe or lld-link through -Wl,
+    # (LNK1561 without it, seen on Windows).
+    clang = LlvmToolchain()
+    assert clang.realize_link_needs(needs, prog, []) == ["-Wl,/SUBSYSTEM:CONSOLE"]
 
 
 def test_a_fortran_only_program_links_with_the_fortran_driver(
@@ -621,7 +924,7 @@ def _answer(monkeypatch, triple: str | None) -> list[str]:
     return asked
 
 
-def test_msys2_clang64_compilers_are_mingw(on_windows, monkeypatch) -> None:
+def test_msys2_clang64_compilers_are_mingw(on_windows, monkeypatch, program) -> None:
     from pcons.toolchains.llvm import LlvmToolchain
 
     _answer(monkeypatch, "x86_64-w64-windows-gnu")
@@ -630,7 +933,9 @@ def test_msys2_clang64_compilers_are_mingw(on_windows, monkeypatch) -> None:
     # Targeting MinGW, flang links its runtime by name, as on Linux, and
     # takes no MSVC C runtime flag.
     assert not flang.objects_name_runtimes
-    assert flang.get_runtime_libs("cxx", {"cxx", "fortran"}) == ["flang_rt.runtime"]
+    assert flang.link_needs(program, {"fortran"}, "cxx", program._env).libs == (
+        "flang_rt.runtime",
+    )
     assert all(
         "-fms-runtime-lib" not in flag
         for c in flang._variant_contributions("debug")
@@ -770,11 +1075,11 @@ def test_a_clone_keeps_each_toolchains_flags_to_its_own_tools(
     assert "/DEBUG" not in debug.link.flags
 
 
-def test_a_same_style_toolchain_reaches_the_link(
+def test_sanitize_covers_both_compilers_and_the_link(
     tmp_path, monkeypatch, gcc_toolchain
 ) -> None:
-    """gfortran has no sanitize preset, so gcc's link flags are the only
-    ones: without them the C++ objects' sanitizer references go unresolved."""
+    """With gfortran primary and gcc added, each compiler sanitizes its own
+    sources and gfortran, which owns the link, links the sanitizer, once."""
     from pcons import Project
 
     monkeypatch.chdir(tmp_path)
@@ -786,7 +1091,8 @@ def test_a_same_style_toolchain_reaches_the_link(
     env.apply_preset("sanitize")
 
     assert "-fsanitize=address,undefined" in env.cxx.flags
-    assert "-fsanitize=address,undefined" in env.link.flags
+    assert "-fsanitize=address,undefined" in env.fc.flags
+    assert list(env.link.flags).count("-fsanitize=address,undefined") == 1
 
 
 def test_a_flang_dll_is_linked_through_its_import_library(on_windows, tmp_path) -> None:
