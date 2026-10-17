@@ -1,0 +1,1 @@
+  character(*), parameter :: salutation = 'Hello'

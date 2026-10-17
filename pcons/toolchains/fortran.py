@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
-from pcons.core.subst import SourcePath, TargetPath
+from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.toolchains.fortran_scanner import (
     DEFAULT_ANCESTOR_FILE,
     DEFAULT_SUBMODULE_FILE,
@@ -145,8 +145,8 @@ class FortranCompiler(BaseTool):
                 target_suffixes=[get_platform().object_suffix],
                 language="fortran",
                 single_source=True,
-                # No depfile: module deps are handled by dyndep, and Fortran
-                # has no header includes to track.
+                # No depfile: the module scan reports both the modules and
+                # the included files, which dyndep adds as inputs.
             ),
         }
 
@@ -240,7 +240,7 @@ class FortranToolchainBase(BaseToolchain):
 
         # Case-sensitive check (.F/.F90 are preprocessed forms)
         if suffix in FORTRAN_EXTENSIONS:
-            # No depfile: Fortran has no header includes; module deps use dyndep
+            # No depfile: the module scan reports includes and modules alike
             return SourceHandler("fc", "fortran", self.get_object_suffix(), None, None)
         return None
 
@@ -378,7 +378,17 @@ class FortranToolchainBase(BaseToolchain):
         ) -> dict[str, object]:
             # Per-edge, so every scan shares one ninja rule even when two
             # environments use different module directories or compilers.
+            # The include path is the compile's own: its context holds the
+            # environment's directories and those its dependencies add.
+            context = (governed._build_info or {}).get("context")
+            include_dirs = [
+                *getattr(context, "includes", ()),
+                *getattr(context, "system_includes", ()),
+            ]
             return {
+                "FC_SCAN_INCLUDES": [
+                    PathToken("-I", str(path), "project") for path in include_dirs
+                ],
                 "FC_MODDIR": _moddir_of(env),
                 "FC_SUBMODULE_FILE": _fc_var(
                     env, "submodule_file", DEFAULT_SUBMODULE_FILE
@@ -407,10 +417,14 @@ class FortranToolchainBase(BaseToolchain):
                 NodeVar("FC_SUBMODULE_FILE"),
                 "--ancestor-file",
                 NodeVar("FC_ANCESTOR_FILE"),
+                NodeVar("FC_SCAN_INCLUDES"),
                 "--out",
                 TargetPath(),
+                "--depfile",
+                TargetPath(suffix=".d"),
             ],
             info_suffix=".fscan.json",
+            scan_depfile=".d",
             scan_vars=scan_vars,
             # A used module may come from a library outside this build (a
             # system or prebuilt Fortran package), so an unresolved USE is

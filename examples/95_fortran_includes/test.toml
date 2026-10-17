@@ -1,0 +1,44 @@
+# Test configuration for the fortran_includes example
+
+[test]
+description = "Demonstrates Fortran #include and INCLUDE, with edits to included files rebuilding their includers"
+
+expected_outputs = [
+    "build/obj.hello/src/greetings.f90.o",
+    "build/obj.hello/src/main.F90.o",
+    "build/hello",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_stdout = "Hello from an included header" },
+]
+
+[skip]
+requires_toolchains = ["fortran"]
+# Xcode generator does not support Fortran
+# Make generator doesn't support Ninja dyndep for Fortran module ordering
+generators = ["xcode", "make"]
+
+[[rebuild]]
+description = "Editing the INCLUDE file recompiles the module that includes it"
+write."include/greeting.inc" = """
+  character(*), parameter :: salutation = 'Goodbye'
+"""
+expect_rebuild = ["obj.hello/src/greetings.f90.o", "hello"]
+run = "./build/hello"
+expect_stdout = "Goodbye from an included header"
+
+[[rebuild]]
+description = "Editing the #include'd header recompiles only main.F90"
+write."src/message.h" = """
+#define MESSAGE "from an edited header"
+"""
+expect_rebuild = ["obj.hello/src/main.F90.o", "hello"]
+expect_no_rebuild = ["obj.hello/src/greetings.f90.o"]
+run = "./build/hello"
+expect_stdout = "Goodbye from an edited header"
+
+[[rebuild]]
+description = "Nothing changed, nothing rebuilds"
+expect_no_work = true
