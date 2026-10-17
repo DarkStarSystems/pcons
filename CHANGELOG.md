@@ -60,7 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PackageDescription.languages` says what a package's libraries are
   built from (`["cxx"]`). A link that pulls in a C++ package then gets the
   C++ runtime, from the environment's C++ toolchain or, with none, from
-  the driver.
+  the driver. Its compile flags reach only the compilers of those
+  languages, the C family when it declares none: a package's `-pthread`
+  no longer reaches gfortran or nvcc (which rejects it) when the package
+  is linked as a target, as it already didn't with `env.use()`.
 - `ConanFinder.sync_profile(env=env)` takes the environment's C/C++
   toolchain, which in a Fortran-primary environment isn't the primary one,
   and the C++ standard `env.cxx.set_standard()` set.

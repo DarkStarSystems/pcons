@@ -196,8 +196,28 @@ class EffectiveRequirements:
         )
 
 
+#: The languages a package's compile flags are for, unless it declares its
+#: own (PackageDescription.languages): pkg-config's and Conan's describe C
+#: and C++ compiles, and -std=c++17 or -pthread would break gfortran's.
+C_FAMILY: frozenset[str] = frozenset({"c", "cxx", "objc", "objcxx"})
+
+
+def tool_language(env: Environment, tool_name: str) -> str | None:
+    """The language *env*'s tool *tool_name* compiles (``fc`` → fortran)."""
+    for toolchain in env.toolchains:
+        tool = toolchain.tools.get(tool_name)
+        if tool is not None:
+            builder = tool.builders().get("Object")
+            if builder is not None:
+                return builder.language
+    return None
+
+
 def apply_requirements_to_env(
-    env: Environment, reqs: UsageRequirements, origin: str | None = None
+    env: Environment,
+    reqs: UsageRequirements,
+    origin: str | None = None,
+    languages: Iterable[str] = (),
 ) -> None:
     """Apply usage requirements env-wide onto tool variables (``env.use()``).
 
@@ -209,6 +229,8 @@ def apply_requirements_to_env(
     Args:
         env: The environment to apply to.
         reqs: The requirements to apply.
+        languages: The languages its compile flags are for; the C family
+            when empty.
         origin: The contributing package's name. Recorded on the environment
             so `compute_effective_requirements` (and thus ``pcons explain``)
             attributes these values to the package, not to the tool variable
@@ -267,16 +289,22 @@ def apply_requirements_to_env(
             tool, "system_includes", (str(inc) for inc in eff.system_includes)
         )
         extend_unique(tool, "defines", eff.defines)
-        if eff.compile_flags:
-            merge_flags(var(tool, "flags"), eff.compile_flags, sep, through)
 
     # A Fortran compile finds a package's .mod files on its include path,
-    # which has no system form. Its compile flags are C-family flags.
+    # which has no system form.
     if env.has_tool("fc"):
         fc = env.fc
         includes = [*eff.includes, *eff.system_includes]
         extend_unique(fc, "includes", (str(inc) for inc in includes))
         extend_unique(fc, "defines", eff.defines)
+
+    # Compile flags go to the compilers of the languages they're for.
+    if eff.compile_flags:
+        scope = set(languages) or C_FAMILY
+        for tool_name in env.tool_names():
+            if tool_language(env, tool_name) in scope:
+                tool = getattr(env, tool_name)
+                merge_flags(var(tool, "flags"), eff.compile_flags, sep, through)
 
     if env.has_tool("link"):
         link = env.link
@@ -412,11 +440,16 @@ def compute_effective_requirements(
     )
 
     # Layer 3: All dependencies' public requirements (transitive): linked
-    # libraries and depends() targets alike.
+    # libraries and depends() targets alike. An imported package's compile
+    # flags reach only the compilers of the languages they're for.
+    language = tool_language(env, tool_name) if tool_name else None
     for dep in target.transitive_dependencies():
-        result.merge(
-            _anchor_dir_lists_for(dep.public, dep), origin=(dep.name, "public")
-        )
+        reqs = dep.public
+        if getattr(dep, "is_imported", False) and language is not None:
+            if language not in (dep.required_languages or C_FAMILY):
+                reqs = reqs.clone()
+                reqs.compile_flags.clear()
+        result.merge(_anchor_dir_lists_for(reqs, dep), origin=(dep.name, "public"))
 
     return result
 

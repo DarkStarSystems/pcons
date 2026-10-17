@@ -1665,7 +1665,9 @@ class Environment(_EnvironmentStubs):
         - include_dirs → cxx.includes (and cc.includes, fc.includes if
           present)
         - defines → cxx.defines (and cc.defines, fc.defines if present)
-        - compile_flags → cxx.flags
+        - compile_flags → the compilers of the package's languages: C and
+          C++ (cc, cxx), unless it declares others
+          (``PackageDescription.languages``)
         - library_dirs → link.libdirs
         - libraries → link.libs
         - link_flags → link.flags
@@ -1700,10 +1702,13 @@ class Environment(_EnvironmentStubs):
         if hasattr(package, "public"):
             # A Target's public requirements are already UsageRequirements.
             reqs = package.public
+            imported = getattr(package, "is_imported", False)
+            languages = set(package.required_languages) if imported else set()
         else:
             from pcons.packages.imported import requirements_from_package
 
             reqs = requirements_from_package(package)
+            languages = set(getattr(package, "languages", ()) or ())
 
         if system:
             # Clone first: system= describes this use, not the package, which
@@ -1711,7 +1716,9 @@ class Environment(_EnvironmentStubs):
             reqs = reqs.clone()
             reqs.make_includes_system()
 
-        apply_requirements_to_env(self, reqs, origin=getattr(package, "name", None))
+        apply_requirements_to_env(
+            self, reqs, origin=getattr(package, "name", None), languages=languages
+        )
 
     def _resolve_cwd(self, cwd: str | Path | None) -> Path | None:
         """Anchor a ``cwd=`` argument, which is relative to the declaring

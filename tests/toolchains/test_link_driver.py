@@ -228,3 +228,49 @@ def test_an_imported_library_declares_its_languages(
     project.resolve()
     _, _, libs = _link(prog)
     assert ("stdc++" in libs) == runtime
+
+
+# =============================================================================
+# A package's compile flags reach the compilers of its languages
+# =============================================================================
+
+
+def _compile_flags(target, suffix: str) -> list[str]:
+    (obj,) = [n for n in target.intermediate_nodes if n.path.name.endswith(suffix)]
+    info = obj._build_info
+    overrides = info["context"].get_env_overrides()
+    tool = getattr(info["env"], info["tool"])
+    return [str(f) for f in overrides.get("flags", tool.flags)]
+
+
+@pytest.mark.parametrize("use", [True, False], ids=["env.use", "linked"])
+@pytest.mark.parametrize(
+    "languages, on_cxx, on_fc",
+    [([], True, False), (["fortran"], False, True)],
+    ids=["undeclared", "fortran"],
+)
+def test_package_compile_flags_follow_its_languages(
+    tmp_path, use, languages, on_cxx, on_fc
+) -> None:
+    """Undeclared, a package's flags are C-family flags, and -pthread
+    must not reach gfortran; a Fortran package's reach only fc. Its
+    include directories reach every compiler either way."""
+    from pcons.packages.description import PackageDescription
+    from pcons.packages.imported import ImportedTarget
+
+    project = _project(tmp_path)
+    env = _env(project, "gcc", "gfortran")
+    pkg = PackageDescription(
+        name="pkg",
+        include_dirs=["/pkg/include"],
+        compile_flags=["-pkg-flag"],
+        languages=languages,
+    )
+    prog = project.Program("prog", env, sources=["main.f90", "helper.cpp"])
+    if use:
+        env.use(pkg)
+    else:
+        prog.link(ImportedTarget.from_package(pkg))
+    project.resolve()
+    assert ("-pkg-flag" in _compile_flags(prog, ".cpp.o")) == on_cxx
+    assert ("-pkg-flag" in _compile_flags(prog, ".f90.o")) == on_fc

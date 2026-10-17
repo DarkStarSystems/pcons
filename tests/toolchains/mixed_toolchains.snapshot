@@ -424,7 +424,7 @@
 ### linux gcc+gfortran | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]
-  app/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
+  app/src.f90.o: tool=fc cmd=gfortran flags=[]
   app/app: tool=link cmd=g++ flags=[-Wl,--as-needed] libs=[pkg gfortran] libdirs=[/pkg/lib /rt/gfortran]
 ### linux gcc+gfortran | upstream: static libraries from single-toolchain environments
   app/src.f90.o: tool=fc cmd=gfortran flags=[]
@@ -709,7 +709,7 @@
 ### linux gfortran+gcc | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]
-  app/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
+  app/src.f90.o: tool=fc cmd=gfortran flags=[]
   app/app: tool=link cmd=g++ flags=[-Wl,--as-needed] libs=[pkg gfortran] libdirs=[/pkg/lib /rt/gfortran]
 ### linux gfortran+gcc | upstream: static libraries from single-toolchain environments
   app/src.c.o: tool=cc cmd=gcc flags=[]
@@ -1006,7 +1006,7 @@
 ### linux llvm+gfortran | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=clang flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread]
-  app/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
+  app/src.f90.o: tool=fc cmd=gfortran flags=[]
   app/app: tool=link cmd=clang++ flags=[-Wl,--as-needed] libs=[pkg gfortran] libdirs=[/pkg/lib /rt/gfortran]
 ### linux llvm+gfortran | upstream: static libraries from single-toolchain environments
   app/src.f90.o: tool=fc cmd=gfortran flags=[]
@@ -1272,7 +1272,7 @@
 ### linux llvm+flang | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=clang flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread]
-  app/src.f90.o: tool=fc cmd=flang flags=[-pthread]
+  app/src.f90.o: tool=fc cmd=flang flags=[]
   app/app: tool=link cmd=clang++ flags=[-Wl,--as-needed] libs=[pkg flang_rt.runtime] libdirs=[/pkg/lib /rt/flang]
 ### linux llvm+flang | upstream: static libraries from single-toolchain environments
   app/src.f90.o: tool=fc cmd=flang flags=[]
@@ -1538,7 +1538,7 @@
 ### linux flang+llvm | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=clang flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread]
-  app/src.f90.o: tool=fc cmd=flang flags=[-pthread]
+  app/src.f90.o: tool=fc cmd=flang flags=[]
   app/app: tool=link cmd=clang++ flags=[-Wl,--as-needed] libs=[pkg flang_rt.runtime] libdirs=[/pkg/lib /rt/flang]
 ### linux flang+llvm | upstream: static libraries from single-toolchain environments
   app/src.c.o: tool=cc cmd=clang flags=[]
@@ -1804,7 +1804,7 @@
 ### linux gcc+ifx | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]
-  app/src.f90.o: tool=fc cmd=ifx flags=[-pthread -fPIE]
+  app/src.f90.o: tool=fc cmd=ifx flags=[-fPIE]
   app/app: tool=link cmd=g++ flags=[-Wl,--as-needed] libs=[pkg ifport ifcoremt imf svml irc] libdirs=[/pkg/lib /rt/ifx]
 ### linux gcc+ifx | upstream: static libraries from single-toolchain environments
   app/src.f90.o: tool=fc cmd=ifx flags=[-fPIE]
@@ -2062,7 +2062,7 @@
 ### linux gcc+cuda | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]
-  app/src.cu.o: tool=cuda cmd=nvcc flags=[-pthread]
+  app/src.cu.o: tool=cuda cmd=nvcc flags=[]
   app/app: tool=link cmd=g++ flags=[-Wl,--as-needed] libs=[pkg] libdirs=[/pkg/lib]
 ### linux gcc+cuda | upstream: static libraries from single-toolchain environments
   app/src.c.o: tool=cc cmd=gcc flags=[]
