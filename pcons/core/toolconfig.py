@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.flags import FlagList
+from pcons.core.paths import PathList
 
 if TYPE_CHECKING:
     from pcons.core._toolconfig_stubs import _ToolConfigStubs
@@ -142,6 +143,8 @@ class ToolConfig(_ToolConfigStubs):
             # A flag list keeps its grouping rules across an assignment:
             # ``env.cc.flags = ["-Wall"]`` must not turn the FlagList into
             # a plain list, or the next FlagPair appended lands as one token.
+            # A path list likewise keeps reading its relative entries from
+            # the script writing them.
             current = vars_dict[name]
             if isinstance(current, FlagList) and not isinstance(value, FlagList):
                 if isinstance(value, list):
@@ -150,6 +153,8 @@ class ToolConfig(_ToolConfigStubs):
                         separated=current.separated,
                         passthrough=current.passthrough,
                     )
+            elif isinstance(current, PathList) and isinstance(value, list):
+                value = PathList(value)
             vars_dict[name] = value
 
     def _unknown_variable_message(self, name: str) -> str:

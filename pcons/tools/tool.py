@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pcons.core.flags import FlagList
+from pcons.core.paths import PathList
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder, OutputGroup
@@ -99,6 +100,12 @@ def _pin_cmd_path(cmd: str) -> str:
     import shutil
 
     return shutil.which(cmd) or cmd
+
+
+#: Tool variables that list directories, under the names every toolchain
+#: gives them. A relative entry is read from the directory of the script that
+#: adds it, as ``sources=`` reads one.
+_PATH_LIST_VARS = frozenset({"includes", "system_includes", "libdirs", "frameworkdirs"})
 
 
 def _flag_list(flags: list, env: Environment) -> FlagList:
@@ -313,6 +320,8 @@ class BaseTool(ABC):
                     value = _pin_cmd_path(value)
                 elif key == "flags" and isinstance(value, list):
                     value = _flag_list(value, env)
+                elif key in _PATH_LIST_VARS and isinstance(value, list):
+                    value = PathList(value)
                 tool_config.set(key, value)
 
         # Attach builders to the tool config

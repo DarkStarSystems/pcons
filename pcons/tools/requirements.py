@@ -17,6 +17,7 @@ from pcons.core.flags import (
     get_separated_arg_flags_from_toolchains,
     merge_flags,
 )
+from pcons.core.paths import _script_dir_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -256,11 +257,19 @@ def apply_requirements_to_env(
     if origin is not None:
         # Only the compile-side fields: they are what the base layer of
         # compute_effective_requirements reads back off the tool variables.
-        # Keys are spelled the way that layer looks them up (via Path).
+        # Keys are written the way that layer looks them up (via Path), and a
+        # relative directory both as written and as a tool's include list
+        # anchors it.
         use_origins = env._use_origins
+
+        def dirs(paths: Iterable[Any]) -> Iterable[str]:
+            for path in paths:
+                yield str(Path(path))
+                yield str(Path(_script_dir_path(path)))
+
         for field_name, values in (
-            ("include_dirs", (str(Path(i)) for i in eff.includes)),
-            ("system_include_dirs", (str(Path(i)) for i in eff.system_includes)),
+            ("include_dirs", dirs(eff.includes)),
+            ("system_include_dirs", dirs(eff.system_includes)),
             ("defines", eff.defines),
         ):
             for value in values:
@@ -401,26 +410,20 @@ def compute_effective_requirements(
         def base_origin(field_name: str, value: str) -> tuple[str, str]:
             return use_origins.get((field_name, value), (f"env.{tool_name}", "base"))
 
-        includes = getattr(tool_config, "includes", None)
-        if includes:
-            for inc in includes:
-                path = Path(inc) if isinstance(inc, str) else inc
-                if path not in result.includes:
-                    result.includes.append(path)
+        # Anchored where a script wrote them (see PathList), and canonical
+        # here, so a directory a target lists as well is the same entry.
+        canonicalize = target.project.top_path_resolver.canonicalize
+        for var_name, field_name, dest in (
+            ("includes", "include_dirs", result.includes),
+            ("system_includes", "system_include_dirs", result.system_includes),
+        ):
+            for inc in getattr(tool_config, var_name, None) or ():
+                written = Path(inc) if isinstance(inc, str) else inc
+                path = canonicalize(written) if isinstance(written, Path) else written
+                if path not in dest:
+                    dest.append(path)
                     result._record(
-                        "include_dirs", path, base_origin("include_dirs", str(path))
-                    )
-
-        system_includes = getattr(tool_config, "system_includes", None)
-        if system_includes:
-            for inc in system_includes:
-                path = Path(inc) if isinstance(inc, str) else inc
-                if path not in result.system_includes:
-                    result.system_includes.append(path)
-                    result._record(
-                        "system_include_dirs",
-                        path,
-                        base_origin("system_include_dirs", str(path)),
+                        field_name, path, base_origin(field_name, str(written))
                     )
 
         defines = getattr(tool_config, "defines", None)

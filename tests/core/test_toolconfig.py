@@ -3,6 +3,8 @@
 
 import pytest
 
+from pcons.core.paths import PathList
+from pcons.core.project import Project
 from pcons.core.toolconfig import ToolConfig
 
 
@@ -155,6 +157,26 @@ class TestToolConfigClone:
 
         assert tc.options["debug"] is True
         assert clone.options["debug"] is False
+
+
+class TestPathListVariables:
+    """A tool's directory lists stay PathLists, so every way in is anchored."""
+
+    def test_tools_list_their_directories_in_path_lists(self, tmp_path, gcc_toolchain):
+        env = Project("p", root_dir=tmp_path).Environment(toolchain=gcc_toolchain)
+        for var in (env.cc.includes, env.cc.system_includes, env.link.libdirs):
+            assert isinstance(var, PathList)
+
+    def test_assignment_keeps_a_path_list(self, tmp_path):
+        Project("p", root_dir=tmp_path)
+        tc = ToolConfig("cc", includes=PathList())
+        tc.includes = ["include"]
+        assert isinstance(tc.includes, PathList)
+        assert tc.includes == [tmp_path / "include"]
+
+    def test_clone_keeps_a_path_list(self):
+        clone = ToolConfig("cc", includes=PathList(["include"])).clone()
+        assert isinstance(clone.includes, PathList)
 
 
 class TestToolConfigUpdate:

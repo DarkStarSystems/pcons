@@ -129,6 +129,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GNU-style drivers now link every shared library with `-shared`, and pass
   frameworks and their directories to the linker as
   `-Wl,-framework,<name>` and `-Wl,-F<dir>`.
+- A relative directory in a tool's list (`env.cc.includes`,
+  `system_includes`, `env.link.libdirs`, `frameworkdirs`) is read from the
+  directory of the script that adds it, like `sources=`. Under
+  `add_subdirectory` it was read from the top directory, so
+  `env.cc.includes.append("include")` missed the subdirectory's headers.
+  These entries now read back as absolute paths.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named

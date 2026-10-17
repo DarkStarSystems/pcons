@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, SupportsIndex
 
 logger = logging.getLogger(__name__)
 
@@ -268,3 +269,67 @@ def executable_form(path: str, *, windows: bool) -> str:
     if windows:
         return path.replace("/", "\\")
     return path if path.startswith((".", "/")) else f"./{path}"
+
+
+def _script_dir_path(entry: Any) -> Any:
+    """*entry*, a directory a build script just wrote, made absolute.
+
+    A relative path is read from the directory of the script running now,
+    as ``sources=`` reads one. Rooted paths, ``$`` references (substituted
+    later) and anything that isn't a path come back unchanged, as does
+    everything when no project is active, since there's no script to read
+    it from.
+    """
+    if isinstance(entry, str) and entry.startswith("$"):
+        return entry
+    if not isinstance(entry, (str, os.PathLike)) or Path(entry).anchor:
+        return entry
+    from pcons.core.project import Project
+
+    if not Project.has_current():
+        return entry
+    return Project.current().current_dir / entry
+
+
+class PathList(list):
+    """A list of directories, such as a compiler's include path, whose
+    relative entries are read from the script that adds them.
+
+    Each entry is anchored on the way in, with :func:`_script_dir_path`: the
+    list may belong to an environment another script made, and by the time
+    anything reads it the adding script's directory is long gone. Anchored
+    entries are absolute, so copying them into another list, in any
+    directory, keeps their meaning.
+    """
+
+    def __init__(self, items: Iterable[Any] = ()) -> None:
+        super().__init__(_script_dir_path(item) for item in items)
+
+    def append(self, item: Any) -> None:
+        super().append(_script_dir_path(item))
+
+    def extend(self, items: Iterable[Any]) -> None:
+        super().extend(_script_dir_path(item) for item in items)
+
+    def insert(self, index: SupportsIndex, item: Any) -> None:
+        super().insert(index, _script_dir_path(item))
+
+    def __setitem__(self, index: Any, value: Any) -> None:
+        if isinstance(index, slice):
+            value = [_script_dir_path(item) for item in value]
+        else:
+            value = _script_dir_path(value)
+        super().__setitem__(index, value)
+
+    def __iadd__(self, items: Iterable[Any]) -> PathList:
+        self.extend(items)
+        return self
+
+    def copy(self) -> PathList:
+        """A copy that is still a PathList (``list(paths)`` is not)."""
+        clone = PathList()
+        list.extend(clone, self)
+        return clone
+
+    def __repr__(self) -> str:
+        return f"PathList({list(self)!r})"

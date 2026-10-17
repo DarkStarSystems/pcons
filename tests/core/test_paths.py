@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: MIT
-"""Tests for pcons.core.paths - PathResolver."""
+"""Tests for pcons.core.paths - PathResolver and PathList."""
 
 import warnings
 from pathlib import Path
 
-from pcons.core.paths import PathResolver
+from pcons.core.paths import PathList, PathResolver
+from pcons.core.project import Project
 
 
 class TestPathResolverCreation:
@@ -369,3 +370,59 @@ class TestPathText:
         resolver = PathResolver(tmp_path / "proj", Path("build"))
         outside = (tmp_path / "sdk" / "a.h").resolve()
         assert resolver.path_text(outside, built=False) == str(outside)
+
+
+class TestPathList:
+    """Relative entries are read from the script adding them."""
+
+    def test_without_a_project_entries_stay_as_written(self) -> None:
+        assert PathList(["include"]) == ["include"]
+
+    def test_relative_entries_are_read_from_the_current_directory(
+        self, tmp_path: Path
+    ) -> None:
+        project = Project("p", root_dir=tmp_path)
+        paths = PathList(["a"])
+        paths.append("b")
+        paths.extend([Path("c")])
+        paths.insert(0, "d")
+        paths += ["e"]
+        with project._enter_subdir("sub"):
+            paths.append("f")
+            paths[0] = "g"
+        assert paths == [
+            tmp_path / "sub" / "g",
+            tmp_path / "a",
+            tmp_path / "b",
+            tmp_path / "c",
+            tmp_path / "e",
+            tmp_path / "sub" / "f",
+        ]
+
+    def test_a_slice_assignment_is_anchored(self, tmp_path: Path) -> None:
+        Project("p", root_dir=tmp_path)
+        paths = PathList(["a", "b"])
+        paths[:1] = ["c", "d"]
+        assert paths == [tmp_path / "c", tmp_path / "d", tmp_path / "b"]
+
+    def test_rooted_paths_references_and_markers_pass_through(
+        self, tmp_path: Path
+    ) -> None:
+        Project("p", root_dir=tmp_path)
+        marker = object()
+        entries = [tmp_path / "abs", "/opt/sdk/include", "$sdk_include", marker]
+        assert PathList(entries) == entries
+
+    def test_entries_keep_their_meaning_in_another_directory(
+        self, tmp_path: Path
+    ) -> None:
+        project = Project("p", root_dir=tmp_path)
+        with project._enter_subdir("a"):
+            written = PathList(["include"])
+        with project._enter_subdir("b"):
+            copied = PathList(written)
+            copied.extend(written)
+        assert copied == [tmp_path / "a" / "include"] * 2
+
+    def test_copy_is_still_a_path_list(self) -> None:
+        assert isinstance(PathList(["x"]).copy(), PathList)

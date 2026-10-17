@@ -895,3 +895,32 @@ class TestDecodeCStringEscapes:
         from pcons.configure.checks import _decode_c_string
 
         assert _decode_c_string(r'"a\nb"', "X") == "a\nb"
+
+
+def test_a_relative_include_dir_in_a_probe_is_read_from_the_top(tmp_path):
+    """A relative entry no script anchored means the top directory, as it
+    does in the build, even on a subproject's environment."""
+    from pcons.core.project import Project
+
+    top = Project("top", root_dir=tmp_path)
+    with top._enter_subdir("sub"):
+        env = Project("sub", root_dir=tmp_path / "sub").Environment()
+    env.add_tool("cc")
+    checks = ToolChecks(Configure(build_dir=tmp_path), env, "cc")
+
+    assert checks._include_flag("inc") == f"-I{(tmp_path / 'inc').as_posix()}"
+
+
+def test_a_relative_include_dir_is_read_from_the_checking_script(tmp_path):
+    """Made from a subdirectory's script, a check reads a relative include
+    dir from that script's directory, as env.cc.includes does."""
+    from pcons.core.project import Project
+
+    top = Project("top", root_dir=tmp_path)
+    env = top.Environment()
+    env.add_tool("cc")
+    checks = ToolChecks(Configure(build_dir=tmp_path), env, "cc")
+    with top._enter_subdir("sub"):
+        flag = checks._include_flag("inc")
+
+    assert flag == f"-I{(tmp_path / 'sub' / 'inc').as_posix()}"
