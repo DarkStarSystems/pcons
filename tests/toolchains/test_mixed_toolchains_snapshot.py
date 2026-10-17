@@ -18,6 +18,7 @@ version) answer with fixed values.
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePath
@@ -182,6 +183,13 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     monkeypatch.setattr(
         swift_mod.SwiftToolchain, "_runtime_libdirs", lambda self: ["/rt/swift"]
     )
+    # LlvmArchiver takes llvm-ar where PATH has one.
+    which = shutil.which
+    monkeypatch.setattr(
+        shutil,
+        "which",
+        lambda name, *a, **k: None if name == "llvm-ar" else which(name, *a, **k),
+    )
     for var in ("CC", "CXX", "FC", "AR", "LD", "SWIFTC", "CUDACXX", "RC"):
         monkeypatch.delenv(var, raising=False)
 
@@ -206,7 +214,9 @@ def _token(token: Any) -> str:
     path = getattr(token, "path", None)  # ProjectPath and the like
     if path is not None:
         return PurePath(str(path)).as_posix()
-    return str(token)
+    # A path a package gave as /pkg/lib reads \pkg\lib on a Windows host.
+    text = str(token)
+    return text.replace("\\", "/") if text.startswith("\\") else text
 
 
 def _tokens(values: Any) -> str:

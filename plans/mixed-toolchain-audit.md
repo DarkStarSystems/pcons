@@ -131,3 +131,21 @@ The link side is the host toolchain's. Position-independent code is
   GIMPLE vs clang, ifx's bitcode vs g++.
 - ASan: gfortran objects linked by Apple clang++ hit an ASan version
   mismatch.
+
+## Verified on Windows after Phase 2 (tower1, 2026-10-17)
+
+- clang-cl + flang and flang + clang-cl, `debug`: each links with `-g` or
+  `/DEBUG` and writes a PDB.
+- msvc + ifx, `sanitize`: links and runs, because cl's objects carry
+  `/InferAsanLibs` and `/DEFAULTLIB:"VCASAN"` themselves. An all-Fortran
+  program in an MSVC environment has no such object, so it needs ifx's
+  runtime stated as a link need (Phase 4). At run time, conda flang's own
+  `clang_rt.asan_dynamic-x86_64.dll` ahead of MSVC's on PATH makes the
+  program exit with 127.
+- msvc + ifx, `hardened`: GUARD_CF set, runs.
+- clang-cl, `sanitize`: **doesn't link** with lld-link, Fortran or not.
+  clang-cl's objects name no ASan runtime (the clang-cl driver adds it
+  when it links, and pcons links with lld-link directly), and lld-link
+  ignores `/inferasanlibs`. It links with
+  `clang_rt.asan_dynamic-x86_64.lib
+  /wholearchive:clang_rt.asan_dynamic_runtime_thunk-x86_64.lib`.
