@@ -13,6 +13,8 @@ from __future__ import annotations
 import platform
 import sys
 
+from pcons.core.paths import affix_filename
+
 
 def get_platform_name() -> str:
     """Get the current platform name.
@@ -130,7 +132,7 @@ def format_shared_lib_name(name: str) -> str:
     """
     prefix = get_shared_lib_prefix()
     ext = get_shared_lib_extension()
-    return f"{prefix}{name}{ext}"
+    return affix_filename(name, prefix, ext)
 
 
 def format_static_lib_name(name: str) -> str:
@@ -149,7 +151,7 @@ def format_static_lib_name(name: str) -> str:
     """
     prefix = get_static_lib_prefix()
     ext = get_static_lib_extension()
-    return f"{prefix}{name}{ext}"
+    return affix_filename(name, prefix, ext)
 
 
 def get_path_separator() -> str:

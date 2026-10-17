@@ -1490,6 +1490,9 @@ libplugin.output_filename = "myplugin.ofx"  # instead of libplugin.so
 #   Program "foo":
 #     Linux/macOS: foo
 #     Windows:     foo.exe
+# A directory in output_name stays in front, and the prefix and suffix go
+# on the file's own name: output_name = "lib/foo" gives lib/libfoo.so,
+# lib/libfoo.dylib, or lib/foo.dll (and lib/foo.lib to link against).
 
 # Create program that uses the library
 app = project.Program("host", env)

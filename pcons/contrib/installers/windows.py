@@ -35,6 +35,7 @@ from pcons.contrib.installers._helpers import (
     as_installer_step,
     staging_dir,
 )
+from pcons.core.paths import last_component
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -170,7 +171,10 @@ def create_msix(
             elif isinstance(first_source, Path):
                 executable = first_source.name
             elif isinstance(first_source, str):
-                executable = first_source.split("/")[-1].split("\\")[-1]
+                executable = first_source
+            # Staged at the package root, by its file name alone
+            if executable:
+                executable = last_component(executable)
         # Fallback to name-based executable
         if not executable:
             executable = f"{name}.exe"

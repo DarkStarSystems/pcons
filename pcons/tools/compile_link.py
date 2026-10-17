@@ -17,6 +17,7 @@ from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.errors import OutputCollisionError, PconsError
 from pcons.core.graph import strongly_connected_components
 from pcons.core.node import BuildInfo, FileNode, Node
+from pcons.core.paths import affix_filename
 from pcons.core.subst import PathToken, TargetPath
 from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
@@ -837,13 +838,16 @@ class CompileLinkFactory:
     ) -> str:
         """Compute the output filename for a target.
 
-        Always applies prefix and suffix to the base name (output_name or
+        Puts the prefix and suffix around the base name (output_name or
         target.name), like CMake's OUTPUT_NAME / PREFIX / SUFFIX, unless
-        ``output_filename`` names the file outright.
+        ``output_filename`` names the file outright. A directory in the base
+        name stays in front: ``lib/foo`` becomes ``lib/libfoo.so``. The prefix
+        is text before the file's own name, so a directory in it nests
+        below the base name's.
 
         Default prefix/suffix come from the toolchain, which decides what a
         name looks like for the platform being built for (Emscripten →
-        ".js", mingw → ".dll" with a "lib*.a" import library). Use
+        ".js", mingw → "foo.dll" but "libfoo.a"). Use
         output_prefix/output_suffix to override (set to "" to suppress).
 
         Args:
@@ -852,7 +856,8 @@ class CompileLinkFactory:
             target_type: One of "static_library", "shared_library", "program".
 
         Returns:
-            Output filename (relative, may include subdirectory via prefix).
+            Output filename relative to the target's output directory, which
+            may include subdirectories.
         """
         if target.output_filename is not None:
             conflicting = [
@@ -899,7 +904,7 @@ class CompileLinkFactory:
             target.output_suffix if target.output_suffix is not None else default_suffix
         )
 
-        return f"{prefix}{base_name}{suffix}"
+        return affix_filename(base_name, prefix, suffix)
 
     def _output_path(
         self, target: Target, env: Environment, filename: str, target_type: str

@@ -38,7 +38,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pcons.core.errors import PconsError
 from pcons.core.graph import refuse_duplicate_names, strongly_connected_components
 from pcons.core.node import FileNode
-from pcons.core.paths import PathResolver
+from pcons.core.paths import PathResolver, affix_filename, last_component
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
@@ -439,19 +439,18 @@ class XcodeGenerator(BaseGenerator):
         output_name = target.output_filename or target.output_name or target.name
         product_name = output_name
 
-        # Add the prefix and suffix libraries have, unless output_filename
-        # already named the whole file.
-        if target.output_filename is None:
-            if target.target_type == "static_library":
-                if not output_name.startswith("lib"):
-                    output_name = f"lib{output_name}"
-                if not output_name.endswith(".a"):
-                    output_name = f"{output_name}.a"
-            elif target.target_type == "shared_library":
-                if not output_name.startswith("lib"):
-                    output_name = f"lib{output_name}"
-                if not output_name.endswith(".dylib"):
-                    output_name = f"{output_name}.dylib"
+        # Add the prefix and suffix libraries have to the file's own name,
+        # unless output_filename already named the whole file.
+        lib_suffix = {"static_library": ".a", "shared_library": ".dylib"}.get(
+            str(target.target_type)
+        )
+        if target.output_filename is None and lib_suffix is not None:
+            leaf = last_component(output_name)
+            output_name = affix_filename(
+                output_name,
+                "" if leaf.startswith("lib") else "lib",
+                "" if leaf.endswith(lib_suffix) else lib_suffix,
+            )
 
         explicit_file_type = EXPLICIT_FILE_TYPE_MAP.get(
             product_type, "compiled.mach-o.executable"

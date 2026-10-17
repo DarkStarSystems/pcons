@@ -7,6 +7,10 @@ This example tests the pattern:
    - Should inherit public includes from core_lib
 3. Executable that links the shared library
 
+The shared library and the program both build into build/bin/, named with
+output_name: "bin/wrapper" writes bin/libwrapper.so (bin/wrapper.dll on
+Windows, where it has to sit beside the program that loads it).
+
 Expected: core.h is found via public include propagation,
 and core_value() from static lib is available in shared lib.
 """
@@ -31,10 +35,13 @@ core_lib.public.include_dirs.append(src_dir)  # So dependents can #include "core
 # instead of link()/link_private(), to keep that API exercised in CI.
 wrapper_lib = project.SharedLibrary("wrapper", env, sources=[src_dir / "wrapper.c"])
 wrapper_lib.public.link_libs.append(core_lib)
+# A directory in output_name stays in front; "lib" and ".so" go on the file name
+wrapper_lib.output_name = "bin/wrapper"
 
 # 3. Create executable that links the shared library
 prog = project.Program("demo", env, sources=[src_dir / "main.c"])
 prog.private.link_libs.append(wrapper_lib)
+prog.output_name = "bin/demo"
 
 # install_dir() resolves the conventional subdir from the env's toolchain:
 # shared libs land in "lib" (or "bin" on DLL platforms), archives in "lib",

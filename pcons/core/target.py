@@ -588,7 +588,8 @@ class Target:
         # For install targets:
         self._install_nodes: list[FileNode] = []
         # Base name for the output, in place of the target's name; the
-        # toolchain's prefix and suffix still apply:
+        # toolchain's prefix and suffix still apply, to its last component
+        # ("lib/foo" -> "lib/libfoo.so"):
         self.output_name: str | None = None
         # Override platform prefix/suffix (e.g., output_prefix="" to drop "lib"):
         self.output_prefix: str | None = None

@@ -104,6 +104,9 @@ class TestXcodeGeneratorTargets:
             # A name already carrying the library prefix and suffix keeps them once.
             ("static_library", "output_name", "libcustom.a", "libcustom.a"),
             ("shared_library", "output_name", "libcustom.dylib", "libcustom.dylib"),
+            # A directory stays in front; the prefix goes on the file's name.
+            ("static_library", "output_name", "lib/foo", "lib/libfoo.a"),
+            ("shared_library", "output_name", "lib/foo", "lib/libfoo.dylib"),
             # output_filename is the whole name: nothing is added.
             ("static_library", "output_filename", "exact.bin", "exact.bin"),
         ],

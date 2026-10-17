@@ -333,3 +333,19 @@ class PathList(list):
 
     def __repr__(self) -> str:
         return f"PathList({list(self)!r})"
+
+
+def affix_filename(name: str, prefix: str, suffix: str) -> str:
+    """Put *prefix* and *suffix* around the last component of *name*.
+
+    A directory in *name* stays in front, so ``lib/foo`` with ``lib`` and
+    ``.so`` gives ``lib/libfoo.so``, not ``liblib/foo.so``. Either separator
+    is taken, and the result is written with ``/``.
+    """
+    directory, sep, leaf = name.replace("\\", "/").rpartition("/")
+    return f"{directory}{sep}{prefix}{leaf}{suffix}"
+
+
+def last_component(name: str) -> str:
+    """The file's own name in *name*, after any directory (either separator)."""
+    return name.replace("\\", "/").rpartition("/")[2]

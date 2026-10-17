@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
+from pcons.core.paths import affix_filename
 from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
@@ -1545,17 +1546,24 @@ class BaseToolchain(ABC):
         # static_library and anything else (archives, data) default to lib.
         return "lib"
 
+    def _affixed_name(self, name: str, target_type: str) -> str:
+        return affix_filename(
+            name,
+            self.get_output_prefix(target_type),
+            self.get_output_suffix(target_type),
+        )
+
     def get_static_library_name(self, name: str) -> str:
         """Return filename for a static library."""
-        return f"{self.get_output_prefix('static_library')}{name}{self.get_output_suffix('static_library')}"
+        return self._affixed_name(name, "static_library")
 
     def get_shared_library_name(self, name: str) -> str:
         """Return filename for a shared library."""
-        return f"{self.get_output_prefix('shared_library')}{name}{self.get_output_suffix('shared_library')}"
+        return self._affixed_name(name, "shared_library")
 
     def get_program_name(self, name: str) -> str:
         """Return filename for a program."""
-        return f"{self.get_output_prefix('program')}{name}{self.get_output_suffix('program')}"
+        return self._affixed_name(name, "program")
 
     def get_compile_flags_for_target_type(
         self,

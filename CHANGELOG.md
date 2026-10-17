@@ -213,6 +213,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On Windows without Developer Mode, every generate warned that it couldn't
   create the root `compile_commands.json` symlink. Pcons now skips the link
   quietly and explains why under `-v` (#217).
+- A directory in `output_name` works for libraries: `output_name =
+  "lib/foo"` on a shared library writes `lib/libfoo.so` (`lib/libfoo.dylib`,
+  `lib/foo.dll` and `lib/foo.lib`). The prefix and suffix go on the file's
+  own name; before, the `lib` went in front of the directory
+  (`liblib/foo.so`). An `output_prefix` with a directory in it still works
+  as before.
 
 ## [0.30.0] - 2026-09-27
 
