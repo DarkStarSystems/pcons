@@ -16,8 +16,13 @@ from pcons import Project
 from pcons.configure.platform import get_platform
 from pcons.core.target import Target
 from pcons.toolchains.fortran import FORTRAN_EXTENSIONS, find_fortran_toolchain
+from pcons.toolchains.fortran_scanner import (
+    depfile_text,
+    expand_includes,
+    scan_fortran_source,
+    scan_info,
+)
 from pcons.toolchains.fortran_scanner import main as fortran_scanner_main
-from pcons.toolchains.fortran_scanner import scan_fortran_source, scan_info
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.gfortran import (
     GfortranCompiler,
@@ -491,6 +496,163 @@ def test_scan_one_cli_reports_a_missing_source(tmp_path: Path, capsys) -> None:
 
 
 # =============================================================================
+# Included files
+# =============================================================================
+
+
+def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(text))
+    return path
+
+
+def test_includes_are_found_beside_the_source_then_on_the_path(tmp_path) -> None:
+    """#include and INCLUDE look in the including file's directory first,
+    then the -I directories in order."""
+    src = _write(
+        tmp_path / "src" / "main.F90",
+        """\
+        program main
+        #include "local.h"
+          include 'shared.inc'
+        end program
+        """,
+    )
+    _write(tmp_path / "src" / "local.h", "! local\n")
+    _write(tmp_path / "first" / "shared.inc", "! first\n")
+    _write(tmp_path / "second" / "shared.inc", "! second\n")
+
+    text, found = expand_includes(
+        src, src.read_text(), [tmp_path / "first", tmp_path / "second"]
+    )
+
+    assert found == [tmp_path / "src" / "local.h", tmp_path / "first" / "shared.inc"]
+    assert "! local" in text and "! first" in text and "! second" not in text
+
+
+def test_an_angle_include_skips_the_source_directory(tmp_path) -> None:
+    src = _write(tmp_path / "src" / "main.F90", "#include <defs.h>\n")
+    _write(tmp_path / "src" / "defs.h", "")
+    _write(tmp_path / "inc" / "defs.h", "")
+
+    _text, found = expand_includes(src, src.read_text(), [tmp_path / "inc"])
+
+    assert found == [tmp_path / "inc" / "defs.h"]
+
+
+def test_nested_includes_resolve_from_their_own_directory(tmp_path) -> None:
+    src = _write(tmp_path / "main.F90", '#include "inc/outer.h"\n')
+    _write(tmp_path / "inc" / "outer.h", '#include "inner.h"\n')
+    _write(tmp_path / "inc" / "inner.h", "")
+
+    _text, found = expand_includes(src, src.read_text(), [])
+
+    assert found == [tmp_path / "inc" / "outer.h", tmp_path / "inc" / "inner.h"]
+
+
+def test_a_file_is_read_once_even_when_it_includes_itself(tmp_path) -> None:
+    src = _write(tmp_path / "main.F90", '#include "loop.h"\n#include "loop.h"\n')
+    _write(tmp_path / "loop.h", '#include "loop.h"\nUSE once\n')
+
+    text, found = expand_includes(src, src.read_text(), [])
+
+    assert found == [tmp_path / "loop.h"]
+    assert text.count("USE once") == 1
+
+
+def test_missing_and_commented_out_includes_are_skipped(tmp_path) -> None:
+    """A missing include may be one #if leaves out; the compiler reports it
+    if it matters. A comment is no include at all."""
+    src = _write(
+        tmp_path / "main.F90",
+        """\
+        #include "missing.h"
+        ! include 'commented.inc'
+        !#include "commented.h"
+        """,
+    )
+    _write(tmp_path / "commented.inc", "")
+    _write(tmp_path / "commented.h", "")
+
+    _text, found = expand_includes(src, src.read_text(), [])
+
+    assert found == []
+
+
+def test_fixed_form_and_uppercase_include_lines(tmp_path) -> None:
+    src = _write(tmp_path / "old.F", '      INCLUDE "common.inc"\n')
+    _write(tmp_path / "common.inc", "")
+
+    _text, found = expand_includes(src, src.read_text(), [])
+
+    assert found == [tmp_path / "common.inc"]
+
+
+def test_modules_reached_through_an_include_count(tmp_path) -> None:
+    """An interface header that USEs a module needs it, and a module
+    declared in an included file is written by this compile."""
+    src = _write(
+        tmp_path / "main.F90",
+        """\
+        #include "decl.inc"
+        subroutine s
+        #include "s.intfb.h"
+        end subroutine
+        """,
+    )
+    _write(tmp_path / "decl.inc", "module declared\nend module declared\n")
+    _write(
+        tmp_path / "s.intfb.h",
+        """\
+        interface
+          subroutine t(x)
+            use parkind1, only: jprb
+            real(kind=jprb) :: x
+          end subroutine t
+        end interface
+        """,
+    )
+
+    text, found = expand_includes(src, src.read_text(), [])
+    info = scan_info(text, "modules", included=[p.as_posix() for p in found])
+
+    assert info["provides"] == [{"name": "declared", "path": "modules/declared.mod"}]
+    assert info["requires"] == ["parkind1"]
+    assert info["extra_deps"] == [p.as_posix() for p in found]
+
+
+def test_depfile_escapes_what_make_syntax_reserves() -> None:
+    assert depfile_text("a b.json", ["x$y.h", "c#d.inc", "plain.h"]) == (
+        "a\\ b.json: x$$y.h c\\#d.inc plain.h\n"
+    )
+
+
+def test_scan_one_cli_reports_includes_and_writes_a_depfile(tmp_path) -> None:
+    """The included files become the compile's extra_deps and, in the
+    depfile, inputs of the scan edge itself."""
+    src = _write(tmp_path / "src" / "main.F90", '#include "defs.h"\nend\n')
+    header = _write(tmp_path / "inc" / "defs.h", "")
+    out = tmp_path / "obj" / "main.F90.o.fscan.json"
+    depfile = tmp_path / "obj" / "main.F90.o.fscan.json.d"
+
+    rc = fortran_scanner_main(
+        [
+            "--scan-one",
+            str(src),
+            f"-I{tmp_path / 'inc'}",
+            "--out",
+            str(out),
+            "--depfile",
+            str(depfile),
+        ]
+    )
+
+    assert rc == 0
+    assert json.loads(out.read_text())["extra_deps"] == [header.as_posix()]
+    assert depfile.read_text() == f"{out}: {header.as_posix()}\n"
+
+
+# =============================================================================
 # Scanner wiring (FortranToolchain.after_resolve)
 # =============================================================================
 
@@ -657,10 +819,37 @@ class TestScannerWiring:
         )
 
         assert info_node._build_info["vars"] == {
+            "FC_SCAN_INCLUDES": [],
             "FC_MODDIR": "modules",
             "FC_SUBMODULE_FILE": "{ancestor}@{name}.smod",
             "FC_ANCESTOR_FILE": "{name}.smod",
         }
+
+    def test_scan_searches_the_compiles_include_path(
+        self, tmp_path, monkeypatch, fortran_toolchain
+    ):
+        """The scan resolves includes as the compile does: the
+        environment's directories, then those a dependency adds."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.F90").write_text("PROGRAM p\nEND PROGRAM\n")
+        project = Project("inc", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=fortran_toolchain)
+        env.fc.includes.append("include")
+        dep = project.HeaderOnlyLibrary("defs", env)
+        dep.public.include_dirs.append(tmp_path / "defs")
+        project.Program("app", env, sources=["src/main.F90"]).link(dep)
+        project.resolve()
+
+        scope = project._scan_scopes[("fortran-modules", "inc::app")]
+        info_node = scope.collate_node._build_info["sources"][0]
+        tokens = info_node._build_info["vars"]["FC_SCAN_INCLUDES"]
+
+        assert [(t.prefix, Path(t.path)) for t in tokens] == [
+            ("-I", Path("include")),
+            ("-I", Path("defs")),
+        ]
+        assert info_node._build_info["deps_style"] == "gcc"
 
     def test_no_scanner_without_fortran_sources(
         self, tmp_path, monkeypatch, gcc_toolchain

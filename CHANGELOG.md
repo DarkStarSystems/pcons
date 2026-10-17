@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Editing a file a Fortran source includes, with `#include` or `INCLUDE`,
+  now recompiles that source; before, nothing did. A module declared or
+  used in an included file now counts too, so an interface header's
+  `USE` orders the compile after that module.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named
