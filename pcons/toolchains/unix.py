@@ -653,6 +653,27 @@ class UnixToolchain(BaseToolchain):
                         )
         return contribs
 
+    #: The compile tool whose driver links each language: C++ objects need
+    #: the C++ driver for its runtime, and CUDA links through it too.
+    LINK_DRIVER_TOOLS: ClassVar[dict[str, str]] = {
+        "c": "cc",
+        "objc": "cc",
+        "cxx": "cxx",
+        "objcxx": "cxx",
+        "cuda": "cxx",
+    }
+
+    def link_driver(self, language: str, env: Environment) -> str | None:
+        """The driver of this toolchain's own compile tool for *language*.
+        Targeting MSVC there's none: the objects name their runtimes."""
+        tool = self.LINK_DRIVER_TOOLS.get(language)
+        if tool is None or self.abi == "msvc" or not env.has_tool(tool):
+            return None
+        if env._tool_owners.get(tool) is not self:
+            return None
+        cmd = getattr(env, tool).cmd
+        return str(cmd) if cmd else None
+
     def _variant_contributions(
         self, variant: str, **kwargs: Any
     ) -> list[ToolContribution]:

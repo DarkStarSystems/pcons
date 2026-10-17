@@ -183,6 +183,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gcc+gfortran | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -196,6 +198,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O0 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O0 -g -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O0 -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gcc+gfortran | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O2] defines=[NDEBUG]
@@ -209,6 +213,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O2 -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O2 -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O2]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gcc+gfortran | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O2 -g] defines=[NDEBUG]
@@ -222,6 +228,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O2 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O2 -g -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O2 -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Wall -Wextra -Wpedantic]
@@ -235,6 +243,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-Wall -Wextra]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Werror]
@@ -248,6 +258,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-Werror -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-Werror -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-Werror]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature sanitize
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
@@ -261,6 +273,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-fsanitize=address,undefined -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
+  fmain/fmain: tool=link cmd=gfortran flags=[-fsanitize=address,undefined] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pg -g]
@@ -274,6 +288,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-pg -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-pg -g -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-pg -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-pg -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pg] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-flto]
@@ -287,6 +303,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-flto -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-flto -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-flto -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-flto]
+  fmain/fmain: tool=link cmd=gfortran flags=[-flto] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature hardened
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
@@ -300,6 +318,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-pie -Wl,-z,relro,-z,now -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fstack-protector-strong -fPIE]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread]
@@ -313,6 +333,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-pthread -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-pthread -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pthread] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature coverage
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[--coverage]
@@ -326,6 +348,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[--coverage -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[--coverage -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[--coverage -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[--coverage]
+  fmain/fmain: tool=link cmd=gfortran flags=[--coverage] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-ffast-math]
@@ -339,6 +363,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-ffast-math -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-ffast-math -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-ffast-math -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-ffast-math]
+  fmain/fmain: tool=link cmd=gfortran flags=[-ffast-math] libs=[] libdirs=[]
 ### linux gcc+gfortran | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fopenmp]
@@ -352,6 +378,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fopenmp -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fopenmp -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-fopenmp -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fopenmp]
+  fmain/fmain: tool=link cmd=gfortran flags=[-fopenmp] libs=[] libdirs=[]
 ### linux gcc+gfortran | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc
@@ -365,6 +393,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-std=c++20 -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gcc+gfortran | cross aarch64-linux-gnu
   ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+gfortran | before add_toolchain: variant debug
@@ -434,10 +464,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[]
   app/src.f90.o: tool=fc cmd=gfortran flags=[]
-  app/app: tool=link cmd=gfortran flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gfortran+gcc | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -447,10 +479,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-O0 -g]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-O0 -g]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-O0 -g]
-  app/app: tool=link cmd=gfortran flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-O0 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O0 -g -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O0 -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gfortran+gcc | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O2] defines=[NDEBUG]
@@ -460,10 +494,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-O2]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-O2]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-O2]
-  app/app: tool=link cmd=gfortran flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-O2 -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O2 -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O2]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gfortran+gcc | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O2 -g] defines=[NDEBUG]
@@ -473,10 +509,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-O2 -g]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-O2 -g]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-O2 -g]
-  app/app: tool=link cmd=gfortran flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-O2 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O2 -g -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O2 -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Wall -Wextra -Wpedantic]
@@ -486,10 +524,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-Wall -Wextra -Wpedantic]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-Wall -Wextra -Wpedantic]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-Wall -Wextra]
-  app/app: tool=link cmd=gfortran flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-Wall -Wextra -Wpedantic -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-Wall -Wextra]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Werror]
@@ -499,10 +539,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-Werror]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-Werror]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-Werror]
-  app/app: tool=link cmd=gfortran flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-Werror -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-Werror -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-Werror]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature sanitize
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
@@ -512,10 +554,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
-  app/app: tool=link cmd=gfortran flags=[-fsanitize=address,undefined] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[-fsanitize=address,undefined] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-fsanitize=address,undefined -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-fsanitize=address,undefined -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
+  fmain/fmain: tool=link cmd=gfortran flags=[-fsanitize=address,undefined] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pg -g]
@@ -525,10 +569,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-pg -g]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pg -g]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-pg -g]
-  app/app: tool=link cmd=gfortran flags=[-pg] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[-pg] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-pg -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-pg -g -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-pg -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-pg -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-pg -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pg] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-flto]
@@ -538,10 +584,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-flto]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-flto]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-flto]
-  app/app: tool=link cmd=gfortran flags=[-flto] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[-flto] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-flto -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-flto -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-flto -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-flto -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-flto]
+  fmain/fmain: tool=link cmd=gfortran flags=[-flto] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature hardened
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
@@ -551,10 +599,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-fstack-protector-strong -fPIE]
-  app/app: tool=link cmd=gfortran flags=[-pie -Wl,-z,relro,-z,now] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[-pie -Wl,-z,relro,-z,now] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-pie -Wl,-z,relro,-z,now -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-pie -Wl,-z,relro,-z,now -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fstack-protector-strong -fPIE]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread]
@@ -564,10 +614,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
-  app/app: tool=link cmd=gfortran flags=[-pthread] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[-pthread] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-pthread -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-pthread -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-pthread -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pthread] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature coverage
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[--coverage]
@@ -577,10 +629,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[--coverage]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[--coverage]
   app/src.f90.o: tool=fc cmd=gfortran flags=[--coverage]
-  app/app: tool=link cmd=gfortran flags=[--coverage] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[--coverage] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[--coverage -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[--coverage -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[--coverage -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[--coverage -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[--coverage]
+  fmain/fmain: tool=link cmd=gfortran flags=[--coverage] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-ffast-math]
@@ -590,10 +644,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-ffast-math]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-ffast-math]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-ffast-math]
-  app/app: tool=link cmd=gfortran flags=[-ffast-math] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[-ffast-math] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-ffast-math -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-ffast-math -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-ffast-math -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-ffast-math -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-ffast-math]
+  fmain/fmain: tool=link cmd=gfortran flags=[-ffast-math] libs=[] libdirs=[]
 ### linux gfortran+gcc | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fopenmp]
@@ -603,10 +659,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-fopenmp]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-fopenmp]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-fopenmp]
-  app/app: tool=link cmd=gfortran flags=[-fopenmp] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[-fopenmp] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-fopenmp -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fopenmp -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-fopenmp -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-fopenmp -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fopenmp]
+  fmain/fmain: tool=link cmd=gfortran flags=[-fopenmp] libs=[] libdirs=[]
 ### linux gfortran+gcc | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc
@@ -616,10 +674,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-std=c++20]
   app/src.f90.o: tool=fc cmd=gfortran flags=[]
-  app/app: tool=link cmd=gfortran flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=g++ flags=[] libs=[gfortran] libdirs=[/rt/gfortran]
   lib/src.c.o: tool=cc cmd=gcc flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-std=c++20 -fPIC]
-  lib/liblib.so: tool=link cmd=gfortran flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux gfortran+gcc | cross aarch64-linux-gnu
   ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### linux gfortran+gcc | before add_toolchain: variant debug
@@ -645,12 +705,12 @@
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]
   app/src.f90.o: tool=fc cmd=gfortran flags=[]
-  app/app: tool=link cmd=gfortran flags=[-Wl,--as-needed] libs=[stdc++ pkg] libdirs=[/pkg/lib]
+  app/app: tool=link cmd=g++ flags=[-Wl,--as-needed] libs=[gfortran pkg] libdirs=[/rt/gfortran /pkg/lib]
 ### linux gfortran+gcc | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]
   app/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
-  app/app: tool=link cmd=gfortran flags=[-Wl,--as-needed] libs=[pkg stdc++] libdirs=[/pkg/lib]
+  app/app: tool=link cmd=g++ flags=[-Wl,--as-needed] libs=[pkg gfortran] libdirs=[/pkg/lib /rt/gfortran]
 ### linux gfortran+gcc | upstream: static libraries from single-toolchain environments
   app/src.c.o: tool=cc cmd=gcc flags=[]
   app/app: tool=link cmd=gcc flags=[] libs=[] libdirs=[]
@@ -688,6 +748,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux llvm+gfortran | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -702,6 +764,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O0 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O0 -g -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O0 -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux llvm+gfortran | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2] defines=[NDEBUG]
@@ -716,6 +780,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O2 -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O2]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux llvm+gfortran | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2 -g] defines=[NDEBUG]
@@ -730,6 +796,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O2 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -g -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O2 -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
@@ -744,6 +812,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-Wall -Wextra]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Werror]
@@ -758,6 +828,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-Werror -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Werror -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-Werror]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature sanitize
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
@@ -772,6 +844,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-fsanitize=address,undefined -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
+  fmain/fmain: tool=link cmd=gfortran flags=[-fsanitize=address,undefined] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pg -g]
@@ -786,6 +860,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-pg -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-pg -g -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-pg -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-pg -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pg] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-flto]
@@ -800,6 +876,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-flto -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-flto -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-flto -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-flto]
+  fmain/fmain: tool=link cmd=gfortran flags=[-flto] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature hardened
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
@@ -814,6 +892,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-pie -Wl,-z,relro,-z,now -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fstack-protector-strong -fPIE]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pthread]
@@ -828,6 +908,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-pthread -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-pthread -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pthread] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature coverage
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[--coverage]
@@ -842,6 +924,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[--coverage -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[--coverage -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[--coverage -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[--coverage]
+  fmain/fmain: tool=link cmd=gfortran flags=[--coverage] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-ffast-math]
@@ -856,6 +940,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-ffast-math -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-ffast-math -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-ffast-math -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-ffast-math]
+  fmain/fmain: tool=link cmd=gfortran flags=[-ffast-math] libs=[] libdirs=[]
 ### linux llvm+gfortran | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fopenmp]
@@ -870,6 +956,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fopenmp -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fopenmp -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-fopenmp -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fopenmp]
+  fmain/fmain: tool=link cmd=gfortran flags=[-fopenmp] libs=[] libdirs=[]
 ### linux llvm+gfortran | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang
@@ -884,6 +972,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-std=c++20 -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### linux llvm+gfortran | cross aarch64-linux-gnu
   ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### linux llvm+gfortran | before add_toolchain: variant debug
@@ -961,6 +1051,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -975,6 +1067,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O0 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O0 -g -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O0 -g]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2] defines=[NDEBUG]
@@ -989,6 +1083,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O2 -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O2]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2 -g] defines=[NDEBUG]
@@ -1003,6 +1099,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O2 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -g -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O2 -g]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
@@ -1017,6 +1115,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Werror]
@@ -1031,6 +1131,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-Werror -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Werror -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-Werror]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | feature sanitize
   ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
 ### linux llvm+flang | feature profile
@@ -1049,6 +1151,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-flto -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-flto -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-flto -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-flto]
+  fmain/fmain: tool=link cmd=flang flags=[-flto] libs=[] libdirs=[]
 ### linux llvm+flang | feature hardened
   ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
 ### linux llvm+flang | feature pthread
@@ -1065,6 +1169,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-pthread -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-pthread -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[-pthread] libs=[] libdirs=[]
 ### linux llvm+flang | feature coverage
   ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('coverage').
 ### linux llvm+flang | feature fast-math
@@ -1081,6 +1187,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-ffast-math -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-ffast-math -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-ffast-math -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-ffast-math]
+  fmain/fmain: tool=link cmd=flang flags=[-ffast-math] libs=[] libdirs=[]
 ### linux llvm+flang | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fopenmp]
@@ -1095,6 +1203,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fopenmp -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fopenmp -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-fopenmp -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-fopenmp]
+  fmain/fmain: tool=link cmd=flang flags=[-fopenmp] libs=[] libdirs=[]
 ### linux llvm+flang | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang
@@ -1109,6 +1219,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-std=c++20 -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | cross aarch64-linux-gnu
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[--target=aarch64-linux-gnu]
@@ -1123,6 +1235,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[--target=aarch64-linux-gnu -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[--target=aarch64-linux-gnu -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[--target=aarch64-linux-gnu -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[--target=aarch64-linux-gnu]
+  fmain/fmain: tool=link cmd=flang flags=[--target=aarch64-linux-gnu] libs=[] libdirs=[]
 ### linux llvm+flang | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -1199,10 +1313,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[]
   app/src.f90.o: tool=fc cmd=flang flags=[]
-  app/app: tool=link cmd=flang flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux flang+llvm | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -1213,10 +1329,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-O0 -g]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-O0 -g]
   app/src.f90.o: tool=fc cmd=flang flags=[-O0 -g]
-  app/app: tool=link cmd=flang flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-O0 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O0 -g -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O0 -g]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux flang+llvm | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2] defines=[NDEBUG]
@@ -1227,10 +1345,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-O2]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2]
   app/src.f90.o: tool=fc cmd=flang flags=[-O2]
-  app/app: tool=link cmd=flang flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-O2 -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O2]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux flang+llvm | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2 -g] defines=[NDEBUG]
@@ -1241,10 +1361,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-O2 -g]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -g]
   app/src.f90.o: tool=fc cmd=flang flags=[-O2 -g]
-  app/app: tool=link cmd=flang flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-O2 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -g -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O2 -g]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux flang+llvm | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
@@ -1255,10 +1377,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
   app/src.f90.o: tool=fc cmd=flang flags=[]
-  app/app: tool=link cmd=flang flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux flang+llvm | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Werror]
@@ -1269,10 +1393,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-Werror]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-Werror]
   app/src.f90.o: tool=fc cmd=flang flags=[-Werror]
-  app/app: tool=link cmd=flang flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-Werror -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Werror -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-Werror]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux flang+llvm | feature sanitize
   ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
 ### linux flang+llvm | feature profile
@@ -1287,10 +1413,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-flto]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-flto]
   app/src.f90.o: tool=fc cmd=flang flags=[-flto]
-  app/app: tool=link cmd=flang flags=[-flto] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[-flto] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-flto -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-flto -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-flto -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-flto -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-flto]
+  fmain/fmain: tool=link cmd=flang flags=[-flto] libs=[] libdirs=[]
 ### linux flang+llvm | feature hardened
   ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
 ### linux flang+llvm | feature pthread
@@ -1303,10 +1431,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread]
   app/src.f90.o: tool=fc cmd=flang flags=[]
-  app/app: tool=link cmd=flang flags=[-pthread] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[-pthread] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-pthread -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-pthread -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-pthread -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[-pthread] libs=[] libdirs=[]
 ### linux flang+llvm | feature coverage
   ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('coverage').
 ### linux flang+llvm | feature fast-math
@@ -1319,10 +1449,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-ffast-math]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-ffast-math]
   app/src.f90.o: tool=fc cmd=flang flags=[-ffast-math]
-  app/app: tool=link cmd=flang flags=[-ffast-math] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[-ffast-math] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-ffast-math -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-ffast-math -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-ffast-math -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-ffast-math -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-ffast-math]
+  fmain/fmain: tool=link cmd=flang flags=[-ffast-math] libs=[] libdirs=[]
 ### linux flang+llvm | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fopenmp]
@@ -1333,10 +1465,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-fopenmp]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-fopenmp]
   app/src.f90.o: tool=fc cmd=flang flags=[-fopenmp]
-  app/app: tool=link cmd=flang flags=[-fopenmp] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[-fopenmp] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-fopenmp -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fopenmp -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-fopenmp -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-fopenmp -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-fopenmp]
+  fmain/fmain: tool=link cmd=flang flags=[-fopenmp] libs=[] libdirs=[]
 ### linux flang+llvm | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang
@@ -1347,10 +1481,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-std=c++20]
   app/src.f90.o: tool=fc cmd=flang flags=[]
-  app/app: tool=link cmd=flang flags=[] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-std=c++20 -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux flang+llvm | cross aarch64-linux-gnu
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[--target=aarch64-linux-gnu]
@@ -1361,10 +1497,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[--target=aarch64-linux-gnu]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[--target=aarch64-linux-gnu]
   app/src.f90.o: tool=fc cmd=flang flags=[--target=aarch64-linux-gnu]
-  app/app: tool=link cmd=flang flags=[--target=aarch64-linux-gnu] libs=[stdc++] libdirs=[]
+  app/app: tool=link cmd=clang++ flags=[--target=aarch64-linux-gnu] libs=[flang_rt.runtime] libdirs=[/rt/flang]
   lib/src.c.o: tool=cc cmd=clang flags=[--target=aarch64-linux-gnu -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[--target=aarch64-linux-gnu -fPIC]
-  lib/liblib.so: tool=link cmd=flang flags=[--target=aarch64-linux-gnu -Wl,-soname,<target>] libs=[] libdirs=[]
+  lib/liblib.so: tool=link cmd=clang++ flags=[--target=aarch64-linux-gnu -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[--target=aarch64-linux-gnu]
+  fmain/fmain: tool=link cmd=flang flags=[--target=aarch64-linux-gnu] libs=[] libdirs=[]
 ### linux flang+llvm | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -1396,12 +1534,12 @@
   app/src.c.o: tool=cc cmd=clang flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread]
   app/src.f90.o: tool=fc cmd=flang flags=[]
-  app/app: tool=link cmd=flang flags=[-Wl,--as-needed] libs=[stdc++ pkg] libdirs=[/pkg/lib]
+  app/app: tool=link cmd=clang++ flags=[-Wl,--as-needed] libs=[flang_rt.runtime pkg] libdirs=[/rt/flang /pkg/lib]
 ### linux flang+llvm | upstream: linked ImportedTarget
   app/src.c.o: tool=cc cmd=clang flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread]
   app/src.f90.o: tool=fc cmd=flang flags=[-pthread]
-  app/app: tool=link cmd=flang flags=[-Wl,--as-needed] libs=[pkg stdc++] libdirs=[/pkg/lib]
+  app/app: tool=link cmd=clang++ flags=[-Wl,--as-needed] libs=[pkg flang_rt.runtime] libdirs=[/pkg/lib /rt/flang]
 ### linux flang+llvm | upstream: static libraries from single-toolchain environments
   app/src.c.o: tool=cc cmd=clang flags=[]
   app/app: tool=link cmd=clang flags=[] libs=[] libdirs=[]
@@ -1438,6 +1576,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[] libs=[] libdirs=[]
 ### linux gcc+ifx | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -1451,6 +1591,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O0 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O0 -g -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-O0 -g -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[] libs=[] libdirs=[]
 ### linux gcc+ifx | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O2] defines=[NDEBUG]
@@ -1464,6 +1606,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O2 -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O2 -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-O2 -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[] libs=[] libdirs=[]
 ### linux gcc+ifx | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O2 -g] defines=[NDEBUG]
@@ -1477,6 +1621,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O2 -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O2 -g -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-O2 -g -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[] libs=[] libdirs=[]
 ### linux gcc+ifx | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Wall -Wextra -Wpedantic]
@@ -1490,6 +1636,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-Wall -Wextra -Wpedantic -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-warn all -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[] libs=[] libdirs=[]
 ### linux gcc+ifx | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Werror]
@@ -1503,6 +1651,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-Werror -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-Werror -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-warn errors -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[] libs=[] libdirs=[]
 ### linux gcc+ifx | feature sanitize
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
@@ -1516,6 +1666,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-fsanitize=address,undefined -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-fsanitize=address -fno-omit-frame-pointer -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[-fsanitize=address] libs=[] libdirs=[]
 ### linux gcc+ifx | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pg -g]
@@ -1529,6 +1681,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-pg -g -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-pg -g -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-pg -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-pg -g -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[-pg] libs=[] libdirs=[]
 ### linux gcc+ifx | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-flto]
@@ -1542,6 +1696,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-flto -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-flto -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-flto -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-flto -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[-flto] libs=[] libdirs=[]
 ### linux gcc+ifx | feature hardened
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
@@ -1555,6 +1711,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-pie -Wl,-z,relro,-z,now -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-fstack-protector-strong -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[]
 ### linux gcc+ifx | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread]
@@ -1568,6 +1726,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-pthread -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-pthread -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-pthread -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[-pthread] libs=[] libdirs=[]
 ### linux gcc+ifx | feature coverage
   ERROR ValueError: Preset 'coverage' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('coverage').
 ### linux gcc+ifx | feature fast-math
@@ -1583,6 +1743,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-ffast-math -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-ffast-math -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-ffast-math -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-ffast-math -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[-ffast-math] libs=[] libdirs=[]
 ### linux gcc+ifx | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fopenmp]
@@ -1596,6 +1758,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fopenmp -fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fopenmp -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-fopenmp -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-qopenmp -fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[-qopenmp] libs=[] libdirs=[]
 ### linux gcc+ifx | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc
@@ -1609,6 +1773,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fPIC]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-std=c++20 -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=ifx flags=[-fPIE]
+  fmain/fmain: tool=link cmd=ifx flags=[] libs=[] libdirs=[]
 ### linux gcc+ifx | cross aarch64-linux-gnu
   ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+ifx | before add_toolchain: variant debug
@@ -1941,6 +2107,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### darwin llvm+gfortran | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -1955,6 +2123,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O0 -g]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O0 -g]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O0 -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### darwin llvm+gfortran | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2] defines=[NDEBUG]
@@ -1969,6 +2139,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O2]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O2]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### darwin llvm+gfortran | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2 -g] defines=[NDEBUG]
@@ -1983,6 +2155,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O2 -g]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -g]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O2 -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
@@ -1997,6 +2171,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-Wall -Wextra]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Werror]
@@ -2011,6 +2187,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-Werror]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Werror]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-Werror]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature sanitize
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
@@ -2025,6 +2203,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-fsanitize=address,undefined -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
+  fmain/fmain: tool=link cmd=gfortran flags=[-fsanitize=address,undefined] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pg -g]
@@ -2039,6 +2219,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-pg -g]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-pg -g]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-pg -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-pg -g]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pg] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-flto]
@@ -2053,6 +2235,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-flto]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-flto]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-flto -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-flto]
+  fmain/fmain: tool=link cmd=gfortran flags=[-flto] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature hardened
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
@@ -2067,6 +2251,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-pie -Wl,-z,relro,-z,now -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fstack-protector-strong -fPIE]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pthread]
@@ -2081,6 +2267,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-pthread]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-pthread -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-pthread]
+  fmain/fmain: tool=link cmd=gfortran flags=[-pthread] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature coverage
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[--coverage]
@@ -2095,6 +2283,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[--coverage]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[--coverage]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[--coverage -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[--coverage]
+  fmain/fmain: tool=link cmd=gfortran flags=[--coverage] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-ffast-math]
@@ -2109,6 +2299,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-ffast-math]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-ffast-math]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-ffast-math -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-ffast-math]
+  fmain/fmain: tool=link cmd=gfortran flags=[-ffast-math] libs=[] libdirs=[]
 ### darwin llvm+gfortran | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fopenmp]
@@ -2123,6 +2315,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fopenmp]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fopenmp]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-fopenmp -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[-fopenmp]
+  fmain/fmain: tool=link cmd=gfortran flags=[-fopenmp] libs=[] libdirs=[]
 ### darwin llvm+gfortran | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang
@@ -2137,6 +2331,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-std=c++20]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
+  fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### darwin llvm+gfortran | arch x86_64
   ERROR ValueError: gfortran cannot retarget the CPU to 'x86_64' by flag. Use a cross preset (e.g. linux_cross(triple=...)) or a cross toolchain instead; see docs/presets.md.
 ### darwin llvm+gfortran | cross aarch64-linux-gnu
@@ -2173,6 +2369,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -2187,6 +2385,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O0 -g]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O0 -g]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O0 -g]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2] defines=[NDEBUG]
@@ -2201,6 +2401,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O2]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O2]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2 -g] defines=[NDEBUG]
@@ -2215,6 +2417,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-O2 -g]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-O2 -g]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-O2 -g]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
@@ -2229,6 +2433,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Werror]
@@ -2243,6 +2449,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-Werror]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-Werror]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-Werror]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | feature sanitize
   ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
 ### darwin llvm+flang | feature profile
@@ -2261,6 +2469,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-flto]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-flto]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-flto -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-flto]
+  fmain/fmain: tool=link cmd=flang flags=[-flto] libs=[] libdirs=[]
 ### darwin llvm+flang | feature hardened
   ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
 ### darwin llvm+flang | feature pthread
@@ -2277,6 +2487,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-pthread]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-pthread]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-pthread -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[-pthread] libs=[] libdirs=[]
 ### darwin llvm+flang | feature coverage
   ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('coverage').
 ### darwin llvm+flang | feature fast-math
@@ -2293,6 +2505,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-ffast-math]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-ffast-math]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-ffast-math -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-ffast-math]
+  fmain/fmain: tool=link cmd=flang flags=[-ffast-math] libs=[] libdirs=[]
 ### darwin llvm+flang | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fopenmp]
@@ -2307,6 +2521,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[-fopenmp]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fopenmp]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-fopenmp -Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[-fopenmp]
+  fmain/fmain: tool=link cmd=flang flags=[-fopenmp] libs=[] libdirs=[]
 ### darwin llvm+flang | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang
@@ -2321,6 +2537,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-std=c++20]
   lib/liblib.dylib: tool=link cmd=clang++ flags=[-Wl,-install_name,@rpath/<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[]
+  fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | arch x86_64
   ERROR ValueError: flang cannot retarget the CPU to 'x86_64' by flag. Use a cross preset (e.g. linux_cross(triple=...)) or a cross toolchain instead; see docs/presets.md.
 ### darwin llvm+flang | cross aarch64-linux-gnu
@@ -2337,6 +2555,8 @@
   lib/src.c.o: tool=cc cmd=clang flags=[--target=aarch64-linux-gnu -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[--target=aarch64-linux-gnu -fPIC]
   lib/liblib.so: tool=link cmd=clang++ flags=[--target=aarch64-linux-gnu -Wl,-soname,<target>] libs=[] libdirs=[]
+  fmain/src.f90.o: tool=fc cmd=flang flags=[--target=aarch64-linux-gnu]
+  fmain/fmain: tool=link cmd=flang flags=[--target=aarch64-linux-gnu] libs=[] libdirs=[]
 ### darwin llvm+flang | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -2599,6 +2819,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[]
   lib/lib.dll: tool=link cmd=g++ flags=[] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### windows gcc+gfortran | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -2612,6 +2834,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O0 -g]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O0 -g]
   lib/lib.dll: tool=link cmd=g++ flags=[] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-O0 -g]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### windows gcc+gfortran | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O2] defines=[NDEBUG]
@@ -2625,6 +2849,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O2]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O2]
   lib/lib.dll: tool=link cmd=g++ flags=[] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-O2]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### windows gcc+gfortran | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O2 -g] defines=[NDEBUG]
@@ -2638,6 +2864,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-O2 -g]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O2 -g]
   lib/lib.dll: tool=link cmd=g++ flags=[] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-O2 -g]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Wall -Wextra -Wpedantic]
@@ -2651,6 +2879,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-Wall -Wextra -Wpedantic]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-Wall -Wextra -Wpedantic]
   lib/lib.dll: tool=link cmd=g++ flags=[] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-Wall -Wextra]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-Werror]
@@ -2664,6 +2894,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-Werror]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-Werror]
   lib/lib.dll: tool=link cmd=g++ flags=[] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-Werror]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature sanitize
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
@@ -2677,6 +2909,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   lib/lib.dll: tool=link cmd=g++ flags=[-fsanitize=address,undefined] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[-fsanitize=address,undefined] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pg -g]
@@ -2690,6 +2924,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-pg -g]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-pg -g]
   lib/lib.dll: tool=link cmd=g++ flags=[-pg] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-pg -g]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[-pg] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-flto]
@@ -2703,6 +2939,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-flto]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-flto]
   lib/lib.dll: tool=link cmd=g++ flags=[-flto] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-flto]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[-flto] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature hardened
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
@@ -2716,6 +2954,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   lib/lib.dll: tool=link cmd=g++ flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-fstack-protector-strong -fPIE]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread]
@@ -2729,6 +2969,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]
   lib/lib.dll: tool=link cmd=g++ flags=[-pthread] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-pthread]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[-pthread] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature coverage
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[--coverage]
@@ -2742,6 +2984,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[--coverage]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[--coverage]
   lib/lib.dll: tool=link cmd=g++ flags=[--coverage] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[--coverage]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[--coverage] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-ffast-math]
@@ -2755,6 +2999,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-ffast-math]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-ffast-math]
   lib/lib.dll: tool=link cmd=g++ flags=[-ffast-math] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-ffast-math]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[-ffast-math] libs=[] libdirs=[]
 ### windows gcc+gfortran | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fopenmp]
@@ -2768,6 +3014,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[-fopenmp]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-fopenmp]
   lib/lib.dll: tool=link cmd=g++ flags=[-fopenmp] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[-fopenmp]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[-fopenmp] libs=[] libdirs=[]
 ### windows gcc+gfortran | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc
@@ -2781,6 +3029,8 @@
   lib/src.c.o: tool=cc cmd=gcc flags=[]
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-std=c++20]
   lib/lib.dll: tool=link cmd=g++ flags=[] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=gfortran flags=[]
+  fmain/fmain.exe: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### windows gcc+gfortran | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -2811,6 +3061,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
@@ -2827,6 +3079,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O0 -g -fms-runtime-lib=dll_dbg]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /O2 /MD] defines=[NDEBUG]
@@ -2843,6 +3097,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /MD]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O2 -fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /O2 /Z7 /MD] defines=[NDEBUG]
@@ -2859,6 +3115,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O2 -g -fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /W4]
@@ -2875,6 +3133,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /W4]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /W4]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /WX]
@@ -2891,6 +3151,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /WX]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /WX]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -Werror]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature sanitize
   ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
 ### windows clang-cl+flang | feature profile
@@ -2909,6 +3171,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /PROFILE] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /PROFILE] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD -flto]
@@ -2925,6 +3189,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD -flto]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD -flto]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -flto]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature hardened
   ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
 ### windows clang-cl+flang | feature pthread
@@ -2947,6 +3213,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /fp:fast]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /fp:fast]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -ffast-math]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /openmp]
@@ -2963,6 +3231,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /openmp]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /openmp]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /LIBPATH:/rt/libomp libomp.lib] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -fopenmp]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /LIBPATH:/rt/libomp libomp.lib] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD]
@@ -2979,6 +3249,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /std:c++20]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
@@ -3015,6 +3287,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
   lib/lib.dll: tool=link cmd=flang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=flang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
@@ -3031,6 +3305,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
   lib/lib.dll: tool=link cmd=flang flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O0 -g -fms-runtime-lib=dll_dbg]
+  fmain/fmain.exe: tool=link cmd=flang flags=[-g] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /O2 /MD] defines=[NDEBUG]
@@ -3047,6 +3323,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /MD]
   lib/lib.dll: tool=link cmd=flang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O2 -fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=flang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /O2 /Z7 /MD] defines=[NDEBUG]
@@ -3063,6 +3341,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
   lib/lib.dll: tool=link cmd=flang flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O2 -g -fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=flang flags=[-g] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /W4]
@@ -3079,6 +3359,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /W4]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /W4]
   lib/lib.dll: tool=link cmd=flang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=flang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /WX]
@@ -3095,6 +3377,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /WX]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /WX]
   lib/lib.dll: tool=link cmd=flang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -Werror]
+  fmain/fmain.exe: tool=link cmd=flang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | feature sanitize
   ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
 ### windows flang+clang-cl | feature profile
@@ -3113,6 +3397,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
   lib/lib.dll: tool=link cmd=flang flags=[-Wl,/PROFILE -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=flang flags=[-Wl,/PROFILE] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD -flto]
@@ -3129,6 +3415,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD -flto]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD -flto]
   lib/lib.dll: tool=link cmd=flang flags=[-flto -fuse-ld=lld -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -flto]
+  fmain/fmain.exe: tool=link cmd=flang flags=[-flto -fuse-ld=lld] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | feature hardened
   ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
 ### windows flang+clang-cl | feature pthread
@@ -3151,6 +3439,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /fp:fast]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /fp:fast]
   lib/lib.dll: tool=link cmd=flang flags=[-ffast-math -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -ffast-math]
+  fmain/fmain.exe: tool=link cmd=flang flags=[-ffast-math] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /openmp]
@@ -3167,6 +3457,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /openmp]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /openmp]
   lib/lib.dll: tool=link cmd=flang flags=[-fopenmp -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -fopenmp]
+  fmain/fmain.exe: tool=link cmd=flang flags=[-fopenmp] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD]
@@ -3183,6 +3475,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /std:c++20]
   lib/lib.dll: tool=link cmd=flang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=flang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
@@ -3218,6 +3512,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | variant debug
   cc: cmd=cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
@@ -3233,6 +3529,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /Od /Z7 /MDd]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /Od /Z7 /MDd]
   lib/lib.dll: tool=link cmd=link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /Od /Z7 /MDd]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | variant release
   cc: cmd=cl flags=[/nologo /O2 /MD] defines=[NDEBUG]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /O2 /MD] defines=[NDEBUG]
@@ -3248,6 +3546,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /O2 /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /O2 /MD]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /MD]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | variant relwithdebinfo
   cc: cmd=cl flags=[/nologo /O2 /Z7 /MD] defines=[NDEBUG]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /O2 /Z7 /MD] defines=[NDEBUG]
@@ -3263,6 +3563,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /O2 /Z7 /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /O2 /Z7 /MD]
   lib/lib.dll: tool=link cmd=link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /Z7 /MD]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature warnings
   cc: cmd=cl flags=[/nologo /MD /W4]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD /W4]
@@ -3278,6 +3580,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /W4]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /W4]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:all]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature werror
   cc: cmd=cl flags=[/nologo /MD /WX]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD /WX]
@@ -3293,6 +3597,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /WX]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /WX]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:errors]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature sanitize
   cc: cmd=cl flags=[/nologo /MD /fsanitize=address]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD /fsanitize=address]
@@ -3308,6 +3614,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /fsanitize=address]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /fsanitize=address]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature profile
   cc: cmd=cl flags=[/nologo /MD]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD]
@@ -3323,6 +3631,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD]
   lib/lib.dll: tool=link cmd=link flags=[/nologo /PROFILE] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /PROFILE /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature lto
   ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('lto').
 ### windows msvc+ifx-msvc | feature hardened
@@ -3340,6 +3650,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /GS /guard:cf]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /GS /guard:cf]
   lib/lib.dll: tool=link cmd=link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature pthread
   ERROR ValueError: Unknown preset 'pthread'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
 ### windows msvc+ifx-msvc | feature coverage
@@ -3359,6 +3671,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /fp:fast]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /fp:fast]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fp:fast]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature openmp
   cc: cmd=cl flags=[/nologo /MD /openmp]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD /openmp]
@@ -3374,6 +3688,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /openmp]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /openmp]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /Qopenmp]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | cxx standard 20
   cc: cmd=cl flags=[/nologo /MD]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD /std:c++20]
@@ -3389,6 +3705,8 @@
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /std:c++20]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | before add_toolchain: variant debug
   cc: cmd=cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
@@ -3422,6 +3740,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | variant debug
   cc: cmd=clang-cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
   cxx: cmd=clang-cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
@@ -3437,6 +3757,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /Od /Z7 /MDd]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | variant release
   cc: cmd=clang-cl flags=[/nologo /O2 /MD] defines=[NDEBUG]
   cxx: cmd=clang-cl flags=[/nologo /O2 /MD] defines=[NDEBUG]
@@ -3452,6 +3774,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /MD]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /MD]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | variant relwithdebinfo
   cc: cmd=clang-cl flags=[/nologo /O2 /Z7 /MD] defines=[NDEBUG]
   cxx: cmd=clang-cl flags=[/nologo /O2 /Z7 /MD] defines=[NDEBUG]
@@ -3467,6 +3791,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /Z7 /MD]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature warnings
   cc: cmd=clang-cl flags=[/nologo /MD /W4]
   cxx: cmd=clang-cl flags=[/nologo /MD /W4]
@@ -3482,6 +3808,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /W4]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /W4]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:all]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature werror
   cc: cmd=clang-cl flags=[/nologo /MD /WX]
   cxx: cmd=clang-cl flags=[/nologo /MD /WX]
@@ -3497,6 +3825,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /WX]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /WX]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:errors]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature sanitize
   cc: cmd=clang-cl flags=[/nologo /MD /fsanitize=address]
   cxx: cmd=clang-cl flags=[/nologo /MD /fsanitize=address]
@@ -3512,6 +3842,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /fsanitize=address]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /fsanitize=address]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature profile
   cc: cmd=clang-cl flags=[/nologo /MD]
   cxx: cmd=clang-cl flags=[/nologo /MD]
@@ -3527,6 +3859,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /PROFILE] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /PROFILE /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature lto
   ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('lto').
 ### windows clang-cl+ifx-msvc | feature hardened
@@ -3544,6 +3878,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /GS /guard:cf]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /GS /guard:cf]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature pthread
   ERROR ValueError: Unknown preset 'pthread'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
 ### windows clang-cl+ifx-msvc | feature coverage
@@ -3563,6 +3899,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /fp:fast]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /fp:fast]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fp:fast]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature openmp
   cc: cmd=clang-cl flags=[/nologo /MD /openmp]
   cxx: cmd=clang-cl flags=[/nologo /MD /openmp]
@@ -3578,6 +3916,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /openmp]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /openmp]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /LIBPATH:/rt/libomp libomp.lib] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /Qopenmp]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /LIBPATH:/rt/libomp libomp.lib /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | cxx standard 20
   cc: cmd=clang-cl flags=[/nologo /MD]
   cxx: cmd=clang-cl flags=[/nologo /MD /std:c++20]
@@ -3593,6 +3933,8 @@
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /std:c++20]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | before add_toolchain: variant debug
   cc: cmd=clang-cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
   cxx: cmd=clang-cl flags=[/nologo /Od /Z7 /MDd] defines=[DEBUG _DEBUG]
@@ -3622,10 +3964,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -3637,10 +3981,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-O0 -g]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O0 -g]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /Od /Z7 /MDd]
-  app/app.exe: tool=link cmd=clang++ flags=[-g] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[-g] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-O0 -g]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O0 -g]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /Od /Z7 /MDd]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-g] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2] defines=[NDEBUG]
@@ -3652,10 +3998,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-O2]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O2]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /MD]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-O2]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O2]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /MD]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2 -g] defines=[NDEBUG]
@@ -3667,10 +4015,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-O2 -g]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O2 -g]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /Z7 /MD]
-  app/app.exe: tool=link cmd=clang++ flags=[-g] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[-g] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-O2 -g]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O2 -g]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /Z7 /MD]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-g] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
@@ -3682,10 +4032,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:all]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:all]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Werror]
@@ -3697,10 +4049,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-Werror]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-Werror]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:errors]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-Werror]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-Werror]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:errors]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature sanitize
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
@@ -3712,10 +4066,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
-  app/app.exe: tool=link cmd=clang++ flags=[-fsanitize=address,undefined] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[-fsanitize=address,undefined] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-fsanitize=address,undefined -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-fsanitize=address,undefined -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-fsanitize=address,undefined] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pg -g]
@@ -3727,10 +4083,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-pg -g]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-pg -g]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
-  app/app.exe: tool=link cmd=clang++ flags=[-pg] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[-pg] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-pg -g]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-pg -g]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-pg -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-pg -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-pg] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature lto
   ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('lto').
 ### windows llvm+ifx-msvc | feature hardened
@@ -3744,10 +4102,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
-  app/app.exe: tool=link cmd=clang++ flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-pie -Wl,-z,relro,-z,now -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-pie -Wl,-z,relro,-z,now -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-pie -Wl,-z,relro,-z,now] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature pthread
   ERROR ValueError: Preset 'pthread' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('pthread').
 ### windows llvm+ifx-msvc | feature coverage
@@ -3763,10 +4123,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-ffast-math]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-ffast-math]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fp:fast]
-  app/app.exe: tool=link cmd=clang++ flags=[-ffast-math] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[-ffast-math] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-ffast-math]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-ffast-math]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-ffast-math -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-ffast-math -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fp:fast]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-ffast-math] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fopenmp]
@@ -3778,10 +4140,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-fopenmp]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-fopenmp]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /Qopenmp]
-  app/app.exe: tool=link cmd=clang++ flags=[-fopenmp] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[-fopenmp] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[-fopenmp]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-fopenmp]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-fopenmp -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-fopenmp -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /Qopenmp]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-fopenmp] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang
@@ -3793,10 +4157,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-std=c++20]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang flags=[]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-std=c++20]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -3825,10 +4191,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[]
   app/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -3839,10 +4207,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-O0 -g]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O0 -g]
   app/src.f90.obj: tool=fc cmd=flang flags=[-O0 -g -fms-runtime-lib=dll_dbg]
-  app/app.exe: tool=link cmd=clang++ flags=[-g] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[-g] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-O0 -g]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O0 -g]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O0 -g -fms-runtime-lib=dll_dbg]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-g] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | variant release
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2] defines=[NDEBUG]
@@ -3853,10 +4223,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-O2]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O2]
   app/src.f90.obj: tool=fc cmd=flang flags=[-O2 -fms-runtime-lib=dll]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-O2]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O2]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O2 -fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | variant relwithdebinfo
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O2 -g] defines=[NDEBUG]
@@ -3867,10 +4239,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-O2 -g]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O2 -g]
   app/src.f90.obj: tool=fc cmd=flang flags=[-O2 -g -fms-runtime-lib=dll]
-  app/app.exe: tool=link cmd=clang++ flags=[-g] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[-g] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-O2 -g]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-O2 -g]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-g -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-O2 -g -fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-g] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | feature warnings
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Wall -Wextra -Wpedantic]
@@ -3881,10 +4255,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
   app/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-Wall -Wextra -Wpedantic]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-Wall -Wextra -Wpedantic]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | feature werror
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-Werror]
@@ -3895,10 +4271,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-Werror]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-Werror]
   app/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -Werror]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-Werror]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-Werror]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -Werror]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | feature sanitize
   ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
 ### windows llvm+flang | feature profile
@@ -3911,10 +4289,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-pg -g]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-pg -g]
   app/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
-  app/app.exe: tool=link cmd=clang++ flags=[-pg] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[-pg] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-pg -g]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-pg -g]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-pg -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-pg -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-pg] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-flto]
@@ -3925,10 +4305,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-flto]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-flto]
   app/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -flto]
-  app/app.exe: tool=link cmd=clang++ flags=[-flto] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[-flto] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-flto]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-flto]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-flto -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-flto -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -flto]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-flto] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | feature hardened
   ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
 ### windows llvm+flang | feature pthread
@@ -3945,10 +4327,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-ffast-math]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-ffast-math]
   app/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -ffast-math]
-  app/app.exe: tool=link cmd=clang++ flags=[-ffast-math] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[-ffast-math] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-ffast-math]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-ffast-math]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-ffast-math -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-ffast-math -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -ffast-math]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-ffast-math] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | feature openmp
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fopenmp]
@@ -3959,10 +4343,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[-fopenmp]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-fopenmp]
   app/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -fopenmp]
-  app/app.exe: tool=link cmd=clang++ flags=[-fopenmp] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[-fopenmp] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[-fopenmp]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-fopenmp]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-fopenmp -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-fopenmp -Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -fopenmp]
+  fmain/fmain.exe: tool=link cmd=clang flags=[-fopenmp] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang
@@ -3973,10 +4359,12 @@
   app/src.c.obj: tool=cc cmd=clang flags=[]
   app/src.cpp.obj: tool=cxx cmd=clang++ flags=[-std=c++20]
   app/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
-  app/app.exe: tool=link cmd=clang++ flags=[] libs=[] libdirs=[/rt/flang]
+  app/app.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang flags=[]
   lib/src.cpp.obj: tool=cxx cmd=clang++ flags=[-std=c++20]
-  lib/lib.dll: tool=link cmd=clang++ flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=clang flags=[-Wl,/IMPLIB:<target1>] libs=[] libdirs=[]
+  fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
+  fmain/fmain.exe: tool=link cmd=clang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]

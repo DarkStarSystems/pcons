@@ -42,6 +42,28 @@ if TYPE_CHECKING:
 # Realization stays per-toolchain (make_cxx_standard_preset).
 # =============================================================================
 
+# The languages a link can be led by, strongest first: a program with C++
+# and Fortran objects links as C++, with the Fortran runtime added (CMake's
+# order for C, C++ and Fortran). Swift's driver handles the Swift runtime,
+# and CUDA links through the host C++ driver.
+LINK_LANGUAGES: tuple[str, ...] = (
+    "swift",
+    "cuda",
+    "objcxx",
+    "cxx",
+    "fortran",
+    "objc",
+    "c",
+)
+
+
+def link_language_rank(language: str) -> int:
+    """How strongly *language* leads a link: higher wins, unknown is 0."""
+    if language not in LINK_LANGUAGES:
+        return 0
+    return len(LINK_LANGUAGES) - LINK_LANGUAGES.index(language)
+
+
 _CXX_STANDARDS: frozenset[int] = frozenset({11, 14, 17, 20, 23, 26})
 
 
@@ -646,16 +668,6 @@ class Toolchain(Protocol):
         ...
 
     @property
-    def language_priority(self) -> dict[str, int]:
-        """Language priority for linker selection.
-
-        Higher values = stronger language. When linking objects from
-        multiple languages, use the linker for the highest-priority
-        language.
-        """
-        ...
-
-    @property
     def abi(self) -> str | None:
         """Which binary interface this toolchain's objects follow, as an
         opaque tag (see BaseToolchain.abi)."""
@@ -721,6 +733,19 @@ class Toolchain(Protocol):
 
     def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
         """Realize tool setting *name* (``"cxx.standard"``), or None."""
+        ...
+
+    def make_arch_preset(self, arch: str) -> Preset | None:
+        """The target-arch Preset for *arch*, or None if it has none."""
+        ...
+
+    def make_target_preset(self, cross: Any) -> Preset:
+        """The Preset realizing cross target *cross* (a CrossPreset)."""
+        ...
+
+    def link_driver(self, language: str, env: Environment) -> str | None:
+        """The command that links a program whose strongest language is
+        *language*, compiled by this toolchain in *env*, or None."""
         ...
 
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
@@ -917,18 +942,6 @@ class BaseToolchain(ABC):
     # target's objects adds its link flags to a link tool of the same style.
     LINKER_STYLE: ClassVar[str | None] = None
 
-    # Default language priorities (higher = stronger).
-    # Fortran is NOT listed here so that C/C++ toolchains don't claim
-    # priority over Fortran objects. GfortranToolchain overrides this
-    # to add "fortran": 3 when it is the primary toolchain.
-    DEFAULT_LANGUAGE_PRIORITY: dict[str, int] = {
-        "c": 1,
-        "cxx": 2,
-        "objc": 2,
-        "objcxx": 3,
-        "cuda": 4,
-    }
-
     def __init__(self, name: str = "") -> None:
         """Initialize a toolchain.
 
@@ -946,11 +959,6 @@ class BaseToolchain(ABC):
     @property
     def tools(self) -> dict[str, Tool]:
         return self._tools
-
-    @property
-    def language_priority(self) -> dict[str, int]:
-        """Override in subclasses if needed."""
-        return self.DEFAULT_LANGUAGE_PRIORITY
 
     @property
     def abi(self) -> str | None:
@@ -1105,13 +1113,19 @@ class BaseToolchain(ABC):
         by default. A toolchain for which an arch is legitimately a no-op
         declares that by overriding this method (see WasmToolchain).
         """
+        preset = self.make_arch_preset(arch)
+        if preset is None:
+            return False
+        env.apply_from(self, preset)
+        return True
+
+    def make_arch_preset(self, arch: str) -> Preset | None:
+        """The target-arch Preset for *arch*, or None if this toolchain
+        realizes none (it may raise instead, for an arch it can't)."""
         contribs = tuple(self._arch_contributions(arch))
         if not contribs:
-            return False
-        env.apply_from(
-            self, Preset(name=arch, category="arch", arch=arch, contributions=contribs)
-        )
-        return True
+            return None
+        return Preset(name=arch, category="arch", arch=arch, contributions=contribs)
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Tool contributions for a target arch. Base realizes none."""
@@ -1142,6 +1156,14 @@ class BaseToolchain(ABC):
 
     def _cxx_standard_flag(self, standard: int) -> str | None:
         """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
+        return None
+
+    def link_driver(self, language: str, env: Environment) -> str | None:
+        """The command that links a program whose strongest language is
+        *language*, when this toolchain compiled those objects in *env*:
+        ``g++`` for C++, ``gfortran`` for Fortran. None when its objects
+        need no driver of their own, as an MSVC-ABI compiler's, whose
+        objects name their runtimes. Base: None."""
         return None
 
     def make_setting_preset(self, name: str, *args: Any) -> Preset | None:

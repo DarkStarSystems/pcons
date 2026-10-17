@@ -206,11 +206,6 @@ class FortranToolchainBase(BaseToolchain):
         Windows for every Fortran compiler, MinGW's included."""
         return get_platform().object_suffix
 
-    # Priority 3 so Fortran wins over C/C++ when this is the primary toolchain.
-    @property
-    def language_priority(self) -> dict[str, int]:
-        return {**self.DEFAULT_LANGUAGE_PRIORITY, "fortran": 3}
-
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
 
@@ -429,6 +424,8 @@ class FortranToolchainBase(BaseToolchain):
 
 class FortranToolchain(FortranToolchainBase, UnixToolchain):
     """A GNU-style Fortran driver, an archiver, and the driver as linker."""
+
+    LINK_DRIVER_TOOLS: ClassVar[dict[str, str]] = {"fortran": "fc"}
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """None of these drivers retargets the CPU by flag, on any platform:

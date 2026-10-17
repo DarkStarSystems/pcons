@@ -370,7 +370,12 @@ def _knob_section(tmp_path: Path, row: Row) -> Iterator[str]:
                 sources=[f"src{s}" for s in suffixes if s != ".f90"]
                 or [f"src{suffixes[0]}"],
             )
-            yield from _target_lines(project, [app, lib])
+            targets = [app, lib]
+            if ".f90" in suffixes and len(suffixes) > 1:
+                # Fortran alone: linked by the Fortran toolchain's driver
+                # where it can read the link tool's command line.
+                targets.append(project.Program("fmain", env, sources=["src.f90"]))
+            yield from _target_lines(project, targets)
 
         _attempt(lines, run)
         yield from lines

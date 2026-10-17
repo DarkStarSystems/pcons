@@ -46,16 +46,6 @@ def test_gfortran_toolchain_creation() -> None:
     assert tc.name == "gfortran"
 
 
-def test_gfortran_language_priority() -> None:
-    """GfortranToolchain includes 'fortran' in its language_priority."""
-    tc = GfortranToolchain()
-    priority = tc.language_priority
-    assert "fortran" in priority
-    # Fortran should outrank C and C++
-    assert priority["fortran"] > priority["c"]
-    assert priority["fortran"] >= priority.get("cxx", 0)
-
-
 # =============================================================================
 # Source handler tests
 # =============================================================================

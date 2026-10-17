@@ -52,12 +52,11 @@ def test_registered_as_fortran(alias, cls) -> None:
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)
-def test_fortran_sources_and_priority(cls: type[FortranToolchainBase]) -> None:
+def test_fortran_sources(cls: type[FortranToolchainBase]) -> None:
     tc = cls()
     for ext in FORTRAN_EXTENSIONS:
         handler = tc.get_source_handler(ext)
         assert handler is not None and handler.tool_name == "fc"
-    assert tc.language_priority["fortran"] > tc.language_priority["cxx"]
 
 
 @pytest.mark.parametrize("cls", TOOLCHAINS)

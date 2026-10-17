@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gains `sanitize`, `lto`, `coverage` and `hardened`, and CUDA has a table
   of its own on `nvcc`. flang's `warnings` is now a deliberate no-op, since
   its `-Wall` did nothing but warn, and it gains `lto` and `pthread`.
+- **A program is linked by the driver of its strongest language, in one
+  order for every environment: C++, then Fortran, then C** (Swift and CUDA
+  lead any link they're in). So with gfortran primary and gcc added, a
+  program with C++ objects now links with `g++` and the Fortran runtime,
+  as it does with gcc primary; before, it was `gfortran` and `-lstdc++`.
+  A Fortran-only program in a C++ environment links with the Fortran
+  compiler, which brings its own realization of the variant and features
+  (ifx's `-qopenmp`, not gcc's `-fopenmp`). `target.link_language =
+  "fortran"` picks the driver for one target, like CMake's
+  `LINKER_LANGUAGE`: an ifx Fortran main program with C++ helpers needs
+  it, since ifx's `main` is in its runtime.
 - `ConanFinder.sync_profile(env=env)` takes the environment's C/C++
   toolchain, which in a Fortran-primary environment isn't the primary one,
   and the C++ standard `env.cxx.set_standard()` set.

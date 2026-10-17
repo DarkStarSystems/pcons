@@ -1227,7 +1227,7 @@ class Environment(_EnvironmentStubs):
         if kind == "setting":
             realized = False
             for toolchain in toolchains:
-                preset = toolchain.make_setting_preset(intent.name, *intent.args)
+                preset = self._preset_for(toolchain, intent)
                 if preset is not None:
                     self.apply_from(toolchain, preset)
                     realized = True
@@ -1241,15 +1241,13 @@ class Environment(_EnvironmentStubs):
     ) -> bool:
         """The feature part of :meth:`_realize`. Nothing is applied unless
         every toolchain that takes part has a realization."""
-        from pcons.core.preset import is_registered_preset, resolve_registered_feature
+        from pcons.core.preset import is_registered_preset
 
         name = intent.name
         found: list[tuple[Toolchain, Preset]] = []
         missing: list[Toolchain] = []
         for toolchain in toolchains:
-            preset = toolchain.make_feature_preset(name)  # built-in
-            if preset is None:
-                preset = resolve_registered_feature(name, toolchain)  # registry
+            preset = self._preset_for(toolchain, intent)
             if preset is not None:
                 found.append((toolchain, preset))
             elif not is_registered_preset(name) and self._takes_part(toolchain):
@@ -1267,6 +1265,57 @@ class Environment(_EnvironmentStubs):
         for toolchain, preset in found:
             self.apply_from(toolchain, preset)
         return bool(found)
+
+    def _preset_for(self, toolchain: Toolchain, intent: Intent) -> Preset | None:
+        """*toolchain*'s realization of *intent*, without applying it."""
+        from pcons.core.preset import resolve_registered_feature
+
+        kind = intent.kind
+        if kind == "variant":
+            return toolchain.make_variant_preset(intent.name, **intent.kwargs)
+        if kind == "arch":
+            return toolchain.make_arch_preset(intent.name)
+        if kind == "target":
+            return toolchain.make_target_preset(intent.args[0])
+        if kind == "feature":
+            preset = toolchain.make_feature_preset(intent.name)  # built-in
+            if preset is None:
+                preset = resolve_registered_feature(intent.name, toolchain)
+            return preset
+        if kind == "setting":
+            return toolchain.make_setting_preset(intent.name, *intent.args)
+        raise ValueError(f"Unknown intent kind '{kind}'")
+
+    def flags_realized_by(self, tool: str, toolchain: Toolchain) -> list[Any]:
+        """*tool*'s flags as they'd be were *toolchain* its realizer.
+
+        A target whose link another toolchain's driver runs (gfortran's,
+        beside gcc) takes that toolchain's realization of the variant,
+        features and cross target: the flags the owner realized come out,
+        and *toolchain*'s for the same intents go in. Flags the script or a
+        package put there stay.
+        """
+        primary = object.__getattribute__(self, "_toolchain")
+        flags: list[Any] = list(getattr(self, tool).flags or ())
+        if self._tool_owners.get(tool, primary) is toolchain:
+            return flags
+        owner = self._tool_owners.get(tool, primary)
+        for preset in self._applied_presets:
+            if owner is not None and preset.realized_by == owner.name:
+                for c in preset.contributions:
+                    if c.tool == tool:
+                        for flag in c.flags:
+                            if flag in flags:
+                                flags.remove(flag)
+        presets = [
+            *toolchain.setup_presets(self),
+            *(self._preset_for(toolchain, intent) for intent in self._intents),
+        ]
+        for preset in presets:
+            for c in preset.contributions if preset is not None else ():
+                if c.tool == tool:
+                    flags.extend(c.flags)
+        return flags
 
     def _apply_setting(self, name: str, *args: Any) -> None:
         """Apply a tool setting (``env.cxx.set_standard``), realized by

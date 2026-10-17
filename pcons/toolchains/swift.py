@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
@@ -314,11 +314,7 @@ class SwiftToolchain(UnixToolchain):
         super().__init__("swift")
         self._swift_runtime_libdirs: list[str] | None = None
 
-    @property
-    def language_priority(self) -> dict[str, int]:
-        # Swift wins linker selection over C/C++ when it's the primary
-        # toolchain: swiftc-as-linker handles the Swift runtime.
-        return {**self.DEFAULT_LANGUAGE_PRIORITY, "swift": 3}
+    LINK_DRIVER_TOOLS: ClassVar[dict[str, str]] = {"swift": "swiftc"}
 
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("swiftc",)

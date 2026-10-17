@@ -464,6 +464,9 @@ class Target:
         public: Usage requirements that propagate to dependents.
         private: Usage requirements for this target only.
         required_languages: Languages used by this target (set by toolchains).
+        link_language: The language whose driver links this target, in
+            place of the strongest one among its objects (CMake's
+            ``LINKER_LANGUAGE``). None, the default, lets the objects decide.
         defined_at: Where this target was created in user code.
         target_type: Type of target (e.g., "program", "static_library").
         intermediate_nodes: Intermediate build artifacts (e.g., object files).
@@ -479,6 +482,7 @@ class Target:
         "public",
         "private",
         "required_languages",
+        "link_language",
         "defined_at",
         "_collected_requirements",
         # NEW for target-centric build model:
@@ -573,6 +577,7 @@ class Target:
         self.public = _make_default_requirements(self.__link_libs_validator)
         self.private = _make_default_requirements(self.__link_libs_validator)
         self.required_languages: set[str] = set()
+        self.link_language: str | None = None
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
         self.target_type: str | None = target_type

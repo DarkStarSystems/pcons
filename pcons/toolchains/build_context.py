@@ -66,6 +66,9 @@ class CompileLinkContext:
     frameworks: list[str] = field(default_factory=list)
     frameworkdirs: list[str] = field(default_factory=list)
     linker_cmd: str | None = None  # Override for link.cmd (e.g., "clang++" for C++)
+    # The link tool's flags as another toolchain's driver takes them (see
+    # Environment.flags_realized_by), in place of env.link.flags
+    link_base_flags: list[FlagToken] | None = None
     mode: str = "compile"  # "compile" or "link"
 
     # Prefixes - allow toolchains to customize (e.g., MSVC uses /I, /D, /LIBPATH:)
@@ -94,9 +97,13 @@ class CompileLinkContext:
         return {}
 
     def _merge_with_base_flags(
-        self, tool_name: str | None, flags: list[FlagToken]
+        self,
+        tool_name: str | None,
+        flags: list[FlagToken],
+        base: list[FlagToken] | None = None,
     ) -> list[FlagToken]:
-        """Prepend env.<tool>.flags to `flags`, dropping duplicates.
+        """Prepend env.<tool>.flags (or *base*) to `flags`, dropping
+        duplicates.
 
         Uses the flag-pair-aware merge so separated-argument flags
         (-isystem, -framework, -Xlinker, ...) aren't split by per-token
@@ -109,7 +116,9 @@ class CompileLinkContext:
         )
 
         base_flags: list[FlagToken] = []
-        if tool_name and self._env and self._env.has_tool(tool_name):
+        if base is not None:
+            base_flags = base
+        elif tool_name and self._env and self._env.has_tool(tool_name):
             tool_cfg = getattr(self._env, tool_name, None)
             base_flags = getattr(tool_cfg, "flags", None) or []
 
@@ -170,8 +179,10 @@ class CompileLinkContext:
         merged_libs = self._merge_with_base_link("libs", self.libs)
         if merged_libs:
             result["libs"] = self._format_libs(merged_libs)
-        if self.link_flags:
-            result["flags"] = self._merge_with_base_flags("link", self.link_flags)
+        if self.link_flags or self.link_base_flags is not None:
+            result["flags"] = self._merge_with_base_flags(
+                "link", self.link_flags, self.link_base_flags
+            )
         if self.linker_cmd:
             result["cmd"] = self.linker_cmd
         if self.frameworkdirs:
@@ -212,6 +223,9 @@ class CompileLinkContext:
         env: Environment | None = None,
         target: Target | None = None,
         output_name: str | None = None,
+        linker: Any = None,
+        linker_cmd: str | None = None,
+        link_base_flags: list[FlagToken] | None = None,
     ) -> CompileLinkContext:
         """Create a CompileLinkContext from EffectiveRequirements.
 
@@ -220,51 +234,21 @@ class CompileLinkContext:
             mode: Which overrides to return: "compile" or "link".
             tool_name: The tool name (e.g., "cc", "cxx") for flag merging
                 in compile mode.
-            language: The link language. "cxx", "objcxx", and "cuda" all
-                link via the C++ driver (env.cxx.cmd) for C++ runtime
-                linkage — Objective-C++ compiles with the cxx tool, and
-                CUDA links through the host C++ toolchain.
+            language: The link language: the one whose driver links.
             env: The build environment.
             target: The target being built. With *output_name*, lets the
                 toolchain inject target-specific link flags (e.g.
                 install_name on macOS, SONAME on Linux).
             output_name: The output filename (e.g., ``libfoo.dylib``).
+            linker: The toolchain whose driver links, which adds its
+                target-specific link flags. Default: the link tool's owner.
+            linker_cmd: The driver's command, when it isn't link.cmd.
+            link_base_flags: The link tool's flags as *linker* takes them,
+                when it isn't the link tool's owner.
 
         Returns:
             A CompileLinkContext populated from the requirements.
         """
-        # C++ linking needs the C++ driver (g++/clang++) to link the C++
-        # runtime. Only override when link.cmd is the C compiler driver:
-        # MSVC's link.exe is a separate linker, and using cl.exe as a
-        # linker driver breaks flags like /OUT:.
-        linker_cmd = None
-        if (
-            language in ("cxx", "objcxx", "cuda")
-            and env is not None
-            and env.has_tool("cxx")
-        ):
-            cxx_cmd = getattr(env.cxx, "cmd", None)
-            cc_cmd = getattr(env.cc, "cmd", None) if env.has_tool("cc") else None
-            link_cmd = getattr(env.link, "cmd", None) if env.has_tool("link") else None
-            if cxx_cmd and link_cmd is not None and link_cmd == cc_cmd:
-                linker_cmd = cxx_cmd
-            elif cxx_cmd and link_cmd is None:
-                linker_cmd = cxx_cmd
-        # Likewise a Fortran link takes the Fortran driver for its runtime,
-        # when a C/C++ driver would otherwise link (a C++ environment with a
-        # Fortran toolchain added). A Fortran toolchain's own link tool is
-        # already right, and link.exe links MSVC-ABI Fortran objects as is.
-        elif language == "fortran" and env is not None and env.has_tool("fc"):
-            fc_cmd = getattr(env.fc, "cmd", None)
-            link_cmd = getattr(env.link, "cmd", None) if env.has_tool("link") else None
-            drivers = {
-                getattr(getattr(env, tool), "cmd", None)
-                for tool in ("cc", "cxx")
-                if env.has_tool(tool)
-            }
-            if fc_cmd and link_cmd in drivers - {None}:
-                linker_cmd = fc_cmd
-
         link_flags = list(effective.link_flags)
 
         # Let the toolchains inject target-specific link flags: the one whose
@@ -273,7 +257,8 @@ class CompileLinkContext:
         # Fortran main program linked by clang-cl's link.exe; not an added
         # flang's GNU-style flags, which link.exe can't read).
         if target is not None and output_name is not None and env is not None:
-            linker = env._tool_owners.get("link", env._toolchain)
+            if linker is None:
+                linker = env._tool_owners.get("link", env._toolchain)
             style = getattr(linker, "LINKER_STYLE", None)
             compilers = [
                 t
@@ -306,6 +291,7 @@ class CompileLinkContext:
             frameworks=list(effective.frameworks),
             frameworkdirs=[str(p) for p in effective.framework_dirs],
             linker_cmd=linker_cmd,
+            link_base_flags=link_base_flags,
             mode=mode,
             _tool_name=tool_name,
             _env=env,
@@ -325,6 +311,7 @@ class CompileLinkContext:
             tuple(self.frameworks),
             tuple(self.frameworkdirs),
             self.linker_cmd,
+            None if self.link_base_flags is None else tuple(self.link_base_flags),
         )
 
 

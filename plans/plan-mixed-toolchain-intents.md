@@ -325,15 +325,29 @@ picks *T* by the same rule as above, so the driver and its link flags
 follow. An environment-wide default isn't needed: the fixed order is the
 default.
 
+**As built (Phase 3).** Two refinements came out of implementing this:
+
+- A driver takes over a link only if it reads the link tool's command
+  line: its own link tool has the same `progcmd` and `sharedcmd`
+  templates. Every GNU-style driver shares gcc's (`gnu_link_vars`), so
+  gfortran, flang and Linux ifx can take over gcc's or clang's link;
+  swiftc and link.exe can't, so clang keeps a link led by Swift objects,
+  as before.
+- The languages are tried strongest first, and the first with a driver
+  wins, the compiling toolchain's before the owner's. MSVC-ABI compilers
+  return none (their objects name their runtimes), so clang targeting MSVC
+  links with `clang`, not `clang++`. A link tool the script set to
+  something other than a compiler driver links as it is.
+
 **Link-side realization per driver.** `env.link.flags` stays what it is
 today: the link tool owner's realization plus the script's own flags, so
 `env.link.explain()` and `"-flto" in env.link.flags` keep working. When a
 target is linked by another toolchain *T*, its link flags are
 `env.link.flags` with the owner's intent contributions removed (by count,
-as group replacement already does) and *T*'s added. The environment keeps
-*T*'s realization of `link` contributions instead of dropping them. That's
-the one exception to rule 2's "dropped", and it's never applied to
-`env.link`. `pcons explain <target>` shows the flags the target actually
+as group replacement already does) and *T*'s added. *T*'s realization is
+computed from the recorded intents when the target is linked
+(`Environment.flags_realized_by`), so no state is kept for it and
+nothing is applied to `env.link`. `pcons explain <target>` shows the flags the target actually
 gets. (Decision D4.)
 
 ### 5. Link needs
