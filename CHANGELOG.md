@@ -80,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the same exports. link.exe leaves such an import library alone, and
   ninja took it for out of date; the relink then failed with `LNK1104`
   while a program had the DLL loaded.
+- On Windows, a source outside the project (from a package cache, say)
+  compiles to an object under the build directory, as on Linux and macOS.
+  Before, its object was written beside the source, inside that other
+  directory.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named
