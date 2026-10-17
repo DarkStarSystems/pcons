@@ -270,6 +270,19 @@ def _link_driver(
                 not _reads_link_command(toolchain, env)
                 or (toolchain.name in left_out and compilers - {toolchain})
             ):
+                if target.link_language is not None and toolchain is compiler:
+                    presets = sorted(
+                        p for p, n in env._partial_presets if n == toolchain.name
+                    )
+                    raise PconsError(
+                        f"Target '{target.name}' asks to link with "
+                        f"{toolchain.name} (link_language '{language}'), but "
+                        f"{', '.join(presets)} left {toolchain.name} out "
+                        f"(allow_partial), so its driver can't link the runtime "
+                        f"the other objects need for {', '.join(presets)}. Drop "
+                        f"link_language, or the preset.",
+                        location=target.defined_at,
+                    )
                 continue
             cmd = toolchain.link_driver(language, env)
             if cmd:

@@ -395,7 +395,6 @@ def test_a_toolchain_left_out_of_a_preset_doesnt_take_over(tmp_path) -> None:
     env = _env(project, "llvm", "flang")
     env.apply_preset("sanitize", allow_partial=True)
     mixed = project.Program("mixed", env, sources=["main.f90", "util.c"])
-    mixed.link_language = "fortran"
     alone = project.Program("alone", env, sources=["main.f90"])
     project.resolve()
 
@@ -420,3 +419,15 @@ def test_the_gcov_need_says_where_libgcov_is(tmp_path, monkeypatch) -> None:
     (node,) = prog.output_nodes
     libdirs = node._build_info["context"].get_env_overrides()["libdirs"]
     assert Path("/gcc/lib") in [Path(str(getattr(d, "path", d))) for d in libdirs]
+
+
+def test_link_language_and_a_left_out_driver_conflict(tmp_path) -> None:
+    """Asked to link with flang, which allow_partial left out of sanitize,
+    beside sanitized C objects: pcons can't do both, so it says so."""
+    project = _project(tmp_path)
+    env = _env(project, "llvm", "flang")
+    env.apply_preset("sanitize", allow_partial=True)
+    prog = project.Program("prog", env, sources=["main.f90", "util.c"])
+    prog.link_language = "fortran"
+    with pytest.raises(PconsError, match="left flang out"):
+        project.resolve()
