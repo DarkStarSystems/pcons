@@ -127,14 +127,19 @@ class IfxToolchain(FortranToolchain):
         return super().make_target_preset(cross)
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """Position-independent code for every target type.
 
         Unlike GCC and Clang on current Linux distributions, ifx doesn't
         default to it, and a C/C++ driver's (PIE) link rejects its objects.
         """
-        return super().get_compile_flags_for_target_type(target_type, env) or ["-fPIE"]
+        flags = super().get_compile_flags_for_target_type(target_type, env, pic=pic)
+        return flags or ["-fPIE"]
 
 
 class IfxMsvcCompiler(FortranCompiler):

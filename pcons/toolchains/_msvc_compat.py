@@ -197,7 +197,11 @@ class MsvcCompatibleToolchain(BaseToolchain):
         return "lib"
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """Return additional compile flags for target type.
 

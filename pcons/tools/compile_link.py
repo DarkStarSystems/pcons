@@ -541,7 +541,7 @@ class CompileLinkFactory:
         toolchain = compiling_toolchain or env._toolchain
         if target.target_type is not None and toolchain is not None:
             for flag in toolchain.get_compile_flags_for_target_type(
-                str(target.target_type), env=env
+                str(target.target_type), env=env, pic=target.get_option("pic")
             ):
                 if flag not in effective.compile_flags:
                     effective.compile_flags.append(flag)

@@ -496,9 +496,17 @@ def test_flang_minsizerel_has_no_os() -> None:
 
 
 def test_ifx_compiles_position_independent_code() -> None:
+    """Every ifx object is position-independent, which ifx doesn't default
+    to: PIC for a static library where shared libraries need it."""
+    from pcons.configure.platform import get_platform
+    from pcons.toolchains.gnu_common import needs_pic
+
     tc = IfxToolchain()
     assert tc.get_compile_flags_for_target_type("program") == ["-fPIE"]
-    assert tc.get_compile_flags_for_target_type("static_library") == ["-fPIE"]
+    pic = needs_pic("static_library", get_platform())
+    assert tc.get_compile_flags_for_target_type("static_library") == (
+        ["-fPIC"] if pic else ["-fPIE"]
+    )
 
 
 # =============================================================================

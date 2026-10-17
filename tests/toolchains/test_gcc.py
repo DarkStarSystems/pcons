@@ -397,7 +397,8 @@ class TestGccCompileFlagsForTargetType:
         assert flags == []
 
     def test_static_library_linux(self, monkeypatch):
-        """Static libraries don't need -fPIC."""
+        """Static libraries compile PIC, so they can go into a shared library,
+        unless their pic option says not to."""
         linux_platform = Platform(
             os="linux",
             arch="x86_64",
@@ -415,8 +416,8 @@ class TestGccCompileFlagsForTargetType:
 
         tc = GccToolchain()
         flags = tc.get_compile_flags_for_target_type("static_library")
-        assert "-fPIC" not in flags
-        assert flags == []
+        assert flags == ["-fPIC"]
+        assert tc.get_compile_flags_for_target_type("static_library", pic=False) == []
 
     def test_program_linux(self, monkeypatch):
         """Programs don't need -fPIC."""

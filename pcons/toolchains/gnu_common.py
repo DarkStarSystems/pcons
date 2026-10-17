@@ -90,13 +90,21 @@ def _link_tail() -> list[object]:
     ]
 
 
-def needs_pic(target_type: str, platform: Platform) -> bool:
+#: Systems whose shared libraries need position-independent code.
+_PIC_SYSTEMS = frozenset({"linux", "android", "freebsd", "openbsd", "netbsd"})
+
+
+def needs_pic(target_type: str, platform: Platform, pic: bool | None = None) -> bool:
     """Whether *target_type* compiles as position-independent code for
-    *platform*: a shared library on Linux, Android and the BSDs. 64-bit
-    macOS code is PIC already, and Windows DLLs don't use it."""
-    return target_type == "shared_library" and not (
-        platform.is_apple or platform.is_windows
-    )
+    *platform*. On Linux, Android and the BSDs a shared library must, and a
+    static or object library does too unless *pic* is False, so it can go
+    into one, as Meson builds them. 64-bit macOS code is PIC already,
+    Windows DLLs don't use it, and bare-metal targets have no loader."""
+    if platform.os not in _PIC_SYSTEMS:
+        return False
+    if target_type == "shared_library":
+        return True
+    return target_type in ("static_library", "object") and pic is not False
 
 
 def require_cross_binaries(

@@ -369,16 +369,19 @@ class UnixToolchain(BaseToolchain):
         return ".o"
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """Return additional compile flags needed for the target type.
 
-        Shared libraries need -fPIC on Linux, Android and the BSDs; on
-        64-bit macOS PIC is the default. The platform is the one *env*
+        ``-fPIC`` where :func:`needs_pic` says, for the platform *env*
         builds for, when it says.
         """
         platform = env.target if env is not None else get_platform()
-        return ["-fPIC"] if needs_pic(target_type, platform) else []
+        return ["-fPIC"] if needs_pic(target_type, platform, pic) else []
 
     @staticmethod
     def _target_platform(target: Target) -> Platform:

@@ -849,8 +849,9 @@ class TestResolverSharedLibraryCompileFlags:
         context = obj_node._build_info["context"]
         assert "-fPIC" not in context.flags
 
-    def test_static_library_no_fpic(self, tmp_path, monkeypatch):
-        """Test that static library objects don't get -fPIC."""
+    def test_static_library_fpic_unless_opted_out(self, tmp_path, monkeypatch):
+        """Static library objects get -fPIC, so the library can go into a
+        shared one, unless its pic option says not to."""
         from pcons.configure.platform import Platform
         from pcons.toolchains.gcc import GccToolchain
 
@@ -883,15 +884,18 @@ class TestResolverSharedLibraryCompileFlags:
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
+        nopic = project.StaticLibrary("nopic", env, sources=[str(src_file)])
+        nopic.set_option("pic", False)
         project.resolve()
 
         assert target._resolved
         assert len(target.intermediate_nodes) == 1
 
-        # Check that -fPIC is NOT in the compile flags via context
-        obj_node = target.intermediate_nodes[0]
-        context = obj_node._build_info["context"]
-        assert "-fPIC" not in context.flags
+        def flags(lib):
+            return lib.intermediate_nodes[0]._build_info["context"].flags
+
+        assert "-fPIC" in flags(target)
+        assert "-fPIC" not in flags(nopic)
 
     def test_program_no_fpic(self, tmp_path, monkeypatch):
         """Test that program objects don't get -fPIC."""
