@@ -51,6 +51,18 @@ def abi_from_triple(triple: str) -> str | None:
 
 
 @functools.cache
+def is_apple_clang(exe: str) -> bool:
+    """Whether *exe* is Apple's clang, by its ``--version`` (cached)."""
+    try:
+        out = subprocess.run(
+            [exe, "--version"], capture_output=True, text=True, timeout=10
+        ).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return bool(out) and "Apple" in out.splitlines()[0]
+
+
+@functools.cache
 def target_triple(compiler: str) -> str | None:
     """*compiler*'s default target triple, from ``-print-target-triple``
     (clang and flang; GCC has ``-dumpmachine`` instead), or None when it
@@ -248,29 +260,34 @@ class UnixToolchain(BaseToolchain):
         "/usr/local/opt/libomp",
     )
 
-    # Per-instance cache for _compiler_is_apple_clang() (class default = unset).
-    _is_apple_clang_cache: bool | None = None
-
     def make_feature_preset(self, name: str) -> Preset | None:
         """Realize feature presets, resolving ``openmp`` dynamically where
         its entry is empty (a toolchain with its own flags lists them)."""
         if name == "openmp" and self.FEATURE_PRESETS.get(name) == {}:
-            flags = self._openmp_flags()
-            if flags is None:
-                return None
-            compile_flags, link_flags = flags
-            contribs = [
-                ToolContribution(tool, flags=tuple(compile_flags))
-                for tool in self._feature_preset_tools()
-            ]
-            contribs.append(ToolContribution("link", flags=tuple(link_flags)))
+            # Each tool by the compiler it runs: $CC can name Homebrew's
+            # clang while $CXX stays Apple's. A program with C++ in it links
+            # with the C++ driver, so the link goes by that compiler.
+            contribs = []
+            for tool in (*self._feature_preset_tools(), "link"):
+                runs = "cxx" if tool == "link" and "cxx" in self._tools else tool
+                flags = self._openmp_flags(self._compiler_is_apple_clang(runs))
+                if flags is None:
+                    return None
+                compile_flags, link_flags = flags
+                contribs.append(
+                    ToolContribution(
+                        tool,
+                        flags=tuple(link_flags if tool == "link" else compile_flags),
+                    )
+                )
             return Preset(
                 name="openmp", category="feature", contributions=tuple(contribs)
             )
         return super().make_feature_preset(name)
 
-    def _openmp_flags(self) -> tuple[list[str], list[str]] | None:
-        """(compile_flags, link_flags) enabling OpenMP, or None if unavailable.
+    def _openmp_flags(self, apple_clang: bool) -> tuple[list[str], list[str]] | None:
+        """(compile_flags, link_flags) enabling OpenMP for a compiler that
+        is or isn't Apple clang, or None if unavailable.
 
         GCC and open-source clang bundle an OpenMP runtime, so ``-fopenmp``
         is all that's needed. Apple clang ships the pragma support but no
@@ -278,7 +295,7 @@ class UnixToolchain(BaseToolchain):
         Note this answers "can the compiler enable OpenMP", flag-level only —
         it cannot prove every OpenMP construct compiles.
         """
-        if not self._compiler_is_apple_clang():
+        if not apple_clang:
             return (["-fopenmp"], ["-fopenmp"])
         from pathlib import Path
 
@@ -290,35 +307,16 @@ class UnixToolchain(BaseToolchain):
                 )
         return None
 
-    def _compiler_is_apple_clang(self) -> bool:
-        """Whether this toolchain's C++/C driver is Apple clang.
-
-        Sniffs ``--version`` output (cached): on macOS the ``gcc``/``g++``
-        names are usually Apple clang shims, so the toolchain name alone
-        can't answer this.
-        """
+    def _compiler_is_apple_clang(self, tool_name: str = "cxx") -> bool:
+        """Whether the compiler the *tool_name* tool runs (_tool_command) is
+        Apple clang: on macOS ``gcc``/``g++`` are usually Apple clang
+        shims, so the toolchain name alone can't answer this."""
         import sys
 
-        if self._is_apple_clang_cache is not None:
-            return self._is_apple_clang_cache
-        result = False
-        if sys.platform == "darwin":
-            import subprocess
-
-            exe = self._tool_command("cxx") or self._tool_command("cc")
-            if exe:
-                try:
-                    out = subprocess.run(
-                        [exe, "--version"],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    ).stdout
-                    result = "Apple" in out.splitlines()[0] if out else False
-                except (OSError, subprocess.TimeoutExpired):
-                    result = False
-        self._is_apple_clang_cache = result
-        return result
+        if sys.platform != "darwin" or tool_name not in self._tools:
+            return False
+        exe = self._tool_command(tool_name)
+        return exe is not None and is_apple_clang(exe)
 
     # =========================================================================
     # Source Handler Methods

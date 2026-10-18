@@ -572,7 +572,9 @@ class TestOpenmpPreset:
     def test_non_apple_compiler_uses_fopenmp(self, test_project, monkeypatch):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        monkeypatch.setattr(GccToolchain, "_compiler_is_apple_clang", lambda _: False)
+        monkeypatch.setattr(
+            GccToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": False
+        )
         toolchain.apply_preset(env, "openmp")
 
         assert "-fopenmp" in env.cc.flags
@@ -585,7 +587,9 @@ class TestOpenmpPreset:
         libomp = tmp_path / "libomp"
         (libomp / "include").mkdir(parents=True)
         (libomp / "include" / "omp.h").write_text("")
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": True
+        )
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", (str(libomp),))
 
         env = _make_unix_env()
@@ -597,14 +601,45 @@ class TestOpenmpPreset:
         assert f"-L{libomp}/lib" in env.link.flags
         assert "-lomp" in env.link.flags
 
+    def test_each_tool_gets_its_own_compilers_flags(
+        self, test_project, monkeypatch, tmp_path
+    ):  # noqa: F811
+        """$CC naming Homebrew's clang while C++ stays Apple's: the C
+        compiler takes -fopenmp, and the C++ compiler and the link (which
+        the C++ driver runs for a program with C++ in it) Apple clang's
+        flags."""
+        libomp = tmp_path / "libomp"
+        (libomp / "include").mkdir(parents=True)
+        (libomp / "include" / "omp.h").write_text("")
+        monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", (str(libomp),))
+        monkeypatch.setattr(
+            LlvmToolchain,
+            "_compiler_is_apple_clang",
+            lambda _, tool="cxx": tool == "cxx",
+        )
+
+        toolchain = LlvmToolchain()
+        toolchain._tools = {name: object() for name in ("cc", "cxx", "link")}
+        preset = toolchain.make_feature_preset("openmp")
+
+        assert preset is not None
+        flags = {c.tool: c.flags for c in preset.contributions}
+        assert flags["cc"] == ("-fopenmp",)
+        assert flags["cxx"][:2] == ("-Xclang", "-fopenmp")
+        assert "-lomp" in flags["link"]
+
     def test_apple_clang_without_libomp_is_unavailable(self, test_project, monkeypatch):  # noqa: F811
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": True
+        )
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
 
         assert LlvmToolchain().make_feature_preset("openmp") is None
 
     def test_unavailable_openmp_raises_clear_error(self, test_project, monkeypatch):  # noqa: F811
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": True
+        )
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
 
         env = _make_unix_env()
@@ -656,10 +691,14 @@ class TestHasPreset:
     def test_openmp_mirrors_availability(self, test_project, monkeypatch):  # noqa: F811
         env = _make_unix_env()
         env._toolchain = LlvmToolchain()
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": True
+        )
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
         assert not env.has_preset("openmp")
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: False)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": False
+        )
         assert env.has_preset("openmp")
 
     def test_contributed_preset(self, test_project, clean_registry):  # noqa: F811
@@ -682,7 +721,9 @@ class TestHasPreset:
         assert env.has_preset("acme/o3")
 
     def test_guard_then_apply_idiom(self, test_project, monkeypatch):  # noqa: F811
-        monkeypatch.setattr(GccToolchain, "_compiler_is_apple_clang", lambda _: False)
+        monkeypatch.setattr(
+            GccToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": False
+        )
         env = _make_unix_env()
         env._toolchain = GccToolchain()
         if env.has_preset("openmp"):
