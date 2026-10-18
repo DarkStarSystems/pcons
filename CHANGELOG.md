@@ -84,6 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiles to an object under the build directory, as on Linux and macOS.
   Before, its object was written beside the source, inside that other
   directory.
+- `pcons test` skips everything below a failed test in a `depends_on`
+  chain, as documented. Before, a test whose dependency was skipped (for
+  a failed dependency of its own) still ran.
+- `pcons test`'s pass rate counts only the tests that ran, as CTest's
+  does: "100% tests passed, 0 tests failed out of 5 (2 skipped)". Skipped
+  tests used to count against it.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named

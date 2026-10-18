@@ -36,6 +36,7 @@ from pcons.test_runner import (
     find_manifest,
     load_manifest,
     main,
+    print_summary,
     run_all,
     run_one_test,
     write_junit,
@@ -583,6 +584,48 @@ class TestRunAllWithDeps:
         assert by_name["root"].status == FAIL
         assert by_name["child"].status == SKIP
         assert "dep failed" in by_name["child"].message
+
+    def _run(self, tmp_path, tests):
+        results = run_all(
+            tests,
+            tmp_path,
+            jobs=2,
+            stop_on_fail=False,
+            on_start=lambda _t: None,
+            on_finish=lambda _t, _r: None,
+        )
+        return {r.name: r for r in results}
+
+    def test_a_skip_for_a_failed_dep_skips_its_dependents_too(self, tmp_path):
+        """The chain stops at the failure, and each skip names it."""
+        ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        bad = _make_exit_script(tmp_path, "bad.py", "import sys; sys.exit(1)")
+        by_name = self._run(
+            tmp_path,
+            [
+                {"name": "root", "command": [str(bad)], "labels": []},
+                {"name": "child", "command": [str(ok)], "depends_on": ["root"]},
+                {"name": "grandchild", "command": [str(ok)], "depends_on": ["child"]},
+            ],
+        )
+
+        assert by_name["grandchild"].status == SKIP
+        assert by_name["grandchild"].message == "dep failed: root"
+
+    def test_a_disabled_dep_blocks_nothing(self, tmp_path):
+        ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        by_name = self._run(
+            tmp_path,
+            [
+                {"name": "off", "command": [str(ok)], "disabled": True},
+                {"name": "child", "command": [str(ok)], "depends_on": ["off"]},
+                {"name": "grandchild", "command": [str(ok)], "depends_on": ["child"]},
+            ],
+        )
+
+        assert by_name["off"].status == SKIP
+        assert by_name["child"].status == PASS
+        assert by_name["grandchild"].status == PASS
 
     def test_dep_pass_allows_dependent(self, tmp_path):
         ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
@@ -1190,4 +1233,20 @@ if os.name == "nt":
     pytest.skip(
         "test_runner subprocess tests use POSIX exec semantics",
         allow_module_level=True,
+    )
+
+
+def test_the_pass_rate_leaves_skipped_tests_out(capsys):
+    """As CTest reports it: the percentage and "out of" count the tests
+    that ran, and the skipped ones are listed apart."""
+    results = [
+        TestResult(name="a", status=PASS, duration=0.0),
+        TestResult(name="b", status=PASS, duration=0.0),
+        TestResult(name="off", status=SKIP, duration=0.0, message="disabled"),
+    ]
+    print_summary("p", results, color=False, verbose=False)
+
+    assert (
+        "100% tests passed, 0 tests failed out of 2 (1 skipped)"
+        in capsys.readouterr().out
     )
