@@ -135,6 +135,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `add_subdirectory` it was read from the top directory, so
   `env.cc.includes.append("include")` missed the subdirectory's headers.
   These entries now read back as absolute paths.
+- Beside flang, `env.add_toolchain("c")` uses the clang from flang's own
+  LLVM, not Apple's clang or gcc, so a program using OpenMP in C and
+  Fortran loads one OpenMP runtime. With two it crashed (macOS, Homebrew)
+  or failed to link (Linux, apt.llvm.org's flang beside gcc). `$CC` and
+  `$CXX` still choose.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named

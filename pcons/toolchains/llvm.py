@@ -391,17 +391,22 @@ class LlvmToolchain(UnixToolchain):
     WINDOWS_ABI = "msvc"
 
     def _abi_probe_compiler(self) -> str | None:
-        """$CXX or $CC when set, as for the compilers that will build;
-        else clang on PATH."""
+        """The C++ (else C) compiler that will build: what $CXX or $CC, or
+        bind_commands(), chooses, else clang on PATH. It's asked before
+        this toolchain has its tools, so by the variables."""
         import shutil
 
-        from pcons.tools.tool import resolve_env_cmd_override
-
         for var in ("CXX", "CC"):
-            override = resolve_env_cmd_override(var)
-            if override is not None:
-                return override
+            chosen = self._chosen_command(var)
+            if chosen is not None:
+                return chosen[0]
         return shutil.which("clang")
+
+        return (
+            self._tool_command("cxx")
+            or self._tool_command("cc")
+            or shutil.which("clang")
+        )
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
 
