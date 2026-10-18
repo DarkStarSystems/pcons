@@ -250,9 +250,16 @@ class LinkNeeds:
             directory (``.`` for beside it), so a build tree that moves
             still runs.
         objects: Files linked as they are (Swift's ``swiftrt.o``).
+        sanitizers: Sanitizer runtimes the objects need and don't name
+            (``address``). A program has only one of each, so the linking
+            toolchain chooses it: link.exe's own, or clang's for clang-cl's
+            lld-link.
         console: The entry point is a console ``main`` the objects don't
             define (ifx's is in its runtime), so the linker can't infer
             the subsystem.
+        excluded_default_libs: Libraries the objects name as defaults
+            (MSVC's ``/DEFAULTLIB``) that the link must leave out: clang-cl's
+            OpenMP objects name MSVC's vcomp, which libomp replaces.
     """
 
     libs: tuple[str, ...] = ()
@@ -262,7 +269,9 @@ class LinkNeeds:
     rpaths: tuple[str, ...] = ()
     relative_rpaths: tuple[str, ...] = ()
     objects: tuple[str, ...] = ()
+    sanitizers: tuple[str, ...] = ()
     console: bool = False
+    excluded_default_libs: tuple[str, ...] = ()
 
     def __or__(self, other: LinkNeeds) -> LinkNeeds:
         """Both sets of needs, each value once, in first-seen order."""
@@ -278,7 +287,11 @@ class LinkNeeds:
             rpaths=both(self.rpaths, other.rpaths),
             relative_rpaths=both(self.relative_rpaths, other.relative_rpaths),
             objects=both(self.objects, other.objects),
+            sanitizers=both(self.sanitizers, other.sanitizers),
             console=self.console or other.console,
+            excluded_default_libs=both(
+                self.excluded_default_libs, other.excluded_default_libs
+            ),
         )
 
 
@@ -1486,7 +1499,13 @@ class BaseToolchain(ABC):
         their directories reach the link as ordinary requirements).
         *existing_flags* are the link's flags so far. Base: none can be
         realized, so any is an error."""
-        if needs.rpaths or needs.objects or needs.console:
+        if (
+            needs.rpaths
+            or needs.objects
+            or needs.sanitizers
+            or needs.console
+            or needs.excluded_default_libs
+        ):
             raise ValueError(
                 f"Target '{target.name}': {self.name} can't link in what its "
                 f"objects need ({needs})."

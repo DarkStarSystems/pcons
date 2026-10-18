@@ -54,6 +54,16 @@ def abi_from_triple(triple: str) -> str | None:
     return None
 
 
+def _sanitizes(flags: Sequence[FlagToken], sanitizer: str) -> bool:
+    """Whether *flags* already enable *sanitizer* (``-fsanitize=a,b``)."""
+    return any(
+        isinstance(f, str)
+        and f.startswith("-fsanitize=")
+        and sanitizer in f.removeprefix("-fsanitize=").split(",")
+        for f in flags
+    )
+
+
 def static_archive(lib: str, platform: Platform) -> str:
     """The static archive of library *lib*, in GNU ld's explicit file name
     form (``:libstdc++.a``), for a link whose driver doesn't link that
@@ -699,10 +709,18 @@ class UnixToolchain(BaseToolchain):
     ) -> list[FlagToken]:
         """rpaths as ``-Wl,-rpath,``, a relative one from ``@loader_path``
         (Mach-O) or ``$ORIGIN`` (ELF), unless the script gave it already;
-        objects as they are; a console entry point needs saying only to
-        link.exe or lld-link, for the MSVC ABI."""
+        objects as they are; excluded default libraries and a console entry
+        point only for the MSVC ABI, where the driver runs link.exe or
+        lld-link."""
         platform = self._target_platform(target)
         flags: list[FlagToken] = list(needs.objects)
+        # The driver links each sanitizer's runtime as it would for its own
+        # objects.
+        flags += [
+            f"-fsanitize={s}"
+            for s in needs.sanitizers
+            if not _sanitizes(existing_flags, s)
+        ]
         if not platform.is_windows:
             flags += [f"-Wl,-rpath,{d}" for d in needs.rpaths]
         origin = (
@@ -717,9 +735,10 @@ class UnixToolchain(BaseToolchain):
                 rpath = f"-Wl,-rpath,{origin}" + ("" if d == "." else f"/{d}")
                 if rpath not in existing_flags and rpath not in flags:
                     flags.append(rpath)
-        if needs.console and self.abi == "msvc":
-            if not _chooses_subsystem(existing_flags):
+        if self._targets_msvc_abi(platform):
+            if needs.console and not _chooses_subsystem(existing_flags):
                 flags.append("-Wl,/SUBSYSTEM:CONSOLE")
+            flags += [f"-Wl,/NODEFAULTLIB:{lib}" for lib in needs.excluded_default_libs]
         return flags
 
     #: The compile tool whose driver links each language: C++ objects need

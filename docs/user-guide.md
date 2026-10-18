@@ -1680,6 +1680,8 @@ for the MSVC ABI uses Control Flow Guard (`-Xclang -cfguard` + `-Wl,/guard:cf`)
 in place of `-fPIE` and RELRO. These follow the platform being built for, so
 apply a cross preset before `hardened`: applying one after it raises.
 
+clang-cl's `sanitize` and `openmp` link the runtime that clang-cl's own driver would, which pcons asks it for: for `sanitize`, a different AddressSanitizer runtime for the DLL and the static C runtime (see [Static Runtimes](#static-runtimes)). clang's AddressSanitizer needs a release C runtime, so clang-cl can't sanitize a `debug` build (`'/MDd' not allowed with '-fsanitize=address'`): use `relwithdebinfo`. MSVC's can.
+
 Combine presets with variants for a complete configuration:
 
 ```python

@@ -161,6 +161,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Flow Guard, as MSVC's `hardened` does. The flags follow the platform
   being built for, so apply a cross preset first; applying one after
   `hardened` raises.
+- clang-cl's `sanitize` links. Its AddressSanitizer objects don't name
+  their runtime, and pcons links with lld-link (or link.exe), not
+  clang-cl, so every sanitized link failed with undefined `__asan_*`
+  symbols. The link now gets the runtime libraries clang-cl's own driver
+  would add, as it lists them (`-###`), since they change between LLVM
+  releases and with the C runtime. `openmp`'s libomp comes the same way.
 - MSVC link options that start with `/I` reach link.exe as written. pcons
   read them as cl's `/I` with a path, so `/INCREMENTAL:NO` in
   `env.link.flags` came out as `/I../NCREMENTAL:NO`, which link.exe

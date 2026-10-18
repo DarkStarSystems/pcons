@@ -65,8 +65,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
             "compile_flags": ["/GS", "/guard:cf"],
             "link_flags": ["/DYNAMICBASE", "/NXCOMPAT", "/guard:cf"],
         },
-        # The compiled objects carry the OpenMP runtime as a /DEFAULTLIB
-        # directive (vcomp for MSVC, libomp for clang-cl), so no link flags.
+        # MSVC's objects carry the OpenMP runtime as a /DEFAULTLIB directive
+        # (vcomp), so no link flags; clang-cl's link needs add its libomp.
         "openmp": {
             "compile_flags": ["/openmp"],
         },
@@ -156,19 +156,31 @@ class MsvcCompatibleToolchain(BaseToolchain):
         entry point the objects don't define (ifx's ``main`` is in its
         runtime, so link.exe can't infer one), unless the project chose a
         subsystem: a C++ ``WinMain`` program sets ``/SUBSYSTEM:WINDOWS``.
-        Windows has no rpaths or frameworks."""
+        Windows has no rpaths or frameworks. Default libraries the objects
+        mustn't bring are ``/NODEFAULTLIB:``."""
         if needs.rpaths or needs.frameworks:
             raise ValueError(
                 f"Target '{target.name}': {self.name} links for Windows, which "
                 f"has no rpaths or frameworks, but its objects need {needs}."
             )
-        flags: list[FlagToken] = list(needs.objects)
+        flags: list[FlagToken] = [
+            *needs.objects,
+            *self._sanitizer_link_args(needs.sanitizers, target),
+        ]
         if needs.console and not any(
             isinstance(f, str) and f.upper().startswith("/SUBSYSTEM:")
             for f in existing_flags
         ):
             flags.append("/SUBSYSTEM:CONSOLE")
+        flags += [f"/NODEFAULTLIB:{lib}" for lib in needs.excluded_default_libs]
         return flags
+
+    def _sanitizer_link_args(
+        self, sanitizers: Sequence[str], target: Target
+    ) -> list[FlagToken]:
+        """link.exe's own AddressSanitizer runtime, for objects that don't
+        name it (ifx's). cl's name it themselves."""
+        return ["/INFERASANLIBS"] if "address" in sanitizers else []
 
     def get_link_flags_for_target(
         self,
