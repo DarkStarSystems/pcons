@@ -161,6 +161,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Flow Guard, as MSVC's `hardened` does. The flags follow the platform
   being built for, so apply a cross preset first; applying one after
   `hardened` raises.
+- A program with ifx objects links with `sanitize` beside MSVC or
+  clang-cl. ifx's objects don't name the AddressSanitizer runtime, and
+  only ifx's own preset linked it, so a program linked by MSVC's or
+  clang-cl's linker had none unless C or C++ objects brought it. The
+  linker now adds the one it uses.
 - clang-cl's `sanitize` links. Its AddressSanitizer objects don't name
   their runtime, and pcons links with lld-link (or link.exe), not
   clang-cl, so every sanitized link failed with undefined `__asan_*`

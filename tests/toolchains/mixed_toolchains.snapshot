@@ -4035,12 +4035,12 @@
   app/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /fsanitize=address]
   app/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /fsanitize=address]
   app/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
-  app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
+  app/app.exe: tool=link cmd=link flags=[/nologo /INFERASANLIBS /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /fsanitize=address]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /fsanitize=address]
   lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
-  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
+  fmain/fmain.exe: tool=link cmd=link flags=[/nologo /INFERASANLIBS /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature profile
   cc: cmd=cl flags=[/nologo /MD]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD]
@@ -4310,7 +4310,7 @@
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /fsanitize=address]
   lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /rt/clang/clang_rt.asan_dynamic.lib /INFERASANLIBS:NO] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
-  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
+  fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /rt/clang/clang_rt.asan_dynamic.lib /INFERASANLIBS:NO /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature profile
   cc: cmd=clang-cl flags=[/nologo /MD]
   cxx: cmd=clang-cl flags=[/nologo /MD]

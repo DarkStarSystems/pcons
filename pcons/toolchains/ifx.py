@@ -209,11 +209,8 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {"compile_flags": ["/warn:all"]},
         "werror": {"compile_flags": ["/warn:errors"]},
-        # Without /INFERASANLIBS, link.exe can't resolve __asan_init.
-        "sanitize": {
-            "compile_flags": ["/fsanitize=address"],
-            "link_flags": ["/INFERASANLIBS"],
-        },
+        # The objects don't name the AddressSanitizer runtime (link_needs).
+        "sanitize": MsvcCompatibleToolchain.FEATURE_PRESETS["sanitize"],
         "profile": MsvcCompatibleToolchain.FEATURE_PRESETS["profile"],
         "hardened": MsvcCompatibleToolchain.FEATURE_PRESETS["hardened"],
         # The objects name the OpenMP runtime (/DEFAULTLIB), as cl's do.
@@ -276,6 +273,11 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
         needs = super().link_needs(target, languages, link_language, env)
         if target.target_type == "program" and "fortran" in languages:
             needs = needs | LinkNeeds(console=True)
+        # The objects don't name the AddressSanitizer runtime, so the
+        # linking toolchain chooses it: link.exe's own, or clang's beside
+        # clang-cl.
+        if "fortran" in languages and env.feature_realized("sanitize", self):
+            needs = needs | LinkNeeds(sanitizers=("address",))
         return needs
 
     def _find_runtime_libdir(self, compiler: str) -> str | None:
