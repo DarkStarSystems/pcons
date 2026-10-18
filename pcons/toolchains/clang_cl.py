@@ -19,7 +19,7 @@ from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.msvc import MsvcAssembler, MsvcResourceCompiler
-from pcons.tools.tool import BaseTool
+from pcons.tools.tool import BaseTool, Probe
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,10 @@ class ClangClCompiler(BaseTool):
     def __init__(self, name: str = "cc", language: str = "c") -> None:
         super().__init__(name, language=language)
         self._language = language
+
+    def probe(self) -> Probe | None:
+        base = super().probe()
+        return base.msvc() if base else None
 
     def default_vars(self) -> dict[str, object]:
         return {

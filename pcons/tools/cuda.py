@@ -6,12 +6,13 @@ Provides CUDA compilation support for GPU code.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.subst import SourcePath, TargetPath
-from pcons.tools.tool import BaseTool
+from pcons.tools.tool import BaseTool, Probe
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -40,6 +41,12 @@ class CudaCompiler(BaseTool):
 
     def __init__(self) -> None:
         super().__init__("cuda", language="cuda")
+
+    def probe(self) -> Probe | None:
+        """nvcc rejects an unknown option itself, and its ``-Werror``
+        takes an argument."""
+        base = super().probe()
+        return dataclasses.replace(base, strict=()) if base else None
 
     def default_vars(self) -> dict[str, object]:
         return {

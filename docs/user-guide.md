@@ -3492,6 +3492,24 @@ The cache key includes a signature of the compiler command *and its current flag
 
 Checks compile the same way the build does: the tool's flags, defines, and include directories all apply, and are properly cached. 
 
+`check_flag()` and `try_compile()` work with any compiler tool: `cc`, `cxx`, `cuda`, or `fc` for Fortran. Each tool writes its probe in its own language and rejects an option the way its compiler can (`-Werror`, `/WX`, ifx's `-diag-error=`), so a flag gfortran accepts and ifx only warns about is reported unsupported for ifx. The header, type, function and macro checks write C programs, so they need a C, C++ or CUDA tool, and raise for any other.
+
+```python
+checks = ToolChecks(config, env, "fc")
+
+# Each Fortran compiler has its own form for this; keep whichever it accepts
+for flag in ("-fbacktrace", "-traceback"):
+    if checks.check_flag(flag).success:
+        env.fc.flags.append(flag)
+
+quad = checks.try_compile("""
+    integer, parameter :: qp = selected_real_kind(33)
+    real(qp) :: x
+    end
+""")
+env.fc.defines.append(f"WITH_QP={int(quad.success)}")
+```
+
 #### Reading Macros From Headers
 
 `check_define()` and `check_defines()` accept `headers=`, `include_dirs=`, and `defines=`, so they read constants out of the project's own headers — version strings, feature flags, install paths — not just compiler builtins. Four outcomes are distinguishable:

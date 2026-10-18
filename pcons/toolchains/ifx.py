@@ -26,6 +26,7 @@ from pcons.toolchains.fortran import (
 )
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.msvc import MsvcLibrarian, MsvcLinker, use_msvc_tool_paths
+from pcons.tools.tool import PROBES, Probe
 from pcons.tools.toolchain import LinkNeeds
 
 if TYPE_CHECKING:
@@ -40,6 +41,13 @@ class IfxCompiler(FortranCompiler):
 
     COMMANDS = ("ifx",)
     MODDIR_FLAG = "-module"
+
+    def probe(self) -> Probe | None:
+        """ifx only warns about an option it doesn't know (diagnostic
+        10006) or doesn't support (10148), and has no ``-Werror``."""
+        return dataclasses.replace(
+            PROBES["fortran"], strict=("-diag-error=10006,10148",)
+        )
 
 
 class IfxLinker(FortranLinker):
@@ -134,6 +142,12 @@ class IfxMsvcCompiler(FortranCompiler):
 
     COMMANDS = ("ifx",)
     MODDIR_FLAG = "/module:"
+
+    def probe(self) -> Probe | None:
+        """As :meth:`IfxCompiler.probe`, with Windows options."""
+        return dataclasses.replace(
+            PROBES["fortran"].msvc(), strict=("/Qdiag-error:10006,10148",)
+        )
 
     def default_vars(self) -> dict[str, object]:
         def compile_command(*extra: str) -> list[object]:

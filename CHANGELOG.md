@@ -102,6 +102,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now recompiles that source; before, nothing did. A module declared or
   used in an included file now counts too, so an interface header's
   `USE` orders the compile after that module.
+- Configure checks work with Fortran: `ToolChecks(config, env, "fc")` runs
+  `check_flag()` and `try_compile()` with the Fortran compiler. Before, the
+  probe was written as C++, so every Fortran check failed. ifx's checks now
+  reject an option it would only warn about, as `-Werror` does for the
+  others, and the header, type, function and macro checks raise for a tool
+  that doesn't compile C rather than report a wrong answer.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named

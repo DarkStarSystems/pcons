@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import trace
+from pcons.core.errors import PconsError
+from pcons.tools.tool import PROBES, BaseTool, Probe
 
 if TYPE_CHECKING:
     from pcons.configure.config import Configure
@@ -182,6 +184,11 @@ def cache_signature(*parts: str) -> str:
     return hashlib.sha1(joined.encode(errors="replace")).hexdigest()[:12]
 
 
+#: Languages whose compilers take the C programs the header, type, define
+#: and function checks write (CUDA's nvcc compiles C as host code).
+_C_SOURCE_LANGUAGES = frozenset({"c", "cxx", "objc", "objcxx", "cuda"})
+
+
 @dataclass
 class CheckResult:
     """Result of a feature check.
@@ -253,6 +260,51 @@ class ToolChecks:
         if len(oneline) > maxlen:
             return oneline[:maxlen] + "..."
         return oneline
+
+    def _tool(self) -> BaseTool | None:
+        """The tool being checked, from the toolchain that owns it."""
+        owner = self._env._tool_owners.get(self._tool_name, self._env._toolchain)
+        tool = owner.tools.get(self._tool_name) if owner is not None else None
+        return tool if isinstance(tool, BaseTool) else None
+
+    def _language(self) -> str | None:
+        """The checked tool's language. A tool set up by hand, with no
+        toolchain, is taken to be C for ``cc`` and C++ otherwise."""
+        tool = self._tool()
+        if tool is not None:
+            return tool.language
+        return "c" if self._tool_name == "cc" else "cxx"
+
+    def _probe(self) -> Probe:
+        """How this tool compiles a probe, as the tool declares it.
+
+        A tool set up by hand has none to ask, so its command decides
+        whether it takes cl.exe's command line.
+        """
+        tool = self._tool()
+        if tool is not None:
+            probe = tool.probe()
+            if probe is None:
+                raise PconsError(
+                    f"Configure checks can't compile with the '{self._tool_name}' "
+                    f"tool ({type(tool).__name__}): it declares no probe."
+                )
+            return probe
+        probe = PROBES[self._language() or "cxx"]
+        compiler = self._get_compiler() or ""
+        if Path(compiler).stem.lower() in ("cl", "clang-cl"):
+            return probe.msvc()
+        return probe
+
+    def _require_c_source(self, check: str) -> None:
+        """Refuse a check whose test program is C, for a tool that doesn't
+        compile C."""
+        if self._language() not in _C_SOURCE_LANGUAGES:
+            raise PconsError(
+                f"{check}() compiles a C program, which the "
+                f"'{self._tool_name}' tool can't. Use try_compile() with "
+                f"source in its own language."
+            )
 
     def _get_compiler(self) -> str | None:
         """Get the compiler command."""
@@ -393,28 +445,9 @@ class ToolChecks:
         return result
 
     def _is_msvc_style(self) -> bool:
-        """Whether the configured compiler uses MSVC-style command lines.
-
-        MSVC and clang-cl (in its cl.exe-compatible mode) both take
-        slash-flags (/c, /Fo, /Fe, /E, /WX, ...) instead of the Unix-style
-        flags (-c, -o, -l, -E, -Werror, ...) used by GCC/Clang.
-        """
-        toolchain = getattr(self._env, "_toolchain", None)
-        tc_name = getattr(toolchain, "name", "") if toolchain else ""
-        if tc_name:
-            return tc_name in ("msvc", "clang-cl")
-        # No toolchain object attached to the environment (e.g. a bare
-        # Environment with cc.cmd set directly) -- fall back to sniffing the
-        # compiler executable's name.
-        compiler = self._get_compiler() or ""
-        return Path(compiler).stem.lower() in ("cl", "clang-cl")
-
-    def _get_werror_flag(self) -> str:
-        """Return the appropriate treat-warnings-as-errors flag.
-
-        MSVC and clang-cl use /WX; GCC and Clang use -Werror.
-        """
-        return "/WX" if self._is_msvc_style() else "-Werror"
+        """Whether the compiler takes cl.exe's slash options (/c, /Fo, /Fe,
+        /E, /I, /D) rather than the Unix ones (-c, -o, -E, -I, -D)."""
+        return self._probe().msvc_style
 
     def _lib_flag(self, lib: str) -> str:
         """Return the command-line argument to link against a library.
@@ -453,9 +486,10 @@ class ToolChecks:
     def check_flag(self, flag: str) -> CheckResult:
         """Check if the compiler accepts a flag.
 
-        Compiles a minimal program with the flag to test if it's accepted.
-        Uses -Werror (or /WX for MSVC/clang-cl) so that flags which produce
-        warnings (e.g., clang's "unknown warning option") are rejected.
+        Compiles the tool's smallest program with the flag, adding the
+        tool's own options for rejecting an option it would only warn
+        about (``-Werror``, cl.exe's ``/WX``, ifx's ``-diag-error=``), so
+        that clang's "unknown warning option" counts as unsupported.
 
         Args:
             flag: Compiler flag to test (e.g., '-Wall', '-std=c++20').
@@ -476,13 +510,15 @@ class ToolChecks:
             return outcome
         compiler = outcome
 
-        source = "int main(void) { return 0; }\n"
-        werror = self._get_werror_flag()
+        probe = self._probe()
 
         cdir = self._make_check_dir()
         try:
             result = self._try_compile(
-                compiler, source, extra_flags=[werror, flag], check_dir=cdir
+                compiler,
+                probe.program,
+                extra_flags=[*probe.strict, flag],
+                check_dir=cdir,
             )
         finally:
             self._cleanup_check_dir(*cdir)
@@ -513,6 +549,7 @@ class ToolChecks:
             # ucontext.h requires _XOPEN_SOURCE on macOS
             checks.check_header("ucontext.h", defines=["_XOPEN_SOURCE"])
         """
+        self._require_c_source("check_header")
         trace(
             "configure",
             "check_header: %s (%s) at %s",
@@ -559,6 +596,7 @@ class ToolChecks:
         Returns:
             CheckResult indicating success/failure.
         """
+        self._require_c_source("check_type")
         trace(
             "configure",
             "check_type: %s (%s) at %s",
@@ -604,6 +642,7 @@ class ToolChecks:
         Returns:
             Size in bytes, or None if check failed.
         """
+        self._require_c_source("check_type_size")
         trace(
             "configure",
             "check_type_size: %s (%s) at %s",
@@ -704,6 +743,7 @@ int main(void) {{ return 0; }}
                 "VERSION_NAME", headers=["core/version.h"], include_dirs=[src_dir]
             )  # -> '"MyApp 2024"'
         """
+        self._require_c_source("check_define")
         trace(
             "configure",
             "check_define: %s (%s) at %s",
@@ -753,6 +793,7 @@ int main(void) {{ return 0; }}
                 include_dirs=[src_dir],
             )
         """
+        self._require_c_source("check_defines")
         trace(
             "configure",
             "check_defines: %s (%s) at %s",
@@ -883,6 +924,7 @@ int main(void) {{ return 0; }}
         Returns:
             CheckResult indicating success/failure.
         """
+        self._require_c_source("check_function")
         trace(
             "configure",
             "check_function: %s (%s) at %s",
@@ -987,7 +1029,7 @@ int main(void) {{
         Returns:
             CheckResult with compilation result.
         """
-        suffix = ".c" if self._tool_name == "cc" else ".cpp"
+        suffix = self._probe().suffix
         owns_dir = check_dir is None
         dir_path, persistent = check_dir if check_dir else self._make_check_dir()
 
@@ -1063,7 +1105,7 @@ int main(void) {{
         Returns:
             CheckResult with preprocessor output.
         """
-        suffix = ".c" if self._tool_name == "cc" else ".cpp"
+        suffix = self._probe().suffix
         owns_dir = check_dir is None
         dir_path, persistent = check_dir if check_dir else self._make_check_dir()
         extra = list(extra_flags or [])
