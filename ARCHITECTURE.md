@@ -985,10 +985,14 @@ interchangeable:
 - **`PathToken`** — the flag says outright that it carries a path, and of what
   kind (`"project"`, `"build"`, `"absolute"`). Use this when constructing a
   flag in a toolchain: it is the only one that cannot be fooled.
-- **A recognized flag prefix** — `-I`, `-L`, `-isystem` and the rest of a
-  toolchain's `get_path_flags()`. The generator splits the prefix off and
+- **A recognized flag prefix** — `-I`, `-L`, `-isystem` and the rest of
+  `get_path_flags(tool)`, from the toolchain that owns the tool the command
+  runs (`env.toolchain_for(tool)`). The generator splits the prefix off and
   rewrites the remainder. This is what catches flags a *user* wrote as plain
-  strings.
+  strings. Each tool has its own: a link line is checked for `/LIBPATH:`,
+  never cl's `/I`, so link.exe's `/INCREMENTAL` reaches it as written. A
+  tool no toolchain has, a `Command`'s, has none: its strings are as
+  written, and its paths are `Path`s or nodes.
 - **The two-token spelling** — `-isystem` followed by its argument. Here the
   generator rewrites the next token only when it is *absolute*, because a
   relative one may not be a path at all and rewriting it would change its

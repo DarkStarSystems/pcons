@@ -111,7 +111,9 @@ class TestConanFinderProfile:
         """Test cppstd inferred from env.cxx.flags."""
         from types import SimpleNamespace
 
-        env = SimpleNamespace(cxx=SimpleNamespace(flags=["-std=c++23"]))
+        env = SimpleNamespace(
+            cxx=SimpleNamespace(flags=["-std=c++23"]), has_tool=lambda tool: False
+        )
         finder = ConanFinder(output_folder=tmp_path)
         finder.sync_profile(env=env)
 
@@ -122,7 +124,9 @@ class TestConanFinderProfile:
         """Explicit cppstd takes precedence over env inference."""
         from types import SimpleNamespace
 
-        env = SimpleNamespace(cxx=SimpleNamespace(flags=["-std=c++17"]))
+        env = SimpleNamespace(
+            cxx=SimpleNamespace(flags=["-std=c++17"]), has_tool=lambda tool: False
+        )
         finder = ConanFinder(output_folder=tmp_path)
         finder.sync_profile(env=env, cppstd="20")
 

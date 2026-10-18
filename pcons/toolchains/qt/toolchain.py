@@ -40,6 +40,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.node import FileNode
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.toolchains.gnu_common import GNU_COMPILE_PATH_FLAGS
 from pcons.toolchains.qt.scan import output_rel_dir
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain, toolchain_registry
@@ -474,6 +475,7 @@ class QtToolchain(BaseToolchain):
     """
 
     TOOL_NAMES = ("qt",)
+    COMPILE_PATH_FLAGS = GNU_COMPILE_PATH_FLAGS
 
     def __init__(self) -> None:
         super().__init__("qt")

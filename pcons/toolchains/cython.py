@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, cast
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.toolchains.gnu_common import GNU_COMPILE_PATH_FLAGS, GNU_LINK_PATH_FLAGS
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain
 
@@ -336,6 +337,9 @@ class CythonToolchain(BaseToolchain):
     """
 
     TOOL_NAMES = ("cython", "cycc", "cylink")
+    COMPILE_PATH_FLAGS = GNU_COMPILE_PATH_FLAGS
+    LINK_PATH_FLAGS = GNU_LINK_PATH_FLAGS
+    LINK_TOOLS = frozenset({"cylink"})
 
     def __init__(self) -> None:
         super().__init__("cython")

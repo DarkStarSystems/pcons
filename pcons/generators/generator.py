@@ -26,6 +26,7 @@ from pcons.core.node import FileNode
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.core.target import Target
 
@@ -67,6 +68,37 @@ def apply_context_overrides(
                 modified = modified.replace(pattern, val_str)
         result.append(modified)
     return result
+
+
+def relativize_path_flag(
+    token: str, path_flags: frozenset[str], text: Callable[[str], str]
+) -> str:
+    """*token* with the path in it rewritten by *text*, if it starts with
+    one of *path_flags* (``-I<path>``, ``/LIBPATH:<path>``); otherwise as
+    it is.
+
+    A flag written as plain text carries a path relative to the project
+    top or absolute, while the command runs elsewhere, so every generator
+    rewrites it the same way it writes any other path.
+    """
+    matches = [p for p in path_flags if token.startswith(p)]
+    if not matches:
+        return token
+    # Longest match wins, so /external:I isn't mistaken for a token that
+    # merely starts with /e.
+    prefix = max(matches, key=len)
+    path = token[len(prefix) :]
+    # "--sysroot=<path>": the "=" joins the flag to its argument and is no
+    # part of the path. Left in, the path reads as relative and comes back
+    # as "--sysroot../=/opt/sdk".
+    if path.startswith("="):
+        prefix += "="
+        path = path[1:]
+    if not path:
+        return token
+    # Outside the project tree (an SDK, a system prefix), the path comes
+    # back absolute: the only thing it can be.
+    return f"{prefix}{text(path)}"
 
 
 @runtime_checkable
@@ -245,21 +277,19 @@ class BaseGenerator:
         project._output_graphs_if_requested()
 
     @staticmethod
-    def _collect_path_flags(project: Project) -> frozenset[str]:
-        """Path-carrying flags (-I, -isystem, /LIBPATH:, ...) of every
-        toolchain in the project.
+    def _path_flags(env: Environment | None, tool: str) -> frozenset[str]:
+        """Path-carrying flags (-I, -isystem, /LIBPATH:, ...) on the command
+        line of *env*'s *tool*.
 
         Generators rewrite the paths in these flags relative to where the
-        build tool runs. Which flags carry paths is toolchain knowledge, so
-        it comes from the toolchains rather than a list in the generator.
+        build tool runs. Which flags carry paths is the knowledge of the
+        toolchain that owns the tool, so it comes from there. A tool no
+        toolchain has (a Command's) has none: its command is as written.
         """
-        flags: set[str] = set()
-        for env in project.environments:
-            for toolchain in getattr(env, "toolchains", []):
-                getter = getattr(toolchain, "get_path_flags", None)
-                if getter is not None:
-                    flags.update(getter())
-        return frozenset(flags)
+        toolchain = env.toolchain_for(tool) if env is not None else None
+        if toolchain is None:
+            return frozenset()
+        return toolchain.get_path_flags(tool)
 
     def _resolve_output_dir(self, project: Project) -> Path:
         """The project's build directory. ``build_dir`` is written from the

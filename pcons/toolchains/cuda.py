@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from pcons.configure.platform import get_platform
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
-from pcons.toolchains.gnu_common import needs_pic
+from pcons.toolchains.gnu_common import GNU_COMPILE_PATH_FLAGS, needs_pic
 from pcons.tools.cuda import CudaCompiler
 from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_registry
 
@@ -46,6 +46,7 @@ class CudaToolchain(BaseToolchain):
     """
 
     TOOL_NAMES = ("cuda",)
+    COMPILE_PATH_FLAGS = GNU_COMPILE_PATH_FLAGS
 
     # Compile flags only: the host toolchain realizes the link side. nvcc
     # rejects bare host flags, so each goes through as one -Xcompiler=
