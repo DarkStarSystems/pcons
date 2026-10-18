@@ -300,6 +300,8 @@ class GccToolchain(UnixToolchain):
     UnixToolchain.
     """
 
+    STATIC_RUNTIME_LINK_FLAGS = ("-static-libgcc", "-static-libstdc++")
+
     ENV_COMPILER_FAMILY = "gcc"
     WINDOWS_ABI = "mingw"
 

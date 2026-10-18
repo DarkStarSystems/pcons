@@ -24,7 +24,7 @@ from pcons.toolchains.fortran_scanner import (
     DEFAULT_SUBMODULE_FILE,
 )
 from pcons.toolchains.gnu_common import gnu_link_builders, gnu_link_vars
-from pcons.toolchains.unix import UnixToolchain
+from pcons.toolchains.unix import UnixToolchain, static_archive
 from pcons.tools.tool import BaseTool, resolve_env_cmd_override
 from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 
@@ -316,7 +316,10 @@ class FortranToolchainBase(BaseToolchain):
             return needs | LinkNeeds(libdirs=libdirs)
         if link_language == "fortran":
             return needs
-        return needs | LinkNeeds(libs=self.RUNTIME_LIBS, libdirs=libdirs)
+        libs = self.RUNTIME_LIBS
+        if env.runtime_linkage == "static":
+            libs = tuple(static_archive(lib, env.target) for lib in self.RUNTIME_LIBS)
+        return needs | LinkNeeds(libs=libs, libdirs=libdirs)
 
     def after_resolve(
         self,

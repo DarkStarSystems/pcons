@@ -231,7 +231,7 @@ class ClangClToolchain(MsvcCompatibleToolchain):
     # /O2 alone here.
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
         **MsvcCompatibleToolchain.MSVC_VARIANTS,
-        "release-fastest": (["/O2", "/MD"], ["NDEBUG"]),
+        "release-fastest": (["/O2"], ["NDEBUG"]),
     }
 
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {

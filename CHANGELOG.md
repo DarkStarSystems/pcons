@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   relative to itself, as CMake and Meson give one. A C program linking a
   Fortran shared library didn't load on macOS before. Turn it off with
   `target.set_option("build_rpath", False)`.
+- `env.set_runtime_linkage("static")` links the language runtimes
+  statically: `/MT` (`/MTd` under `debug`) for MSVC, clang-cl and ifx,
+  `-static-libgcc -static-libstdc++` for GCC, and each other compiler's
+  own way. The default stays `"shared"`. It applies to every compiler in
+  the environment, or raises, as clang on Apple's platforms does. The
+  Conan profile follows it (`compiler.runtime=static`).
 - LLVM flang (21 or newer) and Intel ifx join gfortran as Fortran
   toolchains: `toolchain="flang"` or `"ifx"`, or `toolchain="fortran"` to
   find whichever is installed (gfortran first). `$FC` steers that choice,
@@ -166,6 +172,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   text, as the ninja generator does. `-Iinclude` in `env.cc.flags` reached
   the compiler as written, and make runs in the build directory, so the
   compiler looked for `build/include`.
+- clang for the MSVC ABI (LLVM's own Windows builds) uses the DLL C
+  runtime, as pcons' MSVC, clang-cl, flang and ifx builds do:
+  `-fms-runtime-lib=dll`, `dll_dbg` under `debug`. It used clang's
+  default, the static runtime, so a program mixing its objects with
+  flang's or ifx's got both (`LNK4098`), and it didn't match the
+  `compiler.runtime=dynamic` pcons gives Conan for clang.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named
@@ -224,8 +236,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ifx's `openmp` objects Intel's OpenMP runtime under g++.
 - clang targeting the MSVC ABI beside ifx links a Fortran program as a
   console program (`-Wl,/SUBSYSTEM:CONSOLE`). Before, link.exe failed with
-  `LNK1561`, since ifx's `main` is in its runtime. (clang's static C
-  runtime beside ifx's DLL one is still a mismatch.)
+  `LNK1561`, since ifx's `main` is in its runtime.
 - A shared library linked by clang or flang for the MSVC ABI comes with
   its import library (`foo.lib`), and that is what targets linking it
   take. Before, they were given `foo.dll`, which link.exe rejects

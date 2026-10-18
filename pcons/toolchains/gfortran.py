@@ -13,7 +13,7 @@ from pcons.toolchains.fortran import (
 )
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.gnu_common import require_cross_binaries
-from pcons.toolchains.unix import UnixToolchain
+from pcons.toolchains.unix import UnixToolchain, static_archive
 from pcons.tools.toolchain import LinkNeeds
 
 if TYPE_CHECKING:
@@ -52,6 +52,11 @@ class GfortranToolchain(FortranToolchain):
     LINKER = GfortranLinker
     RUNTIME_PROBE_FILE = "libgfortran.a"
     RUNTIME_LIBS = ("gfortran",)
+    STATIC_RUNTIME_LINK_FLAGS = (
+        "-static-libgfortran",
+        "-static-libquadmath",
+        "-static-libgcc",
+    )
 
     # GCC's, realized on `fc`. -Wpedantic is left out as noisy for legal
     # Fortran, and _FORTIFY_SOURCE does nothing for it.
@@ -81,8 +86,20 @@ class GfortranToolchain(FortranToolchain):
         env: Environment,
     ) -> LinkNeeds:
         """Built with ``coverage``, gfortran's objects need libgcov, which
-        a non-GCC driver (clang++) doesn't add for its own --coverage."""
+        a non-GCC driver (clang++) doesn't add for its own --coverage. A
+        static libgfortran needs libquadmath, where GCC has it, which its
+        shared library brings itself."""
         needs = super().link_needs(target, languages, link_language, env)
+        if (
+            "fortran" in languages
+            and link_language != "fortran"
+            and env.runtime_linkage == "static"
+            and self.quadmath_libdir is not None
+        ):
+            needs = needs | LinkNeeds(
+                libs=(static_archive("quadmath", env.target),),
+                libdirs=(self.quadmath_libdir,),
+            )
         if (
             "fortran" in languages
             and link_language != "fortran"
@@ -91,6 +108,13 @@ class GfortranToolchain(FortranToolchain):
             libdirs = (self.gcov_libdir,) if self.gcov_libdir else ()
             needs = needs | LinkNeeds(libs=("gcov",), libdirs=libdirs)
         return needs
+
+    @cached_property
+    def quadmath_libdir(self) -> str | None:
+        """Where gfortran's static libquadmath is, if its GCC has one (not
+        on Arm)."""
+        exe = self.compiler_path
+        return self._library_dir(exe, "libquadmath.a") if exe else None
 
     @cached_property
     def gcov_libdir(self) -> str | None:

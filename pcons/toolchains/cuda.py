@@ -11,9 +11,10 @@ import logging
 import shutil
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from pcons.configure.platform import get_platform
+from pcons.configure.platform import Platform, get_platform
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
+from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain, msvc_crt
 from pcons.toolchains.gnu_common import GNU_COMPILE_PATH_FLAGS, needs_pic
 from pcons.tools.cuda import CudaCompiler
 from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_registry
@@ -99,6 +100,16 @@ class CudaToolchain(BaseToolchain):
 
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("cuda",)
+
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """On Windows, the host compile's C runtime is cl's, through
+        -Xcompiler. Elsewhere the C/C++ toolchain's link has the runtimes."""
+        if not target.is_windows:
+            return []
+        flag = MsvcCompatibleToolchain.MSVC_CRT_FLAGS[msvc_crt(linkage, variant)]
+        return [ToolContribution("cuda", flags=(f"-Xcompiler={flag}",))]
 
     def make_feature_preset(
         self, name: str, target: Platform | None = None

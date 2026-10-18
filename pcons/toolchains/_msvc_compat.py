@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
+from pcons.core.preset import Preset, ToolContribution
 from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 
 if TYPE_CHECKING:
@@ -18,6 +18,21 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
     from pcons.toolchains.build_context import CompileLinkContext
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
+
+
+def msvc_crt(linkage: str, variant: str) -> str:
+    """The C runtime every compiler in an MSVC-ABI program links, as
+    clang's ``-fms-runtime-lib`` names it: the DLL one ("dll"), or with
+    static runtime linkage the static one ("static"), in its debug build
+    ("dll_dbg", "static_dbg") under the debug variant.
+
+    The DLL one is the default because it's what CMake and Conan
+    (``compiler.runtime=dynamic``) build with, so packages match; the
+    compilers' own default is the static one. Every compiler realizes this
+    one choice, since objects built for different runtimes don't link.
+    """
+    crt = "static" if linkage == "static" else "dll"
+    return f"{crt}_dbg" if variant.lower() == "debug" else crt
 
 
 class MsvcCompatibleToolchain(BaseToolchain):
@@ -229,22 +244,27 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """Return flags that take their argument as a separate token."""
         return self.SEPARATED_ARG_FLAGS
 
-    # Variant flags per build type (compile_flags, defines). Every variant
-    # picks the dynamic CRT, debug or release to match its defines: cl.exe's
-    # default is the static release CRT, which with _DEBUG defined pairs
-    # with the debug STL and fails to link. Dynamic is also what CMake and
-    # Conan (compiler.runtime=dynamic) build with, so packages match.
+    # Variant flags per build type (compile_flags, defines). The C runtime
+    # is the runtime linkage's (msvc_crt), in its debug build under debug.
     # Debug info is /Z7, in the object itself: /Zi has every parallel
     # cl.exe write one shared PDB, which fails (C1041) without /FS or a
     # per-target /Fd. The linker's /DEBUG still produces the final PDB.
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
-        "debug": (["/Od", "/Z7", "/MDd"], ["DEBUG", "_DEBUG"]),
-        "release": (["/O2", "/MD"], ["NDEBUG"]),
+        "debug": (["/Od", "/Z7"], ["DEBUG", "_DEBUG"]),
+        "release": (["/O2"], ["NDEBUG"]),
         # /O2 is already "maximize speed"; /Ob3 (VS 2019+) adds the more
         # aggressive inlining it leaves out. Nothing that changes results.
-        "release-fastest": (["/O2", "/Ob3", "/MD"], ["NDEBUG"]),
-        "relwithdebinfo": (["/O2", "/Z7", "/MD"], ["NDEBUG"]),
-        "minsizerel": (["/O1", "/MD"], ["NDEBUG"]),
+        "release-fastest": (["/O2", "/Ob3"], ["NDEBUG"]),
+        "relwithdebinfo": (["/O2", "/Z7"], ["NDEBUG"]),
+        "minsizerel": (["/O1"], ["NDEBUG"]),
+    }
+
+    # The flag selecting each C runtime (msvc_crt).
+    MSVC_CRT_FLAGS: ClassVar[dict[str, str]] = {
+        "dll": "/MD",
+        "dll_dbg": "/MDd",
+        "static": "/MT",
+        "static_dbg": "/MTd",
     }
 
     def _cxx_standard_flag(self, standard: int) -> str:
@@ -275,26 +295,16 @@ class MsvcCompatibleToolchain(BaseToolchain):
             ToolContribution("lib", flags=(flag,)),
         ]
 
-    def setup_presets(self, env: Environment) -> list[Preset]:
-        """The dynamic CRT (/MD) from the start, as the ``default`` variant.
-
-        cl.exe's own default is the static release CRT, which the debug STL
-        cannot link and Conan packages are not built against. It sits in
-        the variant's exclusive group, so ``set_variant()`` replaces it with
-        the variant's own CRT flag the way any knob does, and ``explain()``
-        attributes it by name.
-        """
-        crt = Preset(
-            name="default",
-            category="variant",
-            exclusive_group=VARIANT_GROUP,
-            contributions=tuple(
-                ToolContribution(tool, flags=("/MD",))
-                for tool in self._feature_preset_tools()
-                if env.has_tool(tool)
-            ),
-        )
-        return [*super().setup_presets(env), crt]
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """The C runtime's flag on each compile tool. Each object names its
+        runtime, so the link needs nothing."""
+        flag = self.MSVC_CRT_FLAGS[msvc_crt(linkage, variant)]
+        return [
+            ToolContribution(tool, flags=(flag,))
+            for tool in self._feature_preset_tools()
+        ]
 
     def _variant_contributions(
         self, variant: str, **kwargs: Any

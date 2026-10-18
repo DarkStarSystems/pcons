@@ -202,11 +202,12 @@ jobs:
         # container. clang/libcxx-devel bring the newest std-module manifest;
         # gcc, make, cmake and ninja round out the toolchains the examples
         # exercise (cmake/make are also what the conan example builds fmt with).
+        # libstdc++-static is for the static runtime example.
         run: |
           dnf -y install \
             git tar which findutils \
             clang libcxx libcxx-devel libcxxabi libcxxabi-devel lld \
-            gcc gcc-c++ make cmake ninja-build \
+            gcc gcc-c++ libstdc++-static make cmake ninja-build \
             python3 python3-devel
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0

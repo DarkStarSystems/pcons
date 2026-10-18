@@ -112,7 +112,9 @@ class TestConanFinderProfile:
         from types import SimpleNamespace
 
         env = SimpleNamespace(
-            cxx=SimpleNamespace(flags=["-std=c++23"]), has_tool=lambda tool: False
+            cxx=SimpleNamespace(flags=["-std=c++23"]),
+            has_tool=lambda tool: False,
+            runtime_linkage="shared",
         )
         finder = ConanFinder(output_folder=tmp_path)
         finder.sync_profile(env=env)
@@ -125,7 +127,9 @@ class TestConanFinderProfile:
         from types import SimpleNamespace
 
         env = SimpleNamespace(
-            cxx=SimpleNamespace(flags=["-std=c++17"]), has_tool=lambda tool: False
+            cxx=SimpleNamespace(flags=["-std=c++17"]),
+            has_tool=lambda tool: False,
+            runtime_linkage="shared",
         )
         finder = ConanFinder(output_folder=tmp_path)
         finder.sync_profile(env=env, cppstd="20")
@@ -1008,6 +1012,13 @@ class TestConanFinderWithToolchain:
         assert settings["compiler.version"] == "193"
         assert settings["compiler.runtime"] == "dynamic"
         assert settings["compiler.runtime_type"] == "Debug"
+
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(
+                toolchain, build_type="Release", runtime_linkage="static"
+            )
+        assert settings["compiler.runtime"] == "static"
+        assert settings["compiler.runtime_type"] == "Release"
 
     @staticmethod
     def _windows_finder(tmp_path: Path) -> ConanFinder:

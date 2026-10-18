@@ -113,3 +113,4 @@ uvx pcons
 | [`94_fortran_submodules`](https://github.com/DarkStarSystems/pcons/tree/main/examples/94_fortran_submodules) | Demonstrates Fortran submodules, nested, compiled in dependency order |
 | [`95_fortran_includes`](https://github.com/DarkStarSystems/pcons/tree/main/examples/95_fortran_includes) | Demonstrates Fortran #include and INCLUDE, with edits to included files rebuilding their includers |
 | [`96_fortran_configure_checks`](https://github.com/DarkStarSystems/pcons/tree/main/examples/96_fortran_configure_checks) | Demonstrates configure checks with a Fortran compiler: flags it accepts, and a feature probe passed to the source as a define |
+| [`96_static_runtime`](https://github.com/DarkStarSystems/pcons/tree/main/examples/96_static_runtime) | Build a C++ program with the shared and with static language runtimes |

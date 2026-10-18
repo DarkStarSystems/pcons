@@ -26,6 +26,14 @@ logger = logging.getLogger(__name__)
 #: The exclusive group every build variant's presets share.
 VARIANT_GROUP = "build_variant"
 
+#: The exclusive group of the runtime linkage presets
+#: (``env.set_runtime_linkage``).
+RUNTIME_LINKAGE_GROUP = "runtime_linkage"
+
+#: How a program links its language runtimes: the shared ones, the
+#: default, or static ones.
+RUNTIME_LINKAGES = ("shared", "static")
+
 
 @dataclass(frozen=True)
 class ToolContribution:
@@ -85,9 +93,11 @@ class Intent:
     records it and hands it on.
 
     Attributes:
-        kind: "variant", "arch", "feature", "target" or "setting".
+        kind: "variant", "arch", "feature", "target", "setting" or
+            "runtime".
         name: The variant, arch, feature or setting name ("debug",
-            "arm64", "lto", "cxx.standard"); a cross target's preset name.
+            "arm64", "lto", "cxx.standard"), or the runtime linkage
+            ("static"); a cross target's preset name.
         args: Positional values: the cross preset for "target", the
             setting's arguments for "setting".
         kwargs: Keyword options (``set_variant(extra_flags=...)``).

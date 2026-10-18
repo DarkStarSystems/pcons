@@ -134,6 +134,14 @@ def _unrealized_arch(arch: str, missing: Sequence[Any]) -> ValueError:
     )
 
 
+def _unrealized_runtime(linkage: str, missing: Sequence[Any]) -> ValueError:
+    return ValueError(
+        f"{_names(missing)} can't link its runtime {linkage}, and "
+        f"set_runtime_linkage({linkage!r}) applies to every compiler in the "
+        f"environment."
+    )
+
+
 def _unrealized_feature(name: str, missing: Sequence[Any]) -> ValueError:
     return ValueError(
         f"Preset '{name}' isn't available with {_names(missing)}, so it can't "
@@ -265,8 +273,14 @@ class Environment(_EnvironmentStubs):
         # compute_effective_requirements so `pcons explain` names the package
         # rather than the tool variable the value landed on.
         self._use_origins: dict[tuple[str, str], tuple[str, str]] = {}
-        # What the script asked for, in order, for toolchains added later
-        self._intents: list[Intent] = []
+        # What the script asked for, in order, for toolchains added later.
+        # A program links its language runtimes one way or another: the
+        # shared ones until set_runtime_linkage() says otherwise.
+        from pcons.core.preset import RUNTIME_LINKAGE_GROUP, Intent
+
+        self._intents: list[Intent] = [
+            Intent("runtime", "shared", group=RUNTIME_LINKAGE_GROUP)
+        ]
         # Set while add_toolchain() configures the toolchain it adds
         self._replaying = False
         # (preset, toolchain) left out by apply_preset(allow_partial=True)
@@ -302,6 +316,7 @@ class Environment(_EnvironmentStubs):
             # After the baseline, so explain() attributes these by name.
             for preset in toolchain.setup_presets(self):
                 self.apply_from(toolchain, preset)
+            self._realize(self._runtime_intent(), [toolchain])
 
         # Always add standalone tools (install, archive)
         # These are tool-agnostic and always available
@@ -632,9 +647,9 @@ class Environment(_EnvironmentStubs):
         # It configures only the tools it brought: $FC from an added Fortran
         # toolchain must not retarget the primary toolchain's linker. Then it
         # realizes everything the script already asked for, for those tools,
-        # as if it had been there from the start: a variant replaces its own
-        # default (an added ifx gets /MDd, not /MD, under debug), and the
-        # environment keeps its variant name.
+        # as if it had been there from the start (an added ifx gets /MDd
+        # under debug, as cl does), and the environment keeps its variant
+        # name.
         current_variant = self.variant
         self._replaying = True
         try:
@@ -1243,6 +1258,8 @@ class Environment(_EnvironmentStubs):
                 continue
             if intent.kind == "arch":
                 raise _unrealized_arch(intent.name, [toolchain])
+            if intent.kind == "runtime" and intent.name != "shared":
+                raise _unrealized_runtime(intent.name, [toolchain])
             if (
                 intent.kind == "feature"
                 and not intent.kwargs.get("allow_partial")
@@ -1282,6 +1299,8 @@ class Environment(_EnvironmentStubs):
                 toolchain.make_variant_preset(intent.name, **intent.kwargs)
             for toolchain in toolchains:
                 toolchain.apply_variant(self, intent.name, **intent.kwargs)
+            # The runtime's debug build goes with the debug variant.
+            self._realize(self._runtime_intent(), toolchains, replaying=replaying)
             return True
         if kind == "target":
             cross = intent.args[0]
@@ -1289,6 +1308,28 @@ class Environment(_EnvironmentStubs):
                 toolchain.make_target_preset(cross)  # raises if it can't
             for toolchain in toolchains:
                 toolchain.apply_cross_preset(self, cross)
+            # Which runtimes there are depends on the platform built for.
+            self._realize(self._runtime_intent(), toolchains, replaying=replaying)
+            return True
+        if kind == "runtime":
+            runtimes = [(t, self._preset_for(t, intent)) for t in toolchains]
+            missing = [
+                t for t, preset in runtimes if preset is None and self._takes_part(t)
+            ]
+            # The shared runtimes are every driver's default, so a
+            # toolchain with nothing to say about them links them anyway.
+            if missing and intent.name != "shared":
+                raise _unrealized_runtime(intent.name, missing)
+            # Realized whether or not the script asked, so for the tools
+            # the environment has.
+            for toolchain, preset in runtimes:
+                if preset is not None:
+                    present = tuple(
+                        c for c in preset.contributions if self.has_tool(c.tool)
+                    )
+                    self.apply_from(
+                        toolchain, dataclasses.replace(preset, contributions=present)
+                    )
             return True
         if kind == "arch":
             arches = [(t, t.make_arch_preset(intent.name)) for t in toolchains]
@@ -1362,6 +1403,8 @@ class Environment(_EnvironmentStubs):
             return preset
         if kind == "setting":
             return toolchain.make_setting_preset(intent.name, *intent.args)
+        if kind == "runtime":
+            return toolchain.make_runtime_preset(intent.name, self.variant, self.target)
         raise ValueError(f"Unknown intent kind '{kind}'")
 
     def flags_realized_by(self, tool: str, toolchain: Toolchain) -> list[Any]:
@@ -1465,6 +1508,42 @@ class Environment(_EnvironmentStubs):
             self._record_intent(intent)
         else:
             self.target_arch = arch
+
+    def set_runtime_linkage(self, linkage: str) -> None:
+        """Link the language runtimes (the C and C++ runtimes, Fortran's)
+        shared, the default, or static.
+
+        Each toolchain links its own runtime that way: ``/MT`` in place of
+        ``/MD`` for an MSVC-ABI compiler (``/MTd`` under ``debug``),
+        ``-static-libgcc -static-libstdc++`` for GCC. A toolchain that
+        can't link its runtime that way is an error: clang on Apple's
+        platforms can't link it statically.
+
+        Args:
+            linkage: "shared" or "static".
+
+        Example:
+            env.set_runtime_linkage("static")
+        """
+        from pcons.core.preset import RUNTIME_LINKAGE_GROUP, RUNTIME_LINKAGES, Intent
+
+        if linkage not in RUNTIME_LINKAGES:
+            raise ValueError(
+                f"Unknown runtime linkage '{linkage}': it is "
+                f"{' or '.join(repr(k) for k in RUNTIME_LINKAGES)}."
+            )
+        intent = Intent("runtime", linkage, group=RUNTIME_LINKAGE_GROUP)
+        self._realize(intent, self.toolchains)
+        self._record_intent(intent)
+
+    @property
+    def runtime_linkage(self) -> str:
+        """How the language runtimes are linked: "shared" or "static"
+        (see :meth:`set_runtime_linkage`)."""
+        return self._runtime_intent().name
+
+    def _runtime_intent(self) -> Intent:
+        return next(i for i in reversed(self._intents) if i.kind == "runtime")
 
     def use_compiler_cache(self, tool: str | None = None) -> None:
         """Run the compile commands behind a compiler cache.
@@ -1642,10 +1721,17 @@ class Environment(_EnvironmentStubs):
             target = getattr(preset, "target_platform", None)
             self._check_retarget(target)
             intent = Intent("target", getattr(preset, "name", "target"), (preset,))
-            self._realize(intent, self.toolchains)
-            self._record_intent(intent)
+            # Set first: the runtime linkage, realized again with it, depends
+            # on the platform built for.
+            previous = (self._cross_preset, self._target)
             self._cross_preset = preset
             self._target = target
+            try:
+                self._realize(intent, self.toolchains)
+            except Exception:
+                self._cross_preset, self._target = previous
+                raise
+            self._record_intent(intent)
         else:
             logger.warning(
                 "No toolchains configured; cannot apply cross-preset '%s'",

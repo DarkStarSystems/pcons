@@ -331,6 +331,18 @@ class SwiftToolchain(UnixToolchain):
         takes no ``-fPIC``."""
         return []
 
+    STATIC_RUNTIME_LINK_FLAGS = ("-static-stdlib",)
+
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """Swift's runtime is part of Apple's systems, so it links static
+        only elsewhere. libstdc++ stays shared even then: swiftc links it
+        by name."""
+        if linkage == "static" and target.is_apple:
+            return None
+        return super()._runtime_contributions(linkage, variant, target)
+
     def make_feature_preset(
         self, name: str, target: Platform | None = None
     ) -> Preset | None:

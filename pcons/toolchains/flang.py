@@ -11,9 +11,9 @@ import subprocess
 import tempfile
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
+from pcons.core.preset import Preset, ToolContribution
 from pcons.toolchains.fortran import (
     FortranCompiler,
     FortranLinker,
@@ -24,7 +24,6 @@ from pcons.toolchains.unix import UnixToolchain, target_triple
 
 if TYPE_CHECKING:
     from pcons.configure.platform import Platform
-    from pcons.core.environment import Environment
     from pcons.tools.toolchain import BaseToolchain
 
 logger = logging.getLogger(__name__)
@@ -116,38 +115,6 @@ class FlangToolchain(FortranToolchain):
     def __init__(self) -> None:
         super().__init__("flang")
 
-    # On Windows, the C runtime each variant links: the DLL one, as
-    # pcons' MSVC and clang-cl builds use (/MD, /MDd), so Fortran and C/C++
-    # objects agree. flang's own default is the static one.
-    WINDOWS_CRT = {"debug": "dll_dbg"}
-    WINDOWS_DEFAULT_CRT = "dll"
-
-    @staticmethod
-    def _crt_flag(crt: str) -> ToolContribution:
-        return ToolContribution("fc", flags=(f"-fms-runtime-lib={crt}",))
-
-    def setup_presets(self, env: Environment) -> list[Preset]:
-        """The DLL C runtime from the start, targeting MSVC."""
-        presets = super().setup_presets(env)
-        if self.abi != "msvc":
-            return presets
-        crt = Preset(
-            name="default",
-            category="variant",
-            exclusive_group=VARIANT_GROUP,
-            contributions=(self._crt_flag(self.WINDOWS_DEFAULT_CRT),),
-        )
-        return [*presets, crt]
-
-    def _variant_contributions(
-        self, variant: str, **kwargs: Any
-    ) -> list[ToolContribution]:
-        contribs = super()._variant_contributions(variant, **kwargs)
-        if self.abi == "msvc":
-            crt = self.WINDOWS_CRT.get(variant.lower(), self.WINDOWS_DEFAULT_CRT)
-            contribs.append(self._crt_flag(crt))
-        return contribs
-
     def make_feature_preset(
         self, name: str, target: Platform | None = None
     ) -> Preset | None:
@@ -165,6 +132,28 @@ class FlangToolchain(FortranToolchain):
             lld = ToolContribution("link", flags=("-fuse-ld=lld",))
             preset = replace(preset, contributions=(*preset.contributions, lld))
         return preset
+
+    STATIC_RUNTIME_LINK_FLAGS = ("-static-libflangrt",)
+
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """flang links its runtime static only where it has the archive:
+        Homebrew's flang has only the shared one."""
+        contribs = super()._runtime_contributions(linkage, variant, target)
+        if (
+            linkage == "static"
+            and not self._targets_msvc_abi(target)
+            and not self.has_static_runtime
+        ):
+            return None
+        return contribs
+
+    @functools.cached_property
+    def has_static_runtime(self) -> bool:
+        """Whether flang's runtime directory has the static flang-rt."""
+        libdir = self.runtime_libdir
+        return libdir is not None and (Path(libdir) / "libflang_rt.runtime.a").is_file()
 
     @property
     def objects_name_runtimes(self) -> bool:

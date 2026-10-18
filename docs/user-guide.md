@@ -334,7 +334,7 @@ The compilers differ in a few ways:
 On Windows, each compiler mixes with the C and C++ compilers that share its ABI:
 
 - **gfortran** (MSYS2's MinGW build) is GNU-ABI, so it mixes only with MinGW's gcc and g++. Pure Fortran works with any setup.
-- **flang** and **ifx** are MSVC-ABI and mix with MSVC and clang-cl. They use the DLL C runtime (`/MD`, `/MDd` for debug), as pcons' MSVC builds do. ifx takes MSVC-style options (`/module:`, `/warn:all`) and links with `link.exe`. A program with ifx-compiled sources is linked as a console program (`/SUBSYSTEM:CONSOLE`), since its Fortran main is in Intel's runtime; a C++ `WinMain` program with Fortran sources sets `/SUBSYSTEM:WINDOWS` in `env.link.flags`. The official LLVM installer for Windows doesn't include flang; conda-forge's `flang` package does. Visual Studio's bundled LLVM has a `flang.exe` without its intrinsic modules, so pcons doesn't use it (and says why).
+- **flang** and **ifx** are MSVC-ABI and mix with MSVC and clang-cl. They use the DLL C runtime (`/MD`, `/MDd` for debug), as pcons' MSVC builds do, or the static one with `env.set_runtime_linkage("static")`. ifx takes MSVC-style options (`/module:`, `/warn:all`) and links with `link.exe`. A program with ifx-compiled sources is linked as a console program (`/SUBSYSTEM:CONSOLE`), since its Fortran main is in Intel's runtime; a C++ `WinMain` program with Fortran sources sets `/SUBSYSTEM:WINDOWS` in `env.link.flags`. The official LLVM installer for Windows doesn't include flang; conda-forge's `flang` package does. Visual Studio's bundled LLVM has a `flang.exe` without its intrinsic modules, so pcons doesn't use it (and says why).
 
 A Windows DLL exports only what it's told to. flang ignores `!DIR$ ATTRIBUTES DLLEXPORT`, so a flang DLL exports nothing unless its routines are listed: give them `BIND(C)` and name them in `exported_symbols` (see [Exporting Only Some Symbols](#exporting-only-some-symbols)). A DLL that exports nothing has no import library, and a program linking it fails with "no such file" for its `.lib`. ifx honors the directive.
 
@@ -1710,6 +1710,42 @@ previous variant's flags rather than piling on top of them, so
 `env.set_variant("release")` followed by `env.set_variant("debug")` switches
 cleanly. To build both variants side by side, clone the environment (see
 [Environment Cloning](#environment-cloning)).
+
+### Static Runtimes
+
+A program links its language runtimes, the C and C++ runtimes and
+Fortran's, as shared libraries unless you ask otherwise:
+
+```python
+env.set_runtime_linkage("static")
+```
+
+Each compiler links its own runtime that way:
+
+| Compiler | `"shared"` (the default) | `"static"` |
+|---|---|---|
+| MSVC, clang-cl, ifx on Windows | `/MD` (`/MDd` under `debug`) | `/MT` (`/MTd`) |
+| clang and flang for the MSVC ABI | `-fms-runtime-lib=dll` (`dll_dbg`) | `-fms-runtime-lib=static` (`static_dbg`) |
+| GCC, and clang on Linux and MinGW | | `-static-libgcc -static-libstdc++` |
+| gfortran | | `-static-libgfortran -static-libquadmath -static-libgcc` |
+| flang | | `-static-libflangrt` |
+| ifx on Linux | | `-static-intel -static-libgcc` |
+| Swift on Linux | | `-static-stdlib`: Swift's own runtime, while libstdc++ stays shared |
+
+It applies to every compiler in the environment, or raises. On Windows
+the compilers' objects have to agree on one C runtime, and the Conan
+profile pcons writes says the same (`compiler.runtime=static`). The
+default is the DLL runtime, as it is for CMake and Conan, though the
+compilers' own default is the static one.
+
+On Apple's platforms, clang links the system's libc++, which is shared
+only, so it can't, and neither can Swift there. Homebrew's flang can't
+either: it ships only the shared flang-rt. GCC and gfortran from Homebrew
+can. The system's own libraries stay shared in every case: this isn't
+`-static`. With MinGW's GCC, that includes `libwinpthread-1.dll`, which
+the static libstdc++ uses; `-static` in `env.link.flags` links it in too.
+Some Linux distributions package the static runtimes separately: on
+Fedora, install `libstdc++-static`.
 
 ### Where Did This Flag Come From? (`pcons explain`)
 

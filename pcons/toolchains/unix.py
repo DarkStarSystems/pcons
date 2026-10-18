@@ -15,7 +15,7 @@ from pcons.configure.platform import Platform, get_platform
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
-from pcons.toolchains._msvc_compat import module_definition
+from pcons.toolchains._msvc_compat import module_definition, msvc_crt
 from pcons.toolchains.gnu_common import (
     GNU_COMPILE_PATH_FLAGS,
     GNU_LINK_PATH_FLAGS,
@@ -52,6 +52,18 @@ def abi_from_triple(triple: str) -> str | None:
     if triple.endswith("-gnu") or "mingw" in triple:
         return "mingw"
     return None
+
+
+def static_archive(lib: str, platform: Platform) -> str:
+    """The static archive of library *lib*, in GNU ld's explicit file name
+    form (``:libstdc++.a``), for a link whose driver doesn't link that
+    runtime itself. Apple's linker has no such form."""
+    if platform.is_apple:
+        raise ValueError(
+            f"On Apple's platforms, only its own language's driver can link "
+            f"lib{lib} static: set the target's link_language to that language."
+        )
+    return f":lib{lib}.a"
 
 
 @functools.cache
@@ -676,8 +688,11 @@ class UnixToolchain(BaseToolchain):
             return LinkNeeds()
         if link_language in ("cxx", "objcxx", "cuda"):
             return LinkNeeds()
-        apple = self._target_platform(target).is_apple
-        return LinkNeeds(libs=("c++",) if apple else ("stdc++",))
+        platform = self._target_platform(target)
+        lib = "c++" if platform.is_apple else "stdc++"
+        if env.runtime_linkage == "static":
+            return LinkNeeds(libs=(static_archive(lib, platform),))
+        return LinkNeeds(libs=(lib,))
 
     def realize_link_needs(
         self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
@@ -754,3 +769,35 @@ class UnixToolchain(BaseToolchain):
         if "-g" in flags and self.abi == "msvc":
             contribs.append(ToolContribution("link", flags=("-g",)))
         return contribs
+
+    # What links this toolchain's runtimes statically, on its link driver:
+    # -static-libgcc -static-libstdc++ for GCC's. None if it can't.
+    STATIC_RUNTIME_LINK_FLAGS: ClassVar[tuple[str, ...] | None] = None
+
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """Targeting MSVC, the C runtime msvc_crt chooses, on each compile
+        tool (``-fms-runtime-lib``). Otherwise the drivers link the shared
+        runtimes by default, and STATIC_RUNTIME_LINK_FLAGS the static ones.
+        clang on Apple's platforms links the system's libc++, which is
+        shared only."""
+        if self._targets_msvc_abi(target):
+            flag = f"-fms-runtime-lib={msvc_crt(linkage, variant)}"
+            return [
+                ToolContribution(tool, flags=(flag,))
+                for tool in self._feature_preset_tools()
+            ]
+        if linkage == "shared":
+            return []
+        if target.is_apple and (
+            self.IS_CLANG_DRIVER or self._compiler_is_apple_clang()
+        ):
+            raise ValueError(
+                f"{self.name} can't link its runtime static: on Apple's "
+                f"platforms, clang links the system's C++ runtime, which is "
+                f"shared only."
+            )
+        if self.STATIC_RUNTIME_LINK_FLAGS is None:
+            return None
+        return [ToolContribution("link", flags=self.STATIC_RUNTIME_LINK_FLAGS)]

@@ -191,6 +191,7 @@ class ConanFinder(BaseFinder):
         self,
         toolchain: Toolchain | None = None,
         build_type: str = "Release",
+        runtime_linkage: str = "shared",
     ) -> dict[str, str]:
         """Detect compiler settings for Conan profile.
 
@@ -198,6 +199,8 @@ class ConanFinder(BaseFinder):
             toolchain: Optional toolchain to get settings from.
             build_type: Build type, used to derive compiler.runtime_type
                 for MSVC (mandatory in Conan 2 profiles).
+            runtime_linkage: The environment's runtime linkage, which is
+                compiler.runtime for MSVC.
 
         Returns:
             Dict of Conan settings.
@@ -248,13 +251,17 @@ class ConanFinder(BaseFinder):
                     settings["compiler.libcxx"] = "libc++"
                 elif self._platform.is_windows:
                     settings.update(
-                        self._windows_clang_settings(compiler_cmd, build_type)
+                        self._windows_clang_settings(
+                            compiler_cmd, build_type, runtime_linkage
+                        )
                     )
                 else:
                     settings["compiler.libcxx"] = "libstdc++11"
             elif "msvc" in compiler_name:
                 settings["compiler"] = "msvc"
-                settings.update(self._msvc_runtime_settings(build_type))
+                settings.update(
+                    self._msvc_runtime_settings(build_type, runtime_linkage)
+                )
         else:
             # Default to system compiler detection
             if self._platform.is_macos:
@@ -272,7 +279,7 @@ class ConanFinder(BaseFinder):
         return settings
 
     def _windows_clang_settings(
-        self, compiler_cmd: str | None, build_type: str
+        self, compiler_cmd: str | None, build_type: str, runtime_linkage: str
     ) -> dict[str, str]:
         """Settings for clang on Windows: the MSVC runtime it links against.
 
@@ -293,20 +300,21 @@ class ConanFinder(BaseFinder):
                 target,
             )
             return {"compiler.libcxx": "libstdc++11"}
-        settings = self._msvc_runtime_settings(build_type)
+        settings = self._msvc_runtime_settings(build_type, runtime_linkage)
         settings["compiler.runtime_version"] = self._conan_runtime_version(
             find_msvc_toolset_version()
         )
         return settings
 
     @staticmethod
-    def _msvc_runtime_settings(build_type: str) -> dict[str, str]:
+    def _msvc_runtime_settings(build_type: str, runtime_linkage: str) -> dict[str, str]:
         """The runtime settings Conan 2 requires for msvc, and for clang
-        targeting MSVC. pcons links the dynamic CRT (/MD, /MDd); the debug
-        vs. release runtime follows the build type.
+        targeting MSVC: the C runtime pcons builds with, dynamic unless the
+        environment's runtime linkage is static, with the debug vs. release
+        runtime following the build type.
         """
         return {
-            "compiler.runtime": "dynamic",
+            "compiler.runtime": "static" if runtime_linkage == "static" else "dynamic",
             "compiler.runtime_type": "Debug" if build_type == "Debug" else "Release",
         }
 
@@ -565,7 +573,11 @@ class ConanFinder(BaseFinder):
 
         if build_type is None:
             build_type = self.build_type_for(env)
-        settings = self._detect_compiler_settings(toolchain, build_type)
+        settings = self._detect_compiler_settings(
+            toolchain,
+            build_type,
+            env.runtime_linkage if env is not None else "shared",
+        )
         settings["build_type"] = build_type
 
         # Explicit parameter wins, then infer from env
