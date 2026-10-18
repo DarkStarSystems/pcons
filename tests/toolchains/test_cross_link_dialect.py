@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: MIT
 """A cross build links the way its target's linker wants, not the host's.
 
-An Android shared library linked on a Mac takes -shared, a link group and a
-version script; one built for macOS from Linux takes -dynamiclib, no group
-and a symbol list. The host is pinned by patching where env.target reads it.
+An Android shared library linked on a Mac takes a link group and a version
+script; one built for macOS from Linux takes no group and a symbol list. The host is pinned by patching where env.target reads it.
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ def _env(host, preset, toolchain) -> Environment:
             config.set("cmd", cmd)
             config.set("flags", [])
             config.set("defines", [])
-        env.link.set("sharedflag", "-host-default")
         env._toolchain = toolchain
         env.apply_cross_preset(preset)
     return env
@@ -43,9 +41,6 @@ class TestAndroidFromAMac:
     @pytest.fixture
     def env(self, test_project):  # noqa: F811
         return _env(MAC_HOST, android(ndk="/fake/ndk", api=35), GccToolchain())
-
-    def test_shared_library_flag(self, env):
-        assert env.link.sharedflag == "-shared"
 
     def test_archives_in_a_cycle_are_grouped(self, env):
         archive = PathToken(path="liba.a", path_type="build")
@@ -74,9 +69,6 @@ class TestMacosFromLinux:
         return _env(
             LINUX_HOST, linux_cross(triple="arm64-apple-darwin"), LlvmToolchain()
         )
-
-    def test_shared_library_flag(self, env):
-        assert env.link.sharedflag == "-dynamiclib"
 
     def test_archives_in_a_cycle_need_no_group(self, env):
         archive = PathToken(path="liba.a", path_type="build")

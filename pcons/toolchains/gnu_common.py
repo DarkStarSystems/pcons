@@ -86,13 +86,8 @@ def _link_tail() -> list[object]:
         "${prefix(link.Lprefix, link.libdirs)}",
         "${prefix(link.lprefix, link.libs)}",
         "${prefix(link.Fprefix, link.frameworkdirs)}",
-        "${pairwise(link.fprefix, link.frameworks)}",
+        "${prefix(link.fprefix, link.frameworks)}",
     ]
-
-
-def shared_library_flag(platform: Platform) -> str:
-    """The driver flag that links a shared library for *platform*."""
-    return "-dynamiclib" if platform.is_apple else "-shared"
 
 
 def needs_pic(target_type: str, platform: Platform) -> bool:
@@ -135,24 +130,25 @@ def require_cross_binaries(
 def gnu_link_vars(cmd: str) -> dict[str, object]:
     """Default vars for a GNU-style link tool (gcc/clang/gfortran).
 
-    ``sharedflag`` is the host's; a cross preset that names its target
-    platform sets it for that platform (UnixToolchain.apply_cross_preset).
-
     Args:
         cmd: Default linker command (e.g. "gcc", "clang", "gfortran").
     """
     return {
         "cmd": cmd,
         "flags": [],
-        "sharedflag": shared_library_flag(get_platform()),
+        # Every GNU-style driver takes -shared, for Mach-O too (flang
+        # takes nothing else).
+        "sharedflag": "-shared",
         "lprefix": "-l",
         "libs": [],
         "Lprefix": "-L",
         "libdirs": [],
-        # Framework support (macOS only, but always defined for portability)
-        "Fprefix": "-F",
+        # Framework support (macOS only, but always defined for portability).
+        # Passed to the linker with -Wl, which every GNU-style driver
+        # takes: flang's takes neither -framework nor -F itself.
+        "Fprefix": "-Wl,-F",
         "frameworkdirs": [],
-        "fprefix": "-framework",
+        "fprefix": "-Wl,-framework,",
         "frameworks": [],
         "progcmd": ["$link.cmd", "$link.flags", *_link_tail()],
         "sharedcmd": ["$link.cmd", "$link.sharedflag", "$link.flags", *_link_tail()],

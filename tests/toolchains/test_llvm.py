@@ -102,16 +102,12 @@ class TestLlvmLinker:
         assert "progcmd" in vars
         assert "sharedcmd" in vars
 
-    def test_shared_flag_platform_specific(self):
-        """The host's flag by default; the command reads it through a
-        variable so a cross preset can retarget it."""
+    def test_shared_flag_is_the_same_everywhere(self):
+        """-shared links a shared library for every target, Mach-O too."""
         link = LlvmLinker()
         vars = link.default_vars()
         assert "$link.sharedflag" in vars["sharedcmd"]
-        if get_platform().is_macos:
-            assert vars["sharedflag"] == "-dynamiclib"
-        else:
-            assert vars["sharedflag"] == "-shared"
+        assert vars["sharedflag"] == "-shared"
 
     def test_builders(self):
         link = LlvmLinker()

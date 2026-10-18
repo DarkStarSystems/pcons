@@ -16,7 +16,7 @@ from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 from pcons.toolchains._msvc_compat import module_definition
-from pcons.toolchains.gnu_common import needs_pic, shared_library_flag
+from pcons.toolchains.gnu_common import needs_pic
 from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 from pcons.util.macos import apple_sdk_for_triple
 
@@ -138,15 +138,6 @@ class UnixToolchain(BaseToolchain):
                 f'toolchain="wasi".'
             )
         return super().make_target_preset(cross)
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross preset, and the target's shared-library flag."""
-        super().apply_cross_preset(env, preset)
-        # The shared-library flag is the target's, not the host's: an Android
-        # library linked on a Mac takes -shared, not -dynamiclib.
-        target = getattr(preset, "target_platform", None)
-        if target is not None and env.has_tool("link") and "sharedflag" in env.link:
-            env.link.sharedflag = shared_library_flag(target)
 
     # Named feature presets; see docs/presets.md.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
