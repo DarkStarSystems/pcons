@@ -202,7 +202,7 @@ class TestMakefilePathFlags:
 
         content = self._makefile(project, tmp_path)
 
-        assert f"-I{tmp_path / 'vendor'}" in content
+        assert f"-I{(tmp_path / 'vendor').as_posix()}" in content
         assert "-Ivendor " not in content
 
     def test_separate_token_form(self, tmp_path, gcc_toolchain):
@@ -212,7 +212,7 @@ class TestMakefilePathFlags:
 
         content = self._makefile(project, tmp_path)
 
-        assert f"-isystem {tmp_path / 'vendor'}" in content
+        assert f"-isystem {(tmp_path / 'vendor').as_posix()}" in content
 
     def test_relative_argument_is_left_alone(self, tmp_path, gcc_toolchain):
         project = _project_with_flags(
