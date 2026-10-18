@@ -2,9 +2,11 @@
 """Relativizing paths carried in compiler flags, in both spellings."""
 
 import logging
+from pathlib import Path
 
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator
+from pcons.generators.makefile import MakefileGenerator
 from pcons.generators.ninja import NinjaGenerator
 
 
@@ -117,6 +119,109 @@ class TestPathFlagRelativization:
             _generate(project, tmp_path)
 
         assert "not relocatable" not in caplog.text
+
+
+class TestPathFlagsPerTool:
+    """Each command is checked for the path flags of its own tool, from the
+    toolchain that owns it, and no others."""
+
+    @staticmethod
+    def _msvc_build(tmp_path: Path, script) -> str:
+        from pcons.toolchains.msvc import (
+            MsvcCompiler,
+            MsvcLibrarian,
+            MsvcLinker,
+            MsvcToolchain,
+        )
+
+        toolchain = MsvcToolchain()
+        toolchain._tools = {
+            t.name: t for t in (MsvcCompiler(), MsvcLinker(), MsvcLibrarian())
+        }
+        toolchain._configured = True
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=toolchain)
+        script(project, env)
+        return _generate(project, tmp_path)
+
+    def test_link_options_that_start_like_cl_include_flag(self, tmp_path):
+        """link.exe's /INCREMENTAL:NO and /INFERASANLIBS start like cl's
+        /I, which a link line isn't checked for: before, they came out as
+        /I../NCREMENTAL:NO. Its /LIBPATH: is still rewritten, and so is
+        cl's /I on the compile line."""
+
+        def script(project, env):
+            env.cc.flags.append("/Iinclude")
+            env.link.flags += ["/INCREMENTAL:NO", "/INFERASANLIBS", "/LIBPATH:lib"]
+            project.Program("hello", env, sources=["hello.c"])
+
+        content = self._msvc_build(tmp_path, script)
+        assert "/INCREMENTAL:NO /INFERASANLIBS" in content
+        assert '"/LIBPATH:$topdir/lib"' in content
+        assert '"/I$topdir/include"' in content
+
+    def test_a_command_is_as_written(self, tmp_path):
+        """A Command's tool belongs to no toolchain, so its strings are
+        passed as written, whichever toolchains the project has."""
+
+        def script(project, env):
+            env.Command(
+                target="out.txt",
+                source="hello.c",
+                command="tool /Iinclude -Iinclude $SOURCE $TARGET",
+            )
+
+        content = self._msvc_build(tmp_path, script)
+        assert "tool /Iinclude -Iinclude $in $out" in content
+
+    def test_each_tool_has_its_own(self, gcc_toolchain, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        assert "-isystem" in BaseGenerator._path_flags(env, "cc")
+        assert "-L" not in BaseGenerator._path_flags(env, "cc")
+        assert "-L" in BaseGenerator._path_flags(env, "link")
+        assert "-I" not in BaseGenerator._path_flags(env, "link")
+        assert BaseGenerator._path_flags(env, "ar") == frozenset()
+        assert BaseGenerator._path_flags(env, "install") == frozenset()
+
+
+class TestMakefilePathFlags:
+    """make runs in the build directory too, so it rewrites the same flags."""
+
+    @staticmethod
+    def _makefile(project: Project, tmp_path) -> str:
+        MakefileGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "Makefile").read_text()
+
+    def test_relative_include_flag(self, tmp_path, gcc_toolchain):
+        """Before, make got -Ivendor as written, which from the build
+        directory isn't the project's vendor directory."""
+        project = _project_with_flags(tmp_path, gcc_toolchain, ["-Ivendor"])
+
+        content = self._makefile(project, tmp_path)
+
+        assert f"-I{tmp_path / 'vendor'}" in content
+        assert "-Ivendor " not in content
+
+    def test_separate_token_form(self, tmp_path, gcc_toolchain):
+        project = _project_with_flags(
+            tmp_path, gcc_toolchain, ["-isystem", str(tmp_path / "vendor")]
+        )
+
+        content = self._makefile(project, tmp_path)
+
+        assert f"-isystem {tmp_path / 'vendor'}" in content
+
+    def test_relative_argument_is_left_alone(self, tmp_path, gcc_toolchain):
+        project = _project_with_flags(
+            tmp_path, gcc_toolchain, ["-include", "arm_acle.h"]
+        )
+
+        content = self._makefile(project, tmp_path)
+
+        assert "-include arm_acle.h" in content
 
 
 class TestAuxiliaryInputRelativization:

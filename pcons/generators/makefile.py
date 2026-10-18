@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, Any, TextIO, cast
 from pcons.core.node import AliasNode, FileNode, Node
 from pcons.core.paths import PathResolver
 from pcons.core.subst import PathToken
-from pcons.generators.generator import BaseGenerator, apply_context_overrides
+from pcons.generators.generator import (
+    BaseGenerator,
+    apply_context_overrides,
+    relativize_path_flag,
+)
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -300,6 +304,7 @@ class MakefileGenerator(BaseGenerator):
                     custom_command,
                     cwd=cwd,
                     node_vars=cast("dict[str, object] | None", build_info.get("vars")),
+                    path_flags=self._path_flags(env, tool_name),
                 )
 
                 # Expand $SOURCES/$TARGET before to_shell_command() so each
@@ -376,6 +381,7 @@ class MakefileGenerator(BaseGenerator):
             relativized_tokens = self._process_path_tokens(
                 tokens,
                 node_vars=cast("dict[str, object] | None", build_info.get("vars")),
+                path_flags=self._path_flags(env, tool_name),
             )
 
             # Expand $SOURCES/$TARGET before to_shell_command() so each
@@ -711,8 +717,10 @@ class MakefileGenerator(BaseGenerator):
         *,
         cwd: Path | None = None,
         node_vars: dict[str, object] | None = None,
+        path_flags: frozenset[str] = frozenset(),
     ) -> list:
-        """Relativize PathTokens in a command token list for make.
+        """Relativize PathTokens in a command token list for make, and the
+        paths in plain strings that start with one of *path_flags*.
 
         SourcePath/TargetPath markers pass through unchanged for
         _expand_source_target_tokens() to handle. A NodeVar expands to its
@@ -738,7 +746,15 @@ class MakefileGenerator(BaseGenerator):
             return self._text(path, built=False, cwd=cwd)
 
         result: list = []
+        expect_path = False
         for token in tokens:
+            if expect_path:
+                # A path flag's argument as the next token ("-isystem",
+                # "/abs/path"), rewritten only when absolute, as ninja does.
+                expect_path = False
+                if isinstance(token, str) and Path(token).is_absolute():
+                    result.append(relativize(token))
+                    continue
             if isinstance(token, (SourcePath, TargetPath)):
                 result.append(token)
             elif isinstance(token, PathToken):
@@ -750,8 +766,10 @@ class MakefileGenerator(BaseGenerator):
                 # $SRCDIR is the project top, as the command sees it
                 if "$SRCDIR" in s:
                     top = self._text(self._resolver.project_root, built=False, cwd=cwd)
-                    s = s.replace("$SRCDIR", top)
-                result.append(s)
+                    result.append(s.replace("$SRCDIR", top))
+                    continue
+                expect_path = s in path_flags
+                result.append(relativize_path_flag(s, path_flags, relativize))
         return result
 
     def _expand_source_target_tokens(

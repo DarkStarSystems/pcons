@@ -26,7 +26,11 @@ from pcons.core.debug import trace, trace_value
 from pcons.core.node import AliasNode, FileNode, Node
 from pcons.core.paths import PathResolver
 from pcons.core.subst import NodeVar, PathToken
-from pcons.generators.generator import BaseGenerator, apply_context_overrides
+from pcons.generators.generator import (
+    BaseGenerator,
+    apply_context_overrides,
+    relativize_path_flag,
+)
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -1000,46 +1004,6 @@ class NinjaGenerator(BaseGenerator):
         # Escape special characters
         return self.ESCAPE_CHARS.sub(r"$\1", path_str)
 
-    def _relativize_flag_with_path(
-        self, token: str, path_flags: frozenset[str], *, cwd: Path | None = None
-    ) -> str:
-        """Relativize a path-carrying flag (``-I<path>``, ``/LIBPATH:<path>``)
-        the same way as any other path in the command — $topdir form, "." for
-        the build dir, or relative to the edge's *cwd*.
-
-        Returns the token unchanged if it isn't one of *path_flags*, or if the
-        path can't be made project-relative (it lives outside the tree).
-        """
-        prefix = self._path_flag_prefix(token, path_flags)
-        if prefix is None:
-            return token
-        path = token[len(prefix) :]
-        if not path:
-            return token
-        # "--sysroot=<path>": the "=" joins the flag to its argument and
-        # is no part of the path. Left in, the path reads as relative and
-        # comes back as "--sysroot../=/opt/sdk".
-        if path.startswith("="):
-            prefix += "="
-            path = path[1:]
-            if not path:
-                return token
-        # Outside the project tree (an SDK, a system prefix), the path comes
-        # back absolute — the only thing it can be.
-        return f"{prefix}{self._text(path, built=False, cwd=cwd)}"
-
-    @staticmethod
-    def _path_flag_prefix(token: str, path_flags: frozenset[str]) -> str | None:
-        """The path flag *token* starts with, if any.
-
-        Longest match wins, so ``/external:I`` isn't mistaken for a token that
-        merely starts with ``/e``.
-        """
-        matches = [p for p in path_flags if token.startswith(p)]
-        if not matches:
-            return None
-        return max(matches, key=len)
-
     def _warn_build_dir_in_command(self, token: str) -> None:
         """Warn once about a build-dir-relative path written into a command.
 
@@ -1236,7 +1200,9 @@ class NinjaGenerator(BaseGenerator):
                     continue
                 # A bare path flag takes its path as the next token
                 expect_path = s in path_flags
-                relativized = self._relativize_flag_with_path(s, path_flags, cwd=cwd)
+                relativized = relativize_path_flag(
+                    s, path_flags, lambda p: self._text(p, built=False, cwd=cwd)
+                )
                 if relativized.startswith("-"):
                     self._warn_absolute_in_tree(relativized, path_flags)
                 if cwd is None:

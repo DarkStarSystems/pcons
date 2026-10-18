@@ -70,6 +70,37 @@ def apply_context_overrides(
     return result
 
 
+def relativize_path_flag(
+    token: str, path_flags: frozenset[str], text: Callable[[str], str]
+) -> str:
+    """*token* with the path in it rewritten by *text*, if it starts with
+    one of *path_flags* (``-I<path>``, ``/LIBPATH:<path>``); otherwise as
+    it is.
+
+    A flag written as plain text carries a path relative to the project
+    top or absolute, while the command runs elsewhere, so every generator
+    rewrites it the same way it writes any other path.
+    """
+    matches = [p for p in path_flags if token.startswith(p)]
+    if not matches:
+        return token
+    # Longest match wins, so /external:I isn't mistaken for a token that
+    # merely starts with /e.
+    prefix = max(matches, key=len)
+    path = token[len(prefix) :]
+    # "--sysroot=<path>": the "=" joins the flag to its argument and is no
+    # part of the path. Left in, the path reads as relative and comes back
+    # as "--sysroot../=/opt/sdk".
+    if path.startswith("="):
+        prefix += "="
+        path = path[1:]
+    if not path:
+        return token
+    # Outside the project tree (an SDK, a system prefix), the path comes
+    # back absolute: the only thing it can be.
+    return f"{prefix}{text(path)}"
+
+
 @runtime_checkable
 class Generator(Protocol):
     """Protocol for build file generators.

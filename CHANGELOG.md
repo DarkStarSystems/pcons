@@ -162,6 +162,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the path flags that tool takes: `/LIBPATH:` on a link line, `/I` on a
   compile line. Before, every command was checked for the path flags of
   every toolchain in the project.
+- The Makefile generator rewrites the paths in flags written as plain
+  text, as the ninja generator does. `-Iinclude` in `env.cc.flags` reached
+  the compiler as written, and make runs in the build directory, so the
+  compiler looked for `build/include`.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named
