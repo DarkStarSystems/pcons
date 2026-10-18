@@ -10,6 +10,8 @@ and JSON manifest generation. The runner is tested separately in
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -150,6 +152,48 @@ class TestSpecFinalization:
         program_arg = spec.command[0]
         assert not program_arg.startswith("/")
         assert not program_arg.startswith("build/")
+
+
+class TestArgumentFiles:
+    """A Target or Path among the args names a file, written as the test
+    sees it from where it runs."""
+
+    def test_a_target_argument_is_its_built_file(self, project):
+        proj, _env, prog = project
+        t = proj.Test("driven", "python3", args=["check.py", prog, "--fast"])
+        proj.resolve()
+
+        assert prog in t.dependencies
+        prog_text = "prog.exe" if sys.platform == "win32" else "./prog"
+        assert t._builder_data["spec"].command[1:] == ["check.py", prog_text, "--fast"]
+
+    def test_a_path_argument_is_read_from_the_script(self, project, tmp_path):
+        proj, _env, prog = project
+        t = proj.Test("data", prog, args=[Path("cases.txt")])
+        proj.resolve()
+
+        written = t._builder_data["spec"].command[1]
+        assert (tmp_path / "build" / written).resolve() == tmp_path / "cases.txt"
+
+    def test_files_are_written_from_the_tests_cwd(self, project, tmp_path):
+        proj, _env, prog = project
+        cwd = tmp_path / "run"
+        t = proj.Test("cwd", "python3", args=[Path("cases.txt"), prog], cwd=cwd)
+        proj.resolve()
+
+        data, program = t._builder_data["spec"].command[1:]
+        assert (cwd / data).resolve() == tmp_path / "cases.txt"
+        assert (cwd / program).resolve().name.startswith("prog")
+
+    def test_set_test_property_takes_files_too(self, project):
+        proj, _env, prog = project
+        t = proj.Test("later", "python3")
+        set_test_property(t, "args", [prog])
+        proj.resolve()
+
+        program = t._builder_data["spec"].command[1]
+        assert prog in t.dependencies
+        assert program.endswith("prog.exe" if sys.platform == "win32" else "prog")
 
 
 class TestManifestSerialization:

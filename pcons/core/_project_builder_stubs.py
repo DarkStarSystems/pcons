@@ -419,7 +419,7 @@ if TYPE_CHECKING:
             name: str,
             program: Target | Path | str,
             *,
-            args: Sequence[str] = (),
+            args: Sequence[str | Path | Target] = (),
             cwd: Path | str | None = None,
             env: dict[str, str] | None = None,
             labels: Sequence[str] = (),

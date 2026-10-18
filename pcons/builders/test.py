@@ -20,9 +20,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.configure.platform import get_platform
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsError
+from pcons.core.paths import executable_form
 from pcons.core.target import Target
-from pcons.core.test import TestSpec
+from pcons.core.test import TestSpec, test_args
 from pcons.util.source_location import get_caller_location
 
 logger = logging.getLogger(__name__)
@@ -77,7 +80,7 @@ class TestNodeFactory:
 
         spec = TestSpec(
             name=partial["name"],
-            command=[program_path, *partial["args"]],
+            command=[program_path, *self._args_text(partial, cwd_value)],
             cwd=cwd_value,
             env=dict(partial["env"]),
             labels=tuple(partial["labels"]),
@@ -97,6 +100,31 @@ class TestNodeFactory:
 
     def resolve_pending(self, target: Target) -> None:  # noqa: ARG002
         """Test targets have no pending sources to resolve."""
+
+    def _args_text(self, partial: dict, cwd: Path | None) -> list[str]:
+        """The test's arguments, with each file written as seen from where
+        the test runs: *cwd*, or the build directory."""
+        resolver = self.project.top_path_resolver
+        text: list[str] = []
+        for arg in partial["args"]:
+            if isinstance(arg, Target):
+                if not arg.output_nodes:
+                    raise PconsError(
+                        f"Test '{partial['name']}': argument target "
+                        f"'{arg.name}' builds no file to name."
+                    )
+                # Written to run as a program, which "./tool" still is as
+                # a file name.
+                arg = executable_form(
+                    resolver.path_text(
+                        arg.output_nodes[0].path, built=True, run_dir=cwd
+                    ),
+                    windows=get_platform().is_windows,
+                )
+            elif isinstance(arg, Path):
+                arg = resolver.path_text(arg, built=False, run_dir=cwd)
+            text.append(arg)
+        return text
 
     def _format_path(self, path: Path) -> str:
         """Render a program path relative to the build directory if possible.
@@ -129,7 +157,7 @@ class TestBuilder:
         name: str,
         program: Target | Path | str,
         *,
-        args: Sequence[str] = (),
+        args: Sequence[str | Path | Target] = (),
         cwd: Path | str | None = None,
         env: dict[str, str] | None = None,
         labels: Sequence[str] = (),
@@ -153,7 +181,10 @@ class TestBuilder:
                 so a Catch2 sentence or a gtest name with colons is fine.
             program: The thing to run. A Target (typically from
                 ``project.Program``), a path, or a string command name.
-            args: Arguments passed after the program.
+            args: Arguments passed after the program. A ``Path`` is a
+                file, read like ``sources=``, and a ``Target`` the file it
+                builds, which the test depends on; both are written as
+                the test sees them from where it runs.
             cwd: Working directory for the test process. Defaults to the
                 build directory.
             env: Extra environment variables for the test process.
@@ -211,7 +242,7 @@ class TestBuilder:
             "spec_partial": {
                 "name": name,
                 "program": program,
-                "args": [str(a) for a in args],
+                "args": [],
                 "cwd": cwd,
                 "env": dict(env) if env else {},
                 "labels": tuple(labels),
@@ -232,5 +263,6 @@ class TestBuilder:
         # and so the Ninja `test-build` phony pulls it in transitively.
         if isinstance(program, Target):
             target.depends(program)
+        target._builder_data["spec_partial"]["args"] = test_args(target, args)
 
         return target
