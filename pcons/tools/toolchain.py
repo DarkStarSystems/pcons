@@ -1118,39 +1118,56 @@ class BaseToolchain(ABC):
         wasi) override this without calling super(), deliberately ignoring
         the env vars — the CMake/Visual-Studio-generator precedent.
         """
-        presets: list[Preset] = []
         by_var: dict[str, list[str]] = {}  # env var -> tool names (AR is shared)
         for tool in self._tools.values():
             if tool.env_var:
                 by_var.setdefault(tool.env_var, []).append(tool.name)
-        bound: list[ToolContribution] = []
+        # One preset per source, so explain() shows cxx.cmd <- $CXX, or
+        # <- flang's LLVM for commands bind_commands() gave.
+        by_source: dict[str, list[ToolContribution]] = {}
         for var, tool_names in by_var.items():
-            from pcons.tools.tool import resolve_env_cmd_override
-
-            path = resolve_env_cmd_override(var)
-            if path is None:
-                if var in self._bound_commands:
-                    path = self._bound_commands[var]
-                    bound += [ToolContribution(n, cmd=path) for n in tool_names]
+            chosen = self._chosen_command(var)
+            if chosen is None:
                 continue
-            if var in ("CC", "CXX", "FC"):
+            path, source = chosen
+            if source == f"${var}" and var in ("CC", "CXX", "FC"):
                 self._validate_compiler_override(var, path)
-            presets.append(
-                Preset(
-                    name=f"${var}",
-                    category="env",
-                    contributions=tuple(
-                        ToolContribution(name, cmd=path) for name in tool_names
-                    ),
-                )
+            by_source.setdefault(source, []).extend(
+                ToolContribution(name, cmd=path) for name in tool_names
             )
-        if bound:
-            presets.append(
-                Preset(
-                    name=self._bound_source, category="env", contributions=tuple(bound)
-                )
-            )
-        return presets
+        return [
+            Preset(name=source, category="env", contributions=tuple(contribs))
+            for source, contribs in by_source.items()
+        ]
+
+    def _chosen_command(self, var: str) -> tuple[str, str] | None:
+        """The command that tool variable *var* (``CC``) chooses, and what
+        chose it: the user's environment variable (``$CC``), else the one
+        bind_commands() gave this toolchain. None if neither does."""
+        from pcons.tools.tool import resolve_env_cmd_override
+
+        path = resolve_env_cmd_override(var)
+        if path is not None:
+            return path, f"${var}"
+        if var in self._bound_commands:
+            return self._bound_commands[var], self._bound_source
+        return None
+
+    def _tool_command(self, name: str) -> str | None:
+        """The program this toolchain's tool *name* runs: what its variable
+        chooses (_chosen_command), else its default command, found on PATH.
+        Every question about the compiler that will build asks this. None
+        if this toolchain has no such tool."""
+        import shutil
+
+        tool = self._tools.get(name)
+        if tool is None:
+            return None
+        chosen = self._chosen_command(tool.env_var) if tool.env_var else None
+        if chosen is not None:
+            return chosen[0]
+        cmd = tool.default_vars().get("cmd")
+        return (shutil.which(cmd) or cmd) if isinstance(cmd, str) else None
 
     def bind_commands(self, commands: dict[str, str], source: str) -> None:
         """Use *commands* for this toolchain's tools, keyed by the variable

@@ -303,23 +303,9 @@ class UnixToolchain(BaseToolchain):
             return self._is_apple_clang_cache
         result = False
         if sys.platform == "darwin":
-            import shutil
             import subprocess
 
-            from pcons.tools.tool import resolve_env_cmd_override
-
-            tool = self._tools.get("cxx") or self._tools.get("cc")
-            exe: str | None = None
-            if tool is not None:
-                # A $CXX/$CC override or a bound command selects the actual
-                # compiler; the default name (often macOS's g++-is-clang
-                # shim) is the fallback.
-                exe = resolve_env_cmd_override(tool.env_var) or (
-                    self._bound_commands.get(tool.env_var) if tool.env_var else None
-                )
-                if exe is None:
-                    cmd = tool.default_vars().get("cmd")
-                    exe = shutil.which(cmd) if isinstance(cmd, str) else None
+            exe = self._tool_command("cxx") or self._tool_command("cc")
             if exe:
                 try:
                     out = subprocess.run(

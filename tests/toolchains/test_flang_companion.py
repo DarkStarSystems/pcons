@@ -142,3 +142,24 @@ def test_add_toolchain_takes_the_primarys_companion(tmp_path, gcc_toolchain) -> 
         env.add_toolchain("c")
 
     assert companion in env.toolchains
+
+
+def test_a_tools_command_is_decided_in_one_place(monkeypatch, tmp_path) -> None:
+    """The user's variable, then a command bind_commands() gave, then the
+    default: every question about the compiler that will build asks this."""
+    from pcons.tools.toolchain import toolchain_registry
+
+    monkeypatch.delenv("CXX", raising=False)
+    entry = toolchain_registry.get("llvm")
+    assert entry is not None
+    toolchain = entry.create_toolchain()
+    assert toolchain._tool_command("cxx") is not None
+    toolchain.bind_commands({"CXX": "/llvm/bin/clang++"}, source="flang's LLVM")
+    assert toolchain._tool_command("cxx") == "/llvm/bin/clang++"
+    assert toolchain._chosen_command("CXX") == ("/llvm/bin/clang++", "flang's LLVM")
+    users = tmp_path / "clang++"
+    users.write_text("#!/bin/sh\n")
+    users.chmod(0o755)
+    monkeypatch.setenv("CXX", str(users))
+    assert toolchain._chosen_command("CXX") == (str(users), "$CXX")
+    assert toolchain._tool_command("cxx") == str(users)
