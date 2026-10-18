@@ -790,8 +790,11 @@ class Toolchain(Protocol):
         each toolchain defines its own flags."""
         ...
 
-    def make_feature_preset(self, name: str) -> Preset | None:
-        """Build a built-in feature Preset by name, or None if not known."""
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
+        """Build a built-in feature Preset by name, for the *target*
+        platform (None: the build machine), or None if not known."""
         ...
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
@@ -1256,7 +1259,7 @@ class BaseToolchain(ABC):
 
     def apply_preset(self, env: Environment, name: str) -> None:
         """Apply a named feature preset (e.g. "warnings", "sanitize")."""
-        preset = self.make_feature_preset(name)
+        preset = self.make_feature_preset(name, env.target)
         if preset is None:
             logger.warning("Unknown preset '%s' for toolchain '%s'", name, self.name)
             return
@@ -1325,13 +1328,18 @@ class BaseToolchain(ABC):
         """
         return ("cc", "cxx")
 
-    def make_feature_preset(self, name: str) -> Preset | None:
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
         """Build a feature Preset by name, or None if this toolchain lacks it.
 
         Realizes the named entry's compile flags on the toolchain's compile
-        tools and link flags on ``link``. See docs/presets.md.
+        tools and link flags on ``link``, as :meth:`_feature_spec` gives
+        them for *target* (None: the build machine). See docs/presets.md.
         """
-        spec = self.FEATURE_PRESETS.get(name)
+        from pcons.configure.platform import get_platform
+
+        spec = self._feature_spec(name, target or get_platform())
         if spec is None:
             return None
         contribs: list[ToolContribution] = []
@@ -1343,6 +1351,10 @@ class BaseToolchain(ABC):
         if link_flags:
             contribs.append(ToolContribution("link", flags=tuple(link_flags)))
         return Preset(name=name, category="feature", contributions=tuple(contribs))
+
+    def _feature_spec(self, name: str, target: Platform) -> dict[str, list[str]] | None:
+        """The FEATURE_PRESETS entry *name* for building for *target*."""
+        return self.FEATURE_PRESETS.get(name)
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross-compilation target preset (a CrossPreset)."""

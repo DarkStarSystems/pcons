@@ -1673,6 +1673,13 @@ Presets are toolchain-specific — each toolchain produces the appropriate flags
 | `lto` | `-flto` (compile+link) | `/GL` (compile) + `/LTCG` (link) |
 | `hardened` | `-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE` + `-pie -Wl,-z,relro,-z,now` | `/GS /guard:cf` + `/DYNAMICBASE /NXCOMPAT /guard:cf` |
 
+The Unix `hardened` flags are for ELF platforms like Linux. On macOS it's the
+compile flags without `-fPIE`, since programs there are position-independent
+already. On Windows, MinGW links with `-Wl,--dynamicbase,--nxcompat`, and clang
+for the MSVC ABI uses Control Flow Guard (`-Xclang -cfguard` + `-Wl,/guard:cf`)
+in place of `-fPIE` and RELRO. These follow the platform being built for, so
+apply a cross preset before `hardened`: applying one after it raises.
+
 Combine presets with variants for a complete configuration:
 
 ```python

@@ -34,6 +34,8 @@ project = Project("app", build_dir=f"build/{variant}")
 env = project.Environment(toolchain="c")
 env.apply_preset("warnings")  # per-toolchain: /W4 (MSVC) or -Wall -Wextra … (GCC/Clang)
 env.set_variant(variant)
+if variant == "release":
+    env.apply_preset("hardened")  # each platform's own hardening flags
 
 prog = project.Program("app", env)
 prog.add_sources([src_dir / "main.c"])

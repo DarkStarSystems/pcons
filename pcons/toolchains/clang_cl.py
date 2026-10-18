@@ -24,6 +24,7 @@ from pcons.tools.tool import BaseTool, Probe
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pcons.configure.platform import Platform
     from pcons.core.builder import Builder
     from pcons.core.toolconfig import ToolConfig
 
@@ -266,7 +267,9 @@ class ClangClToolchain(MsvcCompatibleToolchain):
     def __init__(self) -> None:
         super().__init__("clang-cl")
 
-    def make_feature_preset(self, name: str) -> Preset | None:
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
         """Realize ``openmp`` dynamically: unlike MSVC (whose objects carry a
         vcomp /DEFAULTLIB directive), clang-cl's ``/openmp`` embeds no
         defaultlib, so the runtime must be linked explicitly. libomp.lib
@@ -288,7 +291,7 @@ class ClangClToolchain(MsvcCompatibleToolchain):
                     ),
                 ),
             )
-        return super().make_feature_preset(name)
+        return super().make_feature_preset(name, target)
 
     def _libomp_dir(self) -> Path | None:
         """Directory containing libomp.lib, or None if unavailable."""

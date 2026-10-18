@@ -21,6 +21,7 @@ from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_regist
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
 
 
@@ -98,11 +99,13 @@ class CudaToolchain(BaseToolchain):
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("cuda",)
 
-    def make_feature_preset(self, name: str) -> Preset | None:
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
         """FEATURE_PRESETS for a GCC or Clang host; on Windows, where the
         host compiler is cl.exe, MSVC_HOST_FEATURE_PRESETS."""
         if not get_platform().is_windows:
-            return super().make_feature_preset(name)
+            return super().make_feature_preset(name, target)
         spec = self.MSVC_HOST_FEATURE_PRESETS.get(name)
         if spec is None:
             return None
