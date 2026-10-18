@@ -1351,7 +1351,7 @@ class Environment(_EnvironmentStubs):
         if kind == "target":
             return toolchain.make_target_preset(intent.args[0])
         if kind == "feature":
-            preset = toolchain.make_feature_preset(intent.name)  # built-in
+            preset = toolchain.make_feature_preset(intent.name, self.target)
             if preset is None:
                 preset = resolve_registered_feature(intent.name, toolchain)
             return preset
@@ -1602,7 +1602,7 @@ class Environment(_EnvironmentStubs):
             return True
         found = lands = False
         for toolchain in self.toolchains:
-            preset = toolchain.make_feature_preset(name)
+            preset = toolchain.make_feature_preset(name, self.target)
             if preset is None:
                 preset = resolve_registered_feature(name, toolchain)
             if preset is not None:
@@ -1634,16 +1634,37 @@ class Environment(_EnvironmentStubs):
         from pcons.core.preset import Intent
 
         if self.toolchains:
+            target = getattr(preset, "target_platform", None)
+            self._check_retarget(target)
             intent = Intent("target", getattr(preset, "name", "target"), (preset,))
             self._realize(intent, self.toolchains)
             self._record_intent(intent)
             self._cross_preset = preset
-            self._target = getattr(preset, "target_platform", None)
+            self._target = target
         else:
             logger.warning(
                 "No toolchains configured; cannot apply cross-preset '%s'",
                 preset.name if hasattr(preset, "name") else preset,
             )
+
+    def _check_retarget(self, target: Platform | None) -> None:
+        """Raise if a feature already applied has other flags for *target*
+        (None: the build machine): they were realized for this one."""
+        from pcons.configure.platform import get_platform
+
+        new = target or get_platform()
+        if new == self.target:
+            return
+        for intent in self._intents:
+            if intent.kind != "feature":
+                continue
+            for toolchain in self.toolchains:
+                old = toolchain.make_feature_preset(intent.name, self.target)
+                if old != toolchain.make_feature_preset(intent.name, new):
+                    raise ValueError(
+                        f"Apply the cross preset before preset '{intent.name}', "
+                        f"whose flags depend on the platform built for."
+                    )
 
     @property
     def cross(self) -> Any:

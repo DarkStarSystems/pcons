@@ -260,7 +260,9 @@ class UnixToolchain(BaseToolchain):
         "/usr/local/opt/libomp",
     )
 
-    def make_feature_preset(self, name: str) -> Preset | None:
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
         """Realize feature presets, resolving ``openmp`` dynamically where
         its entry is empty (a toolchain with its own flags lists them)."""
         if name == "openmp" and self.FEATURE_PRESETS.get(name) == {}:
@@ -283,7 +285,34 @@ class UnixToolchain(BaseToolchain):
             return Preset(
                 name="openmp", category="feature", contributions=tuple(contribs)
             )
-        return super().make_feature_preset(name)
+        return super().make_feature_preset(name, target)
+
+    def _feature_spec(self, name: str, target: Platform) -> dict[str, list[str]] | None:
+        """``hardened`` is written for ELF, so it's adjusted for Mach-O and
+        PE, whose linkers reject ``-z`` and whose programs are
+        position-independent already. For the MSVC ABI, stack protection is
+        MSVC's /GS and Control Flow Guard stands in for RELRO, as in MSVC's
+        own preset; MinGW's linker marks programs for ASLR and DEP."""
+        spec = super()._feature_spec(name, target)
+        if name != "hardened" or spec is None:
+            return spec
+        if not (target.is_apple or target.is_windows):
+            return spec
+        compile_flags = [f for f in spec.get("compile_flags", []) if f != "-fPIE"]
+        if target.is_apple:
+            return {"compile_flags": compile_flags}
+        if self._targets_msvc_abi(target):
+            compile_flags = [
+                f for f in compile_flags if not f.startswith("-D_FORTIFY_SOURCE")
+            ]
+            return {
+                "compile_flags": [*compile_flags, "-Xclang", "-cfguard"],
+                "link_flags": ["-Wl,/guard:cf"],
+            }
+        return {
+            "compile_flags": compile_flags,
+            "link_flags": ["-Wl,--dynamicbase,--nxcompat"],
+        }
 
     def _openmp_flags(self, apple_clang: bool) -> tuple[list[str], list[str]] | None:
         """(compile_flags, link_flags) enabling OpenMP for a compiler that
@@ -441,9 +470,14 @@ class UnixToolchain(BaseToolchain):
         return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
 
     def _writes_import_library(self, platform: Platform) -> bool:
-        """Whether a DLL link for *platform* is an MSVC-ABI one. A cross
-        target says so by its naming (an MSVC triple's archives are .lib, a
-        MinGW one's .a); the host, by what this toolchain's compiler targets."""
+        """Whether a DLL link for *platform* is an MSVC-ABI one."""
+        return self._targets_msvc_abi(platform)
+
+    def _targets_msvc_abi(self, platform: Platform) -> bool:
+        """Whether this toolchain builds for the MSVC ABI on *platform*. A
+        cross target says so by its naming (an MSVC triple's archives are
+        .lib, a MinGW one's .a); the host, by what this toolchain's compiler
+        targets."""
         if not platform.is_windows:
             return False
         if platform != get_platform():

@@ -143,6 +143,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On macOS, the `openmp` preset gives each compiler its own flags. With
   `$CC` naming Homebrew's clang and C++ left to Apple's, the C compiler
   got Apple clang's `-Xclang -fopenmp` and Homebrew's `libomp` too.
+- The `hardened` preset links on macOS and Windows. GCC's and clang's
+  `-Wl,-z,relro,-z,now` are for ELF, and macOS's and MinGW's linkers
+  reject them. On macOS it's now the compile flags without `-fPIE`, since
+  programs there are position-independent already. MinGW links with
+  `-Wl,--dynamicbase,--nxcompat`, and clang for the MSVC ABI adds Control
+  Flow Guard, as MSVC's `hardened` does. The flags follow the platform
+  being built for, so apply a cross preset first; applying one after
+  `hardened` raises.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named

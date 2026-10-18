@@ -254,7 +254,7 @@ def test_gfortran_realizes_what_gcc_does(name) -> None:
     }
 
 
-def test_gfortran_leaves_out_what_does_nothing_for_fortran() -> None:
+def test_gfortran_leaves_out_what_does_nothing_for_fortran(on_linux) -> None:
     tc = GfortranToolchain()
     assert _feature(tc, "warnings") == {"fc": ("-Wall", "-Wextra")}
     assert _feature(tc, "hardened") == {
@@ -289,7 +289,7 @@ def test_flang_features_for_the_msvc_abi(on_windows) -> None:
         assert _feature(tc, name) is None, name
 
 
-def test_ifx_features() -> None:
+def test_ifx_features(on_linux) -> None:
     tc = IfxToolchain()
     assert _feature(tc, "warnings") == {"fc": ("-warn", "all")}
     assert _feature(tc, "werror") == {"fc": ("-warn", "errors")}

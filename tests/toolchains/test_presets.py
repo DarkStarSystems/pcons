@@ -8,10 +8,16 @@ from __future__ import annotations
 
 import pytest
 
+from pcons.configure.platform import get_platform
 from pcons.core.environment import Environment
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
+from pcons.toolchains.presets import (
+    CrossPreset,
+    linux_cross,
+    target_platform_for_triple,
+)
 
 
 def _concrete_msvc() -> MsvcCompatibleToolchain:
@@ -114,16 +120,58 @@ class TestUnixPresets:
         assert "-flto" in env.cxx.flags
         assert "-flto" in env.link.flags
 
-    def test_hardened_preset(self, test_project):  # noqa: F811
-        env = _make_unix_env()
-        toolchain = GccToolchain()
-        toolchain.apply_preset(env, "hardened")
+    @pytest.mark.parametrize(
+        ("triple", "link_flags"),
+        [
+            ("x86_64-linux-gnu", ("-pie", "-Wl,-z,relro,-z,now")),
+            ("aarch64-apple-darwin", None),
+            ("x86_64-w64-mingw32", ("-Wl,--dynamicbase,--nxcompat",)),
+        ],
+    )
+    def test_hardened_preset(self, triple, link_flags):
+        """-fPIE, -pie and RELRO are ELF's: ld64 and MinGW's ld reject -z."""
+        target = target_platform_for_triple(triple)
+        preset = GccToolchain().make_feature_preset("hardened", target)
+        assert preset is not None
+        flags = {c.tool: c.flags for c in preset.contributions}
+        elf = link_flags is not None and "-pie" in link_flags
+        assert flags["cc"] == (
+            "-fstack-protector-strong",
+            "-D_FORTIFY_SOURCE=2",
+            *(("-fPIE",) if elf else ()),
+        )
+        assert flags.get("link") == link_flags
 
-        assert "-fstack-protector-strong" in env.cc.flags
-        assert "-D_FORTIFY_SOURCE=2" in env.cc.flags
-        assert "-fPIE" in env.cc.flags
-        assert "-pie" in env.link.flags
+    def test_hardened_preset_for_the_msvc_abi(self, monkeypatch):
+        """clang for the MSVC ABI rejects -fPIE; Control Flow Guard stands
+        in for RELRO, as in MSVC's preset."""
+        monkeypatch.setattr(LlvmToolchain, "abi", property(lambda _: "msvc"))
+        target = target_platform_for_triple("x86_64-pc-windows-msvc")
+        preset = LlvmToolchain().make_feature_preset("hardened", target)
+        assert preset is not None
+        flags = {c.tool: c.flags for c in preset.contributions}
+        assert flags["cxx"] == ("-fstack-protector-strong", "-Xclang", "-cfguard")
+        assert flags["link"] == ("-Wl,/guard:cf",)
+
+    def test_hardened_follows_the_cross_target(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = LlvmToolchain()
+        env.apply_cross_preset(linux_cross("aarch64-linux-gnu"))
+        env.apply_preset("hardened")
+
         assert "-Wl,-z,relro,-z,now" in env.link.flags
+
+    def test_a_cross_target_after_hardened_raises(self, test_project):  # noqa: F811
+        """Its flags were chosen for the build machine."""
+        env = _make_unix_env()
+        env._toolchain = LlvmToolchain()
+        env.apply_preset("hardened")
+        triple = "x86_64-w64-mingw32" if get_platform().is_linux else "x86_64-linux-gnu"
+
+        with pytest.raises(ValueError, match="before preset 'hardened'"):
+            env.apply_cross_preset(
+                CrossPreset(name="other", arch="x86_64", triple=triple)
+            )
 
     def test_pthread_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
@@ -756,3 +804,25 @@ class TestFortranVariants:
 
         assert "-O2" in env.fc.flags
         assert "NDEBUG" in env.fc.defines
+
+
+def test_hardened_follows_a_cross_targets_abi(tmp_path, monkeypatch) -> None:
+    """clang cross-building for the MSVC ABI gets Control Flow Guard, as on
+    Windows, not MinGW's linker flags: the target decides, not the host."""
+    from pcons.core.project import Project
+    from pcons.toolchains import unix as unix_mod
+    from pcons.toolchains.presets import CrossPreset
+    from pcons.tools.toolchain import toolchain_registry
+
+    monkeypatch.setattr(unix_mod, "target_triple", lambda compiler: None)
+    entry = toolchain_registry.get("llvm")
+    assert entry is not None
+    env = Project("h", root_dir=tmp_path).Environment(
+        toolchain=entry.create_toolchain()
+    )
+    env.apply_cross_preset(
+        CrossPreset(name="win", arch="x86_64", triple="x86_64-pc-windows-msvc")
+    )
+    env.apply_preset("hardened")
+    assert "-cfguard" in env.cc.flags
+    assert "-Wl,/guard:cf" in env.link.flags

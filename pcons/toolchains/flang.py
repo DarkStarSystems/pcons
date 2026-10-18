@@ -23,6 +23,7 @@ from pcons.toolchains.llvm import LlvmArchiver
 from pcons.toolchains.unix import UnixToolchain, target_triple
 
 if TYPE_CHECKING:
+    from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
     from pcons.tools.toolchain import BaseToolchain
 
@@ -147,17 +148,19 @@ class FlangToolchain(FortranToolchain):
             contribs.append(self._crt_flag(crt))
         return contribs
 
-    def make_feature_preset(self, name: str) -> Preset | None:
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
         """Targeting MSVC, profile and pthread are as MSVC's presets have
         them, and LTO links with lld, the linker that reads flang's bitcode."""
         if self.abi != "msvc":
-            return super().make_feature_preset(name)
+            return super().make_feature_preset(name, target)
         if name == "pthread":
             return None
         if name == "profile":
             link = ToolContribution("link", flags=("-Wl,/PROFILE",))
             return Preset(name=name, category="feature", contributions=(link,))
-        preset = super().make_feature_preset(name)
+        preset = super().make_feature_preset(name, target)
         if preset is not None and name == "lto":
             lld = ToolContribution("link", flags=("-fuse-ld=lld",))
             preset = replace(preset, contributions=(*preset.contributions, lld))

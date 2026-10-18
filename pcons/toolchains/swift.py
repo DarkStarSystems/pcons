@@ -30,6 +30,7 @@ from pcons.tools.toolchain import LinkNeeds, SourceHandler, toolchain_registry
 from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
+    from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
     from pcons.core.target import Target
     from pcons.core.toolconfig import ToolConfig
@@ -330,7 +331,9 @@ class SwiftToolchain(UnixToolchain):
         takes no ``-fPIC``."""
         return []
 
-    def make_feature_preset(self, name: str) -> Preset | None:
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
         """Realize feature presets; ``hardened`` follows the platform.
 
         Stack protection and PIE are swiftc's defaults, so what's left is
@@ -338,8 +341,8 @@ class SwiftToolchain(UnixToolchain):
         Windows is unverified, so unavailable.
         """
         if name != "hardened":
-            return super().make_feature_preset(name)
-        platform = get_platform()
+            return super().make_feature_preset(name, target)
+        platform = target or get_platform()
         if platform.is_windows:
             return None
         contribs: tuple[ToolContribution, ...] = ()
