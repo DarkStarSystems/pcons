@@ -59,7 +59,9 @@ class TestClangClCCompiler:
         vars = cc.default_vars()
         assert vars["cmd"] == "clang-cl"
         assert "/nologo" in vars["flags"]
-        assert "objcmd" in vars
+        # $cc.flags brings it to the command line, so the command has none.
+        assert "/nologo" not in vars["objcmd"]
+        assert "$cc.flags" in vars["objcmd"]
 
 
 class TestClangClCxxCompiler:
@@ -72,7 +74,9 @@ class TestClangClCxxCompiler:
         cxx = ClangClCxxCompiler()
         vars = cxx.default_vars()
         assert vars["cmd"] == "clang-cl"
-        assert "objcmd" in vars
+        assert "/nologo" not in vars["objcmd"]
+        assert "$cxx.cmd" in vars["objcmd"]
+        assert "$cxx.flags" in vars["objcmd"]
 
 
 class TestClangClLibrarian:

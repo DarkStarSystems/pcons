@@ -53,7 +53,6 @@ class ClangClCompiler(BaseTool):
             # clang-cl uses /showIncludes for MSVC-style deps
             "objcmd": [
                 "$cc.cmd" if self._language == "c" else "$cxx.cmd",
-                "/nologo",
                 "/showIncludes",
                 "/c",
                 TargetPath(prefix="/Fo"),
@@ -108,30 +107,6 @@ class ClangClCxxCompiler(ClangClCompiler):
 
     def __init__(self) -> None:
         super().__init__("cxx", "cxx")
-
-    def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "clang-cl",
-            "flags": ["/nologo"],
-            "iprefix": "/I",
-            "includes": [],
-            "isysprefix": "-imsvc",
-            "system_includes": [],
-            "dprefix": "/D",
-            "defines": [],
-            "objcmd": [
-                "$cxx.cmd",
-                "/nologo",
-                "/showIncludes",
-                "/c",
-                TargetPath(prefix="/Fo"),
-                "${prefix(cxx.iprefix, cxx.includes)}",
-                "${prefix(cxx.isysprefix, cxx.system_includes)}",
-                "${prefix(cxx.dprefix, cxx.defines)}",
-                "$cxx.flags",
-                SourcePath(),
-            ],
-        }
 
 
 class ClangClLibrarian(BaseTool):
