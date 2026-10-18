@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 from pcons.core.paths import affix_filename
-from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
+from pcons.core.preset import (
+    RUNTIME_LINKAGE_GROUP,
+    VARIANT_GROUP,
+    Preset,
+    ToolContribution,
+)
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 
@@ -814,6 +819,14 @@ class Toolchain(Protocol):
         """The target-arch Preset for *arch*, or None if it has none."""
         ...
 
+    def make_runtime_preset(
+        self, linkage: str, variant: str, target: Platform
+    ) -> Preset | None:
+        """The Preset linking this toolchain's runtimes as *linkage*
+        ("shared" or "static") under *variant*, building for *target*, or
+        None if it has none."""
+        ...
+
     def make_target_preset(self, cross: Any) -> Preset:
         """The Preset realizing cross target *cross* (a CrossPreset)."""
         ...
@@ -1257,6 +1270,35 @@ class BaseToolchain(ABC):
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Tool contributions for a target arch. Base realizes none."""
         return []
+
+    def make_runtime_preset(
+        self, linkage: str, variant: str, target: Platform
+    ) -> Preset | None:
+        """The Preset linking this toolchain's language runtimes as
+        *linkage* ("shared" or "static"), or None if it realizes none.
+
+        The environment realizes it again whenever the variant or the
+        platform built for changes, since either can change it: an
+        MSVC-ABI runtime has a debug build. A toolchain may raise for a
+        linkage it can't, or return a preset with no contributions for
+        one its runtimes already are (WebAssembly's, always static).
+        """
+        contribs = self._runtime_contributions(linkage, variant, target)
+        if contribs is None:
+            return None
+        return Preset(
+            name=linkage,
+            category="runtime",
+            exclusive_group=RUNTIME_LINKAGE_GROUP,
+            contributions=tuple(contribs),
+        )
+
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """Tool contributions for a runtime linkage, or None. Base
+        realizes none."""
+        return None
 
     def apply_preset(self, env: Environment, name: str) -> None:
         """Apply a named feature preset (e.g. "warnings", "sanitize")."""

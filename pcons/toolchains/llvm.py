@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING, Any, cast
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.builder_registry import builder
+from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.core.target import Target
+from pcons.toolchains._msvc_compat import msvc_crt
 from pcons.toolchains.gnu_common import (
     gnu_archiver_builders,
     gnu_archiver_vars,
@@ -413,8 +415,31 @@ class LlvmToolchain(UnixToolchain):
     # Clang understands --target=<triple> for cross-compilation.
     IS_CLANG_DRIVER = True
 
+    # libstdc++ or libc++, whichever clang links.
+    STATIC_RUNTIME_LINK_FLAGS = ("-static-libgcc", "-static-libstdc++")
+
     def __init__(self) -> None:
         super().__init__("llvm")
+
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """Targeting MSVC, clang's driver links as if for the static C
+        runtime whatever its objects use: it puts ``-defaultlib:libcmt`` on
+        every link, which a link for any other runtime leaves out, and
+        picks the static sanitizer runtimes unless told ``-shared-libsan``,
+        which the DLL runtime needs."""
+        contribs = super()._runtime_contributions(linkage, variant, target)
+        if contribs is not None and self._targets_msvc_abi(target):
+            crt = msvc_crt(linkage, variant)
+            flags = ()
+            if crt != "static":
+                flags += ("-Wl,/NODEFAULTLIB:libcmt",)
+            if crt.startswith("dll"):
+                flags += ("-shared-libsan",)
+            if flags:
+                contribs.append(ToolContribution("link", flags=flags))
+        return contribs
 
     def get_output_prefix(
         self, target_type: str, target: Platform | None = None

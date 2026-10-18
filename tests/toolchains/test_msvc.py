@@ -38,21 +38,6 @@ class TestMsvcCompiler:
         assert cxx.name == "cxx"
         assert cxx.language == "cxx"
 
-    def test_the_dynamic_crt_is_the_default(self, test_project):  # noqa: F811
-        """cl.exe's own default is the static release CRT, which the debug
-        STL cannot link and Conan packages are not built against. The
-        toolchain applies /MD on setup, as the "default" variant."""
-        env = Environment()
-        for tool in ("cc", "cxx"):
-            cfg = env.add_tool(tool)
-            cfg.set("flags", [])
-        (preset,) = MsvcToolchain().setup_presets(env)
-        assert preset.exclusive_group == "build_variant"
-        assert {c.tool: c.flags for c in preset.contributions} == {
-            "cc": ("/MD",),
-            "cxx": ("/MD",),
-        }
-
     def test_cxx_reports_cplusplus_correctly(self):
         """cl.exe reports __cplusplus as 199711L unless /Zc:__cplusplus is
         given; the C++ compiler passes it, the C compiler has no use for it."""

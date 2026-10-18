@@ -170,6 +170,18 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     monkeypatch.setattr(
         gfortran_mod.GfortranToolchain, "gcov_libdir", property(lambda self: None)
     )
+    # Every library a Fortran compiler is asked for (gfortran's
+    # libquadmath, flang's static runtime) is found.
+    monkeypatch.setattr(
+        fortran_mod.FortranToolchainBase,
+        "_library_dir",
+        staticmethod(lambda compiler, name: "/rt/lib"),
+    )
+    from pcons.toolchains import flang as flang_mod
+
+    monkeypatch.setattr(
+        flang_mod.FlangToolchain, "has_static_runtime", property(lambda self: True)
+    )
     monkeypatch.setattr(
         fortran_mod.FortranToolchainBase,
         "compiler_path",
@@ -358,6 +370,13 @@ def _knob_scenarios(row: Row) -> list[tuple[str, Callable[[Environment], None]]]
         )
     if any(t in ("gcc", "llvm", "clang-cl", "msvc", "swift") for t in row.toolchains):
         scenarios.append(("cxx standard 20", lambda env: env.cxx.set_standard("c++20")))
+    scenarios.append(("runtime static", lambda env: env.set_runtime_linkage("static")))
+
+    def static_debug(env: Environment) -> None:
+        env.set_runtime_linkage("static")
+        env.set_variant("debug")
+
+    scenarios.append(("runtime static, variant debug", static_debug))
     if row.os_name == "darwin":
         scenarios.append(("arch x86_64", lambda env: env.set_target_arch("x86_64")))
     if row.os_name != "windows":
@@ -409,6 +428,7 @@ def _late_section(tmp_path: Path, row: Row) -> Iterator[str]:
     late: list[tuple[str, Callable[[Environment], None]]] = [
         ("variant debug", lambda env: env.set_variant("debug")),
         ("feature warnings", lambda env: env.apply_preset("warnings")),
+        ("runtime static", lambda env: env.set_runtime_linkage("static")),
     ]
     if row.os_name != "windows":
         late.append(

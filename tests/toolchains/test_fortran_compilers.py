@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 import pcons.toolchains.flang as flang_mod
+from pcons.configure.platform import get_platform
 from pcons.toolchains import unix as unix_mod
 from pcons.toolchains.flang import FlangToolchain
 from pcons.toolchains.fortran import (
@@ -613,10 +614,14 @@ def test_flang_on_windows_uses_the_dll_c_runtime(on_windows) -> None:
     tc = FlangToolchain()
     assert tc.objects_name_runtimes
     assert tc.get_object_suffix() == ".obj"
-    crt = tc._variant_contributions("debug")[-1]
-    assert crt.flags == ("-fms-runtime-lib=dll_dbg",)
-    crt = tc._variant_contributions("release")[-1]
-    assert crt.flags == ("-fms-runtime-lib=dll",)
+    windows = get_platform()
+    for linkage, variant, crt in (
+        ("shared", "debug", "dll_dbg"),
+        ("shared", "release", "dll"),
+        ("static", "debug", "static_dbg"),
+    ):
+        (fc,) = tc._runtime_contributions(linkage, variant, windows) or ()
+        assert (fc.tool, fc.flags) == ("fc", (f"-fms-runtime-lib={crt}",))
 
 
 def test_flang_elsewhere_names_its_runtime() -> None:
@@ -639,13 +644,17 @@ def test_ifx_on_windows_is_msvc_style(program) -> None:
     assert tc.link_needs(program, {"fortran"}, "cxx", program._env).libs == ()
 
 
-def test_ifx_on_windows_variants_use_the_dll_c_runtime() -> None:
+def test_ifx_on_windows_uses_the_dll_c_runtime() -> None:
     tc = IfxMsvcToolchain()
     debug = tc._variant_contributions("debug")
-    assert "/MDd" in debug[0].flags
     assert ("link", ("/DEBUG",)) in [(c.tool, c.flags) for c in debug]
-    (release,) = tc._variant_contributions("release")
-    assert "/MD" in release.flags
+    windows = get_platform()
+    for linkage, variant, crt in (
+        ("shared", "debug", "/MDd"),
+        ("static", "release", "/MT"),
+    ):
+        (fc,) = tc._runtime_contributions(linkage, variant, windows) or ()
+        assert (fc.tool, fc.flags) == ("fc", (crt,))
     with pytest.raises(ValueError, match="Unknown variant"):
         tc._variant_contributions("fastest-ever")
 

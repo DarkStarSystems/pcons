@@ -68,6 +68,7 @@ class IfxToolchain(FortranToolchain):
     RUNTIME_PROBE_FILE = "libifcore.a"
     # In the order ifx itself links them.
     RUNTIME_LIBS = ("ifport", "ifcoremt", "imf", "svml", "irc")
+    STATIC_RUNTIME_LINK_FLAGS = ("-static-intel", "-static-libgcc")
 
     # No coverage: ifx accepts --coverage and does nothing with it.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
@@ -220,11 +221,12 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
         "fast-math": {"compile_flags": ["/fp:fast"]},
     }
 
-    # MsvcToolchain's, so Fortran and C/C++ objects agree on one C runtime
-    # (/MD(d) also selects Intel's DLL runtime), with ifx's own top level.
+    # MsvcToolchain's, with ifx's own top level. The C runtime is chosen as
+    # cl's is, so Fortran and C/C++ objects agree on one, and it also
+    # selects Intel's runtime (libifcoremd or libifcoremt).
     MSVC_VARIANTS = {
         **MsvcCompatibleToolchain.MSVC_VARIANTS,
-        "release-fastest": (["/O3", "/MD"], ["NDEBUG"]),
+        "release-fastest": (["/O3"], ["NDEBUG"]),
     }
 
     def __init__(self) -> None:

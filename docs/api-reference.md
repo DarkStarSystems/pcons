@@ -72,6 +72,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 |--------|-------------|
 | `env.set_variant(name)` | Set debug/release variant |
 | `env.set_target_arch(arch)` | Set target CPU architecture |
+| `env.set_runtime_linkage(linkage)` | Link the language runtimes `"shared"` (default) or `"static"` |
 | `env.apply_preset(name)` | Apply flag preset (warnings, werror, sanitize, profile, lto, hardened) |
 | `env.apply_cross_preset(preset)` | Apply cross-compilation preset |
 | `env.explain(tool=None)` | Attribute each flag/define/command to the preset that set it |

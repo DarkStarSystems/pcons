@@ -40,6 +40,9 @@ class WasmToolchain(UnixToolchain):
 
     TARGETS_WASM = True
 
+    # Linked statically however the runtime linkage is set.
+    STATIC_RUNTIME_LINK_FLAGS = ()
+
     # Inherit the clang-flag presets, minus openmp: neither Emscripten nor
     # the WASI SDK ships an OpenMP runtime.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {

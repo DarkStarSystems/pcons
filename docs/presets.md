@@ -29,7 +29,13 @@ General settings that apply to any build live on the environment:
 ```python
 env.set_variant("release")
 env.set_target_arch("arm64")
+env.set_runtime_linkage("static")
 ```
+
+The runtime linkage is realized again whenever the variant or the platform
+built for changes, since both decide it: an MSVC-ABI C runtime has a debug
+build (`/MTd`), and on Apple's platforms clang can't link its runtime
+statically, so raises.
 
 **Domain-specific** settings live on the relevant *tool namespace*, not on core, so the
 core stays tool-agnostic and each language brings its own:
@@ -262,12 +268,15 @@ the same request, so:
   and `explain()` lists what it left out. `has_preset()` says whether
   `apply_preset()` would raise. A contributed preset whose resolver returns
   `None` for a toolchain has decided for itself, and isn't an error.
-  `set_target_arch()` works the same way: a compiler that can't build for
-  the arch is an error, since its sources would be built for the host. A
-  cross target is each toolchain's to realize or refuse, as below.
-- **A variant replaces each toolchain's own earlier one.** An added ifx's
-  default `/MD` becomes `/MDd` under `debug` without touching MSVC's. A
-  preset applied directly with `env.apply()` replaces every toolchain's.
+  `set_target_arch()` and `set_runtime_linkage()` work the same way: a
+  compiler that can't build for the arch is an error, since its sources
+  would be built for the host, and one that can't link its runtime that
+  way is too. A cross target is each toolchain's to realize or refuse, as
+  below.
+- **A variant replaces each toolchain's own earlier one,** and so does the
+  runtime linkage. An added ifx's `/MD` becomes `/MDd` under `debug`
+  without touching MSVC's. A preset applied directly with `env.apply()`
+  replaces every toolchain's.
 
 Deliberate *user* re-application is unaffected: applying the same feature
 preset twice on purpose remains additive, as composition requires.
@@ -544,7 +553,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | `env.apply_preset("name")`, per-toolchain `FEATURE_PRESETS` | implemented |
 | `warnings` + `werror` (orthogonal), Fortran/WASM coverage | implemented |
 | `pthread` / `coverage` / `fast-math` / `openmp` (detected); `env.has_preset()` guard; `KnownFeaturePreset` Literal | implemented |
-| `env.set_variant` / `env.set_target_arch` | implemented |
+| `env.set_variant` / `env.set_target_arch` / `env.set_runtime_linkage` | implemented |
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
 | Cross-preset field contract: triple/sysroot/tool_cmds realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |
 | Preset application contract: apply-fully-or-raise (unknown names, missing-tool cmd, zero-effect presets, unrealizable knobs) | implemented |
