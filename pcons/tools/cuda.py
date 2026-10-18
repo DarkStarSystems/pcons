@@ -53,6 +53,8 @@ class CudaCompiler(BaseTool):
             "cmd": "nvcc",
             "flags": [],
             "arch": "sm_75",  # Turing architecture (default)
+            # The CUDA runtime programs link: static, shared or none.
+            "runtime": "static",
             "iprefix": "-I",
             "includes": [],
             "dprefix": "-D",

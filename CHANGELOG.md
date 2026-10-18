@@ -161,6 +161,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Flow Guard, as MSVC's `hardened` does. The flags follow the platform
   being built for, so apply a cross preset first; applying one after
   `hardened` raises.
+- A program with CUDA objects links the CUDA runtime. Before, the C++
+  driver linking it didn't know to, so every link failed with undefined
+  `cudaMalloc`, `__cudaRegisterFunction` and the like. It's the static
+  runtime by default, as with nvcc and CMake; `env.cuda.runtime =
+  "shared"` links the shared one, and `"none"` neither.
+- On Windows, nvcc's host compiles use the C runtime pcons' MSVC builds
+  do (`/MD`, `/MDd` under `debug`, or `/MT` with
+  `set_runtime_linkage("static")`). They used `cl.exe`'s default, the
+  static one, so CUDA and C++ objects disagreed.
 - A program with ifx objects links with `sanitize` beside MSVC or
   clang-cl. ifx's objects don't name the AddressSanitizer runtime, and
   only ifx's own preset linked it, so a program linked by MSVC's or

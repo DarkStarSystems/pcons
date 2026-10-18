@@ -374,6 +374,14 @@ env = project.Environment(toolchain="c++")
 env.add_toolchain("cuda")
 ```
 
+A program with CUDA objects links the CUDA runtime, which nvcc would add if it linked. `env.cuda.runtime` picks which, like CMake's `CUDA_RUNTIME_LIBRARY`:
+
+- `"static"` (the default, as with nvcc and CMake): `cudart_static`, part of the program. On Linux it also links `libdl`, `librt` and `libpthread`.
+- `"shared"`: `cudart`, which the program loads when it runs (`libcudart.so.12`, `cudart64_12.dll`), so it has to be found then.
+- `"none"`: neither, for a program that links one itself, or uses only the driver API.
+
+On Windows, nvcc's host compiles use the C runtime pcons' MSVC builds do (`-Xcompiler=/MD`, `/MDd` under `debug`, or `/MT` with [static runtimes](#static-runtimes)), and a link with the static CUDA runtime leaves out the static C runtime that `cudart_static.lib` names (`/NODEFAULTLIB:LIBCMT`) unless that's the one in use. [`examples/95_cuda_runtime/`](https://github.com/DarkStarSystems/pcons/tree/main/examples/95_cuda_runtime) builds a program each way.
+
 **Emscripten** requires the Emscripten SDK. Set the `EMSDK` environment variable, or install to `~/emsdk` or `/opt/emsdk`.
 
 **WASI** requires the WASI SDK. Set `WASI_SDK_PATH`, or install to `/opt/wasi-sdk` or `~/.local/share/wasi-sdk` (also available via Homebrew).
