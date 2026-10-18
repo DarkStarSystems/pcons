@@ -2779,7 +2779,7 @@
   app/src.c.o: tool=cc cmd=clang flags=[--target=aarch64-linux-gnu]
   app/src.cpp.o: tool=cxx cmd=clang++ flags=[--target=aarch64-linux-gnu]
   app/app: tool=link cmd=swiftc flags=[-target aarch64-linux-gnu] libs=[stdc++] libdirs=[]
-  lib/lib.o: tool=swiftc cmd=swiftc flags=[-target aarch64-linux-gnu -fPIC]
+  lib/lib.o: tool=swiftc cmd=swiftc flags=[-target aarch64-linux-gnu]
   lib/src.c.o: tool=cc cmd=clang flags=[--target=aarch64-linux-gnu -fPIC]
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[--target=aarch64-linux-gnu -fPIC]
   lib/liblib.so: tool=link cmd=swiftc flags=[-target aarch64-linux-gnu -Wl,-soname,<target>] libs=[stdc++] libdirs=[]

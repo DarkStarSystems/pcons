@@ -82,7 +82,11 @@ class WasmToolchain(UnixToolchain):
         return None
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         # No -fPIC needed for WebAssembly
         if target_type == "shared_library":

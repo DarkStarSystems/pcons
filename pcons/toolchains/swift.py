@@ -319,6 +319,17 @@ class SwiftToolchain(UnixToolchain):
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("swiftc",)
 
+    def get_compile_flags_for_target_type(
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
+    ) -> list[str]:
+        """None: swiftc always generates position-independent code, and
+        takes no ``-fPIC``."""
+        return []
+
     def make_feature_preset(self, name: str) -> Preset | None:
         """Realize feature presets; ``hardened`` follows the platform.
 

@@ -105,7 +105,7 @@ class _TestToolchain(UnixToolchain):
         return ".a"
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env=None
+        self, target_type: str, env=None, *, pic=None
     ) -> list[str]:
         return []
 

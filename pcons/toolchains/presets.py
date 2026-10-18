@@ -57,6 +57,7 @@ def _naming(
 _TARGET_PLATFORMS: dict[str, Platform] = {
     "android": _naming("android"),
     "linux": _naming("linux"),
+    "none": _naming("none"),
     "darwin": _naming("darwin", shared=".dylib"),
     "ios": _naming("ios", shared=".dylib"),
     "windows-gnu": _naming("windows", exe=".exe", shared=".dll", shared_prefix=""),
@@ -80,6 +81,9 @@ _TRIPLE_OS_MARKERS_MOST_SPECIFIC_FIRST: tuple[tuple[str, str], ...] = (
     ("macos", "darwin"),
     ("darwin", "darwin"),
     ("linux", "linux"),
+    # Bare metal: arm-none-eabi, aarch64-none-elf, thumbv7m-none-eabi. After
+    # linux, since Arm's aarch64-none-linux-gnu builds for Linux.
+    ("-none", "none"),
 )
 
 _TRIPLE_ARCHS: dict[str, str] = {

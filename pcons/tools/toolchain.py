@@ -27,6 +27,12 @@ register_target_option(
     "shared libraries through an rpath relative to it",
 )
 register_target_option(
+    "pic",
+    "False compiles a static or object library without position-independent "
+    "code, which Linux, Android and the BSDs otherwise give it so it can go "
+    "into a shared library",
+)
+register_target_option(
     "exported_symbols",
     "symbols a shared library or executable exports, as C names (patterns "
     "allowed on macOS and Linux); everything else is hidden, except that on "
@@ -897,10 +903,16 @@ class Toolchain(Protocol):
         ...
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """Return additional compile flags needed for the target type, for
-        the platform *env* builds for."""
+        the platform *env* builds for. *pic* is the target's ``pic``
+        option: False keeps a static or object library from compiling as
+        position-independent code."""
         ...
 
     def link_group_tokens(
@@ -1546,11 +1558,14 @@ class BaseToolchain(ABC):
         return f"{self.get_output_prefix('program')}{name}{self.get_output_suffix('program')}"
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """Return additional compile flags for a target type (e.g. -fPIC for
-        shared libraries on Linux), for the platform *env* builds for.
-        Base: none."""
+        libraries on Linux), for the platform *env* builds for. Base: none."""
         return []
 
     def link_group_tokens(

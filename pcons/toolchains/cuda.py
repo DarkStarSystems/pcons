@@ -111,11 +111,15 @@ class CudaToolchain(BaseToolchain):
         return Preset(name=name, category="feature", contributions=contribs)
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """``-fPIC`` for the host compiler, where GCC and Clang need it."""
         platform = env.target if env is not None else get_platform()
-        return ["-Xcompiler=-fPIC"] if needs_pic(target_type, platform) else []
+        return ["-Xcompiler=-fPIC"] if needs_pic(target_type, platform, pic) else []
 
     def make_target_preset(self, cross: Any) -> Preset:
         """Raise for a preset with a triple; one without applies as usual."""

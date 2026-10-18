@@ -43,6 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Static and object libraries compile as position-independent code on
+  Linux, Android and the BSDs, so they can go into a shared library, as
+  Meson builds them. Before, linking one into a shared library failed with
+  `recompile with -fPIC`. `target.set_option("pic", False)` opts a library
+  out.
+- A Swift shared library builds on Linux: pcons passed swiftc `-fPIC`,
+  which it rejects. Its code is always position-independent.
+- A bare-metal triple (`arm-none-eabi`, `aarch64-none-elf`) means a
+  bare-metal platform, not the host, so a firmware build on Linux doesn't
+  get the host's conventions.
 - **Presets, variants and linking in environments with several
   toolchains (`add_toolchain()`) were reworked**, on an intent-based model
   internally, so that each compiler gets its own toolchain's flags and the

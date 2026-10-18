@@ -867,6 +867,19 @@ class TestTriplesNameAPlatform:
         assert plat.shared_lib_suffix == ".so"
 
     @pytest.mark.parametrize(
+        "triple", ["arm-none-eabi", "aarch64-none-elf", "riscv64-unknown-none-elf"]
+    )
+    def test_a_bare_metal_triple(self, triple: str) -> None:
+        plat = target_platform_for_triple(triple)
+        assert plat is not None
+        assert plat.os == "none"
+
+    def test_arms_linux_toolchain_is_linux(self) -> None:
+        plat = target_platform_for_triple("aarch64-none-linux-gnu")
+        assert plat is not None
+        assert plat.os == "linux"
+
+    @pytest.mark.parametrize(
         "triple", ["wasm32-wasi", "wasm32-unknown-emscripten", "nonsense"]
     )
     def test_an_unrecognized_triple_is_none_not_an_error(self, triple: str) -> None:
