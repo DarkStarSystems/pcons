@@ -9,7 +9,7 @@ protocol; the core resolver dispatches to it via the builder registry.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
@@ -76,6 +76,20 @@ def target_kind_suffix(target_type: str | None) -> str:
     if not target_type or target_type == "program":
         return ""
     return "." + target_type.removesuffix("_library")
+
+
+def object_subdir(source_dir: PurePath) -> list[str]:
+    """Where under a target's object directory a source in *source_dir*
+    (a node path) puts its object: the same directories, minus any ``..``.
+
+    A source outside the project has a rooted path; its root is dropped,
+    or the object would land beside the source: joining ``C:\\...`` onto
+    the object directory gives ``C:\\...`` back. A Windows drive stays as a
+    directory of its own, so ``C:`` and ``D:`` sources can't collide.
+    """
+    parts = list(source_dir.parts[1:] if source_dir.anchor else source_dir.parts)
+    drive = source_dir.drive.strip("\\/").rstrip(":").replace("\\", "_")
+    return ([drive] if drive else []) + [p for p in parts if p != ".."]
 
 
 def object_dir_name(target: Target) -> str:
@@ -610,10 +624,7 @@ class CompileLinkFactory:
         if bd_parts and rel_dir.parts[: len(bd_parts)] == bd_parts:
             remainder = rel_dir.parts[len(bd_parts) :]
             rel_dir = Path(*remainder) if remainder else Path()
-        parts = [p for p in rel_dir.parts if p not in ("..", "/")]
-        if parts:
-            return obj_dir.joinpath(*parts) / obj_name
-        return obj_dir / obj_name
+        return obj_dir.joinpath(*object_subdir(rel_dir)) / obj_name
 
     def _object_node(self, target: Target, obj_path: Path) -> FileNode:
         """The node for *obj_path*, refusing a second producer.
