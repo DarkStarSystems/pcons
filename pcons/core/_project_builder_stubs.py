@@ -425,6 +425,7 @@ if TYPE_CHECKING:
             labels: Sequence[str] = (),
             timeout: float | None = None,
             should_fail: bool = False,
+            skip_returncode: int | None = None,
             serial: bool = False,
             disabled: bool = False,
             data: Sequence[Path | str] = (),

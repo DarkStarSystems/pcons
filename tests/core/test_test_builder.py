@@ -263,6 +263,33 @@ class TestDiscoverField:
         assert data["tests"][0]["discover"] == "doctest"
 
 
+class TestSkipReturncode:
+    """skip_returncode reaches the spec and the manifest; None by default."""
+
+    def test_default_is_none(self, project):
+        proj, _env, prog = project
+        t = proj.Test("t", prog)
+        proj.resolve()
+        assert t._builder_data["spec"].skip_returncode is None
+
+    def test_serializes(self, project, tmp_path):
+        proj, _env, prog = project
+        proj.Test("t", prog, skip_returncode=77)
+        proj.resolve()
+        out = tmp_path / "build"
+        out.mkdir(exist_ok=True)
+        path = write_test_manifest(proj, out)
+        data = json.loads(path.read_text())
+        assert data["tests"][0]["skip_returncode"] == 77
+
+    def test_set_test_property(self, project):
+        proj, _env, prog = project
+        t = proj.Test("t", prog)
+        set_test_property(t, "skip_returncode", 77)
+        proj.resolve()
+        assert t._builder_data["spec"].skip_returncode == 77
+
+
 class TestSetTestProperty:
     """set_test_property mutates an unresolved Test target's spec_partial."""
 

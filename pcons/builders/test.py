@@ -83,6 +83,7 @@ class TestNodeFactory:
             labels=tuple(partial["labels"]),
             timeout=partial["timeout"],
             should_fail=partial["should_fail"],
+            skip_returncode=partial["skip_returncode"],
             serial=partial["serial"],
             disabled=partial["disabled"],
             data=tuple(Path(p) for p in partial["data"]),
@@ -134,6 +135,7 @@ class TestBuilder:
         labels: Sequence[str] = (),
         timeout: float | None = None,
         should_fail: bool = False,
+        skip_returncode: int | None = None,
         serial: bool = False,
         disabled: bool = False,
         data: Sequence[Path | str] = (),
@@ -161,6 +163,10 @@ class TestBuilder:
                 means no timeout.
             should_fail: If True, the runner inverts the pass/fail
                 interpretation of the exit code (used for XFAIL tests).
+            skip_returncode: An exit code the runner reports as skipped
+                rather than failed, like CTest's ``SKIP_RETURN_CODE``
+                (77 is the automake/Meson convention). ``None`` means
+                every exit code is a pass or a fail.
             serial: If True, runner will not parallelize this test with
                 others (useful for tests that contend on shared
                 resources like ports or GPUs).
@@ -211,6 +217,7 @@ class TestBuilder:
                 "labels": tuple(labels),
                 "timeout": timeout,
                 "should_fail": should_fail,
+                "skip_returncode": skip_returncode,
                 "serial": serial,
                 "disabled": disabled,
                 "data": tuple(data),

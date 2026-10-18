@@ -33,14 +33,21 @@ static int test_always_fails(void) {
     return 1;
 }
 
+/* 77 means "skipped": the automake/Meson convention. */
+static int test_needs_missing_tool(void) {
+    fprintf(stderr, "required tool not found; skipping\n");
+    return 77;
+}
+
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s {add|mul|fail}\n", argv[0]);
+        fprintf(stderr, "usage: %s {add|mul|fail|skip}\n", argv[0]);
         return 2;
     }
     if (strcmp(argv[1], "add") == 0) return test_add();
     if (strcmp(argv[1], "mul") == 0) return test_mul();
     if (strcmp(argv[1], "fail") == 0) return test_always_fails();
+    if (strcmp(argv[1], "skip") == 0) return test_needs_missing_tool();
     fprintf(stderr, "unknown test: %s\n", argv[1]);
     return 2;
 }

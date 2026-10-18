@@ -247,6 +247,58 @@ class TestSingleTestExecution:
         )
         assert result.status == SKIP
 
+    @pytest.mark.parametrize(
+        ("exit_code", "should_fail", "expected"),
+        [
+            (77, False, SKIP),
+            (77, True, SKIP),
+            (1, False, FAIL),
+            (0, False, PASS),
+            (1, True, PASS),
+        ],
+    )
+    def test_skip_returncode(self, tmp_path, exit_code, should_fail, expected):
+        # The skip code wins over should_fail; other codes are unaffected.
+        script = _make_exit_script(
+            tmp_path, "maybe.py", f"import sys; sys.exit({exit_code})"
+        )
+        result = run_one_test(
+            {
+                "name": "maybe",
+                "command": [str(script)],
+                "skip_returncode": 77,
+                "should_fail": should_fail,
+                "labels": [],
+            },
+            tmp_path,
+        )
+        assert result.status == expected
+        assert result.returncode == exit_code
+        if expected == SKIP:
+            assert result.message == "exit code 77"
+
+    def test_skip_returncode_unset_means_fail(self, tmp_path):
+        script = _make_exit_script(tmp_path, "skip.py", "import sys; sys.exit(77)")
+        result = run_one_test(
+            {"name": "skip", "command": [str(script)], "labels": []},
+            tmp_path,
+        )
+        assert result.status == FAIL
+
+    def test_timeout_is_not_a_skip(self, tmp_path):
+        script = _make_exit_script(tmp_path, "slow.py", "import time; time.sleep(5)")
+        result = run_one_test(
+            {
+                "name": "slow",
+                "command": [str(script)],
+                "timeout": 0.3,
+                "skip_returncode": 77,
+                "labels": [],
+            },
+            tmp_path,
+        )
+        assert result.status == TIMEOUT
+
     def test_env_vars_passed_to_subprocess(self, tmp_path):
         # The script returns 0 if MY_VAR=hello, else 1.
         script = _make_exit_script(
