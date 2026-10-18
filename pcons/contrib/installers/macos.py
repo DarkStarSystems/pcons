@@ -45,6 +45,7 @@ from pcons.contrib.installers._helpers import (
     as_installer_step,
     staging_dir,
 )
+from pcons.core.paths import last_component
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -316,7 +317,8 @@ def create_pkg(
             name_str = str(src.name)
         else:
             name_str = Path(str(src)).name
-        return name_str if name_str.endswith(".app") else None
+        # Staged at the payload root, by its file name alone
+        return last_component(name_str) if name_str.endswith(".app") else None
 
     bundle_names = [b for b in (bundle_name(src) for src in sources) if b]
 

@@ -10,48 +10,10 @@ which is what these tests pin: the host here is whatever runs them.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import PropertyMock, patch
-
-import pytest
 
 from pcons import Project
-from pcons.core.environment import Environment
-from pcons.toolchains.clang_cl import (
-    ClangClCCompiler,
-    ClangClCxxCompiler,
-    ClangClLibrarian,
-    ClangClLinker,
-    ClangClToolchain,
-)
 from pcons.toolchains.presets import target_platform_for_triple
-
-
-@pytest.fixture
-def clang_cl_toolchain():
-    """A clang-cl toolchain, configured the way the gcc fixture is.
-
-    Its own configure() only answers on Windows; a cross build to Windows
-    names the binaries itself, so the tools are populated by hand here too.
-    """
-    toolchain = ClangClToolchain()
-    toolchain._tools = {
-        "cc": ClangClCCompiler(),
-        "cxx": ClangClCxxCompiler(),
-        "lib": ClangClLibrarian(),
-        "link": ClangClLinker(),
-    }
-    toolchain._configured = True
-    return toolchain
-
-
-def _target(triple: str):
-    """Pin what every environment builds for, leaving the host alone."""
-    return patch.object(
-        Environment,
-        "target",
-        new_callable=PropertyMock,
-        return_value=target_platform_for_triple(triple),
-    )
+from tests.support import building_for
 
 
 def _sources(tmp_path: Path) -> None:
@@ -72,7 +34,7 @@ def test_a_cross_msvc_build_writes_an_import_library(tmp_path, clang_cl_toolchai
     """The DLL's dependents link foo.lib, on a host that has no link.exe."""
     _sources(tmp_path)
     project = Project("p", root_dir=tmp_path, build_dir="build")
-    with _target("x86_64-pc-windows-msvc"):
+    with building_for("x86_64-pc-windows-msvc"):
         env = project.Environment(toolchain=clang_cl_toolchain)
         shared = project.SharedLibrary("foo", env, sources=["lib.c"])
         program = project.Program("app", env, sources=["main.c"]).link(shared)
@@ -88,7 +50,7 @@ def test_a_cross_mingw_build_links_the_dll_itself(tmp_path, gcc_toolchain):
     """A GNU link writes no import library, so there is none to link."""
     _sources(tmp_path)
     project = Project("p", root_dir=tmp_path, build_dir="build")
-    with _target("x86_64-w64-mingw32"):
+    with building_for("x86_64-w64-mingw32"):
         env = project.Environment(toolchain=gcc_toolchain)
         shared = project.SharedLibrary("foo", env, sources=["lib.c"])
         program = project.Program("app", env, sources=["main.c"]).link(shared)
@@ -112,7 +74,7 @@ def test_an_import_library_keeps_the_stem_output_filename_chose(
     """A plugin named outright still links against a .lib of that stem."""
     _sources(tmp_path)
     project = Project("p", root_dir=tmp_path, build_dir="build")
-    with _target("x86_64-pc-windows-msvc"):
+    with building_for("x86_64-pc-windows-msvc"):
         env = project.Environment(toolchain=clang_cl_toolchain)
         shared = project.SharedLibrary("foo", env, sources=["lib.c"])
         shared.output_filename = "myplugin.ofx"

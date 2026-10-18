@@ -11,6 +11,8 @@ import platform
 import struct
 from dataclasses import dataclass
 
+from pcons.core.paths import affix_filename
+
 
 @dataclass(frozen=True)
 class Platform:
@@ -72,7 +74,7 @@ class Platform:
         Returns:
             Full library name (e.g., 'libfoo.so' or 'foo.dll')
         """
-        return f"{self.shared_lib_prefix}{name}{self.shared_lib_suffix}"
+        return affix_filename(name, self.shared_lib_prefix, self.shared_lib_suffix)
 
     def static_lib_name(self, name: str) -> str:
         """Get the full static library name for a base name.
@@ -83,7 +85,7 @@ class Platform:
         Returns:
             Full library name (e.g., 'libfoo.a' or 'foo.lib')
         """
-        return f"{self.static_lib_prefix}{name}{self.static_lib_suffix}"
+        return affix_filename(name, self.static_lib_prefix, self.static_lib_suffix)
 
     def exe_name(self, name: str) -> str:
         """Get the full executable name for a base name.
@@ -94,7 +96,7 @@ class Platform:
         Returns:
             Full executable name (e.g., 'app' or 'app.exe')
         """
-        return f"{name}{self.exe_suffix}"
+        return affix_filename(name, "", self.exe_suffix)
 
 
 def detect_platform() -> Platform:

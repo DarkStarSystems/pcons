@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from pcons.core.project import Project
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -173,3 +175,22 @@ def object_of(project: Project, target: str, source: str) -> str:
     ]
     assert len(nodes) == 1, [node.path.name for node in nodes]
     return nodes[0].path.name
+
+
+def building_for(triple: str) -> AbstractContextManager[object]:
+    """Pin what every environment builds for, leaving the host alone.
+
+    Naming, import libraries and link groups read ``env.target``, and only
+    that, so this is a cross build as far as they can tell.
+    """
+    from unittest.mock import PropertyMock, patch
+
+    from pcons.core.environment import Environment
+    from pcons.toolchains.presets import target_platform_for_triple
+
+    return patch.object(
+        Environment,
+        "target",
+        new_callable=PropertyMock,
+        return_value=target_platform_for_triple(triple),
+    )

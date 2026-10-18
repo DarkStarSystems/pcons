@@ -91,6 +91,32 @@ def gcc_toolchain():
 
 
 @pytest.fixture
+def clang_cl_toolchain():
+    """A clang-cl toolchain, configured the way the gcc fixture is.
+
+    Its own configure() only answers on Windows; a cross build to Windows
+    names the binaries itself, so the tools are populated by hand here too.
+    """
+    from pcons.toolchains.clang_cl import (
+        ClangClCCompiler,
+        ClangClCxxCompiler,
+        ClangClLibrarian,
+        ClangClLinker,
+        ClangClToolchain,
+    )
+
+    toolchain = ClangClToolchain()
+    toolchain._tools = {
+        "cc": ClangClCCompiler(),
+        "cxx": ClangClCxxCompiler(),
+        "lib": ClangClLibrarian(),
+        "link": ClangClLinker(),
+    }
+    toolchain._configured = True
+    return toolchain
+
+
+@pytest.fixture
 def tmp_project(tmp_path):
     """Create a temporary project directory with standard structure."""
     src_dir = tmp_path / "src"
