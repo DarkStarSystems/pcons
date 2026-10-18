@@ -22,6 +22,11 @@ from pcons.core.target import register_target_option
 logger = logging.getLogger(__name__)
 
 register_target_option(
+    "build_rpath",
+    "False keeps a program or shared library from finding the build's own "
+    "shared libraries through an rpath relative to it",
+)
+register_target_option(
     "exported_symbols",
     "symbols a shared library or executable exports, as C names (patterns "
     "allowed on macOS and Linux); everything else is hidden, except that on "
@@ -228,6 +233,10 @@ class LinkNeeds:
         frameworks: macOS frameworks.
         framework_dirs: Where those are.
         rpaths: Where the runtime is found when the program runs.
+        relative_rpaths: Where shared libraries this build makes are found
+            when the program runs, relative to the linked file's own
+            directory (``.`` for beside it), so a build tree that moves
+            still runs.
         objects: Files linked as they are (Swift's ``swiftrt.o``).
         console: The entry point is a console ``main`` the objects don't
             define (ifx's is in its runtime), so the linker can't infer
@@ -239,6 +248,7 @@ class LinkNeeds:
     frameworks: tuple[str, ...] = ()
     framework_dirs: tuple[str, ...] = ()
     rpaths: tuple[str, ...] = ()
+    relative_rpaths: tuple[str, ...] = ()
     objects: tuple[str, ...] = ()
     console: bool = False
 
@@ -254,6 +264,7 @@ class LinkNeeds:
             frameworks=both(self.frameworks, other.frameworks),
             framework_dirs=both(self.framework_dirs, other.framework_dirs),
             rpaths=both(self.rpaths, other.rpaths),
+            relative_rpaths=both(self.relative_rpaths, other.relative_rpaths),
             objects=both(self.objects, other.objects),
             console=self.console or other.console,
         )

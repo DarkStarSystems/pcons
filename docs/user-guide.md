@@ -1497,6 +1497,8 @@ app.link_private(libplugin)
 project.Default(app, libplugin)
 ```
 
+A program or shared library that links one of the build's own shared libraries runs from the build tree as it is, with no `LD_LIBRARY_PATH` or `DYLD_LIBRARY_PATH`. On Linux and macOS each link gets an rpath to the directory the library is built in, written relative to the linked file (`$ORIGIN/...`, `@loader_path/...`), so the build tree can move. Windows finds a DLL beside its program, so it needs nothing. CMake and Meson do the same. Turn it off for one target with `target.set_option("build_rpath", False)`. The rpath follows the build tree's layout, so an install that puts programs and libraries in different directories needs an rpath of its own.
+
 ### Project with Subdirectories
 
 Organize a larger project with separate directories.

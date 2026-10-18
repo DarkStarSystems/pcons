@@ -9,6 +9,7 @@ protocol; the core resolver dispatches to it via the builder registry.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
@@ -207,6 +208,22 @@ def _reads_link_command(toolchain: Toolchain, env: Environment) -> bool:
         return False
     own = link.default_vars()
     return all(own.get(var) == env.link.get(var) for var in ("progcmd", "sharedcmd"))
+
+
+def _build_library_dirs(target: Target, output_node: FileNode) -> tuple[str, ...]:
+    """Where the shared libraries this build makes, which the link pulls
+    in, are built, relative to the linked file: what a program running in
+    the build tree needs to find them, as CMake's and Meson's build rpaths
+    give it."""
+    if target.get_option("build_rpath") is False:
+        return ()
+    here = output_node.path.parent
+    dirs: dict[str, None] = {}
+    for dep in target.transitive_link_dependencies():
+        if dep.target_type == "shared_library" and dep.output_nodes:
+            built = dep.output_nodes[0].path.parent
+            dirs[Path(os.path.relpath(built, here)).as_posix()] = None
+    return tuple(dirs)
 
 
 def _link_contents(target: Target) -> tuple[list[FileNode], set[str]]:
@@ -1121,7 +1138,7 @@ class CompileLinkFactory:
 
         # What the objects need from this link, which the linking
         # toolchain writes its own way (see LinkNeeds).
-        needs = LinkNeeds()
+        needs = LinkNeeds(relative_rpaths=_build_library_dirs(target, output_node))
         for (toolchain, compiled_in), languages in compilers.items():
             needs = needs | toolchain.link_needs(
                 target, languages, link_language, compiled_in
