@@ -550,8 +550,10 @@ class ConanFinder(BaseFinder):
         self.output_folder.mkdir(parents=True, exist_ok=True)
 
         if toolchain is None and env is not None:
-            owners = getattr(env, "_tool_owners", {})
-            toolchain = owners.get("cxx") or owners.get("cc")
+            toolchain = next(
+                (env.toolchain_for(t) for t in ("cxx", "cc") if env.has_tool(t)),
+                None,
+            )
 
         cc_cmd = cxx_cmd = None
         if toolchain is not None:

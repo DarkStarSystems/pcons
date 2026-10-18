@@ -267,7 +267,7 @@ def _link_driver(
     the driver that really links. *compilers* are the toolchains whose
     objects the link pulls in.
     """
-    owner = env._tool_owners.get("link", env._toolchain)
+    owner = env.toolchain_for("link")
     if target.link_language is not None:
         language = target.link_language
         if not any(_compiles(tc, language) for tc in env.toolchains):
@@ -599,7 +599,7 @@ class CompileLinkFactory:
                 # handles the source too: Swift inherits C++ handlers, but
                 # beside clang, clang's cxx compiles the .cpp, and its
                 # objects need what clang's do.
-                owner = env._tool_owners.get(handler.tool_name, toolchain)
+                owner = env.toolchain_for(handler.tool_name) or toolchain
                 if owner is not toolchain:
                     own = owner.get_source_handler(source.suffix)
                     if own is not None and own.tool_name == handler.tool_name:
@@ -1134,7 +1134,7 @@ class CompileLinkFactory:
             )
             if toolchain is not None:
                 compilers.setdefault((toolchain, env), set()).add(lang)
-        owner = env._tool_owners.get("link", env._toolchain)
+        owner = env.toolchain_for("link")
         link_base_flags = (
             env.flags_realized_by("link", linker)
             if linker is not None and linker is not owner and env.has_tool("link")

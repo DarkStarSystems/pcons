@@ -22,6 +22,27 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
 
 
+# Flags whose argument is a directory path, in either form ("-Ifoo" or
+# "-I foo"), on a GNU-style compiler's and linker's command lines.
+# Generators rewrite these so generated build files stay relocatable.
+# Deliberately excludes -include/-imacros: their argument is a header *name*
+# resolved through the include path (Qt's mkspecs pass "-include
+# arm_acle.h"), and rewriting it as a path breaks the build.
+GNU_COMPILE_PATH_FLAGS: frozenset[str] = frozenset(
+    [
+        "-I",
+        "-F",
+        "-isystem",
+        "-iquote",
+        "-idirafter",
+        "-iframework",
+        "-isysroot",
+        "--sysroot",
+    ]
+)
+GNU_LINK_PATH_FLAGS: frozenset[str] = frozenset(["-L", "-F", "-isysroot", "--sysroot"])
+
+
 def gnu_compile_vars(
     cmd: str,
     ns: str,

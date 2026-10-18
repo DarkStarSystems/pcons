@@ -955,12 +955,13 @@ class Toolchain(Protocol):
         token, for flag deduplication."""
         ...
 
-    def get_path_flags(self) -> frozenset[str]:
-        """Return flags (like -I, -isystem) whose argument is a path.
+    def get_path_flags(self, tool: str) -> frozenset[str]:
+        """Return flags (like -I, -isystem) whose argument is a path, on
+        *tool*'s command line.
 
         Generators use this to rewrite the paths in flags relative to where
         the build tool runs, in both the joined (``-Ifoo``) and separate
-        (``-I foo``) spellings.
+        (``-I foo``) forms, with the flags of the tool a command runs.
         """
         ...
 
@@ -1688,9 +1689,21 @@ class BaseToolchain(ABC):
         """Return flags whose argument is a separate token. Base: none."""
         return frozenset()
 
-    def get_path_flags(self) -> frozenset[str]:
-        """Return flags whose argument is a path. Base: none."""
-        return frozenset()
+    # Flags whose argument is a path: those this toolchain's compilers
+    # read, and those its linkers (LINK_TOOLS) read.
+    COMPILE_PATH_FLAGS: ClassVar[frozenset[str]] = frozenset()
+    LINK_PATH_FLAGS: ClassVar[frozenset[str]] = frozenset()
+    LINK_TOOLS: ClassVar[frozenset[str]] = frozenset({"link"})
+
+    def get_path_flags(self, tool: str) -> frozenset[str]:
+        """Return flags whose argument is a path, on *tool*'s command line:
+        none for the archiver or a tool this toolchain doesn't have, the
+        linker's for a link tool, and the compilers' for the rest."""
+        if tool not in self._tools or tool == self.get_archiver_tool_name():
+            return frozenset()
+        if tool in self.LINK_TOOLS:
+            return self.LINK_PATH_FLAGS
+        return self.COMPILE_PATH_FLAGS
 
     def compile_link_context_class(self) -> type[CompileLinkContext]:
         """Return the CompileLinkContext subclass used for compile/link commands.

@@ -558,6 +558,13 @@ class Environment(_EnvironmentStubs):
             raise AttributeError("this Environment was created without a toolchain")
         return toolchain
 
+    def toolchain_for(self, tool: str) -> Toolchain | None:
+        """The toolchain that owns *tool*: the one that added it, whose
+        realizations reach it. A tool no toolchain added belongs to the
+        primary toolchain. None in an environment without a toolchain."""
+        primary: Toolchain | None = object.__getattribute__(self, "_toolchain")
+        return self._tool_owners.get(tool, primary)
+
     def add_toolchain(self, toolchain: Toolchain | KnownToolchain | str) -> None:
         """Add an additional toolchain to this environment.
 
@@ -1246,11 +1253,9 @@ class Environment(_EnvironmentStubs):
     def _takes_part(self, toolchain: Toolchain) -> bool:
         """Whether *toolchain* owns a tool its features and knobs are
         realized on (gfortran's ``fc``), so must realize each one."""
-        primary = object.__getattribute__(self, "_toolchain")
         tools = getattr(toolchain, "_feature_preset_tools", tuple)()
         return any(
-            self.has_tool(t) and self._tool_owners.get(t, primary) is toolchain
-            for t in tools
+            self.has_tool(t) and self.toolchain_for(t) is toolchain for t in tools
         )
 
     def _realize(

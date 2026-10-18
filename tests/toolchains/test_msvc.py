@@ -629,9 +629,7 @@ class TestMsvcAuxiliaryInputHandler:
     def test_auxiliary_input_paths_are_path_flags(self):
         """/MANIFESTINPUT: and /DEF: take node paths, so generators
         must make them execution-relative, not source-relative."""
-        tc = MsvcToolchain()
-        assert "/MANIFESTINPUT:" in tc.get_path_flags()
-        assert "/DEF:" in tc.get_path_flags()
+        assert {"/MANIFESTINPUT:", "/DEF:"} <= MsvcToolchain.LINK_PATH_FLAGS
 
     def test_auxiliary_input_handler_manifest_case_insensitive(self):
         """Test that .MANIFEST files are also recognized (case insensitive)."""

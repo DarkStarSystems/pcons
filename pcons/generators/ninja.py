@@ -63,8 +63,6 @@ class NinjaGenerator(BaseGenerator):
         # Anchors of the project's paths, set during generate()
         self._resolver: PathResolver = PathResolver(Path("."), Path("build"))
         self._build_dir_parts: tuple[str, ...] = ()  # Parts of relative build_dir
-        # Path-carrying flags of the project's toolchains (-I, -isystem, /I...)
-        self._path_flags: frozenset[str] = frozenset()
         self._warned_absolute_paths: set[str] = set()
         self._warned_build_dir_paths: set[str] = set()
         # id(node) -> (rule_key, command); reset per generate()
@@ -85,7 +83,6 @@ class NinjaGenerator(BaseGenerator):
         self._project_root = project.root_dir.resolve()
         self._resolver = PathResolver(self._project_root, Path(project._build_dir))
         self._build_dir_parts = Path(project._build_dir).parts
-        self._path_flags = self._collect_path_flags(project)
         self._warned_absolute_paths = set()
         self._warned_build_dir_paths = set()
         self._rule_key_cache = {}
@@ -211,6 +208,7 @@ class NinjaGenerator(BaseGenerator):
             ]
             relativized_tokens = self._relativize_command_tokens(
                 cast(list[str], command_tokens),
+                path_flags=self._path_flags(env, tool_name),
                 source_count=len(build_info.get("sources") or []),
                 target_count=len(all_targets) or len(explicit_outputs) or 1,
                 cwd=cwd,
@@ -667,7 +665,13 @@ class NinjaGenerator(BaseGenerator):
         if isinstance(depfile, PathToken) and not depfile.suffix:
             f.write(f"  depfile = {self._ref(depfile.path, built=True)}\n")
 
-        self._write_build_variables(f, node, target, build_info, project)
+        self._write_build_variables(
+            f,
+            node,
+            target,
+            build_info,
+            self._path_flags(env, build_info.get("tool", "")),
+        )
 
     def _write_build_variables(
         self,
@@ -675,7 +679,7 @@ class NinjaGenerator(BaseGenerator):
         node: FileNode,
         target: Target | None,
         build_info: dict[str, object],
-        project: Project | None = None,
+        path_flags: frozenset[str] = frozenset(),
     ) -> None:
         """Write per-build variables for a build statement.
 
@@ -742,7 +746,7 @@ class NinjaGenerator(BaseGenerator):
         if node_vars and isinstance(node_vars, dict):
             for name, value in cast("dict[str, object]", node_vars).items():
                 self._check_node_var_name(name, node)
-                f.write(f"  {name} = {self._render_node_var(value, cwd)}\n")
+                f.write(f"  {name} = {self._render_node_var(value, cwd, path_flags)}\n")
 
         # Custom per-build variables from build_info (legacy support)
         custom_vars = build_info.get("variables")
@@ -765,7 +769,9 @@ class NinjaGenerator(BaseGenerator):
                 f"value where the edge's own paths belong."
             )
 
-    def _render_node_var(self, value: object, cwd: Path | None) -> str:
+    def _render_node_var(
+        self, value: object, cwd: Path | None, path_flags: frozenset[str]
+    ) -> str:
         """One per-node value as ninja variable text.
 
         The same shapes a command carries — a plain string, a PathToken, or a
@@ -776,7 +782,9 @@ class NinjaGenerator(BaseGenerator):
 
         tokens = value if isinstance(value, list) else [value]
         return to_shell_command(
-            self._relativize_command_tokens(cast("list[str]", tokens), cwd=cwd),
+            self._relativize_command_tokens(
+                cast("list[str]", tokens), cwd=cwd, path_flags=path_flags
+            ),
             shell="ninja",
         )
 
@@ -993,49 +1001,41 @@ class NinjaGenerator(BaseGenerator):
         return self.ESCAPE_CHARS.sub(r"$\1", path_str)
 
     def _relativize_flag_with_path(
-        self, token: str, prefix: str | None = None, *, cwd: Path | None = None
+        self, token: str, path_flags: frozenset[str], *, cwd: Path | None = None
     ) -> str:
         """Relativize a path-carrying flag (``-I<path>``, ``/LIBPATH:<path>``)
         the same way as any other path in the command — $topdir form, "." for
         the build dir, or relative to the edge's *cwd*.
 
-        With *prefix* given, *token* is the bare path argument of a flag that
-        was spelled as two tokens (``-isystem`` ``<path>``); the prefix is used
-        only to detect the MSVC ``/I.`` style and is not re-attached.
-
-        Returns the token unchanged if it isn't a path flag, or if the path
-        can't be made project-relative (it lives outside the tree).
+        Returns the token unchanged if it isn't one of *path_flags*, or if the
+        path can't be made project-relative (it lives outside the tree).
         """
+        prefix = self._path_flag_prefix(token, path_flags)
         if prefix is None:
-            prefix = self._path_flag_prefix(token)
-            if prefix is None:
-                return token
-            path = token[len(prefix) :]
+            return token
+        path = token[len(prefix) :]
+        if not path:
+            return token
+        # "--sysroot=<path>": the "=" joins the flag to its argument and
+        # is no part of the path. Left in, the path reads as relative and
+        # comes back as "--sysroot../=/opt/sdk".
+        if path.startswith("="):
+            prefix += "="
+            path = path[1:]
             if not path:
                 return token
-            # "--sysroot=<path>": the "=" joins the flag to its argument and
-            # is no part of the path. Left in, the path reads as relative and
-            # comes back as "--sysroot../=/opt/sdk".
-            if path.startswith("="):
-                prefix += "="
-                path = path[1:]
-                if not path:
-                    return token
-        else:
-            path = token
-            prefix = ""
-
         # Outside the project tree (an SDK, a system prefix), the path comes
         # back absolute — the only thing it can be.
         return f"{prefix}{self._text(path, built=False, cwd=cwd)}"
 
-    def _path_flag_prefix(self, token: str) -> str | None:
-        """The path-flag prefix *token* starts with, if any.
+    @staticmethod
+    def _path_flag_prefix(token: str, path_flags: frozenset[str]) -> str | None:
+        """The path flag *token* starts with, if any.
 
         Longest match wins, so ``/external:I`` isn't mistaken for a token that
         merely starts with ``/e``.
         """
-        matches = [p for p in self._path_flags if token.startswith(p)]
+        matches = [p for p in path_flags if token.startswith(p)]
         if not matches:
             return None
         return max(matches, key=len)
@@ -1089,7 +1089,7 @@ class NinjaGenerator(BaseGenerator):
             token,
         )
 
-    def _warn_absolute_in_tree(self, flag: str) -> None:
+    def _warn_absolute_in_tree(self, flag: str, path_flags: frozenset[str]) -> None:
         """Warn once per flag that carries an absolute path from inside the
         project tree.
 
@@ -1110,10 +1110,11 @@ class NinjaGenerator(BaseGenerator):
         logger.warning(
             "Flag carries an absolute path inside the project tree, so "
             "build.ninja is not relocatable:\n  %s\n"
-            "  pcons rewrites paths in the flags it knows (%s). For anything "
-            "else, use the tool's includes/libdirs lists or a PathToken.",
+            "  pcons rewrites paths in the flags it knows for this tool (%s). "
+            "For anything else, use the tool's includes/libdirs lists or a "
+            "PathToken.",
             flag,
-            ", ".join(sorted(self._path_flags)) or "none configured",
+            ", ".join(sorted(path_flags)) or "none",
         )
 
     def _relativize_command_tokens(
@@ -1123,12 +1124,13 @@ class NinjaGenerator(BaseGenerator):
         source_count: int = 0,
         target_count: int = 0,
         cwd: Path | None = None,
+        path_flags: frozenset[str] = frozenset(),
     ) -> list[str]:
         """Relativize command tokens for ninja execution.
 
         SourcePath/TargetPath markers become $in/$out (or $source_N/$target_N
-        in indexed mode), PathTokens are relativized, and plain strings fall
-        back to pattern-based path-flag detection.
+        in indexed mode), PathTokens are relativized, and a plain string that
+        starts with one of *path_flags* has its path relativized.
 
         A slice marker (``${SOURCES[2:]}``) expands to the indexed references
         it covers, which is why the counts are needed: ninja has no way to
@@ -1162,9 +1164,7 @@ class NinjaGenerator(BaseGenerator):
                 # all, and rewriting it would change its meaning.
                 expect_path = False
                 if isinstance(token, str) and Path(token).is_absolute():
-                    result.append(
-                        self._relativize_flag_with_path(token, prefix="", cwd=cwd)
-                    )
+                    result.append(self._text(token, built=False, cwd=cwd))
                     continue
             if isinstance(token, SourcePath):
                 if token.is_slice:
@@ -1235,10 +1235,10 @@ class NinjaGenerator(BaseGenerator):
                     result.append(s.replace("$SRCDIR", srcdir))
                     continue
                 # A bare path flag takes its path as the next token
-                expect_path = s in self._path_flags
-                relativized = self._relativize_flag_with_path(s, cwd=cwd)
+                expect_path = s in path_flags
+                relativized = self._relativize_flag_with_path(s, path_flags, cwd=cwd)
                 if relativized.startswith("-"):
-                    self._warn_absolute_in_tree(relativized)
+                    self._warn_absolute_in_tree(relativized, path_flags)
                 if cwd is None:
                     self._warn_build_dir_in_command(relativized)
                 result.append(relativized)

@@ -96,6 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ConanFinder.sync_profile(env=env)` takes the environment's C/C++
   toolchain, which in a Fortran-primary environment isn't the primary one,
   and the C++ standard `env.cxx.set_standard()` set.
+- A `Command`'s plain-string flags are passed as written. Before, one
+  starting like a path flag of a toolchain in the project (`-Iinclude`)
+  had its path rewritten. Put a path in a command as a `Path` or a node,
+  and pcons writes it for where the command runs.
 
 ### Fixed
 
@@ -151,6 +155,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Flow Guard, as MSVC's `hardened` does. The flags follow the platform
   being built for, so apply a cross preset first; applying one after
   `hardened` raises.
+- MSVC link options that start with `/I` reach link.exe as written. pcons
+  read them as cl's `/I` with a path, so `/INCREMENTAL:NO` in
+  `env.link.flags` came out as `/I../NCREMENTAL:NO`, which link.exe
+  ignores with a warning. Each tool's command line is now checked only for
+  the path flags that tool takes: `/LIBPATH:` on a link line, `/I` on a
+  compile line. Before, every command was checked for the path flags of
+  every toolchain in the project.
 - Fortran submodules are compiled after the module (or submodule) they
   extend. Before, nothing ordered them, and a separate module procedure
   with a prefix (`module pure function f()`) was read as a module named

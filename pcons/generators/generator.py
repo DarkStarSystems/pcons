@@ -26,6 +26,7 @@ from pcons.core.node import FileNode
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.core.target import Target
 
@@ -245,21 +246,19 @@ class BaseGenerator:
         project._output_graphs_if_requested()
 
     @staticmethod
-    def _collect_path_flags(project: Project) -> frozenset[str]:
-        """Path-carrying flags (-I, -isystem, /LIBPATH:, ...) of every
-        toolchain in the project.
+    def _path_flags(env: Environment | None, tool: str) -> frozenset[str]:
+        """Path-carrying flags (-I, -isystem, /LIBPATH:, ...) on the command
+        line of *env*'s *tool*.
 
         Generators rewrite the paths in these flags relative to where the
-        build tool runs. Which flags carry paths is toolchain knowledge, so
-        it comes from the toolchains rather than a list in the generator.
+        build tool runs. Which flags carry paths is the knowledge of the
+        toolchain that owns the tool, so it comes from there. A tool no
+        toolchain has (a Command's) has none: its command is as written.
         """
-        flags: set[str] = set()
-        for env in project.environments:
-            for toolchain in getattr(env, "toolchains", []):
-                getter = getattr(toolchain, "get_path_flags", None)
-                if getter is not None:
-                    flags.update(getter())
-        return frozenset(flags)
+        toolchain = env.toolchain_for(tool) if env is not None else None
+        if toolchain is None:
+            return frozenset()
+        return toolchain.get_path_flags(tool)
 
     def _resolve_output_dir(self, project: Project) -> Path:
         """The project's build directory. ``build_dir`` is written from the

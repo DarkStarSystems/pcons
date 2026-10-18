@@ -255,7 +255,7 @@ class CompileLinkContext:
         # SONAME, an import library, exported_symbols).
         if target is not None and output_name is not None and env is not None:
             if linker is None:
-                linker = env._tool_owners.get("link", env._toolchain)
+                linker = env.toolchain_for("link")
             if linker is not None:
                 for flag in linker.get_link_flags_for_target(
                     target, output_name, link_flags

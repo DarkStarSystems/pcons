@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.core.preset import VARIANT_GROUP, Preset, ToolContribution
 from pcons.tools.toolchain import BaseToolchain, LinkNeeds
@@ -210,30 +210,24 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """
         return []
 
-    # Flags whose argument is a path. MSVC spells them joined ("/Ifoo"), but
+    # Flags whose argument is a path. MSVC writes them joined ("/Ifoo"), but
     # the separate form is accepted too, so generators handle both.
-    PATH_FLAGS: frozenset[str] = frozenset(
+    COMPILE_PATH_FLAGS: ClassVar[frozenset[str]] = frozenset(
         [
             "/I",
-            "/LIBPATH:",
             "/external:I",
-            "-imsvc",  # clang-cl's spelling of /external:I
-            # Auxiliary linker inputs (get_auxiliary_input_handler): their
-            # $file is a node path, which for a source-tree .manifest or
-            # .def needs the same execution-relative rewrite as any other
-            # path-carrying flag.
-            "/MANIFESTINPUT:",
-            "/DEF:",
+            "-imsvc",  # clang-cl's form of /external:I
         ]
+    )
+    # Auxiliary linker inputs (get_auxiliary_input_handler) are node paths,
+    # which for a source-tree .manifest or .def need the same rewrite.
+    LINK_PATH_FLAGS: ClassVar[frozenset[str]] = frozenset(
+        ["/LIBPATH:", "/MANIFESTINPUT:", "/DEF:"]
     )
 
     def get_separated_arg_flags(self) -> frozenset[str]:
         """Return flags that take their argument as a separate token."""
         return self.SEPARATED_ARG_FLAGS
-
-    def get_path_flags(self) -> frozenset[str]:
-        """Return flags whose argument is a path."""
-        return self.PATH_FLAGS
 
     # Variant flags per build type (compile_flags, defines). Every variant
     # picks the dynamic CRT, debug or release to match its defines: cl.exe's

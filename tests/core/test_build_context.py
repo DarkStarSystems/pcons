@@ -318,8 +318,8 @@ class TestCompileLinkContext:
                 return ["-Wl,-soname,libfoo.so", "-Wl,-z"]
 
         class _StubEnv:
-            _toolchain = _StubToolchain()
-            _tool_owners: dict[str, object] = {}
+            def toolchain_for(self, tool: str) -> object:
+                return _StubToolchain()
 
             def has_tool(self, name: str) -> bool:
                 return False

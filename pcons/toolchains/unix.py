@@ -16,7 +16,11 @@ from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 from pcons.toolchains._msvc_compat import module_definition
-from pcons.toolchains.gnu_common import needs_pic
+from pcons.toolchains.gnu_common import (
+    GNU_COMPILE_PATH_FLAGS,
+    GNU_LINK_PATH_FLAGS,
+    needs_pic,
+)
 from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 from pcons.util.macos import apple_sdk_for_triple
 
@@ -586,32 +590,12 @@ class UnixToolchain(BaseToolchain):
             return [f"{flag}{explicit}"]
         return [TargetPath(basename=True, prefix=f"{flag}{auto_prefix}")]
 
-    # Flags whose argument is a directory path, in either spelling ("-Ifoo"
-    # or "-I foo"). Generators rewrite these so generated build files stay
-    # relocatable. Deliberately excludes -include/-imacros: their argument is
-    # a header *name* resolved through the include path (Qt's mkspecs pass
-    # "-include arm_acle.h"), and rewriting it as a path breaks the build.
-    PATH_FLAGS: frozenset[str] = frozenset(
-        [
-            "-I",
-            "-L",
-            "-F",
-            "-isystem",
-            "-iquote",
-            "-idirafter",
-            "-iframework",
-            "-isysroot",
-            "--sysroot",
-        ]
-    )
+    COMPILE_PATH_FLAGS: ClassVar[frozenset[str]] = GNU_COMPILE_PATH_FLAGS
+    LINK_PATH_FLAGS: ClassVar[frozenset[str]] = GNU_LINK_PATH_FLAGS
 
     def get_separated_arg_flags(self) -> frozenset[str]:
         """Return flags that take their argument as a separate token."""
         return self.SEPARATED_ARG_FLAGS
-
-    def get_path_flags(self) -> frozenset[str]:
-        """Return flags whose argument is a path."""
-        return self.PATH_FLAGS
 
     # =========================================================================
     # Target Architecture and Variant Methods
@@ -741,9 +725,9 @@ class UnixToolchain(BaseToolchain):
         tool = self.LINK_DRIVER_TOOLS.get(language)
         if tool is None or not env.has_tool(tool):
             return None
-        if self.abi == "msvc" and env._tool_owners.get("link") is not self:
+        if self.abi == "msvc" and env.toolchain_for("link") is not self:
             return None
-        if env._tool_owners.get(tool) is not self:
+        if env.toolchain_for(tool) is not self:
             return None
         cmd = getattr(env, tool).cmd
         return str(cmd) if cmd else None
