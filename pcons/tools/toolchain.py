@@ -259,7 +259,9 @@ class LinkNeeds:
             the subsystem.
         excluded_default_libs: Libraries the objects name as defaults
             (MSVC's ``/DEFAULTLIB``) that the link must leave out: clang-cl's
-            OpenMP objects name MSVC's vcomp, which libomp replaces.
+            OpenMP objects name MSVC's vcomp, which libomp replaces, and
+            cudart_static.lib the static C runtime, which a ``/MD`` program
+            doesn't link.
     """
 
     libs: tuple[str, ...] = ()

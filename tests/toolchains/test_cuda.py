@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for CUDA toolchain."""
 
+import sys
+
 import pytest
 
 from pcons.configure.platform import Platform, get_platform
@@ -329,3 +331,111 @@ class TestCudaCrossTargets:
         )
         toolchain.apply_cross_preset(env, preset)
         assert env.cuda.cmd == "/opt/cuda/nvcc"
+
+
+class TestCudaRuntime:
+    """env.cuda.runtime: the CUDA runtime a link with CUDA objects needs."""
+
+    @pytest.fixture(autouse=True)
+    def _project(self, test_project):  # noqa: F811
+        return test_project
+
+    @staticmethod
+    def _toolchain(monkeypatch, platform: Platform) -> CudaToolchain:
+        """A CUDA toolchain on *platform*, as host and as target."""
+        from pcons.configure import platform as platform_mod
+
+        monkeypatch.setattr(platform_mod, "_platform", platform)
+        _on(monkeypatch, platform)
+        toolchain = CudaToolchain()
+        toolchain._tools = {"cuda": CudaCompiler()}
+        toolchain._configured = True
+        return toolchain
+
+    def _env(self, monkeypatch, platform: Platform, runtime: str | None = None):
+        from pcons.core.environment import Environment
+
+        toolchain = self._toolchain(monkeypatch, platform)
+        env = Environment()
+        toolchain.setup(env)
+        if runtime is not None:
+            env.cuda.runtime = runtime
+        return toolchain, env
+
+    def _needs(self, toolchain, env, languages=frozenset({"cuda", "cxx"})):
+        return toolchain.link_needs(None, set(languages), "cuda", env)
+
+    def test_static_by_default_with_its_system_libraries(self, monkeypatch):
+        toolchain, env = self._env(monkeypatch, _LINUX_PLATFORM)
+        assert self._needs(toolchain, env).libs == (
+            "cudart_static",
+            "dl",
+            "rt",
+            "pthread",
+        )
+
+    def test_shared(self, monkeypatch):
+        toolchain, env = self._env(monkeypatch, _LINUX_PLATFORM, "shared")
+        assert self._needs(toolchain, env).libs == ("cudart",)
+
+    def test_none(self, monkeypatch):
+        toolchain, env = self._env(monkeypatch, _LINUX_PLATFORM, "none")
+        assert self._needs(toolchain, env).libs == ()
+
+    def test_only_for_cuda_objects(self, monkeypatch):
+        toolchain, env = self._env(monkeypatch, _LINUX_PLATFORM)
+        assert self._needs(toolchain, env, {"cxx"}).libs == ()
+
+    def test_an_unknown_runtime_raises(self, monkeypatch):
+        toolchain, env = self._env(monkeypatch, _LINUX_PLATFORM, "Static")
+        with pytest.raises(ValueError, match="'static', 'shared', 'none'"):
+            self._needs(toolchain, env)
+
+    def test_static_on_windows_leaves_out_libcmt(self, monkeypatch):
+        """cudart_static.lib names the static release C runtime (LIBCMT),
+        which a program with any other leaves out."""
+        from pcons.toolchains.msvc import MsvcToolchain
+        from pcons.tools.toolchain import LinkNeeds
+
+        toolchain, env = self._env(monkeypatch, _WINDOWS_PLATFORM)
+        needs = self._needs(toolchain, env)
+        assert needs.libs == ("cudart_static",)
+        assert needs.excluded_default_libs == ("LIBCMT",)
+        flags = MsvcToolchain().realize_link_needs(
+            LinkNeeds(excluded_default_libs=("LIBCMT",)), None, []
+        )
+        assert flags == ["/NODEFAULTLIB:LIBCMT"]
+        env.set_runtime_linkage("static")
+        assert self._needs(toolchain, env).excluded_default_libs == ()
+        env.set_variant("debug")
+        assert self._needs(toolchain, env).excluded_default_libs == ("LIBCMT",)
+
+    def test_the_toolkit_libdir(self, monkeypatch, tmp_path):
+        from pcons.toolchains import cuda as cuda_mod
+
+        exe = ".exe" if sys.platform == "win32" else ""
+        nvcc = tmp_path / "cuda" / "bin" / f"nvcc{exe}"
+        nvcc.parent.mkdir(parents=True)
+        nvcc.write_text("")
+        nvcc.chmod(0o755)
+        libdir = tmp_path / "cuda" / "lib64"
+        libdir.mkdir()
+        (libdir / "libcudart_static.a").write_text("")
+        cuda_mod._runtime_libdir.cache_clear()
+        toolchain, env = self._env(monkeypatch, _LINUX_PLATFORM)
+        env.cuda.cmd = str(nvcc)
+        assert self._needs(toolchain, env).libdirs == (str(libdir.resolve()),)
+
+    @pytest.mark.parametrize(
+        ("variant", "crt"), [("debug", "/MDd"), ("release", "/MD")]
+    )
+    def test_the_host_compiles_with_the_dll_c_runtime_on_windows(
+        self, monkeypatch, variant, crt
+    ):
+        from pcons.core.environment import Environment
+
+        env = Environment(toolchain=self._toolchain(monkeypatch, _WINDOWS_PLATFORM))
+        assert "-Xcompiler=/MD" in env.cuda.flags
+        env.set_variant(variant)
+        assert f"-Xcompiler={crt}" in env.cuda.flags
+        assert env.cuda.flags.count("-Xcompiler=/MD") == (variant != "debug")

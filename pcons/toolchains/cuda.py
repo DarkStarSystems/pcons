@@ -7,8 +7,10 @@ provides the linker: env.add_toolchain(find_cuda_toolchain()).
 
 from __future__ import annotations
 
+import functools
 import logging
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import Platform, get_platform
@@ -17,13 +19,34 @@ from pcons.core.subst import TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain, msvc_crt
 from pcons.toolchains.gnu_common import GNU_COMPILE_PATH_FLAGS, needs_pic
 from pcons.tools.cuda import CudaCompiler
-from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_registry
+from pcons.tools.toolchain import (
+    BaseToolchain,
+    LinkNeeds,
+    SourceHandler,
+    toolchain_registry,
+)
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
+    from pcons.core.target import Target
+
+
+@functools.cache
+def _runtime_libdir(nvcc: str, library_file: str) -> str | None:
+    """The directory of the CUDA toolkit *nvcc* belongs to that holds
+    *library_file*: ``lib/x64`` on Windows, ``lib64`` on Linux, ``lib`` in
+    a conda environment."""
+    found = shutil.which(nvcc)
+    if found is None:
+        return None
+    root = Path(found).resolve().parent.parent
+    for libdir in ("lib/x64", "lib64", "lib"):
+        if (root / libdir / library_file).is_file():
+            return str(root / libdir)
+    return None
 
 
 class CudaToolchain(BaseToolchain):
@@ -95,8 +118,56 @@ class CudaToolchain(BaseToolchain):
         "openmp": {"compile_flags": ["-Xcompiler=/openmp"]},
     }
 
+    #: The libraries each ``env.cuda.runtime`` links, as CMake's
+    #: CUDA_RUNTIME_LIBRARY has them. ``static`` is nvcc's own default.
+    CUDA_RUNTIMES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "static": ("cudart_static",),
+        "shared": ("cudart",),
+        "none": (),
+    }
+
     def __init__(self) -> None:
         super().__init__("cuda")
+
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """CUDA objects need the CUDA runtime ``env.cuda.runtime`` picks,
+        which the host compiler's driver doesn't know of, and its
+        directory. On Linux, the static runtime needs libdl, librt and
+        libpthread. On Windows, cudart_static.lib names the static release
+        C runtime (LIBCMT), which a program with any other leaves out."""
+        if "cuda" not in languages or not env.has_tool("cuda"):
+            return LinkNeeds()
+        runtime = env.cuda.get("runtime")
+        libs = self.CUDA_RUNTIMES.get(runtime)
+        if libs is None:
+            raise ValueError(
+                f"env.cuda.runtime is {runtime!r}; it takes "
+                f"{', '.join(repr(r) for r in self.CUDA_RUNTIMES)}."
+            )
+        if not libs:
+            return LinkNeeds()
+        platform = env.target
+        # Windows links the shared runtime through its import library.
+        static = runtime == "static" or platform.is_windows
+        suffix = platform.static_lib_suffix if static else platform.shared_lib_suffix
+        libfile = f"{platform.static_lib_prefix}{libs[0]}{suffix}"
+        libdir = _runtime_libdir(str(env.cuda.cmd), libfile)
+        needs = LinkNeeds(libs=libs, libdirs=(libdir,) if libdir else ())
+        if runtime != "static":
+            return needs
+        if platform.is_windows:
+            if msvc_crt(env.runtime_linkage, env.variant) == "static":
+                return needs
+            return needs | LinkNeeds(excluded_default_libs=("LIBCMT",))
+        if platform.is_linux:
+            return needs | LinkNeeds(libs=("dl", "rt", "pthread"))
+        return needs
 
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("cuda",)
