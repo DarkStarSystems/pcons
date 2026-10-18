@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from pcons.core.debug import trace
 from pcons.core.errors import PconsError
+from pcons.core.paths import _script_dir_path
 from pcons.tools.tool import PROBES, BaseTool, Probe
 
 if TYPE_CHECKING:
@@ -351,9 +352,10 @@ class ToolChecks:
         ]
 
     def _project_root(self) -> Path | None:
-        """The project root, for resolving relative include dirs."""
+        """The top-level project's root, for a relative include dir given
+        when no script is running."""
         project = getattr(self._env, "_project", None)
-        return getattr(project, "root_dir", None)
+        return None if project is None else project.top.root_dir
 
     def _cache_key(self, check_type: str, *args: str) -> str:
         """Generate a cache key for a check.
@@ -461,16 +463,18 @@ class ToolChecks:
     def _include_flag(self, directory: str | Path) -> str:
         """Return the command-line argument adding an include directory.
 
-        A relative directory is resolved against the project root: probes
-        compile in a temporary directory, so ``-Iinclude`` would otherwise
-        search a directory that doesn't exist.
+        A relative directory is read from the directory of the script
+        making the check, as a tool's include dirs are (the project root
+        when no script is running): probes compile in a temporary
+        directory, so ``-Iinclude`` would otherwise search a directory that
+        doesn't exist.
 
         Rootedness is tested with ``anchor`` rather than ``is_absolute()``,
         which is platform-dependent: ``Path("/opt/sdk").is_absolute()`` is
         False on Windows (no drive), and prefixing the project root onto it
         would point the probe somewhere that doesn't exist.
         """
-        path = Path(directory)
+        path = Path(_script_dir_path(directory))
         if not path.anchor:
             root = self._project_root()
             if root is not None:

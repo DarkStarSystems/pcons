@@ -1015,8 +1015,10 @@ down, it is `build/libfoo/`. The same holds several levels deep, and
 sibling subdirectories stay in separate build directories.
 
 Every relative path a script writes is read from the script's own
-directory: `sources=`, `depends=`, include directories, `project.node()`,
-`configure_file()`, `cwd=`, a `Path` in a command, and `$SRCDIR`.
+directory: `sources=`, `depends=`, include and library directories (a
+target's, or a tool's like `env.cxx.includes`, even on an environment the
+parent made), `project.node()`, `configure_file()`, `cwd=`, a `Path` in a
+command, and `$SRCDIR`.
 `project.build_dir` and `env.build_dir` are absolute, so a path built on
 them names one file wherever it goes: `project.build_dir / "config.h"`
 works as a source, a target, a command argument, or a file on disk.

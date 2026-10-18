@@ -23,11 +23,11 @@ PARENT_PROJECT = "from pcons import context\nproject = context.current_project\n
 
 
 @pytest.fixture(params=[OWN_PROJECT, PARENT_PROJECT], ids=["own", "parent"])
-def run_child(request, tmp_path, monkeypatch):
+def run_child(request, tmp_path, monkeypatch, gcc_toolchain):
     """Run *body* as child/pcons-build.py under a top project; return its names."""
     monkeypatch.chdir(tmp_path)
     top = Project("top", root_dir=tmp_path, build_dir="build")
-    top.Environment()
+    top.Environment(toolchain=gcc_toolchain)
     child = tmp_path / "child"
     child.mkdir()
 
@@ -113,3 +113,22 @@ def test_build_files_asked_for_in_a_child_come_from_the_top(run_child, tmp_path)
     BaseGenerator._generate_pending(top)
     assert (tmp_path / "build" / "build.ninja").exists()
     assert not (tmp_path / "build" / "child" / "build.ninja").exists()
+
+
+@pytest.mark.parametrize("take", ["env", "env.clone()"])
+def test_a_tool_directory_is_read_from_the_script(run_child, tmp_path, take):
+    """The parent's environment, or a copy: either way the directories are
+    the child's, though the environment was made in the parent."""
+    top, _ = run_child(
+        f"env = {take}\n"
+        "env.cc.includes.append('include')\n"
+        "env.cc.system_includes = ['vendor']\n"
+        "env.link.libdirs.append('lib')\n"
+        "project.Program('app', env, sources=['src/main.c'])\n"
+        "from pcons import Generator\nGenerator().generate(project)\n"
+    )
+    BaseGenerator._generate_pending(top)
+    ninja = (tmp_path / "build" / "build.ninja").read_text()
+    assert "-I$topdir/child/include" in ninja
+    assert "-isystem$topdir/child/vendor" in ninja
+    assert "-L$topdir/child/lib" in ninja
