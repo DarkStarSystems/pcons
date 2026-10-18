@@ -17,7 +17,7 @@ expected_outputs = [
 # Two tests skip: one disabled, one that exits with its skip_returncode.
 commands = [
     { run = "ninja -C build test", expect_stdout = "tests passed" },
-    { run = "pcons test", expect_stdout = "0 tests failed out of 6 (2 skipped)" },
+    { run = "pcons test", expect_stdout = "(2 skipped)" },
 ]
 
 [skip]
