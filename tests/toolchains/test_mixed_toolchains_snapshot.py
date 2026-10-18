@@ -196,9 +196,27 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     monkeypatch.setattr(msvc_mod, "use_msvc_tool_paths", lambda env, exes: None)
     monkeypatch.setattr(ifx_mod, "use_msvc_tool_paths", lambda env, exes: None)
 
-    monkeypatch.setattr(
-        clang_cl_mod.ClangClToolchain, "_libomp_dir", lambda self: "/rt/libomp"
-    )
+    def driver_link_args(
+        clang_cl: str, flags: tuple[str, ...]
+    ) -> tuple[str, ...] | None:
+        """What clang-cl 19's driver adds to a link, by C runtime."""
+        if "-fsanitize=address" in flags and ("/MDd" in flags or "/MTd" in flags):
+            return None
+        args = ["-libpath:/rt/clang"]
+        if "-fsanitize=address" in flags:
+            asan = "asan_dynamic" if "/MD" in flags else "asan"
+            if "/MT" in flags and "/LD" in flags:
+                asan = "asan_dll_thunk"
+            args += [f"/rt/clang/clang_rt.{asan}.lib", "/INFERASANLIBS:NO"]
+        if "/openmp" in flags:
+            args += [
+                "-nodefaultlib:vcomp.lib",
+                "-libpath:/rt/libomp",
+                "-defaultlib:libomp.lib",
+            ]
+        return tuple(args)
+
+    monkeypatch.setattr(clang_cl_mod, "driver_link_args", driver_link_args)
     monkeypatch.setattr(
         swift_mod.SwiftToolchain,
         "_target_info_json",
