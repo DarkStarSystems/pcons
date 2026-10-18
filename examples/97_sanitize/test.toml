@@ -1,0 +1,15 @@
+# Test configuration for the sanitize example
+
+[test]
+description = "Build a program with AddressSanitizer and check it reports a planted overflow"
+
+expected_outputs = ["build/app"]
+expected_outputs_windows = ["build/app.exe"]
+
+[verify]
+commands = [
+    { run = "uv run python check_asan.py", expect_stdout = "AddressSanitizer reported the overflow" },
+]
+
+[skip]
+generators = ["xcode"]
