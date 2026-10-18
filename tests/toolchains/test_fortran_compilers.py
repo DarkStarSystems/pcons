@@ -313,10 +313,8 @@ def test_ifx_features(on_linux) -> None:
 def test_ifx_on_windows_features() -> None:
     tc = IfxMsvcToolchain()
     assert _feature(tc, "warnings") == {"fc": ("/warn:all",)}
-    assert _feature(tc, "sanitize") == {
-        "fc": ("/fsanitize=address",),
-        "link": ("/INFERASANLIBS",),
-    }
+    # The runtime is the linker's to add (see LinkNeeds.sanitizers).
+    assert _feature(tc, "sanitize") == {"fc": ("/fsanitize=address",)}
     assert _feature(tc, "profile") == {"link": ("/PROFILE",)}
     hardened = _feature(tc, "hardened")
     assert hardened is not None

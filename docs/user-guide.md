@@ -1682,6 +1682,8 @@ apply a cross preset before `hardened`: applying one after it raises.
 
 clang-cl's `sanitize` and `openmp` link the runtime that clang-cl's own driver would, which pcons asks it for: for `sanitize`, a different AddressSanitizer runtime for the DLL and the static C runtime (see [Static Runtimes](#static-runtimes)). clang's AddressSanitizer needs a release C runtime, so clang-cl can't sanitize a `debug` build (`'/MDd' not allowed with '-fsanitize=address'`): use `relwithdebinfo`. MSVC's can.
 
+A program has one AddressSanitizer runtime, and the linker's toolchain chooses it: MSVC's with link.exe (`/INFERASANLIBS`), even for a Fortran program with only ifx objects, or clang's with clang-cl's lld-link, ifx's objects included.
+
 Combine presets with variants for a complete configuration:
 
 ```python
