@@ -175,6 +175,11 @@ jobs:
           key: conan2-${{ runner.os }}-${{ hashFiles('examples/**/conanfile.*') }}
           restore-keys: conan2-${{ runner.os }}-
       - name: Run example tests
+        # The runner has LLVM's clang-cl on PATH, which pcons would pick
+        # first. test-windows-toolchains covers clang-cl; this job is MSVC's.
+        env:
+          CC: cl
+          CXX: cl
         run: uv run pytest tests/test_examples.py -n auto --durations=20 --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -329,13 +334,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Visual Studio's clang-cl. The examples left out name their
-          # toolchain, use C++ modules clang-cl doesn't build here, or need
-          # MSVC's own resource and manifest tools.
+          # Visual Studio's clang-cl. The examples left out ask for a
+          # toolchain or use C++ modules, which pcons doesn't build with
+          # clang-cl.
           - name: clang-cl
             cc: clang-cl
             cxx: clang-cl
-            examples: "not (02_multi_file or 11_ or 20_ or 29_ or 30_ or 31_ or 32_ or 35_ or 36_ or 37_ or 39_ or 50_ or 71_ or 72_)"
+            examples: "not (02_multi_file or 29_ or 30_ or 31_ or 32_ or 35_ or 36_ or 37_ or 39_ or 71_ or 72_)"
           # LLVM's own clang for the MSVC ABI, as the runner has it, leaving
           # out the same kinds of examples.
           - name: clang
@@ -392,7 +397,7 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run example tests
-        run: uv run pytest tests/test_examples.py -n auto -v -rs -k "ninja and ${{ matrix.examples }}"
+        run: uv run pytest tests/test_examples.py -n auto -v -rs -k "(ninja or nested or explain) and ${{ matrix.examples }}"
 
   test-qt:
     name: "test qt examples"
