@@ -730,7 +730,15 @@ def _toolchains_unavailable(names: list[str]) -> str | None:
 
 
 def _toolchain_is_available(toolchain: str, current_platform: str) -> bool:
-    """Check whether a requested toolchain is available on this host."""
+    """Check whether a requested toolchain is available on this host, and
+    not contradicted by the $CC or $CXX pytest was started with."""
+    from pcons.configure.compiler_id import compiler_family
+
+    for var in ("CC", "CXX"):
+        family = compiler_family(USER_TOOL_ENV[var]) if var in USER_TOOL_ENV else None
+        if family is not None and family != toolchain:
+            return False
+
     if toolchain == "msvc":
         return current_platform == "windows" and (
             shutil.which("cl.exe") is not None or shutil.which("cl") is not None
@@ -1232,7 +1240,10 @@ def run_example(
     if toolchain is not None and not _toolchain_is_available(
         toolchain, current_platform
     ):
-        pytest.skip(f"Requested toolchain '{toolchain}' is not available on this host")
+        pytest.skip(
+            f"Requested toolchain '{toolchain}' is not available on this host,"
+            " or $CC or $CXX chooses another"
+        )
 
     build_dir.mkdir(parents=True, exist_ok=True)
     tc_vars = {"TOOLCHAIN": toolchain} if toolchain else {}

@@ -109,6 +109,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A toolchain preference list, such as `toolchain=["llvm", "msvc"]`, passes
+  over a toolchain that `$CC`, `$CXX` or `$FC` contradicts and takes the
+  next one: `CC=cl` builds with MSVC. Before, it stopped at `llvm` with an
+  error.
 - A DLL linked with an import library (MSVC, clang-cl, flang and ifx on
   Windows) no longer relinks on every build after its objects are rebuilt
   with the same exports. link.exe leaves such an import library alone, and

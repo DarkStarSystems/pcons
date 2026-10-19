@@ -229,6 +229,21 @@ class TestFamilyValidation:
         with pytest.raises(ValueError, match=r"\$FC.*gfortran-family.*'flang'"):
             Environment(toolchain=_registry_toolchain("flang"))
 
+    def test_preference_list_passes_over_contradicted_toolchain(
+        self, monkeypatch, tmp_path
+    ):
+        fake = _fake_compiler(tmp_path, "some-g++")
+        monkeypatch.setenv("CXX", str(fake))
+        monkeypatch.delenv("CC", raising=False)
+        monkeypatch.setattr(compiler_id, "compiler_family", lambda p: "gcc")
+        for name in ("llvm", "gcc"):
+            entry = toolchain_registry.get(name)
+            monkeypatch.setattr(entry, "is_available", lambda: True)
+
+        assert toolchain_registry.resolve(["llvm", "gcc"]).name == "gcc"
+        with pytest.raises(RuntimeError, match=r"llvm: \$CXX.*gcc-family"):
+            toolchain_registry.resolve(["llvm"])
+
     def test_unclassifiable_accepted(self, test_project, monkeypatch, tmp_path):  # noqa: F811
         # Compiler wrappers can't be classified; accept them.
         fake = _fake_compiler(tmp_path, "ccache-wrapper")
