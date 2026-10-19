@@ -16,6 +16,7 @@ import pytest
 from pcons.core.environment import Environment
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
+from tests.support import apply_variant
 
 
 class TestGccVariants:
@@ -42,7 +43,7 @@ class TestGccVariants:
 
         # Create toolchain and apply variant
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         # Check flags were applied
         assert "-O0" in cc.flags
@@ -67,7 +68,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "release")
+        apply_variant(toolchain, env, "release")
 
         assert "-O2" in cc.flags
         assert "-g" not in cc.flags
@@ -85,7 +86,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "release-fastest")
+        apply_variant(toolchain, env, "release-fastest")
 
         assert "-O3" in cc.flags
         assert not any(f.startswith("-ffast-math") for f in cc.flags)
@@ -102,7 +103,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "relwithdebinfo")
+        apply_variant(toolchain, env, "relwithdebinfo")
 
         assert "-O2" in cc.flags
         assert "-g" in cc.flags
@@ -118,7 +119,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "minsizerel")
+        apply_variant(toolchain, env, "minsizerel")
 
         assert "-Os" in cc.flags
         assert "NDEBUG" in cc.defines
@@ -133,7 +134,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "debug", extra_flags=["-Wall", "-Wextra"])
+        apply_variant(toolchain, env, "debug", extra_flags=["-Wall", "-Wextra"])
 
         assert "-Wall" in cc.flags
         assert "-Wextra" in cc.flags
@@ -149,7 +150,7 @@ class TestGccVariants:
 
         toolchain = GccToolchain()
         # Extra defines stored without prefix
-        toolchain.apply_variant(env, "release", extra_defines=["MY_FEATURE"])
+        apply_variant(toolchain, env, "release", extra_defines=["MY_FEATURE"])
 
         assert "MY_FEATURE" in cc.defines
 
@@ -165,7 +166,7 @@ class TestGccVariants:
         toolchain = GccToolchain()
         # Unknown variants now raise ValueError with supported variant list
         with pytest.raises(ValueError, match="Unknown variant.*custom"):
-            toolchain.apply_variant(env, "custom")
+            apply_variant(toolchain, env, "custom")
 
     def test_case_insensitive(self, test_project):  # noqa: F811
         """Test variant names are case-insensitive."""
@@ -177,7 +178,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "DEBUG")
+        apply_variant(toolchain, env, "DEBUG")
 
         assert "-O0" in cc.flags
         assert "-g" in cc.flags
@@ -196,7 +197,7 @@ class TestLlvmVariants:
         cc.set("defines", [])
 
         toolchain = LlvmToolchain()
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         assert "-O0" in cc.flags
         assert "-g" in cc.flags
@@ -214,7 +215,7 @@ class TestLlvmVariants:
         cc.set("defines", [])
 
         toolchain = LlvmToolchain()
-        toolchain.apply_variant(env, "release")
+        apply_variant(toolchain, env, "release")
 
         assert "-O2" in cc.flags
         assert "NDEBUG" in cc.defines
@@ -289,7 +290,7 @@ class TestBaseToolchainVariant:
         env.add_tool("cc").set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         assert env.variant == "debug"
 
@@ -299,7 +300,7 @@ class TestBaseToolchainVariant:
 
         toolchain = GccToolchain()
         with pytest.raises(ValueError, match="Unknown variant.*custom"):
-            toolchain.apply_variant(env, "custom")
+            apply_variant(toolchain, env, "custom")
 
 
 class TestClangClVariants:
@@ -315,7 +316,7 @@ class TestClangClVariants:
             cfg.set("flags", [])
             cfg.set("defines", [])
 
-        ClangClToolchain().apply_variant(env, "release-fastest")
+        apply_variant(ClangClToolchain(), env, "release-fastest")
 
         assert "/O2" in env.cc.flags
         # clang reads /Ob3 as /Ob2, and a clang-cl before 19 warns about it.
@@ -407,7 +408,7 @@ class TestClangClVariants:
             cfg.set("defines", [])
         toolchain = MsvcToolchain() if toolchain_name == "msvc" else ClangClToolchain()
 
-        toolchain.apply_variant(env, variant)
+        apply_variant(toolchain, env, variant)
 
         assert ("/Z7" in env.cxx.flags) is has_debug_info
         assert ("/DEBUG" in env.link.flags) is has_debug_info

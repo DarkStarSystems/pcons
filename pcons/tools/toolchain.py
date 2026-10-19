@@ -489,18 +489,8 @@ class ToolchainRegistry:
     def _resolve_one(self, name: str, abi: str | None = None) -> BaseToolchain:
         toolchain = self._find_one(name, abi)
         if not abi_compatible(toolchain.abi, abi):
-            category = self._category_of(toolchain)
-            compatible = self.names_with_abi(category, abi) if category else []
-            raise RuntimeError(
-                f"Toolchain '{name}' ({toolchain.name}) follows the "
-                f"'{toolchain.abi}' ABI, not the '{abi}' one required here: "
-                f"their objects can't be linked together."
-                + (
-                    f" Compatible {category} toolchains: {', '.join(compatible)}."
-                    if compatible
-                    else ""
-                )
-            )
+            subject = name if name == toolchain.name else f"{name} ({toolchain.name})"
+            raise RuntimeError(self.abi_mismatch(subject, toolchain, abi))
         return toolchain
 
     def _find_one(self, name: str, abi: str | None) -> BaseToolchain:
@@ -651,6 +641,21 @@ class ToolchainRegistry:
             + ", and put it on PATH."
         )
 
+    def abi_mismatch(self, subject: str, toolchain: Toolchain, abi: str | None) -> str:
+        """Why *toolchain*, which *subject* chose, can't join one requiring
+        *abi*, and which toolchains could."""
+        category = self._category_of(toolchain)
+        compatible = self.names_with_abi(category, abi) if category else []
+        return (
+            f"{subject} follows the '{toolchain.abi}' ABI, not the '{abi}' one "
+            f"required here, so their objects can't be linked together."
+            + (
+                f" Compatible {category} toolchains: {', '.join(compatible)}."
+                if compatible
+                else ""
+            )
+        )
+
     def names_with_abi(self, category: str, abi: str | None) -> list[str]:
         """The registered *category* toolchains compatible with *abi*, by
         their first alias: what to suggest when one doesn't match."""
@@ -665,7 +670,7 @@ class ToolchainRegistry:
                 names.append(entry.aliases[0])
         return names
 
-    def _category_of(self, toolchain: BaseToolchain) -> str | None:
+    def _category_of(self, toolchain: Toolchain) -> str | None:
         """The registered category of *toolchain*'s class, if any."""
         for entry in self._toolchains.values():
             if entry.toolchain_class is type(toolchain):
@@ -788,26 +793,9 @@ class Toolchain(Protocol):
         """Presets to apply right after setup (attributed by explain())."""
         ...
 
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant (e.g. "debug", "release"); each toolchain
-        defines its own semantics."""
-        ...
-
     def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
-        """Build the Preset that apply_variant() applies."""
-        ...
-
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
-        """Apply target-arch flags (e.g. -arch on macOS, /MACHINE: on MSVC).
-
-        Returns True if this toolchain realized the arch; the environment
-        raises when no configured toolchain did (docs/presets.md).
-        """
-        ...
-
-    def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named flag preset (warnings, sanitize, lto, ...);
-        each toolchain defines its own flags."""
+        """Build the Preset for build variant *variant* ("debug",
+        "release"); each toolchain defines its own semantics."""
         ...
 
     def make_feature_preset(
@@ -815,10 +803,6 @@ class Toolchain(Protocol):
     ) -> Preset | None:
         """Build a built-in feature Preset by name, for the *target*
         platform (None: the build machine), or None if not known."""
-        ...
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation preset (sysroot, triple, SDK paths)."""
         ...
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
@@ -831,7 +815,8 @@ class Toolchain(Protocol):
         ...
 
     def make_arch_preset(self, arch: str) -> Preset | None:
-        """The target-arch Preset for *arch*, or None if it has none."""
+        """The target-arch Preset for *arch* (``-arch`` on macOS,
+        ``/MACHINE:`` on MSVC), or None if it has none."""
         ...
 
     def make_runtime_preset(
@@ -1040,6 +1025,16 @@ class Toolchain(Protocol):
         ...
 
 
+# Methods a toolchain once overrode to realize a setting, and what the
+# environment asks instead (see BaseToolchain.__init_subclass__).
+_REPLACED_METHODS = {
+    "apply_variant": "make_variant_preset",
+    "apply_target_arch": "make_arch_preset",
+    "apply_cross_preset": "make_target_preset",
+    "apply_preset": "make_feature_preset",
+}
+
+
 class BaseToolchain(ABC):
     """Abstract base class for toolchains.
 
@@ -1051,6 +1046,18 @@ class BaseToolchain(ABC):
     # Concrete subclasses override this; the generator reads it to build
     # the Environment typing stub.
     TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Refuse an override of a method the environment no longer calls,
+        which would otherwise be skipped without a word."""
+        super().__init_subclass__(**kwargs)
+        for old, new in _REPLACED_METHODS.items():
+            if old in cls.__dict__:
+                raise TypeError(
+                    f"{cls.__name__} overrides {old}(), which pcons no longer "
+                    f"calls: the environment applies what {new}() returns. "
+                    f"Override {new}() instead."
+                )
 
     def __init__(self, name: str = "") -> None:
         """Initialize a toolchain.
@@ -1122,7 +1129,6 @@ class BaseToolchain(ABC):
     # declarative Preset (a bundle of ToolContributions). Toolchains build them
     # via the make_*_preset() / *_contributions() hooks below; Environment.apply()
     # applies the opaque tokens and records the preset so it can be explained.
-    # The apply_*() methods are thin wrappers kept for call-site readability.
     # =========================================================================
 
     # Compiler family this toolchain's compilers belong to ("gcc", "llvm",
@@ -1221,10 +1227,6 @@ class BaseToolchain(ABC):
                 )
         return None
 
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant (e.g. "debug", "release") to the environment."""
-        env.apply_from(self, self.make_variant_preset(variant, **kwargs))
-
     def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
         """Build a variant Preset. Base contributes no flags."""
         return Preset(
@@ -1240,27 +1242,17 @@ class BaseToolchain(ABC):
         """Tool contributions for a variant. Base knows no variants."""
         return []
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
-        """Apply target architecture flags to the environment.
-
-        Returns True if this toolchain realized the arch. The
-        realization is ``make_arch_preset``'s, which the environment asks
-        of every toolchain before it applies any; override that, not this,
-        to realize, refuse (raise) or declare a no-op (return a preset
-        with no contributions, as WasmToolchain does for wasm32). An empty
-        realization applies nothing and the environment raises, so a
-        custom toolchain that doesn't handle an arch is fail-fast by
-        default (docs/presets.md, "Preset application").
-        """
-        preset = self.make_arch_preset(arch)
-        if preset is None:
-            return False
-        env.apply_from(self, preset)
-        return True
-
     def make_arch_preset(self, arch: str) -> Preset | None:
         """The target-arch Preset for *arch*, or None if this toolchain
-        realizes none (it may raise instead, for an arch it can't)."""
+        realizes none.
+
+        The environment asks every toolchain before it applies any.
+        Override this to realize an arch, refuse one (raise), or declare a
+        no-op (a preset with no contributions, as WasmToolchain does for
+        wasm32). None for a toolchain whose compilers take part is an
+        error, so a custom toolchain that doesn't handle an arch is
+        fail-fast by default (docs/presets.md, "Preset application").
+        """
         contribs = tuple(self._arch_contributions(arch))
         if not contribs:
             return None
@@ -1298,14 +1290,6 @@ class BaseToolchain(ABC):
         """Tool contributions for a runtime linkage, or None. Base
         realizes none."""
         return None
-
-    def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named feature preset (e.g. "warnings", "sanitize")."""
-        preset = self.make_feature_preset(name, env.target)
-        if preset is None:
-            logger.warning("Unknown preset '%s' for toolchain '%s'", name, self.name)
-            return
-        env.apply_from(self, preset)
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
         """Build a C++-standard Preset, or None if this toolchain has no C++.
@@ -1397,10 +1381,6 @@ class BaseToolchain(ABC):
     def _feature_spec(self, name: str, target: Platform) -> dict[str, list[str]] | None:
         """The FEATURE_PRESETS entry *name* for building for *target*."""
         return self.FEATURE_PRESETS.get(name)
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation target preset (a CrossPreset)."""
-        env.apply_from(self, self.make_target_preset(preset))
 
     def make_target_preset(self, cross: Any) -> Preset:
         """Convert a CrossPreset descriptor into a Preset."""

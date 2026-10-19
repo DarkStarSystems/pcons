@@ -22,6 +22,7 @@ from pcons.toolchains.presets import (
     pyodide,
     target_platform_for_triple,
 )
+from tests.support import apply_cross_preset, apply_target_arch, apply_variant
 
 
 def _make_unix_env() -> Environment:
@@ -290,7 +291,7 @@ class TestPyodidePreset:
 
         env = _make_unix_env()
         toolchain = EmscriptenToolchain()
-        toolchain.apply_cross_preset(env, pyodide())
+        apply_cross_preset(toolchain, env, pyodide())
 
         assert "-fPIC" in env.cc.flags
         assert "-fPIC" in env.cxx.flags
@@ -330,7 +331,7 @@ class TestCrossPresetApplication:
             arch="arm64",
             triple="aarch64-linux-gnu",
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "--target=aarch64-linux-gnu" in env.cc.flags
         assert "--target=aarch64-linux-gnu" in env.cxx.flags
@@ -348,7 +349,7 @@ class TestCrossPresetApplication:
             triple="aarch64-linux-gnu",
         )
         with pytest.raises(ValueError, match="selects targets by binary"):
-            toolchain.apply_cross_preset(env, preset)
+            apply_cross_preset(toolchain, env, preset)
 
     def test_gcc_accepts_triple_with_cross_binaries(self, test_project):  # noqa: F811
         """A triple plus CC/CXX overrides is binary-retargeted; no --target."""
@@ -363,7 +364,7 @@ class TestCrossPresetApplication:
             triple="aarch64-linux-gnu",
             env_vars={"CC": "aarch64-linux-gnu-gcc", "CXX": "aarch64-linux-gnu-g++"},
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert env.cc.cmd == "aarch64-linux-gnu-gcc"
         assert not any("--target=" in str(f) for f in env.cc.flags)
@@ -388,7 +389,8 @@ class TestCrossPresetApplication:
         if given_ar:
             tool_cmds["ar"] = given_ar
 
-        GccToolchain().apply_cross_preset(
+        apply_cross_preset(
+            GccToolchain(),
             env,
             CrossPreset(
                 name="test",
@@ -410,7 +412,7 @@ class TestCrossPresetApplication:
         preset = CrossPreset(
             name="test", arch="arm64-v8a", triple="aarch64-linux-android21"
         )
-        LlvmToolchain().apply_cross_preset(env, preset)
+        apply_cross_preset(LlvmToolchain(), env, preset)
 
         for tool in (env.cc, env.cxx, env.link):
             assert "-arch" not in tool.flags
@@ -428,7 +430,7 @@ class TestCrossPresetApplication:
             arch="arm64",
             triple="aarch64-linux-gnu",
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "--target=aarch64-linux-gnu" in env.link.flags
 
@@ -447,7 +449,7 @@ class TestCrossPresetApplication:
         env = _make_unix_env()
         toolchain = LlvmToolchain()
 
-        toolchain.apply_cross_preset(env, ios(arch="arm64"))
+        apply_cross_preset(toolchain, env, ios(arch="arm64"))
 
         for tool in (env.cc, env.cxx, env.link):
             flags = list(tool.flags)
@@ -471,7 +473,7 @@ class TestCrossPresetApplication:
         env = _make_unix_env()
         toolchain = LlvmToolchain()
 
-        toolchain.apply_cross_preset(env, ios(arch="arm64", sdk="/opt/ios-sdk"))
+        apply_cross_preset(toolchain, env, ios(arch="arm64", sdk="/opt/ios-sdk"))
 
         assert "--sysroot=/opt/ios-sdk" in env.cc.flags
         assert "-isysroot" not in env.cc.flags
@@ -484,7 +486,7 @@ class TestCrossPresetApplication:
         toolchain = LlvmToolchain()
 
         preset = CrossPreset(name="test", arch="arm64", triple="aarch64-linux-gnu")
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "-isysroot" not in env.cc.flags
 
@@ -500,7 +502,7 @@ class TestCrossPresetApplication:
             arch="arm64",
             sysroot="/opt/sysroot",
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "--sysroot=/opt/sysroot" in env.cc.flags
         assert "--sysroot=/opt/sysroot" in env.link.flags
@@ -518,7 +520,7 @@ class TestCrossPresetApplication:
             extra_compile_flags=("-DCUSTOM",),
             extra_link_flags=("-lcustom",),
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "-DCUSTOM" in env.cc.flags
         assert "-lcustom" in env.link.flags
@@ -535,7 +537,7 @@ class TestCrossPresetApplication:
             arch="arm64",
             env_vars={"CC": "/usr/bin/custom-gcc", "CXX": "/usr/bin/custom-g++"},
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert env.cc.cmd == "/usr/bin/custom-gcc"
         assert env.cxx.cmd == "/usr/bin/custom-g++"
@@ -547,7 +549,7 @@ class TestCrossPresetApplication:
 
         preset = CrossPreset(name="test", arch="arm64")
         with pytest.raises(ValueError, match="set_target_arch"):
-            toolchain.apply_cross_preset(env, preset)
+            apply_cross_preset(toolchain, env, preset)
 
     def _make_msvc_env(self) -> Environment:
         env = Environment()
@@ -572,7 +574,7 @@ class TestCrossPresetApplication:
         env = self._make_msvc_env()
         toolchain = self._concrete_msvc()
 
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         assert "/Od" in env.cc.flags
         assert "/Z7" in env.cxx.flags
@@ -592,7 +594,7 @@ class TestCrossPresetApplication:
             extra_compile_flags=("-DWASM",),
             extra_link_flags=("-sUSE_PTHREADS",),
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "-DWASM" in env.cc.flags
         assert "-DWASM" in env.cxx.flags
@@ -606,11 +608,11 @@ class TestCrossPresetApplication:
         env = _make_unix_env()
         toolchain = EmscriptenToolchain()
 
-        assert toolchain.apply_target_arch(env, "wasm32") is True
+        assert apply_target_arch(toolchain, env, "wasm32") is True
         assert env.target_arch == "wasm32"
 
         with pytest.raises(ValueError, match="wasm32 only"):
-            toolchain.apply_target_arch(env, "x86_64")
+            apply_target_arch(toolchain, env, "x86_64")
 
     def test_env_apply_cross_preset_delegates(self, test_project):  # noqa: F811
         """Environment.apply_cross_preset() should delegate to toolchains."""
@@ -652,7 +654,7 @@ class TestBinaryRetarget:
                 "ar": "/x/ar",
             },
         )
-        LlvmToolchain().apply_cross_preset(env, preset)
+        apply_cross_preset(LlvmToolchain(), env, preset)
 
         assert env.cc.cmd == "/x/cc"
         assert env.cxx.cmd == "/x/cxx"
@@ -669,7 +671,7 @@ class TestBinaryRetarget:
             triple="aarch64-linux-gnu",
             env_vars={"CC": "aarch64-linux-gnu-gcc", "CXX": "aarch64-linux-gnu-g++"},
         )
-        GccToolchain().apply_cross_preset(env, preset)
+        apply_cross_preset(GccToolchain(), env, preset)
 
         assert env.cc.cmd == "aarch64-linux-gnu-gcc"
         assert env.cxx.cmd == "aarch64-linux-gnu-g++"
@@ -695,7 +697,7 @@ class TestWasmPresetsNeedWasmToolchain:
 
         env = _make_unix_env()
         with pytest.raises(ValueError, match="dedicated toolchain"):
-            LlvmToolchain().apply_cross_preset(env, emscripten())
+            apply_cross_preset(LlvmToolchain(), env, emscripten())
 
     def test_wasi_preset_on_gcc_raises(self, test_project):  # noqa: F811
         from pcons.toolchains.gcc import GccToolchain
@@ -703,7 +705,7 @@ class TestWasmPresetsNeedWasmToolchain:
 
         env = _make_unix_env()
         with pytest.raises(ValueError, match="dedicated toolchain"):
-            GccToolchain().apply_cross_preset(env, wasi_sdk())
+            apply_cross_preset(GccToolchain(), env, wasi_sdk())
 
     def test_pyodide_on_emscripten_toolchain_ok(self, test_project):  # noqa: F811
         """Already covered above, but assert the positive path explicitly:
@@ -711,7 +713,7 @@ class TestWasmPresetsNeedWasmToolchain:
         from pcons.toolchains.emscripten import EmscriptenToolchain
 
         env = _make_unix_env()
-        EmscriptenToolchain().apply_cross_preset(env, pyodide())
+        apply_cross_preset(EmscriptenToolchain(), env, pyodide())
         assert "-sSIDE_MODULE=1" in env.link.flags
 
 

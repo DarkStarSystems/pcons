@@ -18,6 +18,7 @@ from pcons.toolchains.presets import (
     linux_cross,
     target_platform_for_triple,
 )
+from tests.support import apply_feature, apply_variant
 
 
 def _concrete_msvc() -> MsvcCompatibleToolchain:
@@ -72,7 +73,7 @@ class TestUnixPresets:
     def test_warnings_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "warnings")
+        apply_feature(toolchain, env, "warnings")
 
         assert "-Wall" in env.cc.flags
         assert "-Wextra" in env.cc.flags
@@ -84,7 +85,7 @@ class TestUnixPresets:
     def test_werror_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "werror")
+        apply_feature(toolchain, env, "werror")
 
         assert "-Werror" in env.cc.flags
         assert "-Werror" in env.cxx.flags
@@ -94,7 +95,7 @@ class TestUnixPresets:
     def test_sanitize_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = LlvmToolchain()
-        toolchain.apply_preset(env, "sanitize")
+        apply_feature(toolchain, env, "sanitize")
 
         assert "-fsanitize=address,undefined" in env.cc.flags
         assert "-fno-omit-frame-pointer" in env.cc.flags
@@ -105,7 +106,7 @@ class TestUnixPresets:
     def test_profile_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "profile")
+        apply_feature(toolchain, env, "profile")
 
         assert "-pg" in env.cc.flags
         assert "-g" in env.cc.flags
@@ -114,7 +115,7 @@ class TestUnixPresets:
     def test_lto_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "lto")
+        apply_feature(toolchain, env, "lto")
 
         assert "-flto" in env.cc.flags
         assert "-flto" in env.cxx.flags
@@ -175,7 +176,7 @@ class TestUnixPresets:
 
     def test_pthread_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
-        GccToolchain().apply_preset(env, "pthread")
+        apply_feature(GccToolchain(), env, "pthread")
 
         assert "-pthread" in env.cc.flags
         assert "-pthread" in env.cxx.flags
@@ -183,33 +184,27 @@ class TestUnixPresets:
 
     def test_coverage_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
-        LlvmToolchain().apply_preset(env, "coverage")
+        apply_feature(LlvmToolchain(), env, "coverage")
 
         assert "--coverage" in env.cc.flags
         assert "--coverage" in env.link.flags
 
     def test_fast_math_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
-        GccToolchain().apply_preset(env, "fast-math")
+        apply_feature(GccToolchain(), env, "fast-math")
 
         assert "-ffast-math" in env.cc.flags
         assert "-ffast-math" in env.link.flags
 
-    def test_unknown_preset_warns(self, test_project):  # noqa: F811
-        """Unknown preset should log a warning but not raise."""
-        env = _make_unix_env()
-        toolchain = GccToolchain()
-        # Should not raise
-        toolchain.apply_preset(env, "nonexistent")
-        # No flags should be added
-        assert len(env.cc.flags) == 0
+    def test_unknown_preset_has_no_realization(self):
+        assert GccToolchain().make_feature_preset("nonexistent") is None
 
     def test_multiple_presets_combine(self, test_project):  # noqa: F811
         """Applying multiple presets should combine flags."""
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "warnings")
-        toolchain.apply_preset(env, "sanitize")
+        apply_feature(toolchain, env, "warnings")
+        apply_feature(toolchain, env, "sanitize")
 
         assert "-Wall" in env.cc.flags
         assert "-fsanitize=address,undefined" in env.cc.flags
@@ -222,7 +217,7 @@ class TestUnixPresets:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "sanitize")
+        apply_feature(toolchain, env, "sanitize")
 
         assert "-fsanitize=address,undefined" in env.cc.flags
 
@@ -252,7 +247,7 @@ class TestMsvcPresets:
                 return True
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "warnings")
+        apply_feature(toolchain, env, "warnings")
 
         assert "/W4" in env.cc.flags
         assert "/W4" in env.cxx.flags
@@ -262,7 +257,7 @@ class TestMsvcPresets:
     def test_werror_preset(self, test_project):  # noqa: F811
         env = _make_msvc_env()
         toolchain = _concrete_msvc()
-        toolchain.apply_preset(env, "werror")
+        apply_feature(toolchain, env, "werror")
 
         assert "/WX" in env.cc.flags
         assert "/WX" in env.cxx.flags
@@ -278,7 +273,7 @@ class TestMsvcPresets:
                 return True
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "sanitize")
+        apply_feature(toolchain, env, "sanitize")
 
         assert "/fsanitize=address" in env.cc.flags
 
@@ -292,7 +287,7 @@ class TestMsvcPresets:
                 return True
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "lto")
+        apply_feature(toolchain, env, "lto")
 
         assert "/GL" in env.cc.flags
         assert "/LTCG" in env.link.flags
@@ -307,7 +302,7 @@ class TestMsvcPresets:
                 return True
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "hardened")
+        apply_feature(toolchain, env, "hardened")
 
         assert "/GS" in env.cc.flags
         assert "/guard:cf" in env.cc.flags
@@ -324,7 +319,7 @@ class TestMsvcPresets:
                 return True
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "profile")
+        apply_feature(toolchain, env, "profile")
 
         # MSVC profile is linker-only
         assert "/PROFILE" in env.link.flags
@@ -332,7 +327,7 @@ class TestMsvcPresets:
     def test_openmp_preset(self, test_project):  # noqa: F811
         env = _make_msvc_env()
         toolchain = _concrete_msvc()
-        toolchain.apply_preset(env, "openmp")
+        apply_feature(toolchain, env, "openmp")
 
         assert "/openmp" in env.cc.flags
         assert "/openmp" in env.cxx.flags
@@ -342,23 +337,12 @@ class TestMsvcPresets:
     def test_fast_math_preset(self, test_project):  # noqa: F811
         env = _make_msvc_env()
         toolchain = _concrete_msvc()
-        toolchain.apply_preset(env, "fast-math")
+        apply_feature(toolchain, env, "fast-math")
 
         assert "/fp:fast" in env.cc.flags
 
-    def test_unknown_preset_warns(self, test_project):  # noqa: F811
-        from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
-
-        env = _make_msvc_env()
-
-        class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
-
-        toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "nonexistent")
-
-        assert len(env.cc.flags) == 0
+    def test_unknown_preset_has_no_realization(self):
+        assert _concrete_msvc().make_feature_preset("nonexistent") is None
 
 
 class TestCxxStandard:
@@ -439,7 +423,7 @@ class TestFortranPresets:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_preset(env, "warnings")
+        apply_feature(GfortranToolchain(), env, "warnings")
 
         assert "-Wall" in env.fc.flags
         assert "-Wextra" in env.fc.flags
@@ -449,7 +433,7 @@ class TestFortranPresets:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_preset(env, "werror")
+        apply_feature(GfortranToolchain(), env, "werror")
 
         assert "-Werror" in env.fc.flags
 
@@ -461,7 +445,7 @@ class TestWasmPresets:
         from pcons.toolchains.emscripten import EmscriptenToolchain
 
         env = _make_unix_env()
-        EmscriptenToolchain().apply_preset(env, "warnings")
+        apply_feature(EmscriptenToolchain(), env, "warnings")
 
         assert "-Wall" in env.cc.flags
         assert "-Werror" not in env.cc.flags
@@ -470,7 +454,7 @@ class TestWasmPresets:
         from pcons.toolchains.emscripten import EmscriptenToolchain
 
         env = _make_unix_env()
-        EmscriptenToolchain().apply_preset(env, "werror")
+        apply_feature(EmscriptenToolchain(), env, "werror")
 
         assert "-Werror" in env.cc.flags
 
@@ -623,7 +607,7 @@ class TestOpenmpPreset:
         monkeypatch.setattr(
             GccToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": False
         )
-        toolchain.apply_preset(env, "openmp")
+        apply_feature(toolchain, env, "openmp")
 
         assert "-fopenmp" in env.cc.flags
         assert "-fopenmp" in env.cxx.flags
@@ -641,7 +625,7 @@ class TestOpenmpPreset:
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", (str(libomp),))
 
         env = _make_unix_env()
-        LlvmToolchain().apply_preset(env, "openmp")
+        apply_feature(LlvmToolchain(), env, "openmp")
 
         assert "-Xclang" in env.cxx.flags
         assert "-fopenmp" in env.cxx.flags
@@ -699,7 +683,7 @@ class TestOpenmpPreset:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_preset(env, "openmp")
+        apply_feature(GfortranToolchain(), env, "openmp")
 
         assert "-fopenmp" in env.fc.flags
         assert "-fopenmp" in env.link.flags
@@ -791,7 +775,7 @@ class TestFortranVariants:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_variant(env, "debug")
+        apply_variant(GfortranToolchain(), env, "debug")
 
         assert "-O0" in env.fc.flags
         assert "-g" in env.fc.flags
@@ -800,7 +784,7 @@ class TestFortranVariants:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_variant(env, "release")
+        apply_variant(GfortranToolchain(), env, "release")
 
         assert "-O2" in env.fc.flags
         assert "NDEBUG" in env.fc.defines

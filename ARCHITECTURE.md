@@ -1740,7 +1740,7 @@ project.Default(app)
 
 1. **Configuration caching**: What format? JSON for readability, or pickle for speed? When to invalidate? (Probably: hash of configure.py + tool versions)
 
-2. **Variant builds**: Handled via `env.set_variant("debug")` which delegates to the toolchain's `apply_variant()` method. Each toolchain defines what variants mean for its tools. Environment cloning allows multiple variant builds in the same project.
+2. **Variant builds**: Handled via `env.set_variant("debug")` which asks each toolchain for its realization (`make_variant_preset()`). Each toolchain defines what variants mean for its tools. Environment cloning allows multiple variant builds in the same project.
 
 3. **Distributed builds**: distcc/icecream/sccache should "just work" by wrapping compiler commands. Do we need explicit support?
 

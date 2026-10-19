@@ -852,7 +852,7 @@ def test_an_incompatible_fc_is_an_error(on_windows, monkeypatch, tmp_path) -> No
     fc.write_text("#!/bin/sh\n")
     fc.chmod(0o755)
     monkeypatch.setenv("FC", str(fc))
-    with pytest.raises(RuntimeError, match=r"\$FC names .*'mingw' ABI"):
+    with pytest.raises(RuntimeError, match=r"\$FC \(.*'mingw' ABI"):
         find_fortran_toolchain(abi="msvc")
 
 
