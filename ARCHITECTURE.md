@@ -764,7 +764,7 @@ This makes build scripts declarative - the order of declarations doesn't matter.
 │  compute_effective_requirements()  ──► EffectiveRequirements            │
 │         │                              (includes, defines, flags, etc.)  │
 │         ▼                                                                │
-│  toolchain.create_build_context()  ──► ToolchainContext                 │
+│  linker.compile_link_context_class()  ──► ToolchainContext              │
 │         │                              (CompileLinkContext for C/C++)   │
 │         ▼                                                                │
 │  node._build_info["context"] = context                                  │

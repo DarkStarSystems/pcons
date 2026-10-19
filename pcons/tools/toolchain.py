@@ -1000,16 +1000,6 @@ class Toolchain(Protocol):
         toolchain's linker takes them."""
         ...
 
-    def create_build_context(
-        self,
-        target: Target,
-        env: Environment,
-        for_compilation: bool = True,
-    ) -> ToolchainContext | None:
-        """Create a toolchain-specific build context for a target, or None
-        if this toolchain doesn't use the context mechanism."""
-        ...
-
     def after_resolve(
         self,
         project: Any,
@@ -1743,31 +1733,6 @@ class BaseToolchain(ABC):
         from pcons.toolchains.build_context import CompileLinkContext
 
         return CompileLinkContext
-
-    def create_build_context(
-        self,
-        target: Target,
-        env: Environment,
-        for_compilation: bool = True,
-    ) -> ToolchainContext | None:
-        """Create a toolchain-specific build context for a target.
-
-        Args:
-            target: The target being built.
-            env: The build environment.
-            for_compilation: If True, create context for compilation;
-                             if False, for linking.
-        """
-        from pcons.toolchains.build_context import CompileLinkContext
-        from pcons.tools.requirements import compute_effective_requirements
-
-        effective = compute_effective_requirements(target, env, for_compilation)
-
-        mode = "compile" if for_compilation else "link"
-        return CompileLinkContext.from_effective_requirements(
-            effective,
-            mode=mode,
-        )
 
     def __repr__(self) -> str:
         tools = ", ".join(self._tools.keys())
