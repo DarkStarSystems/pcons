@@ -4160,11 +4160,9 @@ msix = windows.create_msix(
 #### Complete Platform-Conditional Example
 
 ```python
-from pcons.contrib import platform
-
 installer_targets = []
 
-if platform.is_macos():
+if env.target.is_macos:
     from pcons.contrib.installers import macos
 
     pkg = macos.create_pkg(
@@ -4179,7 +4177,7 @@ if platform.is_macos():
     dmg = macos.create_dmg(project, env, name="MyApp", sources=[app])
     installer_targets.extend([pkg, dmg])
 
-elif platform.is_windows():
+elif env.target.is_windows:
     from pcons.contrib.installers import windows
 
     msix = windows.create_msix(
@@ -5192,14 +5190,6 @@ if platform.is_macos():
 | `pcons.contrib.latex` Function | Description |
 |-------------------------------|-------------|
 | `find_latex_toolchain()` | Find and configure a LaTeX toolchain (requires `latexmk` in PATH) |
-
-| `pcons.contrib.platform` Function | Description |
-|----------------------------------|-------------|
-| `is_macos()`, `is_linux()`, `is_windows()` | Platform checks |
-| `get_platform_name()` | Get platform name ("darwin", "linux", "win32") |
-| `get_arch()` | Get current architecture ("x86_64", "arm64", etc.) |
-| `get_shared_lib_extension()` | Get shared lib extension (".dylib", ".so", ".dll") |
-| `format_shared_lib_name(name)` | Format as shared lib filename |
 
 ---
 

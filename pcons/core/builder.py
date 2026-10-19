@@ -70,9 +70,6 @@ class OutputGroup:
     def __len__(self) -> int:
         return len(self._nodes)
 
-    def __list__(self) -> list[FileNode]:
-        return list(self._nodes.values())
-
     def keys(self) -> list[str]:
         """Return the names of all outputs."""
         return list(self._nodes.keys())

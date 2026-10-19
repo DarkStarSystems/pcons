@@ -1722,26 +1722,6 @@ class Environment(_EnvironmentStubs):
 
         return self._target or get_platform()
 
-    def Glob(self, pattern: str) -> list[FileNode]:
-        """Find files matching a glob pattern.
-
-        This is a placeholder - actual implementation will use
-        the project's file tracking.
-
-        Args:
-            pattern: Glob pattern (e.g., 'src/*.cpp').
-
-        Returns:
-            List of FileNodes matching the pattern.
-        """
-        from pcons.core.node import FileNode
-
-        # Use project._node() for deduplication when available
-        matches = list(Path(".").glob(pattern))
-        if self._project is not None:
-            return [self._project._node(p) for p in matches]
-        return [FileNode(p, defined_at=get_caller_location()) for p in matches]
-
     def Framework(self, *names: str, dirs: list[str] | None = None) -> None:
         """Add macOS frameworks to link against.
 

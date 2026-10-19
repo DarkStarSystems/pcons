@@ -305,15 +305,6 @@ class TestContribModules:
         assert hasattr(bundle, "create_flat_bundle")
         assert hasattr(bundle, "get_arch_subdir")
 
-    def test_platform_module_imports(self) -> None:
-        """Can import platform module."""
-        from pcons.contrib import platform
-
-        assert hasattr(platform, "is_macos")
-        assert hasattr(platform, "is_linux")
-        assert hasattr(platform, "is_windows")
-        assert hasattr(platform, "get_shared_lib_extension")
-
 
 class TestBundleHelpers:
     """Tests for contrib.bundle helpers."""
@@ -367,38 +358,3 @@ class TestBundleHelpers:
 
         assert get_arch_subdir("win32", "x86_64") == "Win64"
         assert get_arch_subdir("win32", "x86") == "Win32"
-
-
-class TestPlatformHelpers:
-    """Tests for contrib.platform helpers."""
-
-    def test_get_platform_name(self) -> None:
-        """get_platform_name returns current platform."""
-        from pcons.contrib.platform import get_platform_name
-
-        name = get_platform_name()
-        assert name in ("darwin", "linux", "win32")
-
-    def test_platform_checks_are_exclusive(self) -> None:
-        """Exactly one platform check returns True."""
-        from pcons.contrib.platform import is_linux, is_macos, is_windows
-
-        checks = [is_macos(), is_linux(), is_windows()]
-        assert sum(checks) == 1
-
-    def test_get_shared_lib_extension(self) -> None:
-        """get_shared_lib_extension returns correct extension."""
-        from pcons.contrib.platform import get_shared_lib_extension
-
-        ext = get_shared_lib_extension()
-        assert ext in (".dylib", ".so", ".dll")
-        assert ext.startswith(".")
-
-    def test_format_shared_lib_name(self) -> None:
-        """format_shared_lib_name creates correct filename."""
-        from pcons.contrib.platform import format_shared_lib_name
-
-        name = format_shared_lib_name("mylib")
-        assert "mylib" in name
-        # Should have extension
-        assert name.endswith((".dylib", ".so", ".dll"))

@@ -88,7 +88,6 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.PyBuilder(python=, worker=, cwd=, launcher=, env_vars=, restat=, write_if_different=, depends=, emitter=, discovers=)` | Decorator: turn a Python function of the build script into a builder. Says how the function runs; `emitter=` names each edge's files at resolve, `discovers=True` lets the function report the files it read |
 | `builder(target, source, depends, name=, **kwargs)` | Call the builder: one build edge, with the function's own arguments as plain keywords. A `Target` or node keyword arrives as its paths, a `Subst` as its expansion |
 | `env.Framework(*names)` | Link macOS frameworks (macOS only) |
-| `env.Glob(pattern)` | Find files matching a glob pattern |
 | `env.cc` | C compiler settings |
 | `env.cxx` | C++ compiler settings |
 | `env.link` | Linker settings |

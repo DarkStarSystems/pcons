@@ -5,11 +5,10 @@ This example shows how to create:
 - macOS: .pkg installer and .dmg disk image
 - Windows: .msix package
 
-The installer targets are created based on the current platform.
+The installers are the ones for the platform the environment builds for.
 """
 
 from pcons import Project
-from pcons.contrib import platform
 
 # =============================================================================
 # Build Script
@@ -29,7 +28,7 @@ app.add_sources([src_dir / "main.c"])
 # Create platform-specific installers
 installer_targets = []
 
-if platform.is_macos():
+if env.target.is_macos:
     from pcons.contrib.installers import macos
 
     # Create a .pkg installer. The welcome and readme files are copied into
@@ -59,7 +58,7 @@ if platform.is_macos():
     )
     installer_targets.append(dmg)
 
-elif platform.is_windows():
+elif env.target.is_windows:
     from pcons.contrib.installers import windows
 
     # Create an MSIX package

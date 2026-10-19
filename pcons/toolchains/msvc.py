@@ -17,7 +17,7 @@ from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.tools.tool import BaseTool, Probe
-from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES, ToolchainContext
+from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -1224,24 +1224,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             + "\n",
         )
         return {std_key: exports_rel}, None
-
-    def create_build_context(
-        self,
-        target: Target,
-        env: Environment,
-        for_compilation: bool = True,
-    ) -> ToolchainContext | None:
-        """Create an MsvcCompileLinkContext (/I, /D, /LIBPATH: prefixes)."""
-        from pcons.toolchains.build_context import MsvcCompileLinkContext
-        from pcons.tools.requirements import compute_effective_requirements
-
-        effective = compute_effective_requirements(target, env, for_compilation)
-
-        mode = "compile" if for_compilation else "link"
-        return MsvcCompileLinkContext.from_effective_requirements(
-            effective,
-            mode=mode,
-        )
 
 
 # =============================================================================

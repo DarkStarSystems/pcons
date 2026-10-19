@@ -838,22 +838,6 @@ class XcodeGenerator(BaseGenerator):
                     target_name=self._display_name(target),
                 )
 
-    def _discover_headers(self, target: Target) -> list[Path]:
-        """Find headers by scanning the target's include directories."""
-        headers: list[Path] = []
-        include_dirs = list(target.public.include_dirs) + list(
-            target.private.include_dirs
-        )
-
-        path_resolver = target.path_resolver
-        for inc_dir_raw in include_dirs:
-            inc_dir = path_resolver.normalize_source_path(inc_dir_raw)
-            if inc_dir.is_dir():
-                for ext in [".h", ".hpp", ".hxx", ".H", ".hh"]:
-                    headers.extend(inc_dir.rglob(f"*{ext}"))
-
-        return sorted(set(headers))
-
     def _text(self, path: Path | str, *, built: bool) -> str:
         """*path* as Xcode's project and scripts see it, from the build
         directory the xcodeproj sits in: a target's file relative to it, a
