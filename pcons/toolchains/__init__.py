@@ -226,13 +226,10 @@ def env_selected_toolchain(
         if entry is not None and entry.category == category:
             toolchain = entry.create_toolchain()
             if not abi_compatible(toolchain.abi, abi):
-                compatible = toolchain_registry.names_with_abi(category, abi)
+                subject = f"${var} ({path}, a {family} compiler)"
                 raise RuntimeError(
-                    f"${var} names {path}, a {family} compiler following the "
-                    f"'{toolchain.abi}' ABI, but the '{abi}' one is required "
-                    f"here: their objects can't be linked together. Unset "
-                    f"${var}, or name a compatible compiler"
-                    + (f" ({', '.join(compatible)})." if compatible else ".")
+                    toolchain_registry.abi_mismatch(subject, toolchain, abi)
+                    + f" Unset ${var}, or set it to a compatible compiler."
                 )
             return toolchain
     return None

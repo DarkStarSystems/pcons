@@ -489,18 +489,8 @@ class ToolchainRegistry:
     def _resolve_one(self, name: str, abi: str | None = None) -> BaseToolchain:
         toolchain = self._find_one(name, abi)
         if not abi_compatible(toolchain.abi, abi):
-            category = self._category_of(toolchain)
-            compatible = self.names_with_abi(category, abi) if category else []
-            raise RuntimeError(
-                f"Toolchain '{name}' ({toolchain.name}) follows the "
-                f"'{toolchain.abi}' ABI, not the '{abi}' one required here: "
-                f"their objects can't be linked together."
-                + (
-                    f" Compatible {category} toolchains: {', '.join(compatible)}."
-                    if compatible
-                    else ""
-                )
-            )
+            subject = name if name == toolchain.name else f"{name} ({toolchain.name})"
+            raise RuntimeError(self.abi_mismatch(subject, toolchain, abi))
         return toolchain
 
     def _find_one(self, name: str, abi: str | None) -> BaseToolchain:
@@ -651,6 +641,21 @@ class ToolchainRegistry:
             + ", and put it on PATH."
         )
 
+    def abi_mismatch(self, subject: str, toolchain: Toolchain, abi: str | None) -> str:
+        """Why *toolchain*, which *subject* chose, can't join one requiring
+        *abi*, and which toolchains could."""
+        category = self._category_of(toolchain)
+        compatible = self.names_with_abi(category, abi) if category else []
+        return (
+            f"{subject} follows the '{toolchain.abi}' ABI, not the '{abi}' one "
+            f"required here, so their objects can't be linked together."
+            + (
+                f" Compatible {category} toolchains: {', '.join(compatible)}."
+                if compatible
+                else ""
+            )
+        )
+
     def names_with_abi(self, category: str, abi: str | None) -> list[str]:
         """The registered *category* toolchains compatible with *abi*, by
         their first alias: what to suggest when one doesn't match."""
@@ -665,7 +670,7 @@ class ToolchainRegistry:
                 names.append(entry.aliases[0])
         return names
 
-    def _category_of(self, toolchain: BaseToolchain) -> str | None:
+    def _category_of(self, toolchain: Toolchain) -> str | None:
         """The registered category of *toolchain*'s class, if any."""
         for entry in self._toolchains.values():
             if entry.toolchain_class is type(toolchain):

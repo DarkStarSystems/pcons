@@ -615,14 +615,12 @@ class Environment(_EnvironmentStubs):
                 if abi is None:
                     raise
                 raise RuntimeError(
-                    f"Can't add '{toolchain}' beside {primary.name}, whose "
-                    f"objects follow the '{abi}' ABI: {e}"
+                    f"Can't add '{toolchain}' beside {primary.name}: {e}"
                 ) from e
         elif not abi_compatible(getattr(toolchain, "abi", None), abi):
             raise ValueError(
-                f"Can't add {toolchain.name} beside {primary.name}: it follows "
-                f"the '{toolchain.abi}' ABI and {primary.name} the '{abi}' one, "
-                f"so their objects can't be linked together."
+                f"Can't add {toolchain.name} beside {primary.name}: "
+                + toolchain_registry.abi_mismatch(toolchain.name, toolchain, abi)
             )
         self._check_replay(toolchain)
         additional: list[Toolchain] = object.__getattribute__(
