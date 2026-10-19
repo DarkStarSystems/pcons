@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `pcons explain` says how a mixed-language program links: which
+  compiler's driver links it and why (`cxx leads fortran`, or `overridden
+  by link_language`), and each runtime library, directory or rpath the
+  link adds, with the compiler whose objects need it
+  (`lib gfortran <- gfortran (fortran)`).
 - A test's `args` can name files: a `Target` is the file it builds, which
   the test then depends on, and a `Path` is a file in the source tree.
   Each is written as the test sees it from where it runs, so a test can

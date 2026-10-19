@@ -424,3 +424,72 @@ def test_the_gcov_need_says_where_libgcov_is(tmp_path, monkeypatch) -> None:
     (node,) = prog.output_nodes
     libdirs = node._build_info["context"].get_env_overrides()["libdirs"]
     assert Path("/gcc/lib") in [Path(str(getattr(d, "path", d))) for d in libdirs]
+
+
+def _explanation(target) -> tuple[str, list[tuple[str, str]]] | None:
+    """The link's explanation, with a Windows driver's .exe left out."""
+    (node,) = target.output_nodes
+    explanation = node._build_info.get("explanation")
+    if explanation is None:
+        return None
+    summary, rows = explanation
+    return summary.replace(".exe  (", "  ("), rows
+
+
+def test_explain_says_why_the_driver_links_and_who_needs_what(tmp_path) -> None:
+    project = _project(tmp_path)
+    env = _env(project, "gcc", "gfortran")
+    prog = project.Program("prog", env, sources=["main.f90", "helper.cpp"])
+    project.resolve()
+    explanation = _explanation(prog)
+    assert explanation is not None
+    summary, rows = explanation
+    assert summary == "link: g++  (cxx leads fortran; set link_language to change)"
+    assert ("lib gfortran", "gfortran (fortran)") in rows
+
+
+def test_explain_says_link_language_overrode_the_order(tmp_path) -> None:
+    project = _project(tmp_path)
+    env = _env(project, "gcc", "gfortran")
+    prog = project.Program("prog", env, sources=["main.f90", "helper.cpp"])
+    prog.link_language = "fortran"
+    project.resolve()
+    explanation = _explanation(prog)
+    assert explanation is not None
+    assert explanation[0] == "link: gfortran  (fortran, overridden by link_language)"
+    assert ("lib stdc++", "gcc (cxx)") in explanation[1]
+
+
+def test_explain_leaves_out_a_link_with_nothing_to_say(tmp_path) -> None:
+    project = _project(tmp_path)
+    env = _env(project, "gcc")
+    prog = project.Program("prog", env, sources=["main.c"])
+    project.resolve()
+    assert _explanation(prog) is None
+
+
+def test_explain_renders_the_link_rows(tmp_path) -> None:
+    from pcons import _cli_explain
+
+    project = _project(tmp_path)
+    env = _env(project, "gcc", "gfortran")
+    prog = project.Program("prog", env, sources=["main.f90", "helper.cpp"])
+    project.resolve()
+    report = "\n".join(
+        _cli_explain.render_explanation(
+            project, [prog], explicit_targets=True, color=False, width=0
+        )
+    ).replace(".exe  (", "  (")
+    assert "    link: g++  (cxx leads fortran; set link_language to change)" in report
+    assert "      lib gfortran  <- gfortran (fortran)" in report
+
+
+def test_explain_says_how_to_change_a_link_tool_that_isnt_a_driver(tmp_path) -> None:
+    project = _project(tmp_path)
+    env = _env(project, "gcc", "gfortran")
+    env.link.cmd = "/opt/mold/bin/ld.mold"
+    prog = project.Program("prog", env, sources=["main.f90", "helper.cpp"])
+    project.resolve()
+    explanation = _explanation(prog)
+    assert explanation is not None
+    assert explanation[0] == "link: ld.mold  (set env.link.cmd to change)"
