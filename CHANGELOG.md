@@ -121,6 +121,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   had its path rewritten. Put a path in a command as a `Path` or a node,
   and pcons writes it for where the command runs.
 
+### Removed
+
+- `pcons.contrib.platform`. Its helpers described the machine running
+  pcons, not the platform being built for, so they gave the wrong answer
+  in a cross build. Use `env.target` (`env.target.is_macos`,
+  `env.target.shared_lib_suffix`) for the platform a build is for, and
+  `pcons.get_platform()` for the machine running pcons.
+- `env.Glob()`, a placeholder that globbed from the current directory
+  rather than the script's, and `project.print_targets()`; `pcons explain`
+  shows the targets.
+
 ### Fixed
 
 - A toolchain preference list, such as `toolchain=["llvm", "msvc"]`, passes

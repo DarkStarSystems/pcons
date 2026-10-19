@@ -1730,31 +1730,6 @@ class Project(_ProjectBuilders):
         """
         return topological_sort_targets(self._targets)
 
-    def print_targets(self) -> None:
-        """Print a human-readable summary of all targets.
-
-        Useful for debugging. Shows target names, types, and dependencies.
-        """
-        print(f"Project: {self.name}")
-        print(f"Build dir: {self.build_dir}")
-        print(f"Targets ({len(self._targets)}):")
-
-        for target in sorted(self._targets, key=lambda t: t.name):
-            print(f"  {target.name} ({target.target_type})")
-            if target.sources:
-                print(f"    sources: {len(target.sources)} files")
-            if target.output_nodes:
-                for node in target.output_nodes[:3]:
-                    print(f"    output: {node.path}")
-                if len(target.output_nodes) > 3:
-                    print(f"    ... and {len(target.output_nodes) - 3} more")
-            if target.dependencies:
-                deps = [
-                    d.name if hasattr(d, "name") else str(d)
-                    for d in target.dependencies
-                ]
-                print(f"    links: {', '.join(deps)}")
-
     def resolve(self, strict: bool = False) -> None:
         """Resolve all targets, populating their nodes for generation
         (see pcons.core.resolver for the phases), then validate.

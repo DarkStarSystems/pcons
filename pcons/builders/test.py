@@ -95,7 +95,7 @@ class TestNodeFactory:
             defined_at=partial["defined_at"],
         )
         target._builder_data["spec"] = spec
-        # Drop the partial — keeps __repr__/print_targets tidy.
+        # Drop the partial — keeps __repr__ tidy.
         target._builder_data.pop("spec_partial", None)
 
     def resolve_pending(self, target: Target) -> None:  # noqa: ARG002

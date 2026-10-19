@@ -255,7 +255,6 @@ A directory source represents **the directory and all files within it** that are
 
 ```python
 # asset_dir as source - depends on all declared assets within
-assets = env.Glob("assets/*.png")  # Explicitly declared files
 packed = env.PackAssets("game.pak", asset_dir)
 # Rebuilds if any declared asset changes, not if random files appear
 ```
@@ -1510,13 +1509,12 @@ ofx.setup_env(env)
 
 **Contrib modules:** Generic helpers ship with pcons in `pcons.contrib`:
 - `pcons.contrib.bundle` - macOS bundle and flat bundle creation helpers
-- `pcons.contrib.platform` - Platform detection utilities
 
 ```python
-from pcons.contrib import bundle, platform
+from pcons.contrib import bundle
 
 plist = bundle.generate_info_plist("MyPlugin", "1.0.0")
-if platform.is_macos():
+if env.target.is_macos:
     bundle.create_macos_bundle(project, env, plugin, bundle_dir="...")
 ```
 
