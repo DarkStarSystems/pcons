@@ -333,25 +333,24 @@ class TestCrossTarget:
 
 
 class TestWindows:
-    def test_static_library_gets_static_flag(self, swift_project, monkeypatch) -> None:
-        """On Windows, static libs need -static or importers emit __imp_ refs."""
-        import pcons.toolchains.swift as swift_mod
+    @pytest.mark.parametrize(
+        ("triple", "static"),
+        [("x86_64-unknown-windows-msvc", True), ("aarch64-unknown-linux-gnu", False)],
+    )
+    def test_a_static_library_built_for_windows_gets_static_flag(
+        self, swift_project, triple, static
+    ) -> None:
+        """Built for Windows, static libs need -static or importers emit
+        __imp_ refs: the platform built for decides, whatever the host."""
+        from pcons.toolchains.presets import CrossPreset
 
-        class FakeWindows:
-            is_windows = True
-            is_macos = False
-            object_suffix = ".obj"
-            exe_suffix = ".exe"
-            shared_lib_suffix = ".dll"
-
-        monkeypatch.setattr(swift_mod, "get_platform", lambda: FakeWindows())
         project, env = swift_project
+        env.apply_cross_preset(CrossPreset(name="cross", arch="x86_64", triple=triple))
         lib = project.StaticLibrary("Geometry", env, sources=["src/extra.swift"])
         project.resolve()
 
-        assert (
-            "-static" in lib.intermediate_nodes[0]._build_info["vars"]["MODULE_FLAGS"]
-        )
+        flags = lib.intermediate_nodes[0]._build_info["vars"]["MODULE_FLAGS"]
+        assert ("-static" in flags) is static
 
     def test_archiver_prefers_llvm_ar_on_windows(self, monkeypatch) -> None:
         """llvm-ar ships with the swift.org Windows toolchain; ar doesn't."""

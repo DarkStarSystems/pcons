@@ -147,6 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   archive or a clone left at the wrong commit, builds and installs CMake's
   Release configuration with Visual Studio too, and `clean --all` removes
   git clones on Windows.
+- A Swift static library built for Windows from another platform gets the
+  `-static` its importers need; it was decided by the build machine.
 - A toolchain preference list, such as `toolchain=["llvm", "msvc"]`, passes
   over a toolchain that `$CC`, `$CXX` or `$FC` contradicts and takes the
   next one: `CC=cl` builds with MSVC. Before, it stopped at `llvm` with an
