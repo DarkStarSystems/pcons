@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import functools
 import logging
-import os
 import shutil
 import subprocess
 import tempfile
@@ -24,7 +23,6 @@ from pcons.toolchains.unix import UnixToolchain, target_triple
 
 if TYPE_CHECKING:
     from pcons.configure.platform import Platform
-    from pcons.tools.toolchain import BaseToolchain
 
 logger = logging.getLogger(__name__)
 
@@ -54,36 +52,6 @@ class FlangToolchain(FortranToolchain):
     def _abi_probe_compiler(self) -> str | None:
         """$FC, else flang on PATH: the compiler that will build."""
         return self.compiler_path
-
-    def companion_toolchain(self, name: str) -> BaseToolchain | None:
-        """For ``"c"``, the C/C++ compilers from flang's own LLVM, unless
-        the user chose with $CC or $CXX.
-
-        A C compiler from another LLVM (Apple's clang) or from GCC links its
-        own OpenMP runtime, and a program using OpenMP on both sides then
-        loads two and fails. The choice is logged and shown by explain().
-        """
-        if name != "c" or any(os.environ.get(var) for var in ("CC", "CXX")):
-            return None
-        flang = self.compiler_path
-        if flang is None:
-            return None
-        msvc = self.abi == "msvc"
-        found = _own_llvm_compilers(flang, msvc)
-        if found is None:
-            return None
-        family = "clang-cl" if msvc else "llvm"
-        entry = toolchain_registry.get(family)
-        if entry is None:
-            return None
-        toolchain = entry.create_toolchain()
-        toolchain.bind_commands(found, source="flang's LLVM")
-        logger.info(
-            "C and C++ compile with %s, from flang's own LLVM, so both "
-            "sides use one OpenMP runtime; set CC and CXX to choose others.",
-            found["CC"],
-        )
-        return toolchain
 
     COMPILER = FlangCompiler
     ARCHIVER = LlvmArchiver
@@ -184,40 +152,6 @@ class FlangToolchain(FortranToolchain):
             if any(candidate.glob("*flang_rt.runtime.*")):
                 return str(candidate)
         return None
-
-
-@functools.cache
-def _own_llvm_compilers(flang: str, msvc: bool) -> dict[str, str] | None:
-    """The C and C++ compilers of *flang*'s own LLVM, by the variable that
-    would choose them, or None if it has none.
-
-    They're beside flang's real binary (apt.llvm.org, LLVM's own builds,
-    conda-forge), or, for a flang packaged apart from its LLVM (Homebrew),
-    in the LLVM its resource directory's ``include`` links to.
-    """
-    names = (
-        {"CC": "clang-cl", "CXX": "clang-cl"}
-        if msvc
-        else {"CC": "clang", "CXX": "clang++"}
-    )
-    dirs = [Path(flang).resolve().parent]
-    try:
-        resource = subprocess.run(
-            [flang, "-print-resource-dir"], capture_output=True, text=True, timeout=30
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        resource = ""
-    include = Path(resource) / "include" if resource else None
-    if include is not None and include.is_symlink():
-        # <llvm>/lib/clang/<version>/include
-        target = Path(os.path.normpath(include.parent / os.readlink(include)))
-        if len(target.parts) > 4:
-            dirs.append(target.parents[3] / "bin")
-    for d in dirs:
-        found = {var: shutil.which(prog, path=str(d)) for var, prog in names.items()}
-        if all(found.values()):
-            return {var: str(path) for var, path in found.items()}
-    return None
 
 
 @functools.cache

@@ -264,8 +264,8 @@ the same request, so:
   an error naming that compiler: with clang and flang,
   `apply_preset("sanitize")` raises, because flang has no sanitizer and a
   build that sanitizes only the C++ sources isn't a sanitized build.
-  `apply_preset("sanitize", allow_partial=True)` applies it where it can,
-  and `explain()` lists what it left out. `has_preset()` says whether
+  Sources that can't take a preset compile in a clone of the environment
+  made before it (`target.add_sources(sources, env=clone)`). `has_preset()` says whether
   `apply_preset()` would raise. A contributed preset whose resolver returns
   `None` for a toolchain has decided for itself, and isn't an error.
   `set_target_arch()` and `set_runtime_linkage()` work the same way: a
@@ -558,7 +558,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | Cross-preset field contract: triple/sysroot/tool_cmds realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |
 | Preset application contract: apply-fully-or-raise (unknown names, missing-tool cmd, zero-effect presets, unrealizable knobs) | implemented |
 | `env.target_arch` single-writer (knob only; cross presets are metadata) | implemented |
-| Mixed toolchains: each compiler gets its own toolchain's flags, in any order; a preset applies to every compiler or raises (`allow_partial`) | implemented |
+| Mixed toolchains: each compiler gets its own toolchain's flags, in any order; a preset applies to every compiler or raises | implemented |
 | Exclusive groups replace on re-apply (knob semantics; group presets additive-only) | implemented |
 | `CrossPreset.arch` decoupled from flag emission (host-independent) | implemented |
 | `env.target` / `CrossPreset.target_platform`: what the environment builds for | implemented |

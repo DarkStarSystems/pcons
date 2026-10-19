@@ -67,8 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A feature preset applies to every compiler in the environment, or
   raises.** With clang and flang, `apply_preset("sanitize")` is an error
   naming flang, which has no sanitizer: sanitizing only the C and C++
-  sources isn't a sanitized build. `apply_preset(name, allow_partial=True)`
-  applies it where it can, and `env.explain()` lists what it left out.
+  sources isn't a sanitized build. Compile the sources it can't take in a
+  clone of the environment made before the preset, with
+  `target.add_sources(sources, env=clone)`.
   `env.has_preset()` says whether `apply_preset()` would raise.
 - Each compiler has its own flags for each built-in feature preset,
   checked against the real compilers. gfortran now has all of GCC's (`sanitize`,
@@ -149,11 +150,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `add_subdirectory` it was read from the top directory, so
   `env.cc.includes.append("include")` missed the subdirectory's headers.
   These entries now read back as absolute paths.
-- Beside flang, `env.add_toolchain("c")` uses the clang from flang's own
-  LLVM, not Apple's clang or gcc, so a program using OpenMP in C and
-  Fortran loads one OpenMP runtime. With two it crashed (macOS, Homebrew)
-  or failed to link (Linux, apt.llvm.org's flang beside gcc). `$CC` and
-  `$CXX` still choose.
 - On macOS, the `openmp` preset gives each compiler its own flags. With
   `$CC` naming Homebrew's clang and C++ left to Apple's, the C compiler
   got Apple clang's `-Xclang -fopenmp` and Homebrew's `libomp` too.

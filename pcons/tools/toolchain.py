@@ -788,12 +788,6 @@ class Toolchain(Protocol):
         """Presets to apply right after setup (attributed by explain())."""
         ...
 
-    def companion_toolchain(self, name: str) -> Toolchain | None:
-        """The toolchain ``env.add_toolchain(name)`` adds beside this one,
-        when this toolchain's own install provides it, or None for the
-        usual search."""
-        ...
-
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release"); each toolchain
         defines its own semantics."""
@@ -1067,9 +1061,6 @@ class BaseToolchain(ABC):
         self._name = name
         self._tools: dict[str, Tool] = {}
         self._configured = False
-        # Commands bind_commands() gave, by the variable that chooses them.
-        self._bound_commands: dict[str, str] = {}
-        self._bound_source = ""
 
     @property
     def name(self) -> str:
@@ -1156,6 +1147,8 @@ class BaseToolchain(ABC):
         wasi) override this without calling super(), deliberately ignoring
         the env vars — the CMake/Visual-Studio-generator precedent.
         """
+        from pcons.tools.tool import resolve_env_cmd_override
+
         conflict = self.compiler_override_conflict()
         if conflict is not None:
             raise ValueError(conflict)
@@ -1163,64 +1156,39 @@ class BaseToolchain(ABC):
         for tool in self._tools.values():
             if tool.env_var:
                 by_var.setdefault(tool.env_var, []).append(tool.name)
-        # One preset per source, so explain() shows cxx.cmd <- $CXX, or
-        # <- flang's LLVM for commands bind_commands() gave.
-        by_source: dict[str, list[ToolContribution]] = {}
+        presets: list[Preset] = []
         for var, tool_names in by_var.items():
-            chosen = self._chosen_command(var)
-            if chosen is None:
+            path = resolve_env_cmd_override(var)
+            if path is None:
                 continue
-            path, source = chosen
-            by_source.setdefault(source, []).extend(
-                ToolContribution(name, cmd=path) for name in tool_names
+            presets.append(
+                Preset(
+                    name=f"${var}",
+                    category="env",
+                    contributions=tuple(
+                        ToolContribution(name, cmd=path) for name in tool_names
+                    ),
+                )
             )
-        return [
-            Preset(name=source, category="env", contributions=tuple(contribs))
-            for source, contribs in by_source.items()
-        ]
-
-    def _chosen_command(self, var: str) -> tuple[str, str] | None:
-        """The command that tool variable *var* (``CC``) chooses, and what
-        chose it: the user's environment variable (``$CC``), else the one
-        bind_commands() gave this toolchain. None if neither does."""
-        from pcons.tools.tool import resolve_env_cmd_override
-
-        path = resolve_env_cmd_override(var)
-        if path is not None:
-            return path, f"${var}"
-        if var in self._bound_commands:
-            return self._bound_commands[var], self._bound_source
-        return None
+        return presets
 
     def _tool_command(self, name: str) -> str | None:
         """The program this toolchain's tool *name* runs: what its variable
-        chooses (_chosen_command), else its default command, found on PATH.
-        Every question about the compiler that will build asks this. None
-        if this toolchain has no such tool."""
+        (``$CXX``) chooses, else its default command, found on PATH. Every
+        question about the compiler that will build asks this. None if this
+        toolchain has no such tool."""
         import shutil
+
+        from pcons.tools.tool import resolve_env_cmd_override
 
         tool = self._tools.get(name)
         if tool is None:
             return None
-        chosen = self._chosen_command(tool.env_var) if tool.env_var else None
+        chosen = resolve_env_cmd_override(tool.env_var) if tool.env_var else None
         if chosen is not None:
-            return chosen[0]
+            return chosen
         cmd = tool.default_vars().get("cmd")
         return (shutil.which(cmd) or cmd) if isinstance(cmd, str) else None
-
-    def bind_commands(self, commands: dict[str, str], source: str) -> None:
-        """Use *commands* for this toolchain's tools, keyed by the variable
-        that would choose them (``CC``, ``CXX``), as if the user had set
-        it; a variable the user did set still wins. *source* names where
-        they came from, for ``explain()``."""
-        self._bound_commands = dict(commands)
-        self._bound_source = source
-
-    def companion_toolchain(self, name: str) -> Toolchain | None:
-        """The toolchain ``env.add_toolchain(name)`` adds beside this one,
-        when this toolchain's own install provides it, or None for the
-        usual search. Base: None."""
-        return None
 
     def compiler_override_conflict(self) -> str | None:
         """The error to give when the user's ``$CC``, ``$CXX`` or ``$FC``
@@ -1235,13 +1203,13 @@ class BaseToolchain(ABC):
         if expected is None:
             return None
         from pcons.configure.compiler_id import compiler_family
+        from pcons.tools.tool import resolve_env_cmd_override
 
         declared = {tool.env_var for tool in self._tools.values()}
         for var in ("CC", "CXX", "FC"):
-            chosen = self._chosen_command(var) if var in declared else None
-            if chosen is None or chosen[1] != f"${var}":
+            path = resolve_env_cmd_override(var) if var in declared else None
+            if path is None:
                 continue
-            path = chosen[0]
             family = compiler_family(path)
             if family is not None and family != expected:
                 return (

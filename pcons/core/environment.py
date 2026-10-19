@@ -145,8 +145,9 @@ def _unrealized_runtime(linkage: str, missing: Sequence[Any]) -> ValueError:
 def _unrealized_feature(name: str, missing: Sequence[Any]) -> ValueError:
     return ValueError(
         f"Preset '{name}' isn't available with {_names(missing)}, so it can't "
-        f"apply to the whole environment. Apply it with allow_partial=True to "
-        f"leave out {_names(missing)}'s tools, or check first with "
+        f"apply to the whole environment. Compile the sources it can't take in "
+        f"a clone of the environment made before the preset "
+        f"(target.add_sources(sources, env=clone)), or check first with "
         f"env.has_preset({name!r})."
     )
 
@@ -207,7 +208,6 @@ class Environment(_EnvironmentStubs):
         "_use_origins",
         "_intents",
         "_replaying",
-        "_partial_presets",
         "_tool_owners",
         "_name",
         "_cross_preset",
@@ -283,8 +283,6 @@ class Environment(_EnvironmentStubs):
         ]
         # Set while add_toolchain() configures the toolchain it adds
         self._replaying = False
-        # (preset, toolchain) left out by apply_preset(allow_partial=True)
-        self._partial_presets: list[tuple[str, str]] = []
         # Tool name -> the toolchain that brought it, the only one that
         # realizes presets for it (see apply_from)
         self._tool_owners: dict[str, Toolchain] = {}
@@ -611,14 +609,7 @@ class Environment(_EnvironmentStubs):
 
         primary = object.__getattribute__(self, "_toolchain")
         abi = getattr(primary, "abi", None) if primary is not None else None
-        companion = (
-            primary.companion_toolchain(toolchain)
-            if isinstance(toolchain, str) and primary is not None
-            else None
-        )
-        if companion is not None:
-            toolchain = companion
-        elif isinstance(toolchain, str):
+        if isinstance(toolchain, str):
             try:
                 toolchain = toolchain_registry.resolve(toolchain, abi=abi)
             except RuntimeError as e:
@@ -843,7 +834,6 @@ class Environment(_EnvironmentStubs):
         new_env._applied_presets = list(self._applied_presets)
         new_env._applied_imperative = list(self._applied_imperative)
         new_env._intents = list(self._intents)
-        new_env._partial_presets = list(self._partial_presets)
         new_env._tool_owners = dict(self._tool_owners)
         new_env._use_origins = dict(self._use_origins)
 
@@ -1125,7 +1115,6 @@ class Environment(_EnvironmentStubs):
             self._applied_imperative,
             get_separated_arg_flags_from_toolchains(self.toolchains),
             get_passthrough_flags_from_toolchains(self.toolchains),
-            self._partial_presets,
         )
 
     def _record_toolchain_baseline(
@@ -1260,11 +1249,7 @@ class Environment(_EnvironmentStubs):
                 raise _unrealized_arch(intent.name, [toolchain])
             if intent.kind == "runtime" and intent.name != "shared":
                 raise _unrealized_runtime(intent.name, [toolchain])
-            if (
-                intent.kind == "feature"
-                and not intent.kwargs.get("allow_partial")
-                and not is_registered_preset(intent.name)
-            ):
+            if intent.kind == "feature" and not is_registered_preset(intent.name):
                 raise _unrealized_feature(intent.name, [toolchain])
 
     def _takes_part(self, toolchain: Toolchain) -> bool:
@@ -1285,9 +1270,8 @@ class Environment(_EnvironmentStubs):
         """Have each of *toolchains* realize *intent* for its own tools.
 
         Whether any had a realization. A toolchain that takes part
-        (``_takes_part``) and can't realize an arch or feature is an error,
-        unless the feature was applied with ``allow_partial``: the intent
-        applies fully or raises. *replaying* is a toolchain added later,
+        (``_takes_part``) and can't realize an arch or feature is an error:
+        the intent applies fully or raises. *replaying* is a toolchain added later,
         which must realize what the rest of the environment already does.
         """
         kind = intent.kind
@@ -1372,9 +1356,7 @@ class Environment(_EnvironmentStubs):
                 # A registered preset's None is its resolver's decision.
                 missing.append(toolchain)
         if missing and (found or replaying):
-            if not intent.kwargs.get("allow_partial"):
-                raise _unrealized_feature(name, missing)
-            self._partial_presets.extend((name, t.name) for t in missing)
+            raise _unrealized_feature(name, missing)
         landed = [self.apply_from(toolchain, preset) for toolchain, preset in found]
         if found and not any(landed) and not replaying:
             owners = sorted({c.tool for _, p in found for c in p.contributions})
@@ -1439,11 +1421,9 @@ class Environment(_EnvironmentStubs):
         return flags
 
     def feature_realized(self, name: str, toolchain: Toolchain) -> bool:
-        """Whether feature preset *name* was applied here and realized for
-        *toolchain*'s tools (not left out by ``allow_partial``): whether
-        its objects carry it, so may need its runtime from a link."""
-        applied = any(i.kind == "feature" and i.name == name for i in self._intents)
-        return applied and (name, toolchain.name) not in self._partial_presets
+        """Whether feature preset *name* was applied here, so *toolchain*'s
+        objects carry it and may need its runtime from a link."""
+        return any(i.kind == "feature" and i.name == name for i in self._intents)
 
     def _apply_setting(self, name: str, *args: Any) -> None:
         """Apply a tool setting (``env.cxx.set_standard``), realized by
@@ -1584,9 +1564,7 @@ class Environment(_EnvironmentStubs):
 
         apply_clang_tidy(self, tool, args)
 
-    def apply_preset(
-        self, name: KnownFeaturePreset | str, *, allow_partial: bool = False
-    ) -> None:
+    def apply_preset(self, name: KnownFeaturePreset | str) -> None:
         """Apply a named feature preset to this environment.
 
         Resolution is **toolchain-first, then registry**: each toolchain's
@@ -1598,18 +1576,16 @@ class Environment(_EnvironmentStubs):
 
         Every toolchain whose compilers the preset covers must realize it,
         or this raises: with gcc and gfortran, ``sanitize`` sanitizes both
-        the C and the Fortran sources or neither.
+        the C and the Fortran sources or neither. To leave some sources out,
+        compile them in a clone of the environment made before the preset
+        (``target.add_sources(sources, env=clone)``).
 
         Args:
             name: Preset name (``"warnings"`` or ``"scope/name"``).
-            allow_partial: Apply it with the toolchains that realize it and
-                leave out the tools of those that can't, which
-                ``explain()`` then lists.
 
         Example:
             env.apply_preset("warnings")
             env.apply_preset("mycorp/strict")
-            env.apply_preset("sanitize", allow_partial=True)  # not flang's
         """
         from pcons.core.preset import (
             Intent,
@@ -1621,9 +1597,7 @@ class Environment(_EnvironmentStubs):
             logger.warning("No toolchains configured; cannot apply preset '%s'", name)
             return
 
-        intent = Intent(
-            "feature", name, kwargs={"allow_partial": True} if allow_partial else {}
-        )
+        intent = Intent("feature", name)
         applied = self._realize(intent, self.toolchains)
         # Imperative escape-hatch preset: runs once against the whole env.
         description = apply_imperative_preset(name, self)

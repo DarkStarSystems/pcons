@@ -342,9 +342,9 @@ A Windows DLL exports only what it's told to. flang ignores `!DIR$ ATTRIBUTES DL
 
 `env.add_toolchain()` picks a toolchain with the same ABI as the environment's primary one: `"fortran"` beside MSVC or clang-cl finds flang or ifx, not gfortran, and `"c"` beside gfortran finds MinGW gcc. Naming an incompatible one (by name, or with `$FC`/`$CC`/`$CXX`) is an error that says which toolchains would fit. Only an environment's own toolchains have to match: a project can have a MinGW environment and an MSVC one side by side. For clang and flang, pcons asks the compiler (`-print-target-triple`), so MSYS2's clang64 clang and flang count as MinGW and LLVM's own builds as MSVC.
 
-Beside flang, `"c"` compiles C and C++ with the clang from flang's own LLVM when there is one (clang-cl for the MSVC ABI), not the first one on `PATH`. A C compiler from another LLVM or from GCC brings a different OpenMP runtime, and a program using OpenMP in both languages then loads two and fails. `pcons explain` shows the commands as coming from `flang's LLVM`. Set `CC` and `CXX` to choose other compilers.
+A program that uses OpenMP in both C or C++ and flang's Fortran needs a C compiler from flang's own LLVM. Beside flang, `"c"` finds the usual C compiler, and Apple's clang or gcc brings a different OpenMP runtime: a program that loads two crashes (`OMP: Error #15`) or doesn't link. Set `CC` and `CXX` to that LLVM's compilers: `/opt/homebrew/opt/llvm/bin/clang` and `clang++` for Homebrew's flang, `clang-21` and `clang++-21` beside apt.llvm.org's `flang-21`, or the `clang-cl` beside conda-forge's flang on Windows.
 
-Beside gfortran, `"c"` still finds the usual C compiler, typically clang (Apple's on macOS), whose OpenMP runtime isn't GCC's. That mostly works: LLVM's runtime also implements GCC's interface, so with the Fortran code in a static library one runtime serves both languages. With it in a shared library, each side loads its own. The program runs, but the two don't share settings (`omp_set_num_threads()` in C doesn't reach the Fortran code), and their thread pools can oversubscribe the cores. To get one runtime, set `CC` and `CXX` to gfortran's own gcc and g++ (`gcc-16` and `g++-16` from Homebrew's `gcc`, say).
+Beside gfortran, `"c"` also finds the usual C compiler, typically clang (Apple's on macOS), whose OpenMP runtime isn't GCC's. That mostly works: LLVM's runtime also implements GCC's interface, so with the Fortran code in a static library one runtime serves both languages. With it in a shared library, each side loads its own. The program runs, but the two don't share settings (`omp_set_num_threads()` in C doesn't reach the Fortran code), and their thread pools can oversubscribe the cores. To get one runtime, set `CC` and `CXX` to gfortran's own gcc and g++ (`gcc-16` and `g++-16` from Homebrew's `gcc`, say).
 
 **Mixed-language builds** use `env.add_toolchain()`. A program is linked by the compiler of its strongest language, C++, then C, then Fortran, whichever toolchain came first: a C or C++ driver can take the Fortran runtime as libraries, which a Fortran driver can't do for a C compiler's sanitizer or coverage runtimes. CUDA links through the C++ driver, and Swift objects link with swiftc where Swift is the primary toolchain, else with clang++ and the Swift runtime. Pcons adds the runtime libraries the other languages' objects need: `-lgfortran` (or flang's or ifx's) for Fortran objects, `-lstdc++` or `-lc++` for C++ objects, Swift's runtime for Swift objects. That holds for objects in static libraries too, even ones built in another environment.
 
@@ -1706,18 +1706,37 @@ With several compilers in one environment (C++ and Fortran, say), each
 realizes a preset with its own flags, and a preset applies to all of them or
 fails: with clang and flang, `apply_preset("sanitize")` is an error naming
 flang, which has no sanitizer, since a build that sanitizes only the C++
-sources isn't a sanitized build. To apply it to the compilers that can,
-say so, and `pcons explain` lists what it left out. `env.has_preset()`
-says beforehand whether a preset would apply to every compiler.
+sources isn't a sanitized build. To sanitize only the C++, compile the
+Fortran in a clone of the environment, made before the preset, so it keeps
+the other settings (the variant, the runtime linkage). The program still
+links with clang, sanitizer runtime and Fortran runtime included.
+`env.has_preset()` says beforehand whether a preset would apply to every
+compiler.
 
 ```python
-env.apply_preset("sanitize", allow_partial=True)  # C++ sanitized, Fortran not
+env = project.Environment(toolchain="c")
+env.set_variant("debug")
+fortran = env.clone()  # debug too, but not sanitized
+fortran.add_toolchain("flang")
+env.apply_preset("sanitize")
+
+app = project.Program("app", env, sources=["main.cpp"])
+app.add_sources(["solver.f90"], env=fortran)
 ```
+
+A separate environment made from scratch would build the Fortran as a
+release build, and on Windows a debug C++ program and a release Fortran
+runtime don't link (`LNK2038`, `RuntimeLibrary`).
 
 Mixing languages also mixes compilers' runtimes, and some don't combine
 on some platforms, so a mixed build may need a platform-specific
 workaround. For example, on a Mac, Apple clang's and GCC's sanitizer
-runtimes can't be mixed in one program.
+runtimes can't be mixed in one program. On Windows, MSVC's sanitizer
+annotates the C++ standard library's containers, which C++ libraries built
+without it don't (flang's runtime among them), so the link fails with
+`LNK2038` for `annotate_string` and `annotate_vector`. Define
+`_DISABLE_STRING_ANNOTATION` and `_DISABLE_VECTOR_ANNOTATION` in the
+sanitized code to leave the annotations out.
 
 Variants act like a knob: calling `set_variant()` again *replaces* the
 previous variant's flags rather than piling on top of them, so

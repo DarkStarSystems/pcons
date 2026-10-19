@@ -1335,7 +1335,7 @@ Each tool takes presets only from the toolchain that brought it
 and an exclusive group is replaced per toolchain (`Preset.realized_by`).
 A toolchain *takes part* in an intent when it owns one of its
 `_feature_preset_tools()`; one that takes part and has no realization is
-an error unless the feature was applied with `allow_partial`. The design
+an error. The design
 and the decisions behind it are in `plans/plan-mixed-toolchain-intents.md`.
 
 **Provenance is derived, not recorded.** Because presets are data and `Environment.apply()` keeps the ordered list of applied presets, `env.explain()` / `env.cc.explain()` can replay that list and attribute every flag to its source — no per-flag bookkeeping. Tokens not produced by a preset (toolchain defaults or `env.cc.flags.append(...)`) are labelled `(manual)`:
