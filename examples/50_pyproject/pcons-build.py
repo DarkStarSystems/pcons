@@ -26,16 +26,14 @@ else:
 env = project.Environment(toolchain=toolchain_spec)
 toolchain = env.toolchain
 
-# NOTE: this example builds under PEP 517 isolation, where the build backend is
-# the *released* pcons — so it sticks to released APIs and avoids newer ones
-# (e.g. env.cxx.set_standard). Revisit after the next release.
-if toolchain.name == "msvc":
-    env.cxx.flags.extend(["/std:c++20", "/EHsc", "/permissive-"])
+# This example builds under PEP 517 isolation, where the build backend is the
+# *released* pcons, so it sticks to released APIs.
+env.cxx.set_standard("c++20")
+if toolchain.name in ("msvc", "clang-cl"):
+    env.cxx.flags.extend(["/EHsc", "/permissive-"])
 elif toolchain.name == "llvm":
-    env.cxx.flags.extend(["-std=c++20", "-stdlib=libc++"])
+    env.cxx.flags.append("-stdlib=libc++")
     env.link.libs.append("c++")
-else:
-    env.cxx.flags.append("-std=c++20")
 
 # Discover Python's dev headers from the *running* interpreter via sysconfig,
 # rather than pkg-config.
