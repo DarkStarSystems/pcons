@@ -149,11 +149,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `add_subdirectory` it was read from the top directory, so
   `env.cc.includes.append("include")` missed the subdirectory's headers.
   These entries now read back as absolute paths.
-- Beside flang, `env.add_toolchain("c")` uses the clang from flang's own
-  LLVM, not Apple's clang or gcc, so a program using OpenMP in C and
-  Fortran loads one OpenMP runtime. With two it crashed (macOS, Homebrew)
-  or failed to link (Linux, apt.llvm.org's flang beside gcc). `$CC` and
-  `$CXX` still choose.
 - On macOS, the `openmp` preset gives each compiler its own flags. With
   `$CC` naming Homebrew's clang and C++ left to Apple's, the C compiler
   got Apple clang's `-Xclang -fopenmp` and Homebrew's `libomp` too.
