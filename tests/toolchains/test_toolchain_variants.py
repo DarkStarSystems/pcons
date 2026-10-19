@@ -367,7 +367,6 @@ class TestClangClVariants:
         toolchain._tools = {
             t.name: t for t in (MsvcCompiler(), MsvcCxxCompiler(), MsvcLinker())
         }
-        toolchain._configured = True
         env = Project("crt", root_dir=tmp_path).Environment(toolchain=toolchain)
 
         def crt() -> list[str]:

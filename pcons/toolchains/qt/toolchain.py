@@ -50,7 +50,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import Node
     from pcons.core.project import Project
-    from pcons.core.toolconfig import ToolConfig
     from pcons.toolchains.qt.finder import QtPackage
 
 #: Header suffixes moc treats as "header mode" (output: moc_<stem>.cpp).
@@ -441,29 +440,6 @@ class QtTool(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Locate moc/uic/rcc (pkg-config's libexecdir, then PATH)."""
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        dirs = _locate_tool_dirs()
-        moc = _find_tool("moc", dirs)
-        if moc is None:
-            return None
-        self._moc = str(moc)
-        uic = _find_tool("uic", dirs)
-        if uic is not None:
-            self._uic = str(uic)
-        rcc = _find_tool("rcc", dirs)
-        if rcc is not None:
-            self._rcc = str(rcc)
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("qt", cmd=self._moc)
-
 
 class QtToolchain(BaseToolchain):
     """Qt toolchain, added alongside a C/C++ toolchain.
@@ -479,18 +455,6 @@ class QtToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("qt")
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        qt = QtTool()
-        if qt.configure(config) is None:
-            return False
-        self._tools = {"qt": qt}
-        return True
 
     def after_resolve(
         self,
@@ -532,7 +496,6 @@ class QtToolchain(BaseToolchain):
                 lupdate=tool("lupdate"),
             )
         }
-        toolchain._configured = True
         return toolchain
 
 
@@ -554,7 +517,6 @@ def find_qt_toolchain() -> QtToolchain | None:
             rcc=str(_find_tool("rcc", dirs) or "rcc"),
         )
     }
-    toolchain._configured = True
     return toolchain
 
 

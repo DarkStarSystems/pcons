@@ -422,7 +422,6 @@ def _fortran_env(tmp_path, name: str):
             "ar": GccArchiver(),
             "link": IfxLinker(),
         }
-        toolchain._configured = True
     else:
         toolchain = toolchain_registry.get(name).create_toolchain()
     project = Project("cross", root_dir=tmp_path, build_dir="build")
@@ -547,7 +546,6 @@ def test_an_added_toolchain_gets_its_own_target_type_flags(
     env = project.Environment(toolchain=gcc_toolchain)
     ifx = IfxToolchain()
     ifx._tools = {"fc": IfxCompiler(), "ar": GccArchiver(), "link": IfxLinker()}
-    ifx._configured = True
     env.add_toolchain(ifx)
     prog = project.Program("app", env, sources=["main.cpp", "sum.f90"])
     project.resolve()
@@ -666,7 +664,6 @@ def test_an_added_ifx_keeps_msvcs_c_runtime(on_windows, tmp_path) -> None:
 
     ifx = IfxMsvcToolchain()
     ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
-    ifx._configured = True
     project = Project("crt", root_dir=tmp_path, build_dir="build")
     env = project.Environment(
         toolchain=toolchain_registry.get("msvc").create_toolchain()
@@ -699,7 +696,6 @@ def test_ifx_on_windows_preprocesses_capitalized_sources(on_windows, tmp_path) -
 
     ifx = IfxMsvcToolchain()
     ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
-    ifx._configured = True
     (tmp_path / "pre.F90").write_text("program p\nend program\n")
     (tmp_path / "plain.f90").write_text("subroutine s()\nend subroutine\n")
     project = Project("fpp", root_dir=tmp_path, build_dir="build")
@@ -1238,7 +1234,6 @@ def test_an_added_ifx_names_the_console_subsystem(on_windows, tmp_path) -> None:
 
     ifx = IfxMsvcToolchain()
     ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
-    ifx._configured = True
     (tmp_path / "hello.f90").write_text("program p\nend program\n")
     project = Project("sub", root_dir=tmp_path, build_dir="build")
     env = project.Environment(
@@ -1252,44 +1247,6 @@ def test_an_added_ifx_names_the_console_subsystem(on_windows, tmp_path) -> None:
     assert "/SUBSYSTEM:CONSOLE" in link._build_info["context"].link_flags
 
 
-# =============================================================================
-# Configure-driven setup (toolchain.configure(Configure(...)))
-# =============================================================================
-
-
-@pytest.mark.parametrize(
-    ("cls", "archiver"),
-    [
-        (GfortranToolchain, "ar"),
-        (FlangToolchain, "ar"),
-        (IfxToolchain, "ar"),
-        (IfxMsvcToolchain, "lib"),
-    ],
-)
-def test_configure_finds_each_tool(cls, archiver, on_windows, tmp_path) -> None:
-    from pcons.configure.config import Configure, ProgramInfo
-
-    config = Configure(build_dir=tmp_path)
-    config.find_program = (  # type: ignore[method-assign]
-        lambda *a, **k: ProgramInfo(path=Path("/opt/bin/tool"), version="1")
-    )
-    tc = cls()
-    assert tc.configure(config)
-    assert set(tc.tools) == {"fc", archiver, "link"}
-
-
-def test_configure_fails_without_a_compiler(tmp_path) -> None:
-    from pcons.configure.config import Configure
-
-    config = Configure(build_dir=tmp_path)
-    config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
-    assert not GfortranToolchain().configure(config)
-
-
-def test_configure_needs_a_configure() -> None:
-    assert not GfortranToolchain().configure(object())
-
-
 def test_a_fortran_main_linked_as_cxx_names_the_console_subsystem(
     on_windows, tmp_path
 ) -> None:
@@ -1301,7 +1258,6 @@ def test_a_fortran_main_linked_as_cxx_names_the_console_subsystem(
 
     ifx = IfxMsvcToolchain()
     ifx._tools = {"fc": IfxMsvcCompiler(), "lib": MsvcLibrarian(), "link": MsvcLinker()}
-    ifx._configured = True
     (tmp_path / "main.f90").write_text("program p\nend program\n")
     (tmp_path / "helper.cpp").write_text('extern "C" void helper() {}\n')
     project = Project("mix", root_dir=tmp_path, build_dir="build")
@@ -1346,7 +1302,6 @@ def test_flang_links_frameworks_through_the_linker(tmp_path) -> None:
 
     tc = FlangToolchain()
     tc._tools = {"fc": FlangCompiler(), "ar": LlvmArchiver(), "link": FlangLinker()}
-    tc._configured = True
     env = Project("fw", root_dir=tmp_path).Environment(toolchain=tc)
     env.link.frameworks = ["Accelerate"]
     env.link.frameworkdirs = ["/opt/frameworks"]

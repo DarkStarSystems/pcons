@@ -138,7 +138,6 @@ class TestPathFlagsPerTool:
         toolchain._tools = {
             t.name: t for t in (MsvcCompiler(), MsvcLinker(), MsvcLibrarian())
         }
-        toolchain._configured = True
         (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
         project = Project("test", root_dir=tmp_path, build_dir="build")
         env = project.Environment(toolchain=toolchain)

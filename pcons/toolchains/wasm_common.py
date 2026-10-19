@@ -32,7 +32,7 @@ class WasmToolchain(UnixToolchain):
 
     Subclasses set `TOOL_NAMES`, `program_suffix` (".js"/".wasm"), and
     `platform_label` (used in the "no shared libraries" error messages), and
-    provide SDK discovery via __init__/_configure_tools/setup.
+    provide SDK discovery via __init__/setup.
 
     `TOOL_NAMES` stays on the concrete subclasses: the stub generator treats any
     class carrying it as a real toolchain, so the abstract base must not.

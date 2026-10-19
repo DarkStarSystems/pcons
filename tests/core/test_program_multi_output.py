@@ -94,9 +94,6 @@ class _TestToolchain(UnixToolchain):
             "link": _MultiOutputLinker(),
         }
 
-    def _configure_tools(self, config: object) -> bool:
-        return True
-
     def get_output_suffix(self, target_type: str, target=None) -> str:
         if target_type == "program":
             return ".js"

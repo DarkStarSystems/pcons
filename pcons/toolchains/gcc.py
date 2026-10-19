@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode
     from pcons.core.project import Project
-    from pcons.core.toolconfig import ToolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -215,9 +214,6 @@ class GccCCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cc")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "gcc", "cc", with_version=True)
-
 
 class GccCxxCompiler(BaseTool):
     """GCC C++ compiler tool (variables come from gnu_compile_vars)."""
@@ -253,9 +249,6 @@ class GccCxxCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cxx")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "g++", "c++", with_version=True)
-
 
 class GccArchiver(BaseTool):
     """GCC's archiver for creating static libraries: gcc-ar, else ar."""
@@ -271,9 +264,6 @@ class GccArchiver(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_archiver_builders()
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "gcc-ar", "ar")
-
 
 class GccLinker(BaseTool):
     """GCC linker tool (variables come from gnu_link_vars)."""
@@ -288,9 +278,6 @@ class GccLinker(BaseTool):
 
     def builders(self) -> dict[str, Builder]:
         return gnu_link_builders()
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "gcc", "cc")
 
 
 class GccToolchain(UnixToolchain):
@@ -721,29 +708,6 @@ class GccToolchain(UnixToolchain):
             + "\n",
         )
         return {std_key: exports_rel}, None
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        cc = GccCCompiler()
-        if cc.configure(config) is None:
-            return False
-
-        cxx = GccCxxCompiler()
-        cxx.configure(config)
-
-        ar = GccArchiver()
-        ar.configure(config)
-
-        link = GccLinker()
-        if link.configure(config) is None:
-            return False
-
-        self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
-        return True
 
 
 # =============================================================================

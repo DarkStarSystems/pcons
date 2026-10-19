@@ -65,13 +65,10 @@ class MockCToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("mock-c")
-
-    def _configure_tools(self, config: object) -> bool:
         self._tools = {
             "cc": MockCTool(),
             "cxx": MockCxxTool(),
         }
-        return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         from pcons.core.subst import TargetPath
@@ -95,10 +92,7 @@ class MockCudaToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("mock-cuda")
-
-    def _configure_tools(self, config: object) -> bool:
         self._tools = {"cuda": MockCudaTool()}
-        return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         from pcons.core.subst import TargetPath
@@ -124,10 +118,8 @@ class TestMultiToolchainEnvironment:
     def test_add_toolchain(self, test_project):  # noqa: F811
         """Test adding additional toolchains."""
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         cuda_toolchain = MockCudaToolchain()
-        cuda_toolchain.configure(None)
 
         env = Environment(toolchain=c_toolchain)
         assert env.has_tool("cc")
@@ -140,10 +132,8 @@ class TestMultiToolchainEnvironment:
     def test_toolchains_property_returns_all(self, test_project):  # noqa: F811
         """Test that toolchains property includes primary and additional."""
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         cuda_toolchain = MockCudaToolchain()
-        cuda_toolchain.configure(None)
 
         env = Environment(toolchain=c_toolchain)
         assert len(env.toolchains) == 1
@@ -162,10 +152,8 @@ class TestMultiToolchainEnvironment:
     def test_clone_preserves_additional_toolchains(self, test_project):  # noqa: F811
         """Test that clone copies additional toolchains."""
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         cuda_toolchain = MockCudaToolchain()
-        cuda_toolchain.configure(None)
 
         env = Environment(toolchain=c_toolchain)
         env.add_toolchain(cuda_toolchain)
@@ -178,10 +166,8 @@ class TestMultiToolchainEnvironment:
     def test_set_variant_applies_to_all_toolchains(self, test_project):  # noqa: F811
         """set_variant reaches every toolchain's tools."""
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         cuda_toolchain = MockCudaToolchain()
-        cuda_toolchain.configure(None)
 
         env = Environment(toolchain=c_toolchain)
         env.add_toolchain(cuda_toolchain)
@@ -206,10 +192,8 @@ class TestMultiToolchainResolver:
     def test_source_goes_to_correct_compiler(self, tmp_path):
         """Test that .cu files use cuda, .cpp files use cxx."""
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         cuda_toolchain = MockCudaToolchain()
-        cuda_toolchain.configure(None)
 
         # Create source files
         cpp_file = tmp_path / "main.cpp"
@@ -245,9 +229,6 @@ class TestMultiToolchainResolver:
             def __init__(self) -> None:
                 super().__init__("conflict")
 
-            def _configure_tools(self, config: object) -> bool:
-                return True
-
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
                 # Also claims to handle .cpp
                 if suffix.lower() == ".cpp":
@@ -258,10 +239,8 @@ class TestMultiToolchainResolver:
                 return None
 
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         conflict_toolchain = ConflictingToolchain()
-        conflict_toolchain.configure(None)
 
         cpp_file = tmp_path / "main.cpp"
         cpp_file.write_text("int main() { return 0; }")
@@ -281,10 +260,8 @@ class TestMultiToolchainResolver:
     def test_linker_selection_with_multiple_languages(self, tmp_path):
         """Test correct linker selection when mixing C++ and CUDA."""
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         cuda_toolchain = MockCudaToolchain()
-        cuda_toolchain.configure(None)
 
         cpp_file = tmp_path / "main.cpp"
         cpp_file.write_text("int main() { return 0; }")
@@ -310,10 +287,8 @@ class TestCppPlusCuda:
     def test_mixed_cpp_cuda_sources(self, tmp_path):
         """Integration test: build target with both .cpp and .cu files."""
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         cuda_toolchain = MockCudaToolchain()
-        cuda_toolchain.configure(None)
 
         # Create source files
         cpp_file = tmp_path / "host.cpp"
@@ -341,7 +316,6 @@ class TestCppPlusCuda:
     def test_cuda_only_env(self, tmp_path):
         """Test environment with only CUDA toolchain."""
         cuda_toolchain = MockCudaToolchain()
-        cuda_toolchain.configure(None)
 
         cu_file = tmp_path / "kernel.cu"
         cu_file.write_text("__global__ void kernel() {}")
@@ -363,7 +337,6 @@ class TestBackwardsCompatibility:
     def test_single_toolchain_still_works(self, tmp_path):
         """Verify single toolchain setup works unchanged."""
         c_toolchain = MockCToolchain()
-        c_toolchain.configure(None)
 
         cpp_file = tmp_path / "main.cpp"
         cpp_file.write_text("int main() { return 0; }")

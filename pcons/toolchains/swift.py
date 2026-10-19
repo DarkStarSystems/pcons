@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
     from pcons.core.target import Target
-    from pcons.core.toolconfig import ToolConfig
     from pcons.tools.tool import Builder
 
 logger = logging.getLogger(__name__)
@@ -189,9 +188,6 @@ class SwiftCompiler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "swiftc", with_version=True)
-
 
 class SwiftArchiver(GccArchiver):
     """Archiver for Swift static libraries.
@@ -208,9 +204,6 @@ class SwiftArchiver(GccArchiver):
         vars = super().default_vars()
         vars["cmd"] = self._archiver_cmd()
         return vars
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, self._archiver_cmd())
 
 
 class SwiftLinker(BaseTool):
@@ -262,9 +255,6 @@ class SwiftLinker(BaseTool):
                 single_source=False,
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "swiftc", with_version=True)
 
 
 class SwiftToolchain(UnixToolchain):
@@ -526,20 +516,6 @@ class SwiftToolchain(UnixToolchain):
         contribs.append(ToolContribution("swiftc", flags=tuple(swift_flags)))
         contribs.append(ToolContribution("link", flags=tuple(swift_flags)))
         return contribs
-
-    def _configure_tools(self, config: object) -> bool:
-        compiler = SwiftCompiler()
-        archiver = SwiftArchiver()
-        linker = SwiftLinker()
-
-        compiler_config = compiler.configure(config)
-        if compiler_config is None:
-            return False
-        archiver.configure(config)
-        linker.configure(config)
-
-        self._tools = {"swiftc": compiler, "ar": archiver, "link": linker}
-        return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         if suffix in SWIFT_EXTENSIONS:

@@ -214,7 +214,6 @@ class TestWasm:
             "ar": EmccArchiver(),
             "link": EmccLinker(),
         }
-        toolchain._configured = True
         return toolchain
 
     def test_a_program_and_its_wasm(self, tmp_path, emscripten):

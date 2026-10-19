@@ -120,8 +120,8 @@ def _chooses_subsystem(flags: Sequence[FlagToken]) -> bool:
 class UnixToolchain(BaseToolchain):
     """Base class for Unix-like toolchains (GCC, LLVM/Clang).
 
-    Subclasses override _configure_tools(), and get_source_handler() if
-    they handle additional file types.
+    Subclasses override get_source_handler() if they handle additional
+    file types.
     """
 
     # True when this toolchain's compile tools (_feature_preset_tools) are

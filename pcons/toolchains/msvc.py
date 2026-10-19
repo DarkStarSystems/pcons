@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from pcons.core.node import FileNode
     from pcons.core.project import Project
     from pcons.core.target import Target
-    from pcons.core.toolconfig import ToolConfig
     from pcons.tools.toolchain import SourceHandler
 
 
@@ -430,32 +429,6 @@ class MsvcCompiler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-
-        cl = config.find_program("cl.exe", version_flag="")
-        if cl is None:
-            bin_dir = _find_msvc_bin_dir()
-            if bin_dir is not None:
-                cl_path = bin_dir / "cl.exe"
-                if cl_path.exists():
-                    from pcons.configure.config import ProgramInfo
-
-                    cl = ProgramInfo(path=cl_path)
-
-        if cl is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig(self._name, cmd=str(cl.path))
-
 
 class MsvcCxxCompiler(MsvcCompiler):
     """MSVC C++ compiler tool (cxx namespace)."""
@@ -542,21 +515,6 @@ class MsvcLibrarian(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-        lib = config.find_program("lib.exe", version_flag="")
-        if lib is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("lib", cmd=str(lib.path))
-
 
 class MsvcResourceCompiler(BaseTool):
     """MSVC resource compiler tool (rc.exe)."""
@@ -597,42 +555,6 @@ class MsvcResourceCompiler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-
-        rc = config.find_program("rc.exe", version_flag="")
-        if rc is None:
-            # Fall back to the Windows SDK install, newest version first
-            program_files_x86 = os.environ.get(
-                "ProgramFiles(x86)", r"C:\Program Files (x86)"
-            )
-            sdk_path = Path(program_files_x86) / "Windows Kits" / "10" / "bin"
-            if sdk_path.exists():
-                for version_dir in _sorted_version_dirs(sdk_path):
-                    if version_dir.name.startswith("10."):
-                        for arch in ["x64", "arm64", "x86"]:
-                            rc_path = version_dir / arch / "rc.exe"
-                            if rc_path.exists():
-                                from pcons.configure.config import ProgramInfo
-
-                                rc = ProgramInfo(path=rc_path)
-                                break
-                        if rc is not None:
-                            break
-
-        if rc is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("rc", cmd=str(rc.path))
-
 
 class MsvcAssembler(BaseTool):
     """MSVC macro assembler tool (ml64.exe for x64, ml.exe for x86)."""
@@ -669,37 +591,6 @@ class MsvcAssembler(BaseTool):
                 deps_style=None,  # MASM doesn't generate depfiles
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-
-        # ml64.exe (x64) first, then ml.exe (x86)
-        ml = config.find_program("ml64.exe", version_flag="")
-        if ml is None:
-            ml = config.find_program("ml.exe", version_flag="")
-        if ml is None:
-            # Fall back to the VS install (host-aware: ARM64 hosts get
-            # HostARM64/arm64, not x64)
-            bin_dir = _find_msvc_bin_dir()
-            if bin_dir is not None:
-                ml_path = bin_dir / "ml64.exe"
-                if ml_path.exists():
-                    from pcons.configure.config import ProgramInfo
-
-                    ml = ProgramInfo(path=ml_path)
-
-        if ml is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ml", cmd=str(ml.path))
 
 
 class MsvcLinker(BaseTool):
@@ -758,21 +649,6 @@ class MsvcLinker(BaseTool):
                 single_source=False,
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-        link = config.find_program("link.exe", version_flag="")
-        if link is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(link.path))
 
 
 def use_msvc_tool_paths(env: Environment, tool_exes: dict[str, str]) -> None:
@@ -852,45 +728,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         use_msvc_tool_paths(
             env, {"cc": "cl.exe", "cxx": "cl.exe", "link": "link.exe", "lib": "lib.exe"}
         )
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-        platform = get_platform()
-        if not platform.is_windows:
-            return False
-
-        cc = MsvcCompiler("cc", "c")
-        if cc.configure(config) is None:
-            return False
-
-        cxx = MsvcCxxCompiler()
-        cxx.configure(config)
-
-        lib = MsvcLibrarian()
-        lib.configure(config)
-
-        link = MsvcLinker()
-        if link.configure(config) is None:
-            return False
-
-        rc = MsvcResourceCompiler()
-        rc.configure(config)  # Optional - not required for toolchain to work
-
-        ml = MsvcAssembler()
-        ml.configure(config)  # Optional - not required for toolchain to work
-
-        self._tools = {
-            "cc": cc,
-            "cxx": cxx,
-            "lib": lib,
-            "link": link,
-            "rc": rc,
-            "ml": ml,
-        }
-        return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Extend base MSVC handler to recognize C++20 module interface units."""

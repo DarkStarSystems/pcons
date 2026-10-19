@@ -109,7 +109,6 @@ def _built(toolchain: BaseToolchain, *tool_classes: type) -> BaseToolchain:
     for cls in tool_classes:
         tool = cls()
         toolchain._tools[tool.name] = tool
-    toolchain._configured = True
     return toolchain
 
 

@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode, Node
     from pcons.core.project import Project
-    from pcons.core.toolconfig import ToolConfig
     from pcons.tools.toolchain import SourceHandler
 
 logger = logging.getLogger(__name__)
@@ -215,9 +214,6 @@ class ClangCCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cc")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "clang", with_version=True)
-
 
 class ClangCxxCompiler(BaseTool):
     """Clang C++ compiler tool."""
@@ -249,9 +245,6 @@ class ClangCxxCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cxx")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "clang++", with_version=True)
-
 
 class LlvmArchiver(BaseTool):
     """LLVM archiver tool."""
@@ -271,9 +264,6 @@ class LlvmArchiver(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_archiver_builders()
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "llvm-ar", "ar")
-
 
 class LlvmLinker(BaseTool):
     """LLVM linker tool (variables come from gnu_link_vars)."""
@@ -288,9 +278,6 @@ class LlvmLinker(BaseTool):
 
     def builders(self) -> dict[str, Builder]:
         return gnu_link_builders()
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "clang")
 
 
 #: Target type for a linked .metallib. Not one of the four the shared
@@ -360,24 +347,6 @@ class MetalCompiler(BaseTool):
                 single_source=False,
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        platform = get_platform()
-        if not platform.is_macos:
-            return None
-
-        xcrun = config.find_program("xcrun", version_flag="")
-        if xcrun is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("metal", cmd=str(xcrun.path))
 
 
 class LlvmToolchain(UnixToolchain):
@@ -488,37 +457,6 @@ class LlvmToolchain(UnixToolchain):
             return SourceHandler("metal", "metal", ".air", None, None, "metalcmd")
 
         return None
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        cc = ClangCCompiler()
-        if cc.configure(config) is None:
-            return False
-
-        cxx = ClangCxxCompiler()
-        cxx.configure(config)
-
-        ar = LlvmArchiver()
-        ar.configure(config)
-
-        link = LlvmLinker()
-        if link.configure(config) is None:
-            return False
-
-        self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
-
-        # Metal compiler is optional (macOS only)
-        platform = get_platform()
-        if platform.is_macos:
-            metal = MetalCompiler()
-            if metal.configure(config) is not None:
-                self._tools["metal"] = metal
-
-        return True
 
     def after_resolve(
         self,

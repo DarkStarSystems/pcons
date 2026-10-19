@@ -4215,21 +4215,12 @@ int main(void) {
             """\
 import os
 from pathlib import Path
-from pcons.configure.config import Configure
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator
 from pcons.toolchains import find_c_toolchain
 
 build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 source_dir = Path(os.environ.get("PCONS_SOURCE_DIR", "."))
-
-# Configuration (auto-cached)
-config = Configure(build_dir=build_dir)
-if not config.get("configured") or os.environ.get("PCONS_RECONFIGURE"):
-    toolchain = find_c_toolchain()
-    toolchain.configure(config)
-    config.set("configured", True)
-    config.save()
 
 # Create project
 project = Project("hello", root_dir=source_dir, build_dir=build_dir)

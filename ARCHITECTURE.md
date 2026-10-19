@@ -111,21 +111,19 @@ pcons configure [options]
 This is slow and shouldn't run on every build description parse.
 
 ```python
-# pcons-configure.py - runs during configure phase
-from pcons import Configure
+from pcons import Project
+from pcons.configure.checks import ToolChecks
+from pcons.configure.config import Configure
 
-config = Configure()
+project = Project("demo")
+# Find a C++ toolchain: the registry's finders try each candidate
+env = project.Environment(toolchain=["gcc", "llvm", "msvc"])
 
-# Find a C++ toolchain
-cxx = config.find_toolchain("cxx", candidates=["gcc", "clang", "msvc"])
-
-# Probe features
-cxx.check_flag("-std=c++20")
-cxx.check_header("optional")
-cxx.check_define("__cpp_concepts")
-
-# Save configuration
-config.save()
+# Probe features; results are cached in the Configure
+checks = ToolChecks(Configure(build_dir=project.build_dir), env, "cxx")
+checks.check_flag("-std=c++20")
+checks.check_header("optional")
+checks.check_define("__cpp_concepts")
 ```
 
 ### Phase 2: Build Description
@@ -375,10 +373,6 @@ A Tool knows how to perform a specific type of transformation. Tools are **names
 class Tool(Protocol):
     name: str  # e.g., 'cc', 'cxx', 'fortran', 'ar', 'link'
 
-    def configure(self, config: Configure) -> ToolConfig:
-        """Detect and configure this tool. Called during configure phase."""
-        ...
-
     def setup(self, env: Environment) -> None:
         """Initialize tool namespace in environment. Called when tool is added."""
         ...
@@ -428,10 +422,6 @@ class Toolchain:
     name: str
     tools: dict[str, Tool]  # name -> tool
 
-    def configure(self, config: Configure) -> bool:
-        """Configure all tools in this toolchain."""
-        ...
-
     def setup(self, env: Environment) -> None:
         """Add all tools to environment."""
         ...
@@ -449,13 +439,8 @@ class Toolchain:
 - No mixing GCC compiler with MSVC linker
 
 ```python
-# configure.py
-gcc = config.find_toolchain("gcc")
-llvm = config.find_toolchain("llvm")
-
-# pcons-build.py
-env_gcc = project.Environment(toolchain=gcc)
-env_llvm = project.Environment(toolchain=llvm)
+env_gcc = project.Environment(toolchain="gcc")
+env_llvm = project.Environment(toolchain="llvm")
 ```
 
 ### Builder Registry and Extensible Builders
@@ -1445,8 +1430,12 @@ class MyBuilder:
 
 **Toolchains are plugins:**
 ```python
-@register_toolchain("my_toolchain")
-class MyToolchain(Toolchain): ...
+class MyToolchain(BaseToolchain): ...
+
+toolchain_registry.register(
+    MyToolchain, aliases=["my_toolchain"], check_command="mycc",
+    tool_classes=[MyCompiler, MyLinker], category="c",
+)
 ```
 
 **Scanners are declared, by toolchains or by build scripts alike:**

@@ -33,13 +33,10 @@ class MockCxxTool(BaseTool):
 class MockToolchain(BaseToolchain):
     def __init__(self) -> None:
         super().__init__("mock")
-
-    def _configure_tools(self, config: object) -> bool:
         self._tools: dict[str, Tool] = {
             "cc": MockCTool(),
             "cxx": MockCxxTool(),
         }
-        return True
 
 
 class TestToolchainProtocol:
@@ -53,16 +50,13 @@ class TestBaseToolchain:
         tc = MockToolchain()
         assert tc.name == "mock"
 
-    def test_configure(self):
+    def test_tools(self):
         tc = MockToolchain()
-        result = tc.configure(None)
-        assert result is True
         assert "cc" in tc.tools
         assert "cxx" in tc.tools
 
     def test_setup(self, test_project):  # noqa: F811
         tc = MockToolchain()
-        tc.configure(None)
 
         env = Environment()
         tc.setup(env)

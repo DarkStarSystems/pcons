@@ -29,7 +29,6 @@ from pcons.tools.tool import BaseTool
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
-    from pcons.core.toolconfig import ToolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -147,12 +146,6 @@ class WasiCCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cc", object_suffix=".o")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        # Prefer wasi-sdk's clang, fall back to system clang
-        return self._find_tool_config(
-            config, "clang", hints=_wasi_hints(), with_version=True
-        )
-
 
 class WasiCxxCompiler(BaseTool):
     """Clang C++ compiler targeting wasm32-wasi."""
@@ -170,11 +163,6 @@ class WasiCxxCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cxx", object_suffix=".o")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(
-            config, "clang++", hints=_wasi_hints(), with_version=True
-        )
-
 
 class WasiArchiver(BaseTool):
     """LLVM archiver for wasm object files."""
@@ -187,9 +175,6 @@ class WasiArchiver(BaseTool):
 
     def builders(self) -> dict[str, Builder]:
         return gnu_archiver_builders(object_suffix=".o", static_lib_suffix=".a")
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "llvm-ar", "ar", hints=_wasi_hints())
 
 
 class WasiLinker(BaseTool):
@@ -231,9 +216,6 @@ class WasiLinker(BaseTool):
             # No SharedLibrary builder — WASI does not support dynamic linking.
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "clang", hints=_wasi_hints())
-
 
 # =============================================================================
 # Toolchain
@@ -262,36 +244,6 @@ class WasiToolchain(WasmToolchain):
         self._sysroot: Path | None = None
 
     # -- Configuration -------------------------------------------------------
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        self._sdk_path = find_wasi_sdk()
-        if self._sdk_path:
-            self._sysroot = _find_sysroot(self._sdk_path)
-        else:
-            logger.info("wasi-sdk not found; WASI toolchain unavailable")
-            return False
-
-        cc = WasiCCompiler()
-        if cc.configure(config) is None:
-            return False
-
-        cxx = WasiCxxCompiler()
-        cxx.configure(config)
-
-        ar = WasiArchiver()
-        ar.configure(config)
-
-        link = WasiLinker()
-        if link.configure(config) is None:
-            return False
-
-        self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
-        return True
 
     def setup(self, env: Environment) -> None:
         """Set up tools, detecting the SDK lazily if configure didn't.
