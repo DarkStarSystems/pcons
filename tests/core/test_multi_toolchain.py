@@ -3,6 +3,7 @@
 
 from pcons.core.builder import Builder
 from pcons.core.environment import Environment
+from pcons.core.preset import ToolContribution
 from pcons.core.project import Project
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain, SourceHandler
@@ -112,13 +113,9 @@ class MockCudaToolchain(BaseToolchain):
     def get_object_suffix(self) -> str:
         return ".o"
 
-    def apply_variant(self, env: Environment, variant: str, **kwargs) -> None:
-        super().apply_variant(env, variant, **kwargs)
-        if env.has_tool("cuda"):
-            if variant == "debug":
-                env.cuda.flags.extend(["-G", "-g"])
-            elif variant == "release":
-                env.cuda.flags.extend(["-O3"])
+    def _variant_contributions(self, variant: str, **kwargs) -> list[ToolContribution]:
+        flags = {"debug": ("-G", "-g"), "release": ("-O3",)}.get(variant, ())
+        return [ToolContribution("cuda", flags=flags)] if flags else []
 
 
 class TestMultiToolchainEnvironment:
@@ -179,7 +176,7 @@ class TestMultiToolchainEnvironment:
         assert cloned.toolchains[1] is cuda_toolchain
 
     def test_set_variant_applies_to_all_toolchains(self, test_project):  # noqa: F811
-        """Test that set_variant calls apply_variant on all toolchains."""
+        """set_variant reaches every toolchain's tools."""
         c_toolchain = MockCToolchain()
         c_toolchain.configure(None)
 

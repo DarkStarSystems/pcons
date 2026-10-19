@@ -6,7 +6,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -194,3 +194,30 @@ def building_for(triple: str) -> AbstractContextManager[object]:
         new_callable=PropertyMock,
         return_value=target_platform_for_triple(triple),
     )
+
+
+def apply_variant(toolchain: Any, env: Any, variant: str, **kwargs: Any) -> None:
+    """Apply *toolchain*'s realization of *variant* to a hand-built *env*,
+    as the environment does for its own toolchains."""
+    env.apply_from(toolchain, toolchain.make_variant_preset(variant, **kwargs))
+
+
+def apply_target_arch(toolchain: Any, env: Any, arch: str) -> bool:
+    """Apply *toolchain*'s realization of *arch*; whether it had one."""
+    preset = toolchain.make_arch_preset(arch)
+    if preset is None:
+        return False
+    env.apply_from(toolchain, preset)
+    return True
+
+
+def apply_cross_preset(toolchain: Any, env: Any, cross: Any) -> None:
+    """Apply *toolchain*'s realization of cross target *cross*."""
+    env.apply_from(toolchain, toolchain.make_target_preset(cross))
+
+
+def apply_feature(toolchain: Any, env: Any, name: str) -> None:
+    """Apply *toolchain*'s realization of feature preset *name*."""
+    preset = toolchain.make_feature_preset(name, env.target)
+    assert preset is not None, name
+    env.apply_from(toolchain, preset)

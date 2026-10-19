@@ -788,26 +788,9 @@ class Toolchain(Protocol):
         """Presets to apply right after setup (attributed by explain())."""
         ...
 
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant (e.g. "debug", "release"); each toolchain
-        defines its own semantics."""
-        ...
-
     def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
-        """Build the Preset that apply_variant() applies."""
-        ...
-
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
-        """Apply target-arch flags (e.g. -arch on macOS, /MACHINE: on MSVC).
-
-        Returns True if this toolchain realized the arch; the environment
-        raises when no configured toolchain did (docs/presets.md).
-        """
-        ...
-
-    def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named flag preset (warnings, sanitize, lto, ...);
-        each toolchain defines its own flags."""
+        """Build the Preset for build variant *variant* ("debug",
+        "release"); each toolchain defines its own semantics."""
         ...
 
     def make_feature_preset(
@@ -815,10 +798,6 @@ class Toolchain(Protocol):
     ) -> Preset | None:
         """Build a built-in feature Preset by name, for the *target*
         platform (None: the build machine), or None if not known."""
-        ...
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation preset (sysroot, triple, SDK paths)."""
         ...
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
@@ -831,7 +810,8 @@ class Toolchain(Protocol):
         ...
 
     def make_arch_preset(self, arch: str) -> Preset | None:
-        """The target-arch Preset for *arch*, or None if it has none."""
+        """The target-arch Preset for *arch* (``-arch`` on macOS,
+        ``/MACHINE:`` on MSVC), or None if it has none."""
         ...
 
     def make_runtime_preset(
@@ -1122,7 +1102,6 @@ class BaseToolchain(ABC):
     # declarative Preset (a bundle of ToolContributions). Toolchains build them
     # via the make_*_preset() / *_contributions() hooks below; Environment.apply()
     # applies the opaque tokens and records the preset so it can be explained.
-    # The apply_*() methods are thin wrappers kept for call-site readability.
     # =========================================================================
 
     # Compiler family this toolchain's compilers belong to ("gcc", "llvm",
@@ -1221,10 +1200,6 @@ class BaseToolchain(ABC):
                 )
         return None
 
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant (e.g. "debug", "release") to the environment."""
-        env.apply_from(self, self.make_variant_preset(variant, **kwargs))
-
     def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
         """Build a variant Preset. Base contributes no flags."""
         return Preset(
@@ -1240,27 +1215,17 @@ class BaseToolchain(ABC):
         """Tool contributions for a variant. Base knows no variants."""
         return []
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
-        """Apply target architecture flags to the environment.
-
-        Returns True if this toolchain realized the arch. The
-        realization is ``make_arch_preset``'s, which the environment asks
-        of every toolchain before it applies any; override that, not this,
-        to realize, refuse (raise) or declare a no-op (return a preset
-        with no contributions, as WasmToolchain does for wasm32). An empty
-        realization applies nothing and the environment raises, so a
-        custom toolchain that doesn't handle an arch is fail-fast by
-        default (docs/presets.md, "Preset application").
-        """
-        preset = self.make_arch_preset(arch)
-        if preset is None:
-            return False
-        env.apply_from(self, preset)
-        return True
-
     def make_arch_preset(self, arch: str) -> Preset | None:
         """The target-arch Preset for *arch*, or None if this toolchain
-        realizes none (it may raise instead, for an arch it can't)."""
+        realizes none.
+
+        The environment asks every toolchain before it applies any.
+        Override this to realize an arch, refuse one (raise), or declare a
+        no-op (a preset with no contributions, as WasmToolchain does for
+        wasm32). None for a toolchain whose compilers take part is an
+        error, so a custom toolchain that doesn't handle an arch is
+        fail-fast by default (docs/presets.md, "Preset application").
+        """
         contribs = tuple(self._arch_contributions(arch))
         if not contribs:
             return None
@@ -1298,14 +1263,6 @@ class BaseToolchain(ABC):
         """Tool contributions for a runtime linkage, or None. Base
         realizes none."""
         return None
-
-    def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named feature preset (e.g. "warnings", "sanitize")."""
-        preset = self.make_feature_preset(name, env.target)
-        if preset is None:
-            logger.warning("Unknown preset '%s' for toolchain '%s'", name, self.name)
-            return
-        env.apply_from(self, preset)
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
         """Build a C++-standard Preset, or None if this toolchain has no C++.
@@ -1397,10 +1354,6 @@ class BaseToolchain(ABC):
     def _feature_spec(self, name: str, target: Platform) -> dict[str, list[str]] | None:
         """The FEATURE_PRESETS entry *name* for building for *target*."""
         return self.FEATURE_PRESETS.get(name)
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation target preset (a CrossPreset)."""
-        env.apply_from(self, self.make_target_preset(preset))
 
     def make_target_preset(self, cross: Any) -> Preset:
         """Convert a CrossPreset descriptor into a Preset."""

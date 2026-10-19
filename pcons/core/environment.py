@@ -126,27 +126,26 @@ def _names(toolchains: Sequence[Any]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def _unrealized_arch(arch: str, missing: Sequence[Any]) -> ValueError:
+def _unrealized(intent: Intent, missing: Sequence[Any]) -> ValueError:
+    """The error for *missing* toolchains, which take part in *intent* but
+    can't realize it."""
+    who, name = _names(missing), intent.name
+    if intent.kind == "arch":
+        return ValueError(
+            f"{who} can't build for target arch '{name}', so its sources would "
+            f"be built for the host. Build them in an environment of their "
+            f"own, or use a cross preset (see docs/presets.md)."
+        )
+    if intent.kind == "runtime":
+        return ValueError(
+            f"{who} can't link its runtime {name}, and "
+            f"set_runtime_linkage({name!r}) applies to every compiler in the "
+            f"environment."
+        )
     return ValueError(
-        f"{_names(missing)} can't build for target arch '{arch}', so its "
-        f"sources would be built for the host. Build them in an environment "
-        f"of their own, or use a cross preset (see docs/presets.md)."
-    )
-
-
-def _unrealized_runtime(linkage: str, missing: Sequence[Any]) -> ValueError:
-    return ValueError(
-        f"{_names(missing)} can't link its runtime {linkage}, and "
-        f"set_runtime_linkage({linkage!r}) applies to every compiler in the "
-        f"environment."
-    )
-
-
-def _unrealized_feature(name: str, missing: Sequence[Any]) -> ValueError:
-    return ValueError(
-        f"Preset '{name}' isn't available with {_names(missing)}, so it can't "
-        f"apply to the whole environment. Compile the sources it can't take in "
-        f"a clone of the environment made before the preset "
+        f"Preset '{name}' isn't available with {who}, so it can't apply to the "
+        f"whole environment. Compile the sources it can't take in a clone of "
+        f"the environment made before the preset "
         f"(target.add_sources(sources, env=clone)), or check first with "
         f"env.has_preset({name!r})."
     )
@@ -1237,20 +1236,15 @@ class Environment(_EnvironmentStubs):
         realize what the script already asked for: an unknown variant, a
         cross target it refuses, or an arch or feature it lacks for the
         compilers it would bring."""
-        from pcons.core.preset import is_registered_preset
-
         tools = getattr(toolchain, "_feature_preset_tools", tuple)()
-        takes_part = any(t in toolchain.tools and not self.has_tool(t) for t in tools)
+
+        def takes_part(t: Toolchain) -> bool:
+            return any(x in t.tools and not self.has_tool(x) for x in tools)
+
         for intent in self._intents:
-            preset = self._preset_for(toolchain, intent)
-            if preset is not None or not takes_part:
-                continue
-            if intent.kind == "arch":
-                raise _unrealized_arch(intent.name, [toolchain])
-            if intent.kind == "runtime" and intent.name != "shared":
-                raise _unrealized_runtime(intent.name, [toolchain])
-            if intent.kind == "feature" and not is_registered_preset(intent.name):
-                raise _unrealized_feature(intent.name, [toolchain])
+            _, missing = self._realizations(intent, [toolchain], takes_part)
+            if missing:
+                raise _unrealized(intent, missing)
 
     def _takes_part(self, toolchain: Toolchain) -> bool:
         """Whether *toolchain* owns a tool its features and knobs are
@@ -1259,6 +1253,36 @@ class Environment(_EnvironmentStubs):
         return any(
             self.has_tool(t) and self.toolchain_for(t) is toolchain for t in tools
         )
+
+    def _realizations(
+        self,
+        intent: Intent,
+        toolchains: Sequence[Toolchain],
+        takes_part: Callable[[Toolchain], bool],
+    ) -> tuple[list[tuple[Toolchain, Preset]], list[Toolchain]]:
+        """Each of *toolchains*' realization of *intent*, and the ones that
+        take part but have none and must. A toolchain refusing outright (an
+        unknown variant, a cross target it can't build for) raises here,
+        before anything has changed."""
+        from pcons.core.preset import is_registered_preset
+
+        # Who may have nothing to say: the shared runtimes are every
+        # driver's default, a contributed preset's resolver decides for
+        # itself, and a tool setting concerns only the tools that have it.
+        optional = (
+            intent.kind == "setting"
+            or (intent.kind == "runtime" and intent.name == "shared")
+            or (intent.kind == "feature" and is_registered_preset(intent.name))
+        )
+        realized: list[tuple[Toolchain, Preset]] = []
+        missing: list[Toolchain] = []
+        for toolchain in toolchains:
+            preset = self._preset_for(toolchain, intent)
+            if preset is not None:
+                realized.append((toolchain, preset))
+            elif not optional and takes_part(toolchain):
+                missing.append(toolchain)
+        return realized, missing
 
     def _realize(
         self,
@@ -1270,102 +1294,39 @@ class Environment(_EnvironmentStubs):
         """Have each of *toolchains* realize *intent* for its own tools.
 
         Whether any had a realization. A toolchain that takes part
-        (``_takes_part``) and can't realize an arch or feature is an error:
-        the intent applies fully or raises. *replaying* is a toolchain added later,
-        which must realize what the rest of the environment already does.
+        (``_takes_part``) and has none is an error: the intent applies
+        fully or raises. When none has one, the caller says so better (an
+        unknown preset or arch), except for a runtime linkage, whose name is
+        always known. *replaying* is a toolchain added later, which must
+        realize what the rest of the environment already does.
         """
-        kind = intent.kind
-        # Each kind is built for every toolchain first, so one that can't
-        # realize it raises before any of them has changed the environment;
-        # then each toolchain applies it its own way.
-        if kind == "variant":
-            for toolchain in toolchains:
-                toolchain.make_variant_preset(intent.name, **intent.kwargs)
-            for toolchain in toolchains:
-                toolchain.apply_variant(self, intent.name, **intent.kwargs)
-            # The runtime's debug build goes with the debug variant.
-            self._realize(self._runtime_intent(), toolchains, replaying=replaying)
-            return True
-        if kind == "target":
-            cross = intent.args[0]
-            for toolchain in toolchains:
-                toolchain.make_target_preset(cross)  # raises if it can't
-            for toolchain in toolchains:
-                toolchain.apply_cross_preset(self, cross)
-            # Which runtimes there are depends on the platform built for.
-            self._realize(self._runtime_intent(), toolchains, replaying=replaying)
-            return True
-        if kind == "runtime":
-            runtimes = [(t, self._preset_for(t, intent)) for t in toolchains]
-            missing = [
-                t for t, preset in runtimes if preset is None and self._takes_part(t)
-            ]
-            # The shared runtimes are every driver's default, so a
-            # toolchain with nothing to say about them links them anyway.
-            if missing and intent.name != "shared":
-                raise _unrealized_runtime(intent.name, missing)
-            # Realized whether or not the script asked, so for the tools
-            # the environment has.
-            for toolchain, preset in runtimes:
-                if preset is not None:
-                    present = tuple(
+        realized, missing = self._realizations(intent, toolchains, self._takes_part)
+        if missing and (realized or replaying or intent.kind == "runtime"):
+            raise _unrealized(intent, missing)
+        landed = []
+        for toolchain, preset in realized:
+            if intent.kind == "runtime":
+                # Realized whether or not the script asked, so for the tools
+                # the environment has.
+                preset = dataclasses.replace(
+                    preset,
+                    contributions=tuple(
                         c for c in preset.contributions if self.has_tool(c.tool)
-                    )
-                    self.apply_from(
-                        toolchain, dataclasses.replace(preset, contributions=present)
-                    )
-            return True
-        if kind == "arch":
-            arches = [(t, t.make_arch_preset(intent.name)) for t in toolchains]
-            realized = [t for t, preset in arches if preset is not None]
-            missing = [
-                t for t, preset in arches if preset is None and self._takes_part(t)
-            ]
-            if missing and (replaying or realized):
-                raise _unrealized_arch(intent.name, missing)
-            for toolchain in realized:
-                toolchain.apply_target_arch(self, intent.name, **intent.kwargs)
-            return bool(realized)
-        if kind == "setting":
-            realized = False
-            for toolchain in toolchains:
-                preset = self._preset_for(toolchain, intent)
-                if preset is not None:
-                    self.apply_from(toolchain, preset)
-                    realized = True
-            return realized
-        if kind == "feature":
-            return self._realize_feature(intent, toolchains, replaying=replaying)
-        raise ValueError(f"Unknown intent kind '{kind}'")
-
-    def _realize_feature(
-        self, intent: Intent, toolchains: Sequence[Toolchain], *, replaying: bool
-    ) -> bool:
-        """The feature part of :meth:`_realize`. Nothing is applied unless
-        every toolchain that takes part has a realization."""
-        from pcons.core.preset import is_registered_preset
-
-        name = intent.name
-        found: list[tuple[Toolchain, Preset]] = []
-        missing: list[Toolchain] = []
-        for toolchain in toolchains:
-            preset = self._preset_for(toolchain, intent)
-            if preset is not None:
-                found.append((toolchain, preset))
-            elif not is_registered_preset(name) and self._takes_part(toolchain):
-                # A registered preset's None is its resolver's decision.
-                missing.append(toolchain)
-        if missing and (found or replaying):
-            raise _unrealized_feature(name, missing)
-        landed = [self.apply_from(toolchain, preset) for toolchain, preset in found]
-        if found and not any(landed) and not replaying:
-            owners = sorted({c.tool for _, p in found for c in p.contributions})
+                    ),
+                )
+            landed.append(self.apply_from(toolchain, preset))
+        if intent.kind == "feature" and realized and not any(landed) and not replaying:
+            owners = sorted({c.tool for _, p in realized for c in p.contributions})
             raise ValueError(
-                f"Preset '{name}' would have no effect: its flags are for "
+                f"Preset '{intent.name}' would have no effect: its flags are for "
                 f"{', '.join(owners)}, which other toolchains in this "
                 f"environment own."
             )
-        return bool(found)
+        if intent.kind in ("variant", "target"):
+            # The runtime's debug build goes with the debug variant, and
+            # which runtimes there are depends on the platform built for.
+            self._realize(self._runtime_intent(), toolchains, replaying=replaying)
+        return bool(realized)
 
     def _preset_for(self, toolchain: Toolchain, intent: Intent) -> Preset | None:
         """*toolchain*'s realization of *intent*, without applying it."""
@@ -1439,7 +1400,8 @@ class Environment(_EnvironmentStubs):
 
         Args:
             name: Variant name (e.g., "debug", "release").
-            **kwargs: Toolchain-specific options passed to apply_variant().
+            **kwargs: Toolchain-specific options passed to each toolchain's
+                make_variant_preset().
 
         Example:
             env.set_variant("debug")
@@ -1460,7 +1422,7 @@ class Environment(_EnvironmentStubs):
             self.variant = name
         self._record_intent(intent)
 
-    def set_target_arch(self, arch: str, **kwargs: Any) -> None:
+    def set_target_arch(self, arch: str) -> None:
         """Set the target CPU arch; each toolchain translates the name to flags.
 
         Raises if no configured toolchain can retarget to *arch* (e.g. on
@@ -1468,7 +1430,6 @@ class Environment(_EnvironmentStubs):
 
         Args:
             arch: Architecture name (e.g., "arm64", "x86_64", "x64").
-            **kwargs: Toolchain-specific options passed to apply_target_arch().
 
         Example:
             env.set_target_arch("arm64")  # -arch on macOS, /MACHINE: on MSVC
@@ -1476,7 +1437,7 @@ class Environment(_EnvironmentStubs):
         from pcons.core.preset import Intent
 
         if self.toolchains:
-            intent = Intent("arch", arch, kwargs=dict(kwargs))
+            intent = Intent("arch", arch)
             if not self._realize(intent, self.toolchains):
                 names = ", ".join(t.name for t in self.toolchains)
                 raise ValueError(

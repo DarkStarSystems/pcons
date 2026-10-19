@@ -8,6 +8,7 @@ import pytest
 from pcons.configure.platform import Platform, get_platform
 from pcons.toolchains import CudaCompiler, CudaToolchain, find_cuda_toolchain
 from pcons.tools.toolchain import SourceHandler
+from tests.support import apply_cross_preset, apply_variant
 
 _WINDOWS_PLATFORM = Platform(
     os="windows",
@@ -143,7 +144,7 @@ class TestCudaVariants:
         assert "-g" not in env.cuda.flags
 
         # Apply debug variant
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         # Should have debug flags
         assert "-G" in env.cuda.flags
@@ -162,7 +163,7 @@ class TestCudaVariants:
         toolchain.setup(env)
 
         # Apply release variant
-        toolchain.apply_variant(env, "release")
+        apply_variant(toolchain, env, "release")
 
         # Should have optimization
         assert "-O3" in env.cuda.flags
@@ -182,7 +183,7 @@ class TestCudaVariants:
         toolchain.setup(env)
 
         # Apply profile variant
-        toolchain.apply_variant(env, "profile")
+        apply_variant(toolchain, env, "profile")
 
         # Should have line info
         assert "-lineinfo" in env.cuda.flags
@@ -320,7 +321,7 @@ class TestCudaCrossTargets:
 
         toolchain, env = self._env()
         with pytest.raises(ValueError, match="CUDA cross targets aren't supported"):
-            toolchain.apply_cross_preset(env, linux_cross("aarch64-linux-gnu"))
+            apply_cross_preset(toolchain, env, linux_cross("aarch64-linux-gnu"))
 
     def test_a_preset_without_a_triple_applies(self, test_project):
         from pcons.toolchains.presets import CrossPreset
@@ -329,7 +330,7 @@ class TestCudaCrossTargets:
         preset = CrossPreset(
             name="pinned-nvcc", arch="x86_64", tool_cmds={"cuda": "/opt/cuda/nvcc"}
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
         assert env.cuda.cmd == "/opt/cuda/nvcc"
 
 
