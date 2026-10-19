@@ -33,14 +33,12 @@ from pcons.toolchains.llvm import (
 def llvm_toolchain():
     """Create a pre-configured LLVM toolchain for testing."""
     toolchain = LlvmToolchain()
-    # Manually populate tools (normally done by _configure_tools via clang detection)
     toolchain._tools = {
         "cc": ClangCCompiler(),
         "cxx": ClangCxxCompiler(),
         "ar": LlvmArchiver(),
         "link": LlvmLinker(),
     }
-    toolchain._configured = True
     return toolchain
 
 

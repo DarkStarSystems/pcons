@@ -21,27 +21,28 @@ Requirements:
 
 from __future__ import annotations
 
+import shutil
+
 from pcons.contrib.latex.toolchain import LatexTool, LatexToolchain
 
 __all__ = ["LatexTool", "LatexToolchain", "find_latex_toolchain"]
 
 
 def find_latex_toolchain() -> LatexToolchain:
-    """Find and return a configured LaTeX toolchain.
+    """Find a LaTeX toolchain: latexmk on PATH.
 
     Returns:
-        A configured LatexToolchain instance.
+        A LatexToolchain with its tool.
 
     Raises:
         RuntimeError: If latexmk is not found in PATH.
     """
-    toolchain = LatexToolchain()
-    # Use a lightweight configure — just check for latexmk
-    toolchain._configured = toolchain._configure_tools(None)
-    if not toolchain._configured:
+    if not shutil.which("latexmk"):
         msg = (
             "LaTeX toolchain not found. Install a TeX distribution "
             "(TeX Live or MiKTeX) with 'latexmk' in PATH."
         )
         raise RuntimeError(msg)
+    toolchain = LatexToolchain()
+    toolchain._tools = {"latex": LatexTool()}
     return toolchain

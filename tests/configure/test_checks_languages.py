@@ -61,7 +61,6 @@ def _fortran_checks(tmp_path: Path) -> ToolChecks:
         "ar": GccArchiver(),
         "link": GfortranLinker(),
     }
-    tc._configured = True
     project = Project("probe", root_dir=tmp_path, build_dir="build")
     env = project.Environment(toolchain=tc)
     return ToolChecks(Configure(build_dir=tmp_path / "build"), env, "fc")

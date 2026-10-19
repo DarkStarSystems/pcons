@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -331,8 +330,8 @@ class ToolchainRegistry:
     """Registry for toolchains that support auto-discovery.
 
     Toolchains register themselves with metadata needed for automatic
-    detection and instantiation. This allows find_toolchain() to work
-    without hardcoding toolchain-specific information.
+    detection and instantiation. This lets the finders (find_c_toolchain()
+    and the rest) work without hardcoding toolchain-specific information.
 
     Example:
         # In gcc.py, after class definition:
@@ -731,14 +730,12 @@ class ToolchainEntry:
         self.is_available = is_available
 
     def create_toolchain(self) -> BaseToolchain:
-        """Create and configure a toolchain instance."""
+        """A toolchain instance with its tools."""
         toolchain = self.toolchain_class()
-        # Set up tools without requiring full configure()
         toolchain._tools = {}
         for tool_class in self.tool_classes:
             tool = tool_class()
             toolchain._tools[tool.name] = tool
-        toolchain._configured = True
         return toolchain
 
 
@@ -768,17 +765,6 @@ class Toolchain(Protocol):
     def abi(self) -> str | None:
         """Which binary interface this toolchain's objects follow, as an
         opaque tag (see BaseToolchain.abi)."""
-        ...
-
-    def configure(self, config: object) -> bool:
-        """Configure all tools in this toolchain.
-
-        Args:
-            config: Configure context.
-
-        Returns:
-            True if the toolchain is available and configured.
-        """
         ...
 
     def setup(self, env: Environment) -> None:
@@ -1025,11 +1011,12 @@ _REPLACED_METHODS = {
 }
 
 
-class BaseToolchain(ABC):
-    """Abstract base class for toolchains.
+class BaseToolchain:
+    """Base class for toolchains.
 
-    Provides common functionality for toolchains. Subclasses must
-    provide the list of tools and configure logic.
+    Provides common functionality for toolchains. Its tools are set by
+    whatever makes it: the registry (ToolchainEntry.create_toolchain) or a
+    finder.
     """
 
     # Tool namespaces this toolchain installs into env._tools at setup.
@@ -1057,7 +1044,6 @@ class BaseToolchain(ABC):
         """
         self._name = name
         self._tools: dict[str, Tool] = {}
-        self._configured = False
 
     @property
     def name(self) -> str:
@@ -1079,33 +1065,6 @@ class BaseToolchain(ABC):
         must match the environment's primary one (Environment.add_toolchain).
         """
         return None
-
-    def configure(self, config: object) -> bool:
-        """Configure all tools.
-
-        Subclasses should override _configure_tools() to set up
-        the _tools dict.
-        """
-        if self._configured:
-            return True
-
-        result = self._configure_tools(config)
-        self._configured = result
-        return result
-
-    @abstractmethod
-    def _configure_tools(self, config: object) -> bool:
-        """Configure the toolchain's tools.
-
-        Subclasses implement this to detect and configure tools.
-
-        Args:
-            config: Configure context.
-
-        Returns:
-            True if configuration succeeded.
-        """
-        ...
 
     def setup(self, env: Environment) -> None:
         """Set up all tools in the environment."""

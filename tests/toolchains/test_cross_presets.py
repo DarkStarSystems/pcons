@@ -564,8 +564,7 @@ class TestCrossPresetApplication:
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         return ConcreteMsvc("test-msvc")
 

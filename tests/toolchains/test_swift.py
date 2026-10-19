@@ -35,7 +35,6 @@ def swift_toolchain():
         "ar": GccArchiver(),
         "link": SwiftLinker(),
     }
-    toolchain._configured = True
     return toolchain
 
 

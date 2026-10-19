@@ -136,7 +136,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.flags = ["-fsanitize=address"]
@@ -170,7 +169,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.libs = ["dl", "pthread"]
@@ -199,7 +197,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.libdirs = ["/env/lib"]
@@ -248,7 +245,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.flags = ["-fsanitize=address"]
@@ -282,7 +278,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.flags = ["-isystem", "/usr/local/include", "-framework", "Cocoa"]
@@ -376,7 +371,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("cc")
             env.cc.flags = ["-std=c11"]
@@ -545,7 +539,6 @@ class TestMsvcCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = MsvcToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.flags = ["/DEBUG"]
@@ -617,7 +610,6 @@ class TestNinjaQuoting:
         # Create project with path containing spaces
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         toolchain = GccToolchain()
-        toolchain._configured = True
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
@@ -750,7 +742,6 @@ class TestCompileCommandsQuoting:
         # Create project with path containing spaces
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         toolchain = GccToolchain()
-        toolchain._configured = True
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
@@ -822,7 +813,6 @@ class TestEndToEndSpacesInPaths:
         # Create project
         project = Project("My Project", root_dir=tmp_path, build_dir=tmp_path / "build")
         toolchain = GccToolchain()
-        toolchain._configured = True
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")

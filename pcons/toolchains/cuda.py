@@ -260,19 +260,6 @@ class CudaToolchain(BaseToolchain):
         """
         return get_platform().object_suffix
 
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        cuda = CudaCompiler()
-        if cuda.configure(config) is None:
-            return False
-
-        self._tools = {"cuda": cuda}
-        return True
-
     # CUDA variant flags per build type (compile_flags, defines).
     # -G enables device debugging; -lineinfo gives profiler line info; nvcc
     # has no -Os, so minsizerel uses -O1.
@@ -308,9 +295,7 @@ def find_cuda_toolchain() -> CudaToolchain | None:
     """Return a CudaToolchain if nvcc is in PATH, else None."""
     if shutil.which("nvcc"):
         toolchain = CudaToolchain()
-        # Quick setup without full configure
         toolchain._tools = {"cuda": CudaCompiler()}
-        toolchain._configured = True
         return toolchain
     return None
 

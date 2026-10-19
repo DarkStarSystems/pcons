@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from pcons.core.preset import ToolContribution
     from pcons.core.project import Project
     from pcons.core.target import Target
-    from pcons.core.toolconfig import ToolConfig
     from pcons.tools.toolchain import SourceHandler
 
 # Fortran source file extensions
@@ -150,9 +149,6 @@ class FortranCompiler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, *self.COMMANDS, with_version=True)
-
 
 class FortranLinker(BaseTool):
     """A Fortran compiler driving the link, for Fortran runtime linkage."""
@@ -169,9 +165,6 @@ class FortranLinker(BaseTool):
 
     def builders(self) -> dict[str, Builder]:
         return gnu_link_builders()
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, *self.COMMANDS)
 
 
 class FortranToolchainBase(BaseToolchain):
@@ -206,27 +199,6 @@ class FortranToolchainBase(BaseToolchain):
         """The platform's, as the ``Object`` builder uses: ``.obj`` on
         Windows for every Fortran compiler, MinGW's included."""
         return get_platform().object_suffix
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        fc = self.COMPILER()
-        if fc.configure(config) is None:
-            return False
-
-        ar = self.ARCHIVER()
-        ar.configure(config)
-
-        link = self.LINKER()
-        if link.configure(config) is None:
-            return False
-
-        # The archiver is "ar" or, MSVC-style, "lib".
-        self._tools = {"fc": fc, ar.name: ar, "link": link}
-        return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for Fortran source file suffixes, and only those.

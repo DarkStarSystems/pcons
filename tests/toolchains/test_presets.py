@@ -23,8 +23,7 @@ from tests.support import apply_feature, apply_variant
 
 def _concrete_msvc() -> MsvcCompatibleToolchain:
     class ConcreteMsvc(MsvcCompatibleToolchain):
-        def _configure_tools(self, config: object) -> bool:
-            return True
+        pass
 
     return ConcreteMsvc("test-msvc")
 
@@ -243,8 +242,7 @@ class TestMsvcPresets:
         # MsvcCompatibleToolchain is abstract, so use a concrete subclass
         # or just call apply_preset directly on an instance
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
         apply_feature(toolchain, env, "warnings")
@@ -269,8 +267,7 @@ class TestMsvcPresets:
         env = _make_msvc_env()
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
         apply_feature(toolchain, env, "sanitize")
@@ -283,8 +280,7 @@ class TestMsvcPresets:
         env = _make_msvc_env()
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
         apply_feature(toolchain, env, "lto")
@@ -298,8 +294,7 @@ class TestMsvcPresets:
         env = _make_msvc_env()
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
         apply_feature(toolchain, env, "hardened")
@@ -315,8 +310,7 @@ class TestMsvcPresets:
         env = _make_msvc_env()
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
         apply_feature(toolchain, env, "profile")

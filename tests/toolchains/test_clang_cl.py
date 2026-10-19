@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.clang_cl."""
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,39 +13,6 @@ from pcons.toolchains.clang_cl import (
     ClangClLinker,
     ClangClToolchain,
 )
-
-
-class TestClangClConfigure:
-    """configure() is Windows-gated and otherwise delegates to _find_tool_config."""
-
-    _CLASSES = [ClangClCCompiler, ClangClCxxCompiler, ClangClLibrarian, ClangClLinker]
-
-    @pytest.mark.parametrize("cls", _CLASSES)
-    def test_returns_none_off_windows(self, cls, monkeypatch, tmp_path):
-        from pcons.configure.config import Configure
-        from pcons.toolchains import clang_cl
-
-        monkeypatch.setattr(
-            clang_cl, "get_platform", lambda: SimpleNamespace(is_windows=False)
-        )
-        config = Configure(build_dir=tmp_path)
-        assert cls().configure(config) is None
-
-    @pytest.mark.parametrize("cls", _CLASSES)
-    def test_finds_program_on_windows(self, cls, monkeypatch, tmp_path):
-        from pcons.configure.config import Configure, ProgramInfo
-        from pcons.toolchains import clang_cl
-
-        monkeypatch.setattr(
-            clang_cl, "get_platform", lambda: SimpleNamespace(is_windows=True)
-        )
-        config = Configure(build_dir=tmp_path)
-        config.find_program = (  # type: ignore[method-assign]
-            lambda *a, **k: ProgramInfo(path=Path("C:/llvm/tool.exe"))
-        )
-        cfg = cls().configure(config)
-        assert cfg is not None
-        assert cfg.cmd == str(Path("C:/llvm/tool.exe"))
 
 
 class TestClangClCCompiler:
@@ -353,7 +319,6 @@ class TestClangClDriverRuntimes:
             t.name: t
             for t in (ClangClCCompiler(), ClangClCxxCompiler(), ClangClLinker())
         }
-        toolchain._configured = True
         env = Project("asan", root_dir=tmp_path).Environment(toolchain=toolchain)
         env.apply_preset("sanitize")
         program = SimpleNamespace(name="app", target_type="program", _env=env)
@@ -406,7 +371,6 @@ class TestClangClDriverRuntimes:
             t.name: t
             for t in (ClangClCCompiler(), ClangClCxxCompiler(), ClangClLinker())
         }
-        toolchain._configured = True
         env = Project("omp", root_dir=tmp_path).Environment(toolchain=toolchain)
         env.apply_preset("openmp")
         assert "/openmp" in env.cxx.flags

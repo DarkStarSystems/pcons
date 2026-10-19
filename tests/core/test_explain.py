@@ -235,9 +235,6 @@ class TestToolchainBaseline:
         from pcons.tools.toolchain import BaseToolchain
 
         class FakeToolchain(BaseToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
-
             def setup(self, env: Environment) -> None:
                 cc = env.add_tool("cc")
                 cc.set("cmd", "cc")
@@ -259,9 +256,6 @@ class TestToolchainBaseline:
         from pcons.tools.toolchain import BaseToolchain
 
         class FakeToolchain(BaseToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
-
             def setup(self, env: Environment) -> None:
                 cc = env.add_tool("cc")
                 cc.set("flags", ["/nologo"])

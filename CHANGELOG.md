@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   toolchain that still defines one is an error saying which to override
   instead. `env.set_target_arch()` no longer takes keyword arguments, which
   no toolchain read.
+- A custom toolchain needs no `_configure_tools()` and its tools no
+  `configure()`: pcons never called them. It gets its tools from the
+  registry's `tool_classes`, or from the finder that makes it.
+  `toolchain.configure()`, `Configure.find_toolchain()` and
+  `Configure.register_toolchain()` are gone.
 - Static and object libraries compile as position-independent code on
   Linux, Android and the BSDs, so they can go into a shared library, as
   Meson builds them. Before, linking one into a shared library failed with

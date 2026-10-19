@@ -8,6 +8,7 @@ tool that combines multiple text files into one.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +26,6 @@ from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
-    from pcons.core.toolconfig import ToolConfig
 
 
 # ============================================================================
@@ -76,24 +76,6 @@ class ConcatTool(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Check if cat command is available."""
-        from pcons.core.toolconfig import ToolConfig
-
-        # Simple check - try to run cat --version
-        try:
-            subprocess.run(
-                ["cat", "--version"],
-                capture_output=True,
-                timeout=5,
-            )
-            # cat --version returns 0 on GNU coreutils, but may fail on BSD
-            # Either way, if we get here without exception, cat exists
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            return None
-
-        return ToolConfig("concat", cmd="cat")
-
 
 class ConcatToolchain(BaseToolchain):
     """A minimal toolchain containing just the concat tool.
@@ -103,15 +85,7 @@ class ConcatToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("concat")
-
-    def _configure_tools(self, config: object) -> bool:
-        concat = ConcatTool()
-        concat_config = concat.configure(config)
-        if concat_config is None:
-            return False
-
-        self._tools = {"concat": concat}
-        return True
+        self._tools = {"concat": ConcatTool()}
 
 
 # ============================================================================
@@ -209,24 +183,14 @@ class TestExternalToolchain:
         toolchain = ConcatToolchain()
         assert toolchain.name == "concat"
 
-    def test_toolchain_can_configure(self) -> None:
-        """Test that the toolchain can configure its tools."""
-        toolchain = ConcatToolchain()
-
-        # Configure with a mock config object
-        # The concat tool just needs to find 'cat'
-        result = toolchain.configure(None)
-
-        # On Unix systems, this should succeed
-        # On Windows without cat, it might fail - that's OK
-        if result:
-            assert "concat" in toolchain.tools
+    def test_toolchain_has_its_tool(self) -> None:
+        assert "concat" in ConcatToolchain().tools
 
     def test_environment_with_toolchain(self, test_project):  # noqa: F811
         """Test creating an environment with the toolchain."""
-        toolchain = ConcatToolchain()
-        if not toolchain.configure(None):
+        if shutil.which("cat") is None:
             pytest.skip("cat command not available")
+        toolchain = ConcatToolchain()
 
         env = Environment(toolchain=toolchain)
 

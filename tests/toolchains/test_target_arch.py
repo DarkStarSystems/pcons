@@ -32,7 +32,6 @@ def flags_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     not_windows = lambda: SimpleNamespace(is_windows=False)  # noqa: E731
     monkeypatch.setattr("pcons.toolchains.msvc.get_platform", not_windows)
-    monkeypatch.setattr("pcons.toolchains.clang_cl.get_platform", not_windows)
 
 
 class TestGccTargetArch:
@@ -432,8 +431,7 @@ class TestBaseToolchainTargetArch:
 
         # Create a minimal concrete subclass for testing
         class MinimalToolchain(BaseToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         env = Environment()
 
@@ -457,7 +455,6 @@ class TestMsvcCrossToolset:
     def _fake_windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
         is_windows = lambda: SimpleNamespace(is_windows=True)  # noqa: E731
         monkeypatch.setattr("pcons.toolchains.msvc.get_platform", is_windows)
-        monkeypatch.setattr("pcons.toolchains.clang_cl.get_platform", is_windows)
         monkeypatch.setattr("platform.machine", lambda: "AMD64")
         monkeypatch.delenv("VCToolsInstallDir", raising=False)
         monkeypatch.delenv("WindowsSDKLibVersion", raising=False)
@@ -577,8 +574,7 @@ class TestArchRealizationContract:
         from pcons.tools.toolchain import BaseToolchain
 
         class MinimalToolchain(BaseToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         env = Environment()
         cc = env.add_tool("cc")
@@ -601,8 +597,7 @@ class TestArchRealizationContract:
         )
 
         class MinimalToolchain(BaseToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         env = Environment()
         for name in ("cc", "cxx", "link"):

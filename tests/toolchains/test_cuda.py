@@ -134,7 +134,6 @@ class TestCudaVariants:
 
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
-        toolchain._configured = True
 
         env = Environment()
         toolchain.setup(env)
@@ -157,7 +156,6 @@ class TestCudaVariants:
 
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
-        toolchain._configured = True
 
         env = Environment()
         toolchain.setup(env)
@@ -177,7 +175,6 @@ class TestCudaVariants:
 
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
-        toolchain._configured = True
 
         env = Environment()
         toolchain.setup(env)
@@ -311,7 +308,6 @@ class TestCudaCrossTargets:
 
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
-        toolchain._configured = True
         env = Environment()
         toolchain.setup(env)
         return toolchain, env
@@ -350,7 +346,6 @@ class TestCudaRuntime:
         _on(monkeypatch, platform)
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
-        toolchain._configured = True
         return toolchain
 
     def _env(self, monkeypatch, platform: Platform, runtime: str | None = None):

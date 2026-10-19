@@ -17,7 +17,6 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
@@ -35,7 +34,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.flags import FlagToken
     from pcons.core.target import Target
-    from pcons.core.toolconfig import ToolConfig
 
 
 @functools.cache
@@ -173,11 +171,6 @@ class ClangClCompiler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        if not get_platform().is_windows:
-            return None
-        return self._find_tool_config(config, "clang-cl", with_version=True)
-
 
 class ClangClCCompiler(ClangClCompiler):
     """Clang-CL C compiler."""
@@ -226,12 +219,6 @@ class ClangClLibrarian(BaseTool):
                 single_source=False,
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        if not get_platform().is_windows:
-            return None
-        # Prefer llvm-lib, fall back to lib.exe
-        return self._find_tool_config(config, "llvm-lib", "lib.exe", version_flag="")
 
 
 class ClangClLinker(BaseTool):
@@ -290,12 +277,6 @@ class ClangClLinker(BaseTool):
                 single_source=False,
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        if not get_platform().is_windows:
-            return None
-        # Prefer lld-link, fall back to link.exe
-        return self._find_tool_config(config, "lld-link", "link.exe", version_flag="")
 
 
 class ClangClToolchain(MsvcCompatibleToolchain):
@@ -409,46 +390,6 @@ class ClangClToolchain(MsvcCompatibleToolchain):
     def _driver(env: Environment) -> str:
         """The clang-cl *env* compiles with."""
         return str((env.cxx if env.has_tool("cxx") else env.cc).cmd)
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-        platform = get_platform()
-        if not platform.is_windows:
-            return False
-
-        cc = ClangClCCompiler()
-        if cc.configure(config) is None:
-            return False
-
-        cxx = ClangClCxxCompiler()
-        cxx.configure(config)
-
-        lib = ClangClLibrarian()
-        if lib.configure(config) is None:
-            return False
-
-        link = ClangClLinker()
-        if link.configure(config) is None:
-            return False
-
-        rc = MsvcResourceCompiler()
-        rc.configure(config)  # Optional - not required for toolchain to work
-
-        ml = MsvcAssembler()
-        ml.configure(config)  # Optional - not required for toolchain to work
-
-        self._tools = {
-            "cc": cc,
-            "cxx": cxx,
-            "lib": lib,
-            "link": link,
-            "rc": rc,
-            "ml": ml,
-        }
-        return True
 
     # Architecture to Clang target triple mapping for Windows
     CLANG_CL_TARGET_MAP: dict[str, str] = {

@@ -29,7 +29,6 @@ from pcons.tools.tool import BaseTool
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
-    from pcons.core.toolconfig import ToolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -132,11 +131,6 @@ class EmccCCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cc", object_suffix=".o")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(
-            config, "emcc", hints=_emsdk_hints(), with_version=True
-        )
-
 
 class EmccCxxCompiler(BaseTool):
     """Emscripten C++ compiler (em++)."""
@@ -150,11 +144,6 @@ class EmccCxxCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cxx", object_suffix=".o")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(
-            config, "em++", hints=_emsdk_hints(), with_version=True
-        )
-
 
 class EmccArchiver(BaseTool):
     """Emscripten archiver (emar)."""
@@ -167,9 +156,6 @@ class EmccArchiver(BaseTool):
 
     def builders(self) -> dict[str, Builder]:
         return gnu_archiver_builders(object_suffix=".o", static_lib_suffix=".a")
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "emar", hints=_emsdk_hints())
 
 
 class EmccLinker(BaseTool):
@@ -220,9 +206,6 @@ class EmccLinker(BaseTool):
             # No SharedLibrary builder — Emscripten SIDE_MODULE is niche.
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "emcc", hints=_emsdk_hints())
-
 
 # =============================================================================
 # Toolchain
@@ -251,33 +234,6 @@ class EmscriptenToolchain(WasmToolchain):
         self._emsdk_path: Path | None = None
 
     # -- Configuration -------------------------------------------------------
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        if not is_emcc_available():
-            logger.info("Emscripten (emcc) not found; toolchain unavailable")
-            return False
-
-        cc = EmccCCompiler()
-        if cc.configure(config) is None:
-            return False
-
-        cxx = EmccCxxCompiler()
-        cxx.configure(config)
-
-        ar = EmccArchiver()
-        ar.configure(config)
-
-        link = EmccLinker()
-        if link.configure(config) is None:
-            return False
-
-        self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
-        return True
 
     def setup(self, env: Environment) -> None:
         """Set up tools, detecting the SDK lazily if configure didn't.

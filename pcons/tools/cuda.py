@@ -16,7 +16,6 @@ from pcons.tools.tool import BaseTool, Probe
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
-    from pcons.core.toolconfig import ToolConfig
 
 
 class CudaCompiler(BaseTool):
@@ -90,20 +89,3 @@ class CudaCompiler(BaseTool):
                 deps_style="gcc",  # nvcc uses gcc-style depfiles
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        nvcc = config.find_program("nvcc")
-        if nvcc is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cuda", cmd=str(nvcc.path))
-        if nvcc.version:
-            tool_config.version = nvcc.version
-        return tool_config

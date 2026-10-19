@@ -86,7 +86,6 @@ def gcc_toolchain():
         "ar": GccArchiver(),
         "link": GccLinker(),
     }
-    toolchain._configured = True
     return toolchain
 
 
@@ -112,7 +111,6 @@ def clang_cl_toolchain():
         "lib": ClangClLibrarian(),
         "link": ClangClLinker(),
     }
-    toolchain._configured = True
     return toolchain
 
 

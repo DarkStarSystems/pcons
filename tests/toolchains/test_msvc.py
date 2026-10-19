@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from pcons.configure.platform import get_platform
 from pcons.core.builder import MultiOutputBuilder, OutputGroup
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
@@ -224,23 +223,8 @@ class TestMsvcToolchain:
         tc = MsvcToolchain()
         assert tc.name == "msvc"
 
-    def test_tools_empty_before_configure(self):
-        tc = MsvcToolchain()
-        # Tools should be empty before configure
-        assert tc.tools == {}
-
-    def test_configure_returns_false_on_non_windows(self):
-        platform = get_platform()
-        if not platform.is_windows:
-            tc = MsvcToolchain()
-
-            # Create a mock config object
-            class MockConfig:
-                pass
-
-            # Should return False on non-Windows
-            result = tc._configure_tools(MockConfig())
-            assert result is False
+    def test_no_tools_until_given_them(self):
+        assert MsvcToolchain().tools == {}
 
 
 class TestMsvcCompileFlagsForTargetType:

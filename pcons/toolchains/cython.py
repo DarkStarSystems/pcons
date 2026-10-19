@@ -22,7 +22,6 @@ from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
-    from pcons.core.toolconfig import ToolConfig
 
 
 def get_python_info() -> dict[str, str]:
@@ -90,28 +89,6 @@ class CythonTranspiler(BaseTool):
                 single_source=True,
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        """Detect Cython."""
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        cython = config.find_program("cython")
-        if cython is None:
-            cython = config.find_program("cython3")
-
-        if cython is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cython", cmd=str(cython.path))
-        if cython.version:
-            tool_config.version = cython.version
-
-        return tool_config
 
 
 class _PythonInfoTool(BaseTool):
@@ -195,33 +172,6 @@ class CythonCCompiler(_PythonInfoTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Detect C compiler for Cython."""
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        platform = get_platform()
-
-        if platform.is_macos:
-            compiler = config.find_program("clang")
-        else:
-            compiler = config.find_program("gcc")
-            if compiler is None:
-                compiler = config.find_program("clang")
-
-        if compiler is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cycc", cmd=str(compiler.path))
-        if compiler.version:
-            tool_config.version = compiler.version
-
-        return tool_config
-
 
 class CythonLinker(_PythonInfoTool):
     """Linker for Cython extension modules.
@@ -295,45 +245,18 @@ class CythonLinker(_PythonInfoTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Detect linker for Cython."""
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        platform = get_platform()
-
-        if platform.is_macos:
-            linker = config.find_program("clang")
-        else:
-            linker = config.find_program("gcc")
-            if linker is None:
-                linker = config.find_program("clang")
-
-        if linker is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cylink", cmd=str(linker.path))
-        return tool_config
-
 
 class CythonToolchain(BaseToolchain):
     """Cython toolchain for building Python extension modules
     (.pyx → .c → .o → .so/.pyd).
 
     Example:
-        config = Configure()
-        cython = CythonToolchain()
-        if cython.configure(config):
-            env = project.Environment(toolchain=cython)
+        env = project.Environment(toolchain="cython")
 
-            # Build an extension module
-            c_file = env.cython.Transpile("hello.c", "hello.pyx")
-            obj = env.cycc.Object("hello.o", c_file)
-            env.cylink.Extension("hello", obj)
+        # Build an extension module
+        c_file = env.cython.Transpile("hello.c", "hello.pyx")
+        obj = env.cycc.Object("hello.o", c_file)
+        env.cylink.Extension("hello", obj)
     """
 
     TOOL_NAMES = ("cython", "cycc", "cylink")
@@ -343,36 +266,6 @@ class CythonToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("cython")
-
-    def _configure_tools(self, config: object) -> bool:
-        """Configure all Cython tools."""
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        cython = CythonTranspiler()
-        cython_config = cython.configure(config)
-        if cython_config is None:
-            return False
-
-        cycc = CythonCCompiler()
-        cycc_config = cycc.configure(config)
-        if cycc_config is None:
-            return False
-
-        cylink = CythonLinker()
-        cylink_config = cylink.configure(config)
-        if cylink_config is None:
-            return False
-
-        self._tools = {
-            "cython": cython,
-            "cycc": cycc,
-            "cylink": cylink,
-        }
-
-        return True
 
 
 # =============================================================================

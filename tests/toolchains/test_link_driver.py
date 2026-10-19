@@ -113,7 +113,6 @@ def test_the_driver_brings_its_own_link_flags(tmp_path) -> None:
 
     ifx = IfxToolchain()
     ifx._tools = {"fc": IfxCompiler(), "ar": GccArchiver(), "link": IfxLinker()}
-    ifx._configured = True
     project = _project(tmp_path)
     env = _env(project, "gcc")
     env.add_toolchain(ifx)
@@ -304,7 +303,6 @@ def test_ifx_openmp_objects_need_intels_runtime_from_gcc(tmp_path) -> None:
 
     ifx = IfxToolchain()
     ifx._tools = {"fc": IfxCompiler(), "ar": GccArchiver(), "link": IfxLinker()}
-    ifx._configured = True
     project = _project(tmp_path)
     env = _env(project, "gcc")
     env.add_toolchain(ifx)

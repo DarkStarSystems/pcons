@@ -789,7 +789,6 @@ class TestResolverSharedLibraryCompileFlags:
 
         # Create environment with GCC toolchain
         gcc_toolchain = GccToolchain()
-        gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -833,7 +832,6 @@ class TestResolverSharedLibraryCompileFlags:
 
         # Create environment with GCC toolchain
         gcc_toolchain = GccToolchain()
-        gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -878,7 +876,6 @@ class TestResolverSharedLibraryCompileFlags:
 
         # Create environment with GCC toolchain
         gcc_toolchain = GccToolchain()
-        gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -925,7 +922,6 @@ class TestResolverSharedLibraryCompileFlags:
 
         # Create environment with GCC toolchain
         gcc_toolchain = GccToolchain()
-        gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -955,9 +951,6 @@ class TestResolverToolAgnostic:
             def __init__(self):
                 super().__init__("tex")
 
-            def _configure_tools(self, config):
-                return True
-
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
                 if suffix.lower() == ".tex":
                     return SourceHandler(
@@ -985,7 +978,6 @@ class TestResolverToolAgnostic:
 
         # Create environment with our custom toolchain
         tex_toolchain = TexToolchain()
-        tex_toolchain._configured = True
         env = project.Environment(toolchain=tex_toolchain)
 
         # Add a fake latex tool
@@ -1020,9 +1012,6 @@ class TestResolverToolAgnostic:
             def __init__(self):
                 super().__init__("custom")
 
-            def _configure_tools(self, config):
-                return True
-
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
                 from pcons.core.subst import TargetPath
 
@@ -1051,7 +1040,6 @@ class TestResolverToolAgnostic:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
 
         toolchain = CustomToolchain()
-        toolchain._configured = True
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -1071,9 +1059,6 @@ class TestResolverToolAgnostic:
         class CustomToolchain(BaseToolchain):
             def __init__(self):
                 super().__init__("custom")
-
-            def _configure_tools(self, config):
-                return True
 
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
                 from pcons.core.subst import TargetPath
@@ -1095,7 +1080,6 @@ class TestResolverToolAgnostic:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
 
         toolchain = CustomToolchain()
-        toolchain._configured = True
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"

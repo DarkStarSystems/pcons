@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder, OutputGroup
     from pcons.core.environment import Environment
     from pcons.core.node import Node
-    from pcons.core.toolconfig import ToolConfig
 
 
 def standalone_tool_tokens(tool_name: str, command_var: str) -> list | None:
@@ -143,20 +142,6 @@ class Tool(Protocol):
         """Tool name (e.g., 'cc', 'cxx', 'ar', 'link')."""
         ...
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Detect and configure this tool.
-
-        Called during the configure phase. Should detect the tool's
-        executable, version, and capabilities.
-
-        Args:
-            config: Configure context for running checks.
-
-        Returns:
-            ToolConfig with detected settings, or None if not available.
-        """
-        ...
-
     def setup(self, env: Environment) -> None:
         """Initialize the tool in an environment.
 
@@ -258,55 +243,6 @@ class BaseTool(ABC):
         probe, or None for a tool they can't use."""
         return PROBES.get(self._language or "")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Default implementation returns None (tool not configured)."""
-        return None
-
-    def _find_tool_config(
-        self,
-        config: object,
-        *programs: str,
-        hints: list[Path | str] | None = None,
-        version_flag: str = "--version",
-        with_version: bool = False,
-    ) -> ToolConfig | None:
-        """Locate the first available program and build this tool's ToolConfig.
-
-        Tries each name in *programs* in order. Returns None if *config* is not
-        a Configure or none of the candidates are found.
-
-        Args:
-            config: The Configure instance (anything else yields None).
-            programs: Candidate executable names, tried in order.
-            hints: Extra directories to search.
-            version_flag: Flag used to probe the version; pass "" for tools
-                that don't support --version (e.g. lib.exe, lld-link).
-            with_version: Copy the detected program version onto the config.
-        """
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        override = resolve_env_cmd_override(self.env_var)
-        if override is not None:
-            # Authoritative: the env var replaces the candidate list.
-            programs = (override,)
-            hints = None
-        found = None
-        for name in programs:
-            found = config.find_program(name, hints=hints, version_flag=version_flag)
-            if found is not None:
-                break
-        if found is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig(self._name, cmd=str(found.path))
-        if with_version and found.version:
-            tool_config.set("version", found.version)
-        return tool_config
-
     def setup(self, env: Environment) -> None:
         """Set up the tool namespace with default values."""
         # Create or get the tool's namespace
@@ -384,12 +320,6 @@ class StandaloneTool(BaseTool):
             def builders(self) -> dict[str, Builder]:
                 return {}  # Builders registered via @builder decorator
     """
-
-    def configure(self, config: object) -> ToolConfig | None:
-        """Standalone tools are always available; no detection needed."""
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig(self.name)
 
 
 class BuilderMethod:
