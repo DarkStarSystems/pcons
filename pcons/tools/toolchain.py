@@ -449,7 +449,8 @@ class ToolchainRegistry:
         A single string is either a finder name ("c", "fortran", ...) for
         auto-detection, or a specific toolchain alias ("gcc", "msvc", ...)
         which must be available. A sequence is a preference list: the first
-        name that resolves to an available toolchain wins.
+        name that resolves to an available toolchain wins, passing over any
+        that the user's ``$CC``, ``$CXX`` or ``$FC`` contradicts.
 
         Args:
             spec: Toolchain name, or a preference-ordered list of names.
@@ -472,9 +473,14 @@ class ToolchainRegistry:
         errors: list[str] = []
         for name in spec:
             try:
-                return self._resolve_one(name, abi)
+                toolchain = self._resolve_one(name, abi)
             except (RuntimeError, ValueError) as e:
                 errors.append(f"{name}: {e}")
+                continue
+            conflict = toolchain.compiler_override_conflict()
+            if conflict is None:
+                return toolchain
+            errors.append(f"{name}: {conflict}")
         raise RuntimeError(
             "No toolchain available from preference list "
             f"{list(spec)}:\n  " + "\n  ".join(errors)
@@ -1150,6 +1156,9 @@ class BaseToolchain(ABC):
         wasi) override this without calling super(), deliberately ignoring
         the env vars — the CMake/Visual-Studio-generator precedent.
         """
+        conflict = self.compiler_override_conflict()
+        if conflict is not None:
+            raise ValueError(conflict)
         by_var: dict[str, list[str]] = {}  # env var -> tool names (AR is shared)
         for tool in self._tools.values():
             if tool.env_var:
@@ -1162,8 +1171,6 @@ class BaseToolchain(ABC):
             if chosen is None:
                 continue
             path, source = chosen
-            if source == f"${var}" and var in ("CC", "CXX", "FC"):
-                self._validate_compiler_override(var, path)
             by_source.setdefault(source, []).extend(
                 ToolContribution(name, cmd=path) for name in tool_names
             )
@@ -1215,8 +1222,10 @@ class BaseToolchain(ABC):
         usual search. Base: None."""
         return None
 
-    def _validate_compiler_override(self, var: str, path: str) -> None:
-        """Reject a compiler override from a different compiler family.
+    def compiler_override_conflict(self) -> str | None:
+        """The error to give when the user's ``$CC``, ``$CXX`` or ``$FC``
+        chooses a compiler from another family than this toolchain's, else
+        None.
 
         The user asked for two contradictory things (e.g. ``CXX=g++-15``
         with ``toolchain="msvc"``); applying one silently would misbuild.
@@ -1224,18 +1233,25 @@ class BaseToolchain(ABC):
         """
         expected = self.ENV_COMPILER_FAMILY
         if expected is None:
-            return
+            return None
         from pcons.configure.compiler_id import compiler_family
 
-        family = compiler_family(path)
-        if family is not None and family != expected:
-            raise ValueError(
-                f"${var} is set to '{path}', which is a {family}-family "
-                f"compiler, but the requested toolchain is '{self.name}' "
-                f"({expected} family). Unset ${var} or use the matching "
-                f'toolchain (e.g. toolchain="{family}", or auto-detection, '
-                f"which follows ${var})."
-            )
+        declared = {tool.env_var for tool in self._tools.values()}
+        for var in ("CC", "CXX", "FC"):
+            chosen = self._chosen_command(var) if var in declared else None
+            if chosen is None or chosen[1] != f"${var}":
+                continue
+            path = chosen[0]
+            family = compiler_family(path)
+            if family is not None and family != expected:
+                return (
+                    f"${var} is set to '{path}', which is a {family}-family "
+                    f"compiler, but the requested toolchain is '{self.name}' "
+                    f"({expected} family). Unset ${var} or use the matching "
+                    f'toolchain (e.g. toolchain="{family}", or auto-detection, '
+                    f"which follows ${var})."
+                )
+        return None
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release") to the environment."""

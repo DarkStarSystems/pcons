@@ -223,7 +223,9 @@ error. Specifically, the rules are as follows:
 - With `toolchain="fortran"`, `$FC` does the same for Fortran:
   `FC=flang-21` selects the flang toolchain.
 - An explicitly requested toolchain that *contradicts* the variable
-  (`CXX=g++-15` with `toolchain="msvc"`) is an error.
+  (`CXX=g++-15` with `toolchain="msvc"`) is an error. A preference list
+  passes over such a toolchain: `toolchain=["llvm", "msvc"]` with `CC=cl`
+  builds with MSVC.
 - Values a compiler-id can't classify (e.g. wrapper scripts) are used
   as-is on whichever toolchain is selected.
 - On the gcc toolchain, `$CXX` or `$CC` also picks the archiver: the
