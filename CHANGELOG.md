@@ -67,8 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A feature preset applies to every compiler in the environment, or
   raises.** With clang and flang, `apply_preset("sanitize")` is an error
   naming flang, which has no sanitizer: sanitizing only the C and C++
-  sources isn't a sanitized build. `apply_preset(name, allow_partial=True)`
-  applies it where it can, and `env.explain()` lists what it left out.
+  sources isn't a sanitized build. Compile the sources it can't take in a
+  clone of the environment made before the preset, with
+  `target.add_sources(sources, env=clone)`.
   `env.has_preset()` says whether `apply_preset()` would raise.
 - Each compiler has its own flags for each built-in feature preset,
   checked against the real compilers. gfortran now has all of GCC's (`sanitize`,

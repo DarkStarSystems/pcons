@@ -45,16 +45,13 @@ class Explanation:
     ``imperative`` lists ``(name, description)`` of any imperative escape-hatch
     presets that ran — these mutate the environment directly, so their effect
     can't be attributed token-by-token; they're reported as a trailing note.
-    ``partial`` lists ``(preset, toolchain)`` for each toolchain a preset
-    applied with ``allow_partial`` left out.
     """
 
     rows: tuple[ExplainRow, ...]
     imperative: tuple[tuple[str, str], ...] = ()
-    partial: tuple[tuple[str, str], ...] = ()
 
     def __bool__(self) -> bool:
-        return bool(self.rows) or bool(self.imperative) or bool(self.partial)
+        return bool(self.rows) or bool(self.imperative)
 
     def __str__(self) -> str:
         lines: list[str] = []
@@ -79,10 +76,6 @@ class Explanation:
             lines.append("imperative presets (ran; effect not attributable):")
             for name, desc in self.imperative:
                 lines.append(f"  {name} - {desc}" if desc else f"  {name}")
-        if self.partial:
-            lines.append("presets applied with allow_partial, left out for:")
-            for name, toolchain in self.partial:
-                lines.append(f"  {name} - {toolchain}")
         return "\n".join(lines) if lines else "(no flags)"
 
 
@@ -293,7 +286,6 @@ def explain(
     imperative: Sequence[tuple[str, str]] = (),
     separated_arg_flags: frozenset[str] = frozenset(),
     passthrough_flags: frozenset[str] = frozenset(),
-    partial: Sequence[tuple[str, str]] = (),
 ) -> Explanation:
     """Build an :class:`Explanation` for the given tools.
 
@@ -306,7 +298,6 @@ def explain(
             argument (``-framework Foo``) form one attributed row.
         passthrough_flags: Driver flags whose argument goes to a sub-tool
             (``-Xlinker``); a run of them forms one row.
-        partial: ``(preset, toolchain)`` left out by ``allow_partial``.
     """
     from pcons.core.flags import parse_flags
 
@@ -358,4 +349,4 @@ def explain(
             if replaced is not None and cmd == replaced[2]:
                 rows.append(ExplainRow(tool_name, "cmd", cmd, replaced[0], replaced[1]))
 
-    return Explanation(tuple(rows), tuple(imperative), tuple(partial))
+    return Explanation(tuple(rows), tuple(imperative))

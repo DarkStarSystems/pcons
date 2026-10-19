@@ -1267,9 +1267,9 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[-Werror]
   fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux llvm+flang | feature sanitize
-  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
+  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('sanitize').
 ### linux llvm+flang | feature profile
-  ERROR ValueError: Preset 'profile' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('profile').
+  ERROR ValueError: Preset 'profile' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('profile').
 ### linux llvm+flang | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-flto]
@@ -1287,7 +1287,7 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[-flto]
   fmain/fmain: tool=link cmd=flang flags=[-flto] libs=[] libdirs=[]
 ### linux llvm+flang | feature hardened
-  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
+  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('hardened').
 ### linux llvm+flang | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pthread]
@@ -1305,7 +1305,7 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[]
   fmain/fmain: tool=link cmd=flang flags=[-pthread] libs=[] libdirs=[]
 ### linux llvm+flang | feature coverage
-  ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('coverage').
+  ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('coverage').
 ### linux llvm+flang | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-ffast-math]
@@ -1572,9 +1572,9 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[-Werror]
   fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### linux flang+llvm | feature sanitize
-  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
+  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('sanitize').
 ### linux flang+llvm | feature profile
-  ERROR ValueError: Preset 'profile' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('profile').
+  ERROR ValueError: Preset 'profile' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('profile').
 ### linux flang+llvm | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-flto]
@@ -1592,7 +1592,7 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[-flto]
   fmain/fmain: tool=link cmd=flang flags=[-flto] libs=[] libdirs=[]
 ### linux flang+llvm | feature hardened
-  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
+  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('hardened').
 ### linux flang+llvm | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pthread]
@@ -1610,7 +1610,7 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[]
   fmain/fmain: tool=link cmd=flang flags=[-pthread] libs=[] libdirs=[]
 ### linux flang+llvm | feature coverage
-  ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('coverage').
+  ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('coverage').
 ### linux flang+llvm | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-ffast-math]
@@ -1940,7 +1940,7 @@
   fmain/src.f90.o: tool=fc cmd=ifx flags=[-pthread -fPIE]
   fmain/fmain: tool=link cmd=ifx flags=[-pthread] libs=[] libdirs=[]
 ### linux gcc+ifx | feature coverage
-  ERROR ValueError: Preset 'coverage' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('coverage').
+  ERROR ValueError: Preset 'coverage' isn't available with ifx, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('coverage').
 ### linux gcc+ifx | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-ffast-math]
@@ -2195,7 +2195,7 @@
   lib/src.cu.o: tool=cuda cmd=nvcc flags=[-pg -Xcompiler=-fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-pg -Wl,-soname,<target>] libs=[cudart_static dl rt pthread] libdirs=[]
 ### linux gcc+cuda | feature lto
-  ERROR ValueError: Preset 'lto' isn't available with cuda, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out cuda's tools, or check first with env.has_preset('lto').
+  ERROR ValueError: Preset 'lto' isn't available with cuda, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('lto').
 ### linux gcc+cuda | feature hardened
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE]
@@ -2739,9 +2739,9 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[-Werror]
   fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | feature sanitize
-  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
+  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('sanitize').
 ### darwin llvm+flang | feature profile
-  ERROR ValueError: Preset 'profile' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('profile').
+  ERROR ValueError: Preset 'profile' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('profile').
 ### darwin llvm+flang | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-flto]
@@ -2759,7 +2759,7 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[-flto]
   fmain/fmain: tool=link cmd=flang flags=[-flto] libs=[] libdirs=[]
 ### darwin llvm+flang | feature hardened
-  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
+  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('hardened').
 ### darwin llvm+flang | feature pthread
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pthread]
@@ -2777,7 +2777,7 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[]
   fmain/fmain: tool=link cmd=flang flags=[-pthread] libs=[] libdirs=[]
 ### darwin llvm+flang | feature coverage
-  ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('coverage').
+  ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('coverage').
 ### darwin llvm+flang | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-ffast-math]
@@ -2979,7 +2979,7 @@
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-fsanitize=address,undefined -fno-omit-frame-pointer]
   lib/liblib.dylib: tool=link cmd=swiftc flags=[-sanitize=address -Wl,-install_name,@rpath/<target>] libs=[c++] libdirs=[]
 ### darwin swift+llvm | feature profile
-  ERROR ValueError: Preset 'profile' isn't available with swift, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out swift's tools, or check first with env.has_preset('profile').
+  ERROR ValueError: Preset 'profile' isn't available with swift, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('profile').
 ### darwin swift+llvm | feature lto
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-flto]
@@ -3041,9 +3041,9 @@
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[--coverage]
   lib/liblib.dylib: tool=link cmd=swiftc flags=[-profile-generate -Wl,-install_name,@rpath/<target>] libs=[c++] libdirs=[]
 ### darwin swift+llvm | feature fast-math
-  ERROR ValueError: Preset 'fast-math' isn't available with swift, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out swift's tools, or check first with env.has_preset('fast-math').
+  ERROR ValueError: Preset 'fast-math' isn't available with swift, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('fast-math').
 ### darwin swift+llvm | feature openmp
-  ERROR ValueError: Preset 'openmp' isn't available with swift, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out swift's tools, or check first with env.has_preset('openmp').
+  ERROR ValueError: Preset 'openmp' isn't available with swift, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('openmp').
 ### darwin swift+llvm | cxx standard 20
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang
@@ -3489,7 +3489,7 @@
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -Werror]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature sanitize
-  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
+  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('sanitize').
 ### windows clang-cl+flang | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD]
@@ -3527,7 +3527,7 @@
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -flto]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature hardened
-  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
+  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('hardened').
 ### windows clang-cl+flang | feature pthread
   ERROR ValueError: Preset 'pthread' is not available with this toolchain on this system. Optional features can be guarded with env.has_preset('pthread').
 ### windows clang-cl+flang | feature coverage
@@ -3760,7 +3760,7 @@
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -Werror]
   fmain/fmain.exe: tool=link cmd=flang flags=[] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | feature sanitize
-  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
+  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('sanitize').
 ### windows flang+clang-cl | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD]
@@ -3798,7 +3798,7 @@
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -flto]
   fmain/fmain.exe: tool=link cmd=flang flags=[-flto -fuse-ld=lld] libs=[] libdirs=[/rt/flang]
 ### windows flang+clang-cl | feature hardened
-  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
+  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('hardened').
 ### windows flang+clang-cl | feature pthread
   ERROR ValueError: Preset 'pthread' is not available with this toolchain on this system. Optional features can be guarded with env.has_preset('pthread').
 ### windows flang+clang-cl | feature coverage
@@ -4059,7 +4059,7 @@
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /PROFILE /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature lto
-  ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('lto').
+  ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('lto').
 ### windows msvc+ifx-msvc | feature hardened
   cc: cmd=cl flags=[/nologo /MD /GS /guard:cf]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD /GS /guard:cf]
@@ -4329,7 +4329,7 @@
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /PROFILE /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature lto
-  ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('lto').
+  ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('lto').
 ### windows clang-cl+ifx-msvc | feature hardened
   cc: cmd=clang-cl flags=[/nologo /MD /GS /guard:cf]
   cxx: cmd=clang-cl flags=[/nologo /MD /GS /guard:cf]
@@ -4599,7 +4599,7 @@
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=clang flags=[-Wl,/NODEFAULTLIB:libcmt -shared-libsan -pg -Wl,/SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature lto
-  ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('lto').
+  ERROR ValueError: Preset 'lto' isn't available with ifx, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('lto').
 ### windows llvm+ifx-msvc | feature hardened
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fms-runtime-lib=dll -fstack-protector-strong -Xclang -cfguard]
@@ -4618,9 +4618,9 @@
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
   fmain/fmain.exe: tool=link cmd=clang flags=[-Wl,/NODEFAULTLIB:libcmt -shared-libsan -Wl,/guard:cf -Wl,/SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows llvm+ifx-msvc | feature pthread
-  ERROR ValueError: Preset 'pthread' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('pthread').
+  ERROR ValueError: Preset 'pthread' isn't available with ifx, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('pthread').
 ### windows llvm+ifx-msvc | feature coverage
-  ERROR ValueError: Preset 'coverage' isn't available with ifx, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out ifx's tools, or check first with env.has_preset('coverage').
+  ERROR ValueError: Preset 'coverage' isn't available with ifx, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('coverage').
 ### windows llvm+ifx-msvc | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fms-runtime-lib=dll -ffast-math]
@@ -4829,7 +4829,7 @@
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -Werror]
   fmain/fmain.exe: tool=link cmd=clang flags=[-Wl,/NODEFAULTLIB:libcmt -shared-libsan] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | feature sanitize
-  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('sanitize').
+  ERROR ValueError: Preset 'sanitize' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('sanitize').
 ### windows llvm+flang | feature profile
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fms-runtime-lib=dll -pg -g]
@@ -4863,11 +4863,11 @@
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -flto]
   fmain/fmain.exe: tool=link cmd=clang flags=[-Wl,/NODEFAULTLIB:libcmt -shared-libsan -flto] libs=[] libdirs=[/rt/flang]
 ### windows llvm+flang | feature hardened
-  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('hardened').
+  ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('hardened').
 ### windows llvm+flang | feature pthread
-  ERROR ValueError: Preset 'pthread' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('pthread').
+  ERROR ValueError: Preset 'pthread' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('pthread').
 ### windows llvm+flang | feature coverage
-  ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Apply it with allow_partial=True to leave out flang's tools, or check first with env.has_preset('coverage').
+  ERROR ValueError: Preset 'coverage' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('coverage').
 ### windows llvm+flang | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-fms-runtime-lib=dll -ffast-math]

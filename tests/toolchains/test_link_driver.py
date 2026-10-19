@@ -389,22 +389,25 @@ def test_cxx_objects_beside_swift_primary_need_the_cxx_runtime(
     assert "stdc++" in _link(prog)[2]
 
 
-def test_a_toolchain_left_out_of_a_preset_doesnt_take_over(tmp_path) -> None:
-    """flang, left out of sanitize, would link the C helper's sanitized
-    objects without their runtime: clang links instead, adding flang's
-    runtime. A Fortran-only program has no such objects, so flang links it."""
+def test_sources_from_an_unsanitized_env_link_into_a_sanitized_program(
+    tmp_path,
+) -> None:
+    """flang has no sanitizer, so its sources compile in a clone made before
+    the preset: the program links with clang, sanitized, and adds flang's
+    runtime for the Fortran objects."""
     project = _project(tmp_path)
-    env = _env(project, "llvm", "flang")
-    env.apply_preset("sanitize", allow_partial=True)
-    mixed = project.Program("mixed", env, sources=["main.f90", "util.c"])
-    alone = project.Program("alone", env, sources=["main.f90"])
+    env = _env(project, "llvm")
+    fortran = env.clone()
+    fortran.add_toolchain(toolchain_registry.get("flang").create_toolchain())
+    env.apply_preset("sanitize")
+    prog = project.Program("prog", env, sources=["util.c"])
+    prog.add_sources(["main.f90"], env=fortran)
     project.resolve()
 
-    cmd, flags, libs = _link(mixed)
+    cmd, flags, libs = _link(prog)
     assert cmd.startswith("clang")
     assert any("-fsanitize" in f for f in flags)
     assert "flang_rt.runtime" in libs
-    assert _link(alone)[0].startswith("flang")
 
 
 def test_the_gcov_need_says_where_libgcov_is(tmp_path, monkeypatch) -> None:
@@ -421,15 +424,3 @@ def test_the_gcov_need_says_where_libgcov_is(tmp_path, monkeypatch) -> None:
     (node,) = prog.output_nodes
     libdirs = node._build_info["context"].get_env_overrides()["libdirs"]
     assert Path("/gcc/lib") in [Path(str(getattr(d, "path", d))) for d in libdirs]
-
-
-def test_link_language_and_a_left_out_driver_conflict(tmp_path) -> None:
-    """Asked to link with flang, which allow_partial left out of sanitize,
-    beside sanitized C objects: pcons can't do both, so it says so."""
-    project = _project(tmp_path)
-    env = _env(project, "llvm", "flang")
-    env.apply_preset("sanitize", allow_partial=True)
-    prog = project.Program("prog", env, sources=["main.f90", "util.c"])
-    prog.link_language = "fortran"
-    with pytest.raises(PconsError, match="left flang out"):
-        project.resolve()

@@ -470,7 +470,6 @@ def render_explanation(
         shaped = Explanation(
             tuple(row for row in explanation.rows if row.category != "toolchain"),
             explanation.imperative,
-            explanation.partial,
         )
         if shaped:
             yield title

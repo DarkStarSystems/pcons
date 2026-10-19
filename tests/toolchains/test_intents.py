@@ -175,18 +175,10 @@ def test_a_feature_one_compiler_lacks_raises(tmp_path) -> None:
     """flang has no sanitizer: sanitizing only the C and C++ sources isn't
     a sanitized build, so it's an error, and nothing is applied."""
     env = _llvm_flang(tmp_path)
-    with pytest.raises(ValueError, match="'sanitize' isn't available with flang"):
+    with pytest.raises(ValueError, match="'sanitize' isn't available with flang.*env="):
         env.apply_preset("sanitize")
     assert not any("sanitize" in str(f) for f in env.cc.flags)
     assert not env.has_preset("sanitize")
-
-
-def test_allow_partial_leaves_out_that_compiler(tmp_path) -> None:
-    env = _llvm_flang(tmp_path)
-    env.apply_preset("sanitize", allow_partial=True)
-    assert any("-fsanitize" in str(f) for f in env.cc.flags)
-    assert not any("sanitize" in str(f) for f in env.fc.flags)
-    assert "sanitize - flang" in str(env.explain())
 
 
 def test_has_preset_is_whether_apply_preset_would_raise(tmp_path) -> None:
@@ -202,13 +194,6 @@ def test_a_toolchain_added_later_must_realize_it_too(tmp_path) -> None:
     env.apply_preset("sanitize")
     with pytest.raises(ValueError, match="'sanitize' isn't available with flang"):
         _add(env, "flang")
-
-
-def test_allow_partial_holds_for_a_toolchain_added_later(tmp_path) -> None:
-    env = _env(tmp_path, "llvm")
-    env.apply_preset("sanitize", allow_partial=True)
-    _add(env, "flang")
-    assert "sanitize - flang" in str(env.explain())
 
 
 def test_a_contributed_preset_decides_for_itself(tmp_path) -> None:

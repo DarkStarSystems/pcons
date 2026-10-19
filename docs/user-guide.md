@@ -1706,18 +1706,37 @@ With several compilers in one environment (C++ and Fortran, say), each
 realizes a preset with its own flags, and a preset applies to all of them or
 fails: with clang and flang, `apply_preset("sanitize")` is an error naming
 flang, which has no sanitizer, since a build that sanitizes only the C++
-sources isn't a sanitized build. To apply it to the compilers that can,
-say so, and `pcons explain` lists what it left out. `env.has_preset()`
-says beforehand whether a preset would apply to every compiler.
+sources isn't a sanitized build. To sanitize only the C++, compile the
+Fortran in a clone of the environment, made before the preset, so it keeps
+the other settings (the variant, the runtime linkage). The program still
+links with clang, sanitizer runtime and Fortran runtime included.
+`env.has_preset()` says beforehand whether a preset would apply to every
+compiler.
 
 ```python
-env.apply_preset("sanitize", allow_partial=True)  # C++ sanitized, Fortran not
+env = project.Environment(toolchain="c")
+env.set_variant("debug")
+fortran = env.clone()  # debug too, but not sanitized
+fortran.add_toolchain("flang")
+env.apply_preset("sanitize")
+
+app = project.Program("app", env, sources=["main.cpp"])
+app.add_sources(["solver.f90"], env=fortran)
 ```
+
+A separate environment made from scratch would build the Fortran as a
+release build, and on Windows a debug C++ program and a release Fortran
+runtime don't link (`LNK2038`, `RuntimeLibrary`).
 
 Mixing languages also mixes compilers' runtimes, and some don't combine
 on some platforms, so a mixed build may need a platform-specific
 workaround. For example, on a Mac, Apple clang's and GCC's sanitizer
-runtimes can't be mixed in one program.
+runtimes can't be mixed in one program. On Windows, MSVC's sanitizer
+annotates the C++ standard library's containers, which C++ libraries built
+without it don't (flang's runtime among them), so the link fails with
+`LNK2038` for `annotate_string` and `annotate_vector`. Define
+`_DISABLE_STRING_ANNOTATION` and `_DISABLE_VECTOR_ANNOTATION` in the
+sanitized code to leave the annotations out.
 
 Variants act like a knob: calling `set_variant()` again *replaces* the
 previous variant's flags rather than piling on top of them, so

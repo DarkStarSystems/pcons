@@ -251,7 +251,6 @@ def _link_driver(
     env: Environment,
     languages: set[str],
     compiled_by: dict[str, Toolchain],
-    compilers: set[Toolchain],
 ) -> tuple[str, Toolchain | None, str | None]:
     """(link language, linking toolchain, its driver command or None).
 
@@ -264,8 +263,7 @@ def _link_driver(
     script chose) links as it is. ``target.link_language`` overrides the
     order. When the link tool's own driver links, the language is the one
     that driver compiles, so each toolchain states its objects' needs for
-    the driver that really links. *compilers* are the toolchains whose
-    objects the link pulls in.
+    the driver that really links.
     """
     owner = env.toolchain_for("link")
     if target.link_language is not None:
@@ -290,31 +288,12 @@ def _link_driver(
     link_cmd = env.link.get("cmd") if env.has_tool("link") else None
     if link_cmd is None or link_cmd not in drivers:
         return ranked[0], owner, None
-    # A toolchain a preset left out (allow_partial) would link without that
-    # preset's runtime, which other toolchains' objects need: the owner links.
-    left_out = {name for _, name in env._partial_presets}
     for language in ranked:
         compiler = compiled_by.get(language) or next(
             (tc for tc in env.toolchains if _compiles(tc, language)), None
         )
         for toolchain in dict.fromkeys(t for t in (compiler, owner) if t is not None):
-            if toolchain is not owner and (
-                not _reads_link_command(toolchain, env)
-                or (toolchain.name in left_out and compilers - {toolchain})
-            ):
-                if target.link_language is not None and toolchain is compiler:
-                    presets = sorted(
-                        p for p, n in env._partial_presets if n == toolchain.name
-                    )
-                    raise PconsError(
-                        f"Target '{target.name}' asks to link with "
-                        f"{toolchain.name} (link_language '{language}'), but "
-                        f"{', '.join(presets)} left {toolchain.name} out "
-                        f"(allow_partial), so its driver can't link the runtime "
-                        f"the other objects need for {', '.join(presets)}. Drop "
-                        f"link_language, or the preset.",
-                        location=target.defined_at,
-                    )
+            if toolchain is not owner and not _reads_link_command(toolchain, env):
                 continue
             cmd = toolchain.link_driver(language, env)
             if cmd:
@@ -1121,7 +1100,7 @@ class CompileLinkFactory:
                     compiled_by.setdefault(lang, toolchain)
 
         link_language, linker, linker_cmd = _link_driver(
-            target, env, langs, compiled_by, {tc for tc, _ in compilers}
+            target, env, langs, compiled_by
         )
         # An imported library's declared languages need what that language's
         # toolchain here says, else what the linking toolchain knows of it
