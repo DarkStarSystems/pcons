@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.errors import OutputCollisionError, PconsError
@@ -246,13 +246,23 @@ def _link_contents(target: Target) -> tuple[list[FileNode], set[str]]:
     return objects, declared
 
 
+class LinkDriver(NamedTuple):
+    """Who links a target, and why (see _link_driver)."""
+
+    language: str
+    toolchain: Toolchain | None
+    cmd: str | None  # the driver, when not the link tool's own command
+    reason: str
+
+
 def _link_driver(
     target: Target,
     env: Environment,
     languages: set[str],
     compiled_by: dict[str, Toolchain],
-) -> tuple[str, Toolchain | None, str | None]:
-    """(link language, linking toolchain, its driver command or None).
+) -> LinkDriver:
+    """The link language, the linking toolchain, its driver command (None
+    for the link tool's own) and, for explain, why.
 
     A target is linked by the driver of its strongest language: the
     toolchain that compiled those objects, when its driver takes the link
@@ -279,7 +289,7 @@ def _link_driver(
     else:
         ranked = sorted(languages, key=link_language_rank, reverse=True)
     if not ranked:
-        return "c", owner, None
+        return LinkDriver("c", owner, None, "no compiled sources")
     drivers = {
         getattr(env, name).get("cmd")
         for name in env.tool_names()
@@ -287,8 +297,8 @@ def _link_driver(
     }
     link_cmd = env.link.get("cmd") if env.has_tool("link") else None
     if link_cmd is None or link_cmd not in drivers:
-        return ranked[0], owner, None
-    for language in ranked:
+        return LinkDriver(ranked[0], owner, None, "set env.link.cmd to change")
+    for i, language in enumerate(ranked):
         compiler = compiled_by.get(language) or next(
             (tc for tc in env.toolchains if _compiles(tc, language)), None
         )
@@ -297,7 +307,12 @@ def _link_driver(
                 continue
             cmd = toolchain.link_driver(language, env)
             if cmd:
-                return language, toolchain, None if cmd == link_cmd else cmd
+                reason = _driver_reason(target, ranked, i)
+                if compiler is not None and toolchain is not compiler:
+                    reason += f"; {compiler.name}'s driver can't take this link"
+                return LinkDriver(
+                    language, toolchain, None if cmd == link_cmd else cmd, reason
+                )
     driving = next(
         (
             lang
@@ -308,7 +323,42 @@ def _link_driver(
         ),
         ranked[0],
     )
-    return driving, owner, None
+    return LinkDriver(
+        driving, owner, None, f"no compiler's driver links {ranked[0]} objects"
+    )
+
+
+def _driver_reason(target: Target, ranked: list[str], index: int) -> str:
+    """Why the driver of ``ranked[index]`` links *target*."""
+    if target.link_language is not None:
+        return f"{target.link_language}, overridden by link_language"
+    language = ranked[index]
+    reason = (
+        f"{language} leads {', '.join(ranked[index + 1 :])}"
+        if index + 1 < len(ranked)
+        else f"{language} objects"
+    )
+    if index:
+        reason += f"; {', '.join(ranked[:index])} has no driver"
+    if len(ranked) > 1:
+        reason += "; set link_language to change"
+    return reason
+
+
+def _need_rows(needs: LinkNeeds) -> list[str]:
+    """Each of *needs*, as explain shows it."""
+    return [
+        *(f"lib {lib}" for lib in needs.libs),
+        *(f"libdir {d}" for d in needs.libdirs),
+        *(f"framework {f}" for f in needs.frameworks),
+        *(f"framework dir {d}" for d in needs.framework_dirs),
+        *(f"rpath {d}" for d in needs.rpaths),
+        *(f"build rpath {d}" for d in needs.relative_rpaths),
+        *(f"object {o}" for o in needs.objects),
+        *(f"{s} sanitizer runtime" for s in needs.sanitizers),
+        *(["console subsystem"] if needs.console else []),
+        *(f"leaves out {lib}" for lib in needs.excluded_default_libs),
+    ]
 
 
 class CompileLinkFactory:
@@ -1099,8 +1149,11 @@ class CompileLinkFactory:
                 if toolchain in env.toolchains:
                     compiled_by.setdefault(lang, toolchain)
 
-        link_language, linker, linker_cmd = _link_driver(
-            target, env, langs, compiled_by
+        driver = _link_driver(target, env, langs, compiled_by)
+        link_language, linker, linker_cmd = (
+            driver.language,
+            driver.toolchain,
+            driver.cmd,
         )
         # An imported library's declared languages need what that language's
         # toolchain here says, else what the linking toolchain knows of it
@@ -1121,12 +1174,19 @@ class CompileLinkFactory:
         )
 
         # What the objects need from this link, which the linking
-        # toolchain writes its own way (see LinkNeeds).
+        # toolchain writes its own way (see LinkNeeds), and who needs each,
+        # for explain.
         needs = LinkNeeds(relative_rpaths=_build_library_dirs(target, output_node))
+        need_rows = [
+            (row, "this build's shared libraries") for row in _need_rows(needs)
+        ]
         for (toolchain, compiled_in), languages in compilers.items():
-            needs = needs | toolchain.link_needs(
-                target, languages, link_language, compiled_in
-            )
+            need = toolchain.link_needs(target, languages, link_language, compiled_in)
+            needs = needs | need
+            who = f"{toolchain.name} ({', '.join(sorted(languages))})"
+            if compiled_in is not env:
+                who += f", env {compiled_in.name or '?'}"
+            need_rows.extend((row, who) for row in _need_rows(need))
         effective_link.link_libs = [*effective_link.link_libs, *needs.libs]
         effective_link.link_dirs = [
             *effective_link.link_dirs,
@@ -1170,6 +1230,16 @@ class CompileLinkFactory:
             "context": context,
             "env": env,
         }
+        # Explained when there was a choice to make, or the link adds
+        # something the objects asked for.
+        if need_rows or len(langs) > 1 or target.link_language is not None:
+            link_cmd = env.link.get("cmd") if env.has_tool("link") else None
+            program = Path(str(linker_cmd or link_cmd or "?"))
+            driver_name = program.stem + program.suffix.lower()
+            info["explanation"] = (
+                f"link: {driver_name}  ({driver.reason})",
+                list(dict.fromkeys(need_rows)),
+            )
         if link_groups is not None:
             info["vars"] = {"LINK_GROUPS": link_groups}
         output_node._build_info = info

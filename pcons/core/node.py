@@ -58,6 +58,9 @@ class BuildInfo(TypedDict, total=False):
     deps_style: str | None  # Ninja dependency style ("gcc" or "msvc")
     command: str | list[Any]  # Direct command (generic/custom builders)
     description: str  # Human-readable build description
+    # Why the builder made this node as it did, for explain: a summary line
+    # and (value, who asked for it) rows
+    explanation: tuple[str, list[tuple[str, str]]]
 
     # Toolchain-provided context; the resolver uses
     # context.get_env_overrides() when expanding command templates

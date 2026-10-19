@@ -338,6 +338,15 @@ def render_explanation(
             arrow += f"  {env_ref(node_env)}"
         yield arrow
         yield _fit(f"      {command}", width, style)
+        # Why the builder made the node as it did (a link's driver and the
+        # runtimes its objects asked for), when it says.
+        explanation = build_info.get("explanation")
+        if explanation is not None:
+            summary, rows = explanation
+            yield f"    {summary}"
+            pad = max((len(value) for value, _ in rows), default=0)
+            for value, who in rows:
+                yield f"      {value.ljust(pad)}  {style.origin(f'<- {who}')}"
 
     def defined_at(obj: object) -> str | None:
         """Where *obj* was defined, as file:line relative to the project."""

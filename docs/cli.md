@@ -179,6 +179,19 @@ Environment #1  (toolchain: llvm)  pcons-build.py:8
     -g     <- debug (variant)
 ```
 
+A link that had a choice of driver, or adds something its objects need,
+says so under its command: which driver links and why, and each runtime
+library, directory or rpath the link adds, with the compiler whose objects
+need it. A program with C++ and Fortran sources:
+
+```console
+  * build/hello  <-  build/obj.hello/src/{main.cpp.o,math_utils.f90.o}
+      /usr/bin/clang++ -o hello obj.hello/src/main.cpp.o obj.hello/src/math_utils.f90.o -L/opt/homebrew/Cellar/gcc/16.2.0/lib/gcc/current -lgfortran
+    link: clang++  (cxx leads fortran; set link_language to change)
+      lib gfortran                                            <- gfortran (fortran)
+      libdir /opt/homebrew/Cellar/gcc/16.2.0/lib/gcc/current  <- gfortran (fortran)
+```
+
 A node compiled with a per-source environment override, or a dependency
 built in a different environment, is annotated with that environment's
 label (`[env #2]`).
