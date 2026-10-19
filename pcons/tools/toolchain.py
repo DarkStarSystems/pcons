@@ -1025,6 +1025,16 @@ class Toolchain(Protocol):
         ...
 
 
+# Methods a toolchain once overrode to realize a setting, and what the
+# environment asks instead (see BaseToolchain.__init_subclass__).
+_REPLACED_METHODS = {
+    "apply_variant": "make_variant_preset",
+    "apply_target_arch": "make_arch_preset",
+    "apply_cross_preset": "make_target_preset",
+    "apply_preset": "make_feature_preset",
+}
+
+
 class BaseToolchain(ABC):
     """Abstract base class for toolchains.
 
@@ -1036,6 +1046,18 @@ class BaseToolchain(ABC):
     # Concrete subclasses override this; the generator reads it to build
     # the Environment typing stub.
     TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Refuse an override of a method the environment no longer calls,
+        which would otherwise be skipped without a word."""
+        super().__init_subclass__(**kwargs)
+        for old, new in _REPLACED_METHODS.items():
+            if old in cls.__dict__:
+                raise TypeError(
+                    f"{cls.__name__} overrides {old}(), which pcons no longer "
+                    f"calls: the environment applies what {new}() returns. "
+                    f"Override {new}() instead."
+                )
 
     def __init__(self, name: str = "") -> None:
         """Initialize a toolchain.

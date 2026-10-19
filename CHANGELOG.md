@@ -54,6 +54,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A custom toolchain realizes a variant, a target arch, a cross target or
+  a feature preset only through `make_variant_preset()`,
+  `make_arch_preset()`, `make_target_preset()` or `make_feature_preset()`.
+  pcons no longer calls a toolchain's `apply_variant()`,
+  `apply_target_arch()`, `apply_cross_preset()` or `apply_preset()`, and a
+  toolchain that still defines one is an error saying which to override
+  instead. `env.set_target_arch()` no longer takes keyword arguments, which
+  no toolchain read.
 - Static and object libraries compile as position-independent code on
   Linux, Android and the BSDs, so they can go into a shared library, as
   Meson builds them. Before, linking one into a shared library failed with

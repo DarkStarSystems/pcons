@@ -377,3 +377,15 @@ class TestBackwardsCompatibility:
         assert target._resolved
         assert len(target.intermediate_nodes) == 1
         assert target.intermediate_nodes[0]._build_info["tool"] == "cxx"
+
+
+def test_a_toolchain_overriding_a_method_pcons_no_longer_calls_is_refused():
+    """An apply_variant override would be skipped silently, its flags
+    missing from the build; defining one is an error naming its successor."""
+    import pytest
+
+    with pytest.raises(TypeError, match=r"apply_variant\(\).*make_variant_preset"):
+
+        class OldStyle(MockCToolchain):
+            def apply_variant(self, env, variant, **kwargs):
+                pass
