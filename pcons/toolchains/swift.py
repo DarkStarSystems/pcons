@@ -549,10 +549,10 @@ class SwiftToolchain(UnixToolchain):
         interface_path = None
         if is_library:
             module_flags.append("-parse-as-library")
-            # On Windows the .swiftmodule records linkage: without -static,
-            # importers emit __imp_ (dllimport) references and fail to link
-            # against a static library.
-            if target.target_type == "static_library" and get_platform().is_windows:
+            # Built for Windows, the .swiftmodule records linkage: without
+            # -static, importers emit __imp_ (dllimport) references and fail
+            # to link against a static library.
+            if target.target_type == "static_library" and env.target.is_windows:
                 module_flags.append("-static")
             if bool(getattr(env.swiftc, "library_evolution", False)):
                 interface_path = module_dir / f"{module_name}.swiftinterface"
