@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -337,7 +336,7 @@ def merge_scan_compile_flags(
     """
 
     def include_path(inc: Any) -> str:
-        if root is not None and not os.path.isabs(str(inc)):
+        if root is not None and not Path(str(inc)).is_absolute():
             return str(root / str(inc))
         return str(inc)
 

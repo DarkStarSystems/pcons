@@ -23,7 +23,6 @@ flags, etc. can be customized after target creation.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -649,7 +648,7 @@ def _tool_token(owner: Target, tool: Any, marker: ToolPath) -> Any:
             path, prefix=marker.prefix, suffix=marker.suffix, executable=True
         )
     text = str(tool)
-    if os.path.isabs(text):
+    if Path(text).is_absolute():
         return PathToken(
             prefix=marker.prefix,
             path=text,
