@@ -139,6 +139,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `pcons-fetch` builds an autotools release tarball. Extraction dropped the
+  files' executable bits, so `configure` couldn't run, and the default
+  `.deps` gave it a relative `--prefix`, which configure rejects.
+- `pcons-fetch` fails cleanly, without a traceback, when a download fails
+  or git or autoreconf is missing. It no longer reuses a half-extracted
+  archive or a clone left at the wrong commit, builds and installs CMake's
+  Release configuration with Visual Studio too, and `clean --all` removes
+  git clones on Windows.
 - A toolchain preference list, such as `toolchain=["llvm", "msvc"]`, passes
   over a toolchain that `$CC`, `$CXX` or `$FC` contradicts and takes the
   next one: `CC=cl` builds with MSVC. Before, it stopped at `llvm` with an
