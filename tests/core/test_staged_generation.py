@@ -284,3 +284,32 @@ class TestVirtualenvIsNotAConfigureDependency:
         module.write_text("")
 
         assert _in_virtualenv(module, tmp_path)
+
+
+class TestTheModuleScan:
+    """Each resolve scans sys.modules for the build's own modules."""
+
+    def test_a_module_whose_file_cannot_be_resolved_is_skipped(
+        self, tmp_path, monkeypatch
+    ):
+        """The scan passes over it rather than failing the resolve."""
+        from pcons.core.project import _module_file
+
+        def unresolvable(self, strict=False):
+            raise OSError("unreadable")
+
+        monkeypatch.setattr(Path, "resolve", unresolvable)
+
+        assert _module_file(str(tmp_path / "helper.py")) is None
+
+    def test_pcons_is_not_a_configure_dependency(self, tmp_path):
+        """Even in a project that contains pcons, as its own checkout does."""
+        import pcons
+
+        package = Path(pcons.__file__).resolve().parent
+        project = Project("p", root_dir=package.parent, build_dir=tmp_path / "build")
+        project.resolve()
+
+        assert not [
+            p for p in project.configure_dependencies if p.is_relative_to(package)
+        ]
