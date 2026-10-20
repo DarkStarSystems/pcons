@@ -11,14 +11,16 @@ expected_outputs = [
 ]
 
 [verify]
+# driver.py configures and builds, so it gets the build budget rather than
+# the 30 s a plain run gets.
 commands = [
-    { run = "python3 driver.py", expect_stdout = "" },
+    { run = "python3 driver.py", expect_stdout = "", timeout = 120 },
     { run = "./build-embed/hello-embed", expect_stdout = "hello from pcons" },
     { run = "./build/hello", expect_stdout = "hello from pcons" },
 ]
 
 commands_windows = [
-    { run = "python driver.py", expect_stdout = "" },
+    { run = "python driver.py", expect_stdout = "", timeout = 120 },
     { run = "build-embed\\hello-embed.exe", expect_stdout = "hello from pcons" },
     { run = "build\\hello.exe", expect_stdout = "hello from pcons" },
 ]

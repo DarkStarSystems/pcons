@@ -72,6 +72,29 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.setdefault("COVERAGE_FILE", str(_REPO_ROOT / ".coverage"))
 
 
+@pytest.hookimpl(trylast=True)
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Measure the subprocesses a test starts with coverage's ctrace core.
+
+    On 3.14 coverage defaults to sys.monitoring, which measures in-process
+    code fastest but adds about two seconds to the start of every measured
+    subprocess; ctrace adds almost nothing. A process that runs tests has
+    started its own coverage by now and keeps its core; the processes it
+    starts read this. xdist's controller runs none, and its workers would
+    inherit the variable before starting theirs, so it sets nothing.
+    """
+    try:
+        import coverage
+    except ImportError:
+        return
+
+    config = session.config
+    if config.getoption("numprocesses", None) and not hasattr(config, "workerinput"):
+        return
+    if coverage.Coverage.current() is not None:
+        os.environ["COVERAGE_CORE"] = "ctrace"
+
+
 @pytest.fixture
 def gcc_toolchain():
     """Create a pre-configured GCC toolchain for testing.
