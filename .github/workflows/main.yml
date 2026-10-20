@@ -112,6 +112,11 @@ jobs:
         # `xcrun metal` is a stub until it's installed.
         if: runner.os == 'macOS'
         run: xcrun metal --version || xcodebuild -downloadComponent MetalToolchain
+      - name: Warm up the compilers (Windows only)
+        # See test-windows-toolchains. These checks compile with each
+        # compiler the unit tests use, under a 30 s limit.
+        if: runner.os == 'Windows'
+        run: uv run pytest tests/configure/test_checks.py tests/configure/test_checks_languages.py -o addopts="" -q
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
         run: uv run pytest -n auto --cov=pcons --cov-report=xml --ignore=tests/test_examples.py -k "not 21_msvcup_hello"
@@ -151,6 +156,10 @@ jobs:
     runs-on: windows-latest
     env:
       UV_PYTHON: ${{ matrix.python-version }}
+      # The runner has LLVM's clang-cl on PATH, which pcons would pick
+      # first. test-windows-toolchains covers clang-cl; this job is MSVC's.
+      CC: cl
+      CXX: cl
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -170,12 +179,10 @@ jobs:
           path: ~/.conan2
           key: conan2-${{ runner.os }}-${{ hashFiles('examples/**/conanfile.*') }}
           restore-keys: conan2-${{ runner.os }}-
+      - name: Warm up the compilers
+        # See test-windows-toolchains.
+        run: uv run pytest tests/test_examples.py -o addopts="" -q -k "ninja and (01_hello_c or 43_rust)"
       - name: Run example tests
-        # The runner has LLVM's clang-cl on PATH, which pcons would pick
-        # first. test-windows-toolchains covers clang-cl; this job is MSVC's.
-        env:
-          CC: cl
-          CXX: cl
         run: uv run pytest tests/test_examples.py -n auto --durations=20 --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
@@ -392,8 +399,15 @@ jobs:
           if ($env:FC) { & $env:FC --version }
       - name: Install dependencies
         run: uv sync
+      - name: Warm up the compilers
+        # A fresh runner reads each compiler from disk slowly the first time
+        # it runs, and the parallel run starts many at once: a one-file
+        # example can take half a minute. Building one C and one Rust example
+        # first, one at a time, pays that cost once.
+        if: matrix.cc
+        run: uv run pytest tests/test_examples.py -o addopts="" -q -k "ninja and (01_hello_c or 43_rust)"
       - name: Run example tests
-        run: uv run pytest tests/test_examples.py -n auto -v -rs -k "(ninja or nested or explain) and ${{ matrix.examples }}"
+        run: uv run pytest tests/test_examples.py -n auto -v -rs -k "(ninja or nested or explain) and not 21_msvcup_hello and ${{ matrix.examples }}"
 
   test-qt:
     name: "test qt examples"
