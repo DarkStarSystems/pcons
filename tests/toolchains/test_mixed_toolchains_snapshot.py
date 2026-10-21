@@ -231,13 +231,11 @@ def pinned(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     from pcons.toolchains import gcc as gcc_mod
 
     monkeypatch.setattr(gcc_mod, "gcc_archiver_for", lambda driver: None)
-    # LlvmArchiver takes llvm-ar where PATH has one.
-    which = shutil.which
-    monkeypatch.setattr(
-        shutil,
-        "which",
-        lambda name, *a, **k: None if name == "llvm-ar" else which(name, *a, **k),
-    )
+    # Nothing is on PATH, so a command stays as its toolchain gives it, and
+    # no choice (LlvmArchiver taking llvm-ar where PATH has one) depends on
+    # the host. A failed lookup is also slow on Windows, where it tries
+    # every PATHEXT extension in every PATH directory.
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)
     for var in ("CC", "CXX", "FC", "AR", "LD", "SWIFTC", "CUDACXX", "RC"):
         monkeypatch.delenv(var, raising=False)
 

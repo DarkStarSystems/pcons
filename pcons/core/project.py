@@ -8,6 +8,7 @@ serves as the context for build descriptions.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
@@ -125,6 +126,19 @@ def _in_virtualenv(path: Path, root: Path) -> bool:
         if (parent / "pyvenv.cfg").exists():
             return True
     return False
+
+
+@functools.cache
+def _module_file(filename: str) -> Path | None:
+    """A loaded module's file, resolved; None if it can't be.
+
+    Cached because every resolve scans all of ``sys.modules``, and a test
+    suite resolves thousands of projects in one process.
+    """
+    try:
+        return Path(filename).resolve()
+    except OSError:
+        return None
 
 
 #: The pending "this build script was run directly" notice: (armed, script).
@@ -1567,7 +1581,8 @@ class Project(_ProjectBuilders):
 
         top = self.top
         root = top.root_dir.resolve()
-        pcons_dir = Path(__file__).resolve().parent.parent
+        root_parts = root.parts
+        pcons_parts = Path(__file__).resolve().parent.parent.parts
 
         inv = invocation.current()
         if inv is not None:
@@ -1577,11 +1592,12 @@ class Project(_ProjectBuilders):
             filename = getattr(module, "__file__", None)
             if not filename or not filename.endswith(".py"):
                 continue
-            try:
-                path = Path(filename).resolve()
-            except OSError:
+            path = _module_file(filename)
+            # Comparing parts is is_relative_to() for resolved paths, without
+            # building every parent of every module.
+            if path is None or path.parts[: len(root_parts)] != root_parts:
                 continue
-            if not path.is_relative_to(root) or path.is_relative_to(pcons_dir):
+            if path.parts[: len(pcons_parts)] == pcons_parts:
                 continue
             if _in_virtualenv(path, root):
                 continue

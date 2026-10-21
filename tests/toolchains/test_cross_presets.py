@@ -14,6 +14,7 @@ import pytest
 
 from pcons.core.environment import Environment
 from pcons.toolchains.presets import (
+    AndroidStl,
     CrossPreset,
     android,
     emscripten,
@@ -1053,44 +1054,59 @@ class TestAndroidPresetAgainstARealNdk:
 
         assert Path(preset.resolved_tool_cmds()["cxx"]).is_file()
 
-    @pytest.mark.parametrize(
-        "stl,shared_runtime",
-        [("c++_shared", True), ("c++_static", False), ("none", False)],
-    )
     def test_the_stl_flags_produce_the_runtime_they_claim(
-        self, stl: str, shared_runtime: bool, android_ndk, tmp_path: Path
+        self, android_ndk, tmp_path: Path
     ) -> None:
-        """Link a shared library and read back what it depends on.
+        """Link a shared library with each STL and read back what it depends on.
 
-        The unit tests above pin the flag; this pins what the flag does,
-        so a future NDK changing its default fails here rather than in a
-        user's APK.
+        The unit tests above pin the flags; this pins what they do, so a
+        future NDK changing its default fails here rather than in a user's
+        APK. The STL changes only the link, so one object serves all three.
         """
-        preset = android(ndk=str(android_ndk), arch="arm64-v8a", api=21, stl=stl)  # type: ignore[arg-type]
+        expected: dict[AndroidStl, bool] = {
+            "c++_shared": True,
+            "c++_static": False,
+            "none": False,
+        }
+        tools = android(
+            ndk=str(android_ndk), arch="arm64-v8a", api=21
+        ).resolved_tool_cmds()
         source = tmp_path / "s.cpp"
         source.write_text("#include <string>\nstd::string f() { return {}; }\n")
-        out = tmp_path / "libs.so"
-
+        obj = tmp_path / "s.o"
         subprocess.run(
-            [
-                preset.resolved_tool_cmds()["cxx"],
-                "-shared",
-                "-fPIC",
-                str(source),
-                *preset.extra_link_flags,
-                "-o",
-                str(out),
-            ],
+            [tools["cxx"], "-c", "-fPIC", str(source), "-o", str(obj)],
             check=True,
             capture_output=True,
         )
-        ar = Path(preset.resolved_tool_cmds()["ar"])
+        ar = Path(tools["ar"])
         readelf = ar.with_name(f"llvm-readelf{ar.suffix}")
-        needed = subprocess.run(
-            [str(readelf), "-d", str(out)], capture_output=True, text=True, check=True
-        ).stdout
 
-        assert ("libc++_shared.so" in needed) is shared_runtime
+        links_shared_runtime: dict[AndroidStl, bool] = {}
+        for n, stl in enumerate(expected):
+            preset = android(ndk=str(android_ndk), arch="arm64-v8a", api=21, stl=stl)
+            out = tmp_path / f"lib{n}.so"
+            subprocess.run(
+                [
+                    tools["cxx"],
+                    "-shared",
+                    str(obj),
+                    *preset.extra_link_flags,
+                    "-o",
+                    str(out),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            needed = subprocess.run(
+                [str(readelf), "-d", str(out)],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            links_shared_runtime[stl] = "libc++_shared.so" in needed
+
+        assert links_shared_runtime == expected
 
 
 _MINGW = CrossPreset(
