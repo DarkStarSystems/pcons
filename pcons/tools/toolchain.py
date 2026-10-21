@@ -24,6 +24,7 @@ from pcons.core.preset import (
 )
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
+from pcons.util.source_location import get_caller_location
 
 logger = logging.getLogger(__name__)
 
@@ -1073,6 +1074,15 @@ class BaseToolchain:
         """Set up all tools in the environment."""
         for tool in self._tools.values():
             tool.setup(env)
+
+    def configure(self, config: object) -> None:
+        """Deprecated, and does nothing: build scripts were taught to call
+        it, but a toolchain gets its tools when it is made."""
+        logger.warning(
+            "%s: toolchain.configure() does nothing, and pcons 0.32 removes "
+            "it; delete the call.",
+            get_caller_location(),
+        )
 
     # =========================================================================
     # Presets (variants, features, cross targets)

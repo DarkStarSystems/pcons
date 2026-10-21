@@ -66,6 +66,11 @@ class TestBaseToolchain:
         assert env.cc.cmd == "mock-cc"
         assert env.cxx.cmd == "mock-cxx"
 
+    def test_configure_warns_that_it_does_nothing(self, caplog):
+        MockToolchain().configure(object())
+        assert "toolchain.configure() does nothing" in caplog.text
+        assert "test_toolchain.py:" in caplog.text
+
 
 class TestAuxiliaryInputHandler:
     def test_base_toolchain_returns_none(self):
