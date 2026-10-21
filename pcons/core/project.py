@@ -18,7 +18,14 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.environment import Environment as Env
-from pcons.core.errors import OutputCollisionError, PconsError
+from pcons.core.errors import (
+    OutputCollisionError,
+    PconsAttributeError,
+    PconsError,
+    PconsKeyError,
+    PconsTypeError,
+    PconsValueError,
+)
 from pcons.core.graph import (
     collect_all_nodes,
     detect_cycles_in_targets,
@@ -219,11 +226,11 @@ def _refuse_duplicate(existing: Target, new: Target) -> None:
     if existing_name and new_name and existing_name != new_name:
         return
     if existing_env is not None and existing_env is new_env and existing_name:
-        raise ValueError(
+        raise PconsValueError(
             f"Target '{new.name}'{kind} already exists in environment "
             f"'{existing_name}'{where}."
         )
-    raise ValueError(
+    raise PconsValueError(
         f"Target '{new.name}'{kind} already exists{where}. Two targets of one "
         f"type may share a name only when their environments are named and "
         f"different. Name the environment: "
@@ -295,7 +302,7 @@ class Imports(Mapping[str, Any]):
     def __getitem__(self, key: str) -> Any:
         if key not in self._given:
             given = ", ".join(repr(k) for k in self._given) or "nothing"
-            raise KeyError(
+            raise PconsKeyError(
                 f"{key!r} was not handed to this directory. The including "
                 f"script passes objects down with "
                 f"add_subdirectory(imports={{...}}); it passed: {given}."
@@ -506,7 +513,7 @@ class Project(_ProjectBuilders):
             try:
                 self._offset = self.root_dir.relative_to(top.root_dir)
             except ValueError as exc:
-                raise ValueError(
+                raise PconsValueError(
                     f"Sub-project '{self.name}' at {self.root_dir} is not inside "
                     f"the top-level project at {top.root_dir}. add_subdirectory() "
                     f"only works for directories under the top-level project."
@@ -533,7 +540,7 @@ class Project(_ProjectBuilders):
                     )
                 build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
             if not self.root_dir.is_absolute():
-                raise ValueError(
+                raise PconsValueError(
                     f"Root directory must be absolute (got: {self.root_dir})"
                 )
             bd = Path(build_dir)
@@ -608,13 +615,13 @@ class Project(_ProjectBuilders):
     @staticmethod
     def current() -> Project:
         if Project.__current is None:
-            raise ValueError("no project is currently active")
+            raise PconsValueError("no project is currently active")
         return Project.__current
 
     @staticmethod
     def top_level() -> Project:
         if Project.__top_level is None:
-            raise ValueError("no top-level project is currently active")
+            raise PconsValueError("no top-level project is currently active")
         return Project.__top_level
 
     @property
@@ -633,7 +640,7 @@ class Project(_ProjectBuilders):
     def parent(self) -> Project:
         """Get the parent project if this is a subdir, or None if top-level."""
         if self._parent is None:
-            raise ValueError("This project has no parent (it is top-level).")
+            raise PconsValueError("This project has no parent (it is top-level).")
         return self._parent
 
     @property
@@ -774,7 +781,7 @@ class Project(_ProjectBuilders):
                     )
                 )
             elif recorded.command_override != wanted:
-                raise ValueError(
+                raise PconsValueError(
                     "write_build_files(regen_command=...): this run already "
                     "owns the regen rule"
                     + (
@@ -961,7 +968,7 @@ class Project(_ProjectBuilders):
             self._child_index.add(path, self._normalize_for_index(path))
         node = self._nodes[path]
         if not isinstance(node, FileNode):
-            raise TypeError(
+            raise PconsTypeError(
                 f"Path {path} is registered as {type(node).__name__}, not FileNode"
             )
         if role is not None:
@@ -979,7 +986,7 @@ class Project(_ProjectBuilders):
             self._child_index.add(path, self._normalize_for_index(path))
         node = self._nodes[path]
         if not isinstance(node, DirNode):
-            raise TypeError(
+            raise PconsTypeError(
                 f"Path {path} is registered as {type(node).__name__}, not DirNode"
             )
         if role is not None:
@@ -1081,7 +1088,7 @@ class Project(_ProjectBuilders):
                         else f" '{target_name}' has no named environment."
                     )
                     if raise_if_missing:
-                        raise KeyError(f"Target '{name}' not found.{where}")
+                        raise PconsKeyError(f"Target '{name}' not found.{where}")
                     return None
                 matches = in_env
             if len(matches) > 1:
@@ -1092,7 +1099,7 @@ class Project(_ProjectBuilders):
                 return matches[0]
             if project is not None:
                 if raise_if_missing:
-                    raise KeyError(f"Target '{name}' not found.")
+                    raise PconsKeyError(f"Target '{name}' not found.")
                 return None
 
         if recursive:
@@ -1108,7 +1115,7 @@ class Project(_ProjectBuilders):
                 return targets_found[0]
 
         if raise_if_missing:
-            raise KeyError(f"Target '{name}' not found.")
+            raise PconsKeyError(f"Target '{name}' not found.")
         return None
 
     def get_targets(self, *names: str) -> list[Target]:
@@ -1168,7 +1175,7 @@ class Project(_ProjectBuilders):
         """
         env = self._resolve_default_environment()
         if env is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"No environments have been registered in project '{self.name}' "
                 f"or any enclosing project."
             )
@@ -1231,7 +1238,7 @@ class Project(_ProjectBuilders):
         for t in flat:
             match t:
                 case AliasNode() if reaches(t, alias):
-                    raise ValueError(
+                    raise PconsValueError(
                         f"Adding alias '{t.alias_name}' to '{name}' would "
                         f"create a cycle."
                     )
@@ -1241,7 +1248,7 @@ class Project(_ProjectBuilders):
                 case Node():
                     alias.add_target(t)
                 case _:
-                    raise TypeError(
+                    raise PconsTypeError(
                         f"Alias targets must be Target, Node, or list of them, got {type(t)}"
                     )
 
@@ -1313,7 +1320,7 @@ class Project(_ProjectBuilders):
                 case Node():
                     target = self._find_target_for_node(t)
                     if target is None:
-                        raise ValueError(
+                        raise PconsValueError(
                             f"Default(): {t!r} is not an output of any "
                             f"target registered in project '{self.name}', "
                             "so it can't be used as a default build target. "
@@ -1326,7 +1333,7 @@ class Project(_ProjectBuilders):
                     for target in self._resolve_default_name(t):
                         self._add_default_target(target, location)
                 case _:
-                    raise TypeError(
+                    raise PconsTypeError(
                         f"Default() arguments must be Target, Node, or str; "
                         f"got {type(t)!r}"
                     )
@@ -1383,7 +1390,7 @@ class Project(_ProjectBuilders):
                     if target is not None and target not in resolved:
                         resolved.append(target)
             if not resolved:
-                raise ValueError(
+                raise PconsValueError(
                     f"Default(): alias '{name}' does not resolve to any "
                     "target-backed build output, so it can't be used as a "
                     "default build target."
@@ -1394,7 +1401,7 @@ class Project(_ProjectBuilders):
         if target is not None:
             return [target]
 
-        raise KeyError(
+        raise PconsKeyError(
             f"Default(): '{name}' is not a known alias or target in "
             f"project '{self.name}'. Tried aliases "
             f"{sorted(self.tree_aliases)!r} and targets "
@@ -2184,7 +2191,7 @@ class Project(_ProjectBuilders):
             where = (
                 f" in environment '{env.name}'" if env is not None and env.name else ""
             )
-            raise ValueError(
+            raise PconsValueError(
                 f"Package '{name}' was already found{where} with "
                 f"system={conflicting.system}; requesting system={system} would "
                 f"need a second target of the same name. Pick one spelling."
@@ -2314,7 +2321,7 @@ class Project(_ProjectBuilders):
                     import sys
 
                     if sys.platform not in registration.platforms:
-                        raise AttributeError(
+                        raise PconsAttributeError(
                             f"Builder '{name}' is only available on "
                             f"{', '.join(registration.platforms)} "
                             f"(current platform: {sys.platform})"

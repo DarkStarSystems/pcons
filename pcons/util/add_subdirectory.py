@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any, overload
 
 from pcons.core.environment import Environment as Env
+from pcons.core.errors import PconsFileNotFoundError
 from pcons.core.invocation import RUN_NAME
 from pcons.core.project import Project, _in_virtualenv
 from pcons.core.tiers import TierFloor, validate_tier
@@ -187,7 +188,7 @@ def add_subdirectory(
     subdir_path = project.current_dir / subdir
     script = subdir_path / "pcons-build.py"
     if not script.exists():
-        raise FileNotFoundError(f"No pcons-build.py found in {subdir_path}")
+        raise PconsFileNotFoundError(f"No pcons-build.py found in {subdir_path}")
 
     # runpy doesn't touch sys.modules, so the automatic scan can't see this
     # script; register it directly or editing it wouldn't re-run pcons.

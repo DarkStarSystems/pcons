@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
+from pcons.core.errors import PconsAttributeError, PconsTypeError, PconsValueError
 from pcons.core.node import BuildInfo, FileNode, Node, OutputInfo
 from pcons.core.project import Project, script_srcdir
 from pcons.core.subst import PathToken, SourcePath, TargetPath, ToolPath
@@ -59,7 +60,7 @@ class OutputGroup:
             )
         if name in self._nodes:
             return self._nodes[name]
-        raise AttributeError(f"No output named '{name}'")
+        raise PconsAttributeError(f"No output named '{name}'")
 
     def __getitem__(self, name: str) -> FileNode:
         return self._nodes[name]
@@ -187,7 +188,7 @@ def reject_unknown_kwargs(builder_name: str, kwargs: dict[str, Any]) -> None:
     """
     unknown = sorted(k for k in kwargs if k != "defined_at")
     if unknown:
-        raise TypeError(
+        raise PconsTypeError(
             f"{builder_name}() got unexpected keyword argument(s): "
             f"{', '.join(unknown)}."
         )
@@ -306,7 +307,7 @@ class BaseBuilder(ABC):
         directory). Subclasses can override.
         """
         if not self._target_suffixes:
-            raise ValueError(f"Builder {self.name} has no target suffixes")
+            raise PconsValueError(f"Builder {self.name} has no target suffixes")
 
         suffix = self._target_suffixes[0]
         return [
@@ -663,7 +664,7 @@ def _marker_from_match(
 
     if second is None:  # ${X[n]} -- a single item
         if not first:
-            raise ValueError(
+            raise PconsValueError(
                 f"{token} has an empty subscript. Use ${{{kind}[n]}} for one "
                 f"item or ${{{kind}[n:m]}} for a range."
             )
@@ -688,7 +689,7 @@ def _reject_unknown_substitution(token: str) -> None:
     for candidate in re.findall(r"\$\{[^}]*\}", token):
         if _PLAIN_VARIABLE.match(candidate):
             continue
-        raise ValueError(
+        raise PconsValueError(
             f"Unrecognized substitution {candidate} in command {token!r}.\n"
             f"Supported: {_SUPPORTED_SUBSTITUTIONS}."
         )
@@ -722,7 +723,7 @@ def _reject_hand_quoting(token: str) -> None:
     if any(operator in token.split() for operator in _SHELL_OPERATORS):
         return
     bare = token.strip("\"'")
-    raise ValueError(
+    raise PconsValueError(
         f"Command token {token!r} starts with a quote. pcons quotes each token "
         f"for the shell itself, so this would reach the program with the "
         f"quotes still on it.\n"
@@ -773,7 +774,7 @@ def _tokenize_one(token: Any) -> Any:
         return token
 
     if _MARKER.search(token, match.end()):
-        raise ValueError(
+        raise PconsValueError(
             f"Command token {token!r} has more than one $SOURCE/$TARGET "
             f"substitution. Give each one its own argument."
         )
@@ -782,7 +783,7 @@ def _tokenize_one(token: Any) -> Any:
     prefix, suffix = token[: match.start()], token[match.end() :]
     if suffix.startswith("["):
         kind = match.group("braced") or match.group("bare")
-        raise ValueError(
+        raise PconsValueError(
             f"Command token {token!r} needs braces around the subscript: "
             f"write ${{{kind}{suffix}}}, not ${kind}{suffix}."
         )
@@ -1015,7 +1016,7 @@ class GenericCommandBuilder(BaseBuilder):
         env: Environment,
     ) -> list[Path]:
         """Generic commands must have explicit targets."""
-        raise ValueError(
+        raise PconsValueError(
             "GenericCommandBuilder requires explicit target(s). "
             "Use env.Command(target, sources, command) with a target specified."
         )
@@ -1044,7 +1045,7 @@ class GenericCommandBuilder(BaseBuilder):
             shielded = text.replace("$SRCDIR", _SRCDIR_SENTINEL)
             tokens = env.subst_list([shielded])
             if len(tokens) != 1:
-                raise ValueError(
+                raise PconsValueError(
                     f"{text!r} expands to {len(tokens)} arguments, but it is "
                     f"attached to a $SOURCE/$TARGET path."
                 )

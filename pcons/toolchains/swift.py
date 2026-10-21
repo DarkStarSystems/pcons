@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
+from pcons.core.errors import PconsRuntimeError, PconsValueError
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.toolchains.gcc import GccArchiver
@@ -356,7 +357,7 @@ class SwiftToolchain(UnixToolchain):
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Raise: swiftc has no -arch; the CPU is part of its -target triple."""
-        raise ValueError(
+        raise PconsValueError(
             f"{self.name} can't build for target arch '{arch}' by flag; use a "
             f"cross preset (swiftc takes a -target triple)."
         )
@@ -370,7 +371,7 @@ class SwiftToolchain(UnixToolchain):
     ) -> list[ToolContribution]:
         spec = self.SWIFT_VARIANTS.get(variant.lower())
         if spec is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"Unknown variant '{variant}'. "
                 f"Supported variants: {', '.join(sorted(self.SWIFT_VARIANTS))}."
             )
@@ -652,7 +653,7 @@ def find_swift_toolchain(prefer: list[str] | None = None) -> SwiftToolchain:
     toolchain = toolchain_registry.find_available("swift", prefer)
     if toolchain is not None:
         return cast("SwiftToolchain", toolchain)
-    raise RuntimeError(
+    raise PconsRuntimeError(
         "No Swift toolchain found: 'swiftc' is not in PATH. "
         "Install Xcode (macOS) or a swift.org toolchain (Linux)."
     )

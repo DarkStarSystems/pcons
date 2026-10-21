@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.configure.platform import get_platform
+from pcons.core.errors import PconsRuntimeError
 from pcons.core.flags import deduplicate_flags
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.base import BaseFinder
@@ -717,7 +718,7 @@ class ConanFinder(BaseFinder):
             RuntimeError: If conan is not available or install fails.
         """
         if not self.is_available():
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 "Conan is not available. Please install it: pip install conan"
             )
 
@@ -759,7 +760,7 @@ class ConanFinder(BaseFinder):
         )
 
         if result.returncode != 0:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Conan install failed:\n"
                 f"Command: {' '.join(cmd)}\n"
                 f"Stdout: {result.stdout}\n"
@@ -770,7 +771,7 @@ class ConanFinder(BaseFinder):
 
         packages = self._parse_pkgconfig_files()
         if not packages:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Conan install succeeded but no packages were parsed. "
                 f"No .pc files found under {self.output_folder}. "
                 f"Check that the conanfile declares dependencies and that "

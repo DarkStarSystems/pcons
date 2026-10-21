@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.errors import PconsValueError
 from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain, msvc_crt
@@ -101,7 +102,7 @@ def link_needs_from_args(args: tuple[str, ...]) -> LinkNeeds:
             case "nodefaultlib" if value:
                 excluded.append(value)
             case _:
-                raise ValueError(
+                raise PconsValueError(
                     f"clang-cl's driver links with {arg!r}, which pcons can't "
                     f"state as a link need."
                 )
@@ -351,7 +352,7 @@ class ClangClToolchain(MsvcCompatibleToolchain):
         if env.feature_realized("openmp", self):
             args = driver_link_additions(self._driver(env), ("/MD",), "/openmp")
             if not args:
-                raise ValueError(
+                raise PconsValueError(
                     f"Target '{target.name}': clang-cl doesn't say how to link "
                     f"its OpenMP runtime (libomp, beside clang-cl)."
                 )
@@ -369,6 +370,7 @@ class ClangClToolchain(MsvcCompatibleToolchain):
             return []
         env = target._env
         if env is None:
+            # A pcons bug, not a user error.
             raise ValueError(f"Target '{target.name}' has no environment to link.")
         crt = self.MSVC_CRT_FLAGS[msvc_crt(env.runtime_linkage, env.variant)]
         link = (crt, "/LD") if target.target_type == "shared_library" else (crt,)
@@ -380,7 +382,7 @@ class ClangClToolchain(MsvcCompatibleToolchain):
                 if crt.endswith("d")
                 else ""
             )
-            raise ValueError(
+            raise PconsValueError(
                 f"Target '{target.name}': clang-cl can't link AddressSanitizer "
                 f"with the {crt} C runtime.{hint}"
             )

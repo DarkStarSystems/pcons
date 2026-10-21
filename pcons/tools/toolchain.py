@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
+from pcons.core.errors import PconsRuntimeError, PconsTypeError, PconsValueError
 from pcons.core.paths import affix_filename
 from pcons.core.preset import (
     RUNTIME_LINKAGE_GROUP,
@@ -91,12 +92,14 @@ def _parse_cxx_standard(standard: int | str) -> int:
     try:
         n = int(text)
     except ValueError:
-        raise ValueError(
+        raise PconsValueError(
             f"Invalid C++ standard {standard!r}; use e.g. 'c++20' or 20"
         ) from None
     if n not in _CXX_STANDARDS:
         allowed = ", ".join(str(s) for s in sorted(_CXX_STANDARDS))
-        raise ValueError(f"Unsupported C++ standard 'c++{n}'; supported: {allowed}")
+        raise PconsValueError(
+            f"Unsupported C++ standard 'c++{n}'; supported: {allowed}"
+        )
     return n
 
 
@@ -480,7 +483,7 @@ class ToolchainRegistry:
             if conflict is None:
                 return toolchain
             errors.append(f"{name}: {conflict}")
-        raise RuntimeError(
+        raise PconsRuntimeError(
             "No toolchain available from preference list "
             f"{list(spec)}:\n  " + "\n  ".join(errors)
         )
@@ -489,7 +492,7 @@ class ToolchainRegistry:
         toolchain = self._find_one(name, abi)
         if not abi_compatible(toolchain.abi, abi):
             subject = name if name == toolchain.name else f"{name} ({toolchain.name})"
-            raise RuntimeError(self.abi_mismatch(subject, toolchain, abi))
+            raise PconsRuntimeError(self.abi_mismatch(subject, toolchain, abi))
         return toolchain
 
     def _find_one(self, name: str, abi: str | None) -> BaseToolchain:
@@ -505,7 +508,7 @@ class ToolchainRegistry:
                 else finder.finder()
             )
             if toolchain is None:
-                raise RuntimeError(f"No '{name}' toolchain found on this system")
+                raise PconsRuntimeError(f"No '{name}' toolchain found on this system")
             return toolchain
 
         entry = self._toolchains.get(key)
@@ -515,14 +518,14 @@ class ToolchainRegistry:
             else:
                 available = shutil.which(entry.check_command) is not None
             if not available:
-                raise RuntimeError(
+                raise PconsRuntimeError(
                     f"Toolchain '{name}' is not available "
                     f"('{entry.check_command}' not found in PATH)"
                 )
             return entry.create_toolchain()
 
         known = ", ".join(sorted({*self._finders, *self._toolchains, *self._lazy}))
-        raise ValueError(f"Unknown toolchain '{name}'. Known names: {known}")
+        raise PconsValueError(f"Unknown toolchain '{name}'. Known names: {known}")
 
     def register(
         self,
@@ -1030,7 +1033,7 @@ class BaseToolchain:
         super().__init_subclass__(**kwargs)
         for old, new in _REPLACED_METHODS.items():
             if old in cls.__dict__:
-                raise TypeError(
+                raise PconsTypeError(
                     f"{cls.__name__} overrides {old}(), which pcons no longer "
                     f"calls: the environment applies what {new}() returns. "
                     f"Override {new}() instead."
@@ -1106,7 +1109,7 @@ class BaseToolchain:
 
         conflict = self.compiler_override_conflict()
         if conflict is not None:
-            raise ValueError(conflict)
+            raise PconsValueError(conflict)
         by_var: dict[str, list[str]] = {}  # env var -> tool names (AR is shared)
         for tool in self._tools.values():
             if tool.env_var:
@@ -1421,7 +1424,7 @@ class BaseToolchain:
             or needs.console
             or needs.excluded_default_libs
         ):
-            raise ValueError(
+            raise PconsValueError(
                 f"Target '{target.name}': {self.name} can't link in what its "
                 f"objects need ({needs})."
             )

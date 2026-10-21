@@ -320,6 +320,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own name; before, the `lib` went in front of the directory
   (`liblib/foo.so`). An `output_prefix` with a directory in it still works
   as before.
+- A mistake in a build script, such as a toolchain that isn't installed
+  or a `$FC` that contradicts the toolchain asked for, is reported in one
+  line after the script line that led to it (`pcons-build.py:12: ...`),
+  not with a Python traceback that made it look like a crash. Pcons's
+  errors are still the exceptions they were, so `except RuntimeError`
+  keeps working, and a bug in pcons itself still shows its traceback.
 
 ## [0.30.0] - 2026-09-27
 

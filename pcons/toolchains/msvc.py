@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.errors import PconsValueError
 from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
@@ -355,7 +356,7 @@ def cross_arch_contributions(
         return []
     toolset = _find_cross_toolset(target)
     if toolset is None:
-        raise ValueError(
+        raise PconsValueError(
             f"MSVC {target} cross toolset not found: no bin/{host}/{target}/"
             f"cl.exe in any installed VC tools version. Install the "
             f"'MSVC ... {target.upper()} build tools' component in the "

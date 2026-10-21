@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsValueError
 from pcons.core.paths import last_component
 
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ def _manifest_arch(arch: str) -> str:
     mapped = _PROCESSOR_ARCHITECTURE.get(arch.lower())
     if mapped is None:
         known = ", ".join(sorted(set(_PROCESSOR_ARCHITECTURE)))
-        raise ValueError(
+        raise PconsValueError(
             f"No manifest processorArchitecture for {arch!r}. Known: {known}"
         )
     return mapped

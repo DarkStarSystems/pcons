@@ -13,6 +13,7 @@ import pytest
 from pcons.core.errors import (
     CircularReferenceError,
     MissingVariableError,
+    PconsError,
     SubstitutionError,
 )
 from pcons.core.subst import (
@@ -44,6 +45,11 @@ class TestNamespace:
         assert ns.get("missing", "default") == "default"
         with pytest.raises(KeyError):
             _ = ns["missing"]
+
+    def test_a_value_is_not_a_namespace(self):
+        ns = Namespace({"cc": "gcc"})
+        with pytest.raises(PconsError, match="cc is not a namespace"):
+            ns["cc.flags"] = ["-O2"]
 
     def test_contains(self):
         ns = Namespace({"foo": "bar"})

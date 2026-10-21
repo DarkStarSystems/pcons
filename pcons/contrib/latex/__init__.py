@@ -24,6 +24,7 @@ from __future__ import annotations
 import shutil
 
 from pcons.contrib.latex.toolchain import LatexTool, LatexToolchain
+from pcons.core.errors import PconsRuntimeError
 
 __all__ = ["LatexTool", "LatexToolchain", "find_latex_toolchain"]
 
@@ -42,7 +43,7 @@ def find_latex_toolchain() -> LatexToolchain:
             "LaTeX toolchain not found. Install a TeX distribution "
             "(TeX Live or MiKTeX) with 'latexmk' in PATH."
         )
-        raise RuntimeError(msg)
+        raise PconsRuntimeError(msg)
     toolchain = LatexToolchain()
     toolchain._tools = {"latex": LatexTool()}
     return toolchain

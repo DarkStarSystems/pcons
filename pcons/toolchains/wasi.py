@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder import CommandBuilder
+from pcons.core.errors import PconsRuntimeError
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gnu_common import (
@@ -294,7 +295,7 @@ def find_wasi_toolchain() -> WasiToolchain:
     if isinstance(toolchain, WasiToolchain):
         return toolchain
 
-    raise RuntimeError(
+    raise PconsRuntimeError(
         "wasi-sdk not found. Install it from https://github.com/WebAssembly/wasi-sdk "
         "and either set WASI_SDK_PATH or install to /opt/wasi-sdk. "
         "On macOS: brew install wasi-sdk"

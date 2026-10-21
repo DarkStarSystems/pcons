@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
+from pcons.core.errors import PconsValueError
 from pcons.core.node import AliasNode, FileNode, Node
 from pcons.core.paths import PathResolver
 from pcons.core.subst import NodeVar, PathToken
@@ -767,7 +768,7 @@ class NinjaGenerator(BaseGenerator):
     @classmethod
     def _check_node_var_name(cls, name: str, node: FileNode) -> None:
         if name in cls._RESERVED_VARS or re.fullmatch(r"(source|target)_\d+", name):
-            raise ValueError(
+            raise PconsValueError(
                 f"Per-node variable {name!r} on {node.path} shadows one the "
                 f"generator defines. Pick another name: ninja would use this "
                 f"value where the edge's own paths belong."

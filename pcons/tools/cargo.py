@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsFileNotFoundError, PconsValueError
 from pcons.packages.description import PackageDescription
 from pcons.packages.imported import ImportedTarget
 
@@ -59,7 +60,7 @@ def _read_crate_name(manifest: Path) -> str:
     pkg_table = data.get("package", {})
     pkg_name = pkg_table.get("name")
     if not pkg_name:
-        raise ValueError(f"Cargo.toml at {manifest} has no [package] name")
+        raise PconsValueError(f"Cargo.toml at {manifest} has no [package] name")
     return str(pkg_name).replace("-", "_")
 
 
@@ -116,7 +117,7 @@ def _artifact_filename(
         if platform == "wasm":
             return f"{crate_name}.wasm"
         return crate_name
-    raise ValueError(
+    raise PconsValueError(
         f"Unsupported crate_type {crate_type!r}; expected one of {sorted(_CRATE_TYPES)}"
     )
 
@@ -189,18 +190,18 @@ class CargoBuildBuilder:
             changes.
         """
         if crate_type not in _CRATE_TYPES:
-            raise ValueError(
+            raise PconsValueError(
                 f"crate_type {crate_type!r} not supported; expected one of {sorted(_CRATE_TYPES)}"
             )
         is_bin = crate_type == "bin"
         if is_bin and generate_header is not None:
-            raise ValueError(
+            raise PconsValueError(
                 "generate_header only applies to library crates, not crate_type='bin'"
             )
 
         manifest_path = project.current_dir / manifest
         if not manifest_path.is_file():
-            raise FileNotFoundError(f"Cargo.toml not found: {manifest_path}")
+            raise PconsFileNotFoundError(f"Cargo.toml not found: {manifest_path}")
 
         manifest_dir = manifest_path.parent
         crate_name = _read_crate_name(manifest_path)

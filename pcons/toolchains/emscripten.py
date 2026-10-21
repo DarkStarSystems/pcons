@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder import MultiOutputBuilder, OutputSpec
+from pcons.core.errors import PconsRuntimeError
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gnu_common import (
@@ -276,7 +277,7 @@ def find_emscripten_toolchain() -> EmscriptenToolchain:
     if isinstance(toolchain, EmscriptenToolchain):
         return toolchain
 
-    raise RuntimeError(
+    raise PconsRuntimeError(
         "Emscripten not found. Install it from https://emscripten.org/docs/getting_started/ "
         "and either set EMSDK or activate the emsdk environment. "
         "On macOS: brew install emscripten"

@@ -389,6 +389,10 @@ class TestPresets:
         contributions = preset.contributions
         assert any(c.tool == "swiftc" and "-Onone" in c.flags for c in contributions)
 
+    def test_an_unknown_variant_lists_the_known_ones(self, swift_toolchain) -> None:
+        with pytest.raises(ValueError, match="Unknown variant 'relase'.*release"):
+            swift_toolchain.make_variant_preset("relase")
+
     def test_werror_preset(self, swift_toolchain) -> None:
         preset = swift_toolchain.make_feature_preset("werror")
         assert preset is not None

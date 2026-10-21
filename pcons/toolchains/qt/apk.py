@@ -41,6 +41,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsValueError
 from pcons.toolchains.android import build_tools_program
 from pcons.toolchains.qt.android import (
     _android_preset,
@@ -344,7 +345,7 @@ def sign_apk(
     """
     cross = _android_preset(env, what="Signing an Android package")
     if keystore is None:
-        raise ValueError(
+        raise PconsValueError(
             "sign_apk() needs the release keystore: pass keystore=<path>. "
             "A release package is never signed with a debug key, and pcons "
             "never makes a release keystore."
@@ -357,7 +358,7 @@ def sign_apk(
         else _password_source(key_password, "key_password", root)
     )
     if key is not None and key == store and key.startswith("file:"):
-        raise ValueError(
+        raise PconsValueError(
             "store_password and key_password name the same file. apksigner "
             "reads one password per line from a file and fails on the "
             "second. Leave key_password out to open the key with the "
@@ -397,30 +398,30 @@ def _password_source(spec: str | None, argument: str, root: Path) -> str:
     directory and would find neither where it was written.
     """
     if spec is None:
-        raise ValueError(
+        raise PconsValueError(
             f"sign_apk() needs to know where apksigner reads the password: "
             f"pass {argument}='env:NAME' or {argument}='file:PATH'."
         )
     if spec.startswith("pass:"):
-        raise ValueError(
+        raise PconsValueError(
             f"{argument}='pass:...' puts the password in build.ninja, which "
             f"is a generated file people commit. Use 'env:NAME' or "
             f"'file:PATH'; apksigner reads the value itself when the edge "
             f"runs."
         )
     if spec == "stdin":
-        raise ValueError(
+        raise PconsValueError(
             f"{argument}='stdin' makes apksigner prompt, and a build edge "
             f"has no console to answer it. Use 'env:NAME' or 'file:PATH'."
         )
     if not spec.startswith(_PASSWORD_SOURCES):
-        raise ValueError(
+        raise PconsValueError(
             f"{argument}='{spec}' is not an apksigner password source. "
             f"Use 'env:NAME' or 'file:PATH'."
         )
     scheme, _, value = spec.partition(":")
     if not value:
-        raise ValueError(f"{argument}='{spec}' names nothing after '{scheme}:'.")
+        raise PconsValueError(f"{argument}='{spec}' names nothing after '{scheme}:'.")
     if scheme == "file":
         path = Path(value)
         if not path.is_absolute():
@@ -437,4 +438,6 @@ def _apksigner(cross: CrossPreset, override: str | Path | None) -> str | Path:
     try:
         return build_tools_program(cross.sdk, "apksigner")
     except ValueError as exc:
-        raise ValueError(f"{exc} Or name the program with apksigner=<path>.") from exc
+        raise PconsValueError(
+            f"{exc} Or name the program with apksigner=<path>."
+        ) from exc

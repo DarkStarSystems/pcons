@@ -27,6 +27,7 @@ import click
 
 from pcons import __version__
 from pcons._cli_click import MergingGroup, run_cli
+from pcons.core.errors import PconsRuntimeError
 from pcons.packages.description import PackageDescription
 
 logger = logging.getLogger("pcons-fetch")
@@ -75,7 +76,7 @@ def _verify_sha256(path: Path, expected: str | None) -> None:
 
     actual = digest.hexdigest()
     if actual.lower() != expected.lower():
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}"
         )
 
@@ -86,7 +87,7 @@ def _ensure_member_is_within_root(root: Path, member_name: str) -> Path:
     destination = (root / member_name).resolve()
     if destination == resolved_root or resolved_root in destination.parents:
         return destination
-    raise RuntimeError(f"Archive member escapes extraction root: {member_name}")
+    raise PconsRuntimeError(f"Archive member escapes extraction root: {member_name}")
 
 
 def _set_mode(path: Path, mode: int) -> None:
@@ -108,7 +109,7 @@ def _safe_extract_zip(archive_path: Path, source_dir: Path) -> None:
 
             mode = (member.external_attr >> 16) & 0o170000
             if mode == 0o120000:
-                raise RuntimeError(
+                raise PconsRuntimeError(
                     f"Refusing to extract symlink from zip archive: {member.filename}"
                 )
 
@@ -124,7 +125,7 @@ def _safe_extract_tar(archive_path: Path, source_dir: Path) -> None:
     with tarfile.open(archive_path) as tf:
         for member in tf.getmembers():
             if member.issym() or member.islnk():
-                raise RuntimeError(
+                raise PconsRuntimeError(
                     f"Refusing to extract link from tar archive: {member.name}"
                 )
 
@@ -163,7 +164,7 @@ def _run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(["git", *args], capture_output=True, text=True)
     except FileNotFoundError as e:
-        raise RuntimeError("git not found, needed to fetch a git source") from e
+        raise PconsRuntimeError("git not found, needed to fetch a git source") from e
 
 
 def download_source(
@@ -213,12 +214,12 @@ def download_source(
             # Commit SHAs require a full clone + checkout (can't use --branch)
             result = _run_git(["clone", git_url, str(source_dir)])
             if result.returncode != 0:
-                raise RuntimeError(f"Git clone failed: {result.stderr}")
+                raise PconsRuntimeError(f"Git clone failed: {result.stderr}")
             result = _run_git(["-C", str(source_dir), "checkout", ref])
             if result.returncode != 0:
                 # A clone at the wrong commit would be reused next time.
                 _remove_tree(source_dir)
-                raise RuntimeError(f"Git checkout {ref} failed: {result.stderr}")
+                raise PconsRuntimeError(f"Git checkout {ref} failed: {result.stderr}")
         else:
             cmd = ["clone", "--depth=1"]
             if ref:
@@ -226,7 +227,7 @@ def download_source(
             cmd.extend([git_url, str(source_dir)])
             result = _run_git(cmd)
             if result.returncode != 0:
-                raise RuntimeError(f"Git clone failed: {result.stderr}")
+                raise PconsRuntimeError(f"Git clone failed: {result.stderr}")
 
     elif url.endswith((".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip")):
         archive_name = url.split("/")[-1]
@@ -237,7 +238,7 @@ def download_source(
             try:
                 urllib.request.urlretrieve(url, archive_path)
             except OSError as e:
-                raise RuntimeError(f"Download of {url} failed: {e}") from e
+                raise PconsRuntimeError(f"Download of {url} failed: {e}") from e
             _verify_sha256(archive_path, sha256)
 
             logger.info("Extracting %s", archive_path)
@@ -264,7 +265,7 @@ def download_source(
             inner_dir.rmdir()
 
     else:
-        raise RuntimeError(f"Unsupported URL format: {url}")
+        raise PconsRuntimeError(f"Unsupported URL format: {url}")
 
     return source_dir
 

@@ -13,6 +13,12 @@ from collections.abc import Callable, Iterable, MutableSequence, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
+from pcons.core.errors import (
+    PconsAttributeError,
+    PconsRuntimeError,
+    PconsTypeError,
+    PconsValueError,
+)
 from pcons.core.flags import merge_flags
 from pcons.core.names import validate_name
 from pcons.core.tiers import validate_tier
@@ -212,7 +218,7 @@ class UsageRequirements(_UsageRequirementsStubs):
         empty list.
         """
         if name not in _KNOWN_USAGE_REQUIREMENTS:
-            raise AttributeError(_unknown_requirement_message(name))
+            raise PconsAttributeError(_unknown_requirement_message(name))
         data: dict[str, list[Any] | UserList[Any]] = object.__getattribute__(
             self, "_data"
         )
@@ -223,9 +229,9 @@ class UsageRequirements(_UsageRequirementsStubs):
             object.__setattr__(self, name, value)
         else:
             if name not in _KNOWN_USAGE_REQUIREMENTS:
-                raise AttributeError(_unknown_requirement_message(name))
+                raise PconsAttributeError(_unknown_requirement_message(name))
             if not isinstance(value, (list, UserList)):
-                raise TypeError(
+                raise PconsTypeError(
                     f"Usage requirement '{name}' must be a list, "
                     f"got {type(value).__name__}. "
                     f"Use target.public.{name}.append(value) to add items, "
@@ -336,7 +342,7 @@ def split_qualified_name(
         return None, parts[0]
     else:
         if raise_on_invalid:
-            raise ValueError(
+            raise PconsValueError(
                 f"Invalid qualified name: {name!r}. Too many '::' separators."
             )
         return None, name
@@ -357,10 +363,12 @@ def split_target_spec(spec: str) -> tuple[str | None, str, str | None]:
     if len(parts) == 1:
         return project, target, None
     if len(parts) > 2:
-        raise ValueError(f"Invalid target spec: {spec!r}. Too many '@' separators.")
+        raise PconsValueError(
+            f"Invalid target spec: {spec!r}. Too many '@' separators."
+        )
     name, env = parts
     if not env:
-        raise ValueError(
+        raise PconsValueError(
             f"Invalid target spec: {spec!r}. Name the environment after the '@'."
         )
     return project, name, env
@@ -776,7 +784,7 @@ class Target:
     @sources.setter
     def sources(self, value: list[Node]) -> None:
         """Always raises; use add_source() or add_sources()."""
-        raise AttributeError(
+        raise PconsAttributeError(
             f"Cannot assign directly to {self.name}.sources. "
             f"Use add_source() or add_sources() instead. "
             f"Example: target.add_sources({value!r})"
@@ -816,9 +824,11 @@ class Target:
 
     def __link_libs_validator(self, item: Target | str):
         if self._resolved:
-            raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
+            raise PconsRuntimeError(
+                f"Cannot modify target '{self.name}' after resolve(). "
+            )
         if item is self:
-            raise ValueError(f"Target '{self.name}' cannot link itself.")
+            raise PconsValueError(f"Target '{self.name}' cannot link itself.")
         if isinstance(item, Target):
             self._check_same_tree(item, "link")
         # Invalidate cached requirements
@@ -918,27 +928,27 @@ class Target:
     ) -> Target:
         """Validate and append link dependencies; shared by link()/link_private()."""
         if self._resolved:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
                 f"Add link dependencies before project.resolve() or project.generate()."
             )
         for lib in libs:
             if isinstance(lib, (list, tuple)):
-                raise TypeError(
+                raise PconsTypeError(
                     f"{method}() takes individual arguments, not a list. "
                     f"Use target.{method}(a, b) or target.{method}(*libs)."
                 )
             if not isinstance(lib, (Target, str)):
-                raise TypeError(
+                raise PconsTypeError(
                     f"{method}() requires Target objects or library-name strings, "
                     f"got {type(lib).__name__}. Pass a Target to depend on it "
                     f"(bringing its headers and usage requirements), or a string "
                     f"like 'm' for a raw system library."
                 )
             if isinstance(lib, str) and not lib.strip():
-                raise ValueError(f"{method}() got an empty library name.")
+                raise PconsValueError(f"{method}() got an empty library name.")
             if isinstance(lib, str) and _looks_like_a_path(lib):
-                raise TypeError(
+                raise PconsTypeError(
                     f"{method}() got {lib!r}, which looks like a file path; a "
                     f"string here should be a library name, which the toolchain turns "
                     f"into a link argument like -l{lib}. To link a library "
@@ -949,7 +959,7 @@ class Target:
                     f"use just the library name here."
                 )
             if lib is self:
-                raise ValueError(f"Target '{self.name}' cannot link itself.")
+                raise PconsValueError(f"Target '{self.name}' cannot link itself.")
             link_libs.append(
                 lib
             )  # ValidatedUniqueList: validates, de-dupes, invalidates cache
@@ -1014,14 +1024,16 @@ class Target:
         from pcons.core.node import Node
 
         if self._resolved:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
                 f"Add dependencies before project.resolve() or project.generate()."
             )
         for item in items:
             if isinstance(item, Target):
                 if item is self:
-                    raise ValueError(f"Target '{self.name}' cannot depend on itself.")
+                    raise PconsValueError(
+                        f"Target '{self.name}' cannot depend on itself."
+                    )
                 self._check_same_tree(item, "depend on")
             elif not isinstance(item, Node):
                 # str or Path: a FileNode, read from this target's script
@@ -1192,17 +1204,17 @@ class Target:
                 lib.add_sources(["cuda-support.cxx"], env=careful)
         """
         if self._resolved:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
                 f"Call add_sources() before project.resolve() or project.generate()."
             )
         if isinstance(sources, str):
-            raise TypeError(
+            raise PconsTypeError(
                 f"add_sources() requires a list, got a string. "
                 f'Use add_sources(["{sources}"]) or add_source("{sources}").'
             )
         if isinstance(sources, Path):
-            raise TypeError(
+            raise PconsTypeError(
                 f"add_sources() requires a list, got a Path. "
                 f"Use add_sources([{sources!r}]) or add_source({sources!r})."
             )
@@ -1229,7 +1241,7 @@ class Target:
         if self._pending_sources is None:
             self._pending_sources = []
         if source in self._pending_sources:
-            raise ValueError(
+            raise PconsValueError(
                 f"Target '{self.name}' already has source target "
                 f"'{source.name}'. Its outputs would be built once and "
                 f"consumed twice."
@@ -1260,7 +1272,7 @@ class Target:
         """
         if node in self._source_set:
             if env is None:
-                raise ValueError(
+                raise PconsValueError(
                     f"Target '{self.name}' already has source '{node.name}'. "
                     f"Adding it again links it twice, which the linker reports "
                     f"as duplicate symbols in one object file.\n"
@@ -1288,7 +1300,7 @@ class Target:
             return
         existing = self._source_envs.get(node.path)
         if existing is not None and existing is not env:
-            raise ValueError(
+            raise PconsValueError(
                 f"Source '{node.path}' was added to target '{self.name}' twice "
                 f"with different environments. One source compiles once per "
                 f"target; use a separate target if you need two variants."
@@ -1316,14 +1328,14 @@ class Target:
                 nothing would read it.
         """
         if key not in _KNOWN_TARGET_OPTIONS:
-            raise ValueError(_unknown_option_message(key))
+            raise PconsValueError(_unknown_option_message(key))
         self._builder_data[key] = value
         return self
 
     def get_option(self, key: str, default: Any = None) -> Any:
         """Get an option previously set with :meth:`set_option`."""
         if key not in _KNOWN_TARGET_OPTIONS:
-            raise ValueError(_unknown_option_message(key))
+            raise PconsValueError(_unknown_option_message(key))
         return self._builder_data.get(key, default)
 
     def pre_build(self, command: str) -> Target:

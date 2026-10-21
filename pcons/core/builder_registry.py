@@ -21,6 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
+from pcons.core.errors import PconsValueError
 from pcons.core.tiers import validate_tier
 
 if TYPE_CHECKING:
@@ -174,7 +175,7 @@ def builder(
     def decorator(cls: type) -> type:
         create_target = getattr(cls, "create_target", None)
         if create_target is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"Builder class {cls.__name__} must have a 'create_target' method"
             )
 

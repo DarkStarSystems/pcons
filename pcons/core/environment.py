@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias, cast
 
 from pcons.core.debug import trace, trace_value
+from pcons.core.errors import PconsRuntimeError, PconsTypeError, PconsValueError
 from pcons.core.names import validate_name
 from pcons.core.subst import Namespace, subst, to_shell_command
 from pcons.core.toolconfig import ToolConfig
@@ -295,7 +296,7 @@ class Environment(_EnvironmentStubs):
         # Validate toolchain type early, before any access (strings and
         # sequences were already resolved via the registry above)
         if toolchain is not None and not hasattr(toolchain, "setup"):
-            raise TypeError(
+            raise PconsTypeError(
                 f"toolchain must be a Toolchain object or a registered toolchain "
                 f'name like "c" or "gcc", got {type(toolchain).__name__}'
             )
@@ -614,11 +615,11 @@ class Environment(_EnvironmentStubs):
             except RuntimeError as e:
                 if abi is None:
                     raise
-                raise RuntimeError(
+                raise PconsRuntimeError(
                     f"Can't add '{toolchain}' beside {primary.name}: {e}"
                 ) from e
         elif not abi_compatible(getattr(toolchain, "abi", None), abi):
-            raise ValueError(
+            raise PconsValueError(
                 f"Can't add {toolchain.name} beside {primary.name}: "
                 + toolchain_registry.abi_mismatch(toolchain.name, toolchain, abi)
             )
@@ -920,7 +921,7 @@ class Environment(_EnvironmentStubs):
         # leaves no half-applied environment behind.
         for key, value in kwargs.items():
             if isinstance(value, (list, tuple, UserList)):
-                raise TypeError(self._list_override_message(key, value))
+                raise PconsTypeError(self._list_override_message(key, value))
 
         temp_env = self.clone()
 
@@ -1151,7 +1152,7 @@ class Environment(_EnvironmentStubs):
                 {c.tool for c in preset.contributions if c.cmd is not None}
             )
             if cmd_tools:
-                raise ValueError(
+                raise PconsValueError(
                     f"Preset '{preset.name}' is in exclusive group "
                     f"'{preset.exclusive_group}' but replaces the command of "
                     f"tool(s) {', '.join(cmd_tools)}. Group presets switch by "
@@ -1173,7 +1174,7 @@ class Environment(_EnvironmentStubs):
             }
         )
         if missing_cmd:
-            raise ValueError(
+            raise PconsValueError(
                 f"Preset '{preset.name}' replaces the command of "
                 f"tool(s) {', '.join(missing_cmd)}, which this "
                 f"environment does not have (available: "
@@ -1182,7 +1183,7 @@ class Environment(_EnvironmentStubs):
             )
         if not any(c.tool in tools for c in preset.contributions):
             targets = sorted({c.tool for c in preset.contributions})
-            raise ValueError(
+            raise PconsValueError(
                 f"Preset '{preset.name}' would have no effect: none of "
                 f"its target tools ({', '.join(targets)}) exist in this "
                 f"environment (available: {', '.join(sorted(tools))})."
@@ -1315,7 +1316,7 @@ class Environment(_EnvironmentStubs):
             landed.append(self.apply_from(toolchain, preset))
         if intent.kind == "feature" and realized and not any(landed) and not replaying:
             owners = sorted({c.tool for _, p in realized for c in p.contributions})
-            raise ValueError(
+            raise PconsValueError(
                 f"Preset '{intent.name}' would have no effect: its flags are for "
                 f"{', '.join(owners)}, which other toolchains in this "
                 f"environment own."
@@ -1346,6 +1347,7 @@ class Environment(_EnvironmentStubs):
             return toolchain.make_setting_preset(intent.name, *intent.args)
         if kind == "runtime":
             return toolchain.make_runtime_preset(intent.name, self.variant, self.target)
+        # A pcons bug, not a user error.
         raise ValueError(f"Unknown intent kind '{kind}'")
 
     def flags_realized_by(self, tool: str, toolchain: Toolchain) -> list[Any]:
@@ -1438,7 +1440,7 @@ class Environment(_EnvironmentStubs):
             intent = Intent("arch", arch)
             if not self._realize(intent, self.toolchains):
                 names = ", ".join(t.name for t in self.toolchains)
-                raise ValueError(
+                raise PconsValueError(
                     f"No configured toolchain ({names}) realizes target "
                     f"arch '{arch}'. Retargeting the CPU on this platform "
                     f"may need a cross toolchain or cross preset instead "
@@ -1467,7 +1469,7 @@ class Environment(_EnvironmentStubs):
         from pcons.core.preset import RUNTIME_LINKAGE_GROUP, RUNTIME_LINKAGES, Intent
 
         if linkage not in RUNTIME_LINKAGES:
-            raise ValueError(
+            raise PconsValueError(
                 f"Unknown runtime linkage '{linkage}': it is "
                 f"{' or '.join(repr(k) for k in RUNTIME_LINKAGES)}."
             )
@@ -1576,12 +1578,12 @@ class Environment(_EnvironmentStubs):
             if name in available:
                 # The name is declared but its realization came back empty:
                 # an optional feature (e.g. openmp) this system can't provide.
-                raise ValueError(
+                raise PconsValueError(
                     f"Preset '{name}' is not available with this toolchain on "
                     f"this system. Optional features can be guarded with "
                     f"env.has_preset({name!r})."
                 )
-            raise ValueError(
+            raise PconsValueError(
                 f"Unknown preset '{name}'. Toolchain built-ins here: "
                 f"{', '.join(available) or '(none)'}; contributed presets "
                 f"are listed by pcons.list_presets()."
@@ -1685,7 +1687,7 @@ class Environment(_EnvironmentStubs):
             for toolchain in self.toolchains:
                 old = toolchain.make_feature_preset(intent.name, self.target)
                 if old != toolchain.make_feature_preset(intent.name, new):
-                    raise ValueError(
+                    raise PconsValueError(
                         f"Apply the cross preset before preset '{intent.name}', "
                         f"whose flags depend on the platform built for."
                     )

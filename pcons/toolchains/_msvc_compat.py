@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from pcons.core.errors import PconsValueError
 from pcons.core.preset import Preset, ToolContribution
 from pcons.tools.toolchain import BaseToolchain, LinkNeeds
 
@@ -159,7 +160,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         Windows has no rpaths or frameworks. Default libraries the objects
         mustn't bring are ``/NODEFAULTLIB:``."""
         if needs.rpaths or needs.frameworks:
-            raise ValueError(
+            raise PconsValueError(
                 f"Target '{target.name}': {self.name} links for Windows, which "
                 f"has no rpaths or frameworks, but its objects need {needs}."
             )
@@ -292,7 +293,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """Raise: these toolchains target only Windows; CPU selection is
         set_target_arch's job."""
         name = getattr(cross, "name", cross)
-        raise ValueError(
+        raise PconsValueError(
             f"Cross preset '{name}' does not apply to the {self.name} toolchain: "
             f"it targets only Windows. To select the CPU, use "
             f'env.set_target_arch(...) (e.g. "arm64") instead.'
@@ -323,7 +324,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
     ) -> list[ToolContribution]:
         spec = self.MSVC_VARIANTS.get(variant.lower())
         if spec is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"Unknown variant '{variant}'. "
                 f"Supported variants: {', '.join(self.MSVC_VARIANTS)}."
             )
@@ -348,7 +349,7 @@ def module_definition(target: Target, symbols: Sequence[str]) -> str:
     """
     patterns = [s for s in symbols if "*" in s or "?" in s]
     if patterns:
-        raise ValueError(
+        raise PconsValueError(
             f"Target '{target.name}': MSVC exports symbols by exact name, "
             f"so the pattern {patterns[0]!r} in exported_symbols can't be "
             f"honored. List the names."

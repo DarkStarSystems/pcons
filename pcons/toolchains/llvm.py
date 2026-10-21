@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsRuntimeError
 from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.core.target import Target
@@ -118,7 +119,7 @@ def _parse_libcxx_manifest(manifest: Path) -> dict[str, dict[str, Any]]:
     data = json.loads(manifest.read_text(encoding="utf-8"))
     version = data.get("version")
     if version is not None and version != 1:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"libc++ modules manifest at {manifest} declares version "
             f"{version!r}, but pcons only knows version 1. The format may "
             "have changed in your libc++; please update pcons or file an "

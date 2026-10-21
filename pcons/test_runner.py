@@ -26,6 +26,7 @@ from pathlib import Path
 import click
 
 from pcons._cli_click import run_cli
+from pcons.core.errors import PconsRuntimeError, PconsValueError
 
 logger = logging.getLogger("pcons.test")
 
@@ -118,10 +119,10 @@ def load_manifest(path: Path) -> tuple[dict, list[dict]]:
     """
     data = json.loads(path.read_text())
     if not isinstance(data, dict):
-        raise ValueError(f"{path}: manifest root must be a JSON object")
+        raise PconsValueError(f"{path}: manifest root must be a JSON object")
     tests = data.get("tests", [])
     if not isinstance(tests, list):
-        raise ValueError(f"{path}: 'tests' must be a list")
+        raise PconsValueError(f"{path}: 'tests' must be a list")
     return data, tests
 
 
@@ -204,7 +205,7 @@ def _discover_gtest(
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"--gtest_list_tests failed (exit {result.returncode}): "
             f"{result.stderr.strip()}"
         )
@@ -247,7 +248,7 @@ def _discover_doctest(
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"--list-test-cases failed (exit {result.returncode}): "
             f"{result.stderr.strip()}"
         )
@@ -287,7 +288,7 @@ def _discover_catch2(
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"--list-test-names-only failed (exit {result.returncode}): "
             f"{result.stderr.strip()}"
         )
@@ -528,7 +529,7 @@ def _validate_deps(tests: list[dict]) -> None:
     for name, deps in deps_of.items():
         for d in deps:
             if d not in known:
-                raise ValueError(
+                raise PconsValueError(
                     f"Test {name!r} depends_on {d!r} which is not a defined test."
                 )
 
@@ -541,7 +542,7 @@ def _validate_deps(tests: list[dict]) -> None:
         for d in deps_of[node]:
             if color[d] == GRAY:
                 cycle = " -> ".join([*stack[stack.index(d) :], d])
-                raise ValueError(f"Cycle in depends_on graph: {cycle}")
+                raise PconsValueError(f"Cycle in depends_on graph: {cycle}")
             if color[d] == WHITE:
                 visit(d, [*stack, d])
         color[node] = BLACK

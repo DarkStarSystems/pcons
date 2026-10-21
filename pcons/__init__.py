@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsValueError
+
 if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.toolchains import (
@@ -153,7 +155,7 @@ def Generator(
     valid = ", ".join(sorted(set(GENERATORS.keys())))
     for name in names:
         if name not in GENERATORS:
-            raise ValueError(f"Unknown generator '{name}'. Valid options: {valid}")
+            raise PconsValueError(f"Unknown generator '{name}'. Valid options: {valid}")
 
     instances = [GENERATORS[name]() for name in names]
     if len(instances) == 1:

@@ -25,6 +25,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from pcons.core.errors import PconsKeyError, PconsValueError
+
 # Values treated as false by CMake for #cmakedefine / #cmakedefine01
 _FALSY_VALUES = frozenset({"", "0", "off", "false", "no"})
 
@@ -85,7 +87,7 @@ def configure_file(
         pass  # called outside a project (a unit test, or a bare script)
 
     if style not in ("cmake", "at"):
-        raise ValueError(
+        raise PconsValueError(
             f"Unknown configure_file style {style!r}; expected 'cmake' or 'at'"
         )
 
@@ -132,7 +134,7 @@ def configure_file(
         if var in variables:
             return variables[var]
         if strict:
-            raise KeyError(
+            raise PconsKeyError(
                 f"Variable @{var}@ in {template} has no entry in the variables dict"
             )
         return ""

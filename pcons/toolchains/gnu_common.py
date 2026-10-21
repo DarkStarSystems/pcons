@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import Platform, get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.errors import PconsValueError
 from pcons.core.subst import NodeVar, SourcePath, TargetPath
 
 if TYPE_CHECKING:
@@ -147,7 +148,7 @@ def require_cross_binaries(
     if any(tool in cmds for tool in tools):
         return
     name = getattr(preset, "name", preset)
-    raise ValueError(
+    raise PconsValueError(
         f"Cross preset '{name}' targets triple '{triple}', but {compiler} "
         f"selects targets by binary, not by flag. Provide cross-compiler "
         f"commands in the preset's tool_cmds (e.g. "

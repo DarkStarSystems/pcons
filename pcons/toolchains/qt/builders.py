@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING
 from xml.sax.saxutils import escape
 
 from pcons.core.builder_registry import BuilderRegistry, builder
+from pcons.core.errors import PconsFileNotFoundError, PconsRuntimeError
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import PathToken
 from pcons.toolchains.qt.scan import _HEADER_SUFFIXES, output_rel_dir
@@ -68,7 +69,7 @@ _CPP_SUFFIXES = MOC_SOURCE_SUFFIXES + (".c", ".m", ".mm")
 
 def _require_qt_tool(env: Environment, what: str) -> None:
     if not env.has_tool("qt"):
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"{what} needs the qt toolchain on the environment. "
             f'Call find_qt(project, env, modules=[...]) first (or env.add_toolchain("qt")).'
         )
@@ -816,7 +817,7 @@ class QtResourcesBuilder:
             if any(ch in pattern_str for ch in "*?["):
                 matches = sorted(root.glob(pattern_str))
                 if not matches:
-                    raise FileNotFoundError(
+                    raise PconsFileNotFoundError(
                         f"QtResources '{name}': pattern '{pattern_str}' "
                         f"matched no files under {root}"
                     )

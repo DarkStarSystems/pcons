@@ -12,6 +12,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import Platform, get_platform
+from pcons.core.errors import PconsValueError
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
@@ -69,7 +70,7 @@ def static_archive(lib: str, platform: Platform) -> str:
     form (``:libstdc++.a``), for a link whose driver doesn't link that
     runtime itself. Apple's linker has no such form."""
     if platform.is_apple:
-        raise ValueError(
+        raise PconsValueError(
             f"On Apple's platforms, only its own language's driver can link "
             f"lib{lib} static: set the target's link_language to that language."
         )
@@ -169,7 +170,7 @@ class UnixToolchain(BaseToolchain):
         triple = str(getattr(cross, "triple", None) or "")
         if triple.startswith("wasm32") and not self.TARGETS_WASM:
             name = getattr(cross, "name", cross)
-            raise ValueError(
+            raise PconsValueError(
                 f"Cross preset '{name}' targets WebAssembly, which needs its "
                 f"dedicated toolchain rather than {self.name}: use "
                 f'project.Environment(toolchain="emscripten") or '
@@ -649,7 +650,7 @@ class UnixToolchain(BaseToolchain):
                 ToolContribution(t, flags=("-arch", arch))
                 for t in (*self._feature_preset_tools(), "link")
             ]
-        raise ValueError(
+        raise PconsValueError(
             f"{self.name} cannot retarget the CPU to '{arch}' by flag on "
             f"this platform. Use a cross preset (e.g. "
             f"linux_cross(triple=...)) or a cross toolchain instead; see "
@@ -771,7 +772,7 @@ class UnixToolchain(BaseToolchain):
     ) -> list[ToolContribution]:
         spec = self.UNIX_VARIANTS.get(variant.lower())
         if spec is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"Unknown variant '{variant}'. "
                 f"Supported variants: debug, release, release-fastest, "
                 f"relwithdebinfo, minsizerel."
@@ -812,7 +813,7 @@ class UnixToolchain(BaseToolchain):
         if target.is_apple and (
             self.IS_CLANG_DRIVER or self._compiler_is_apple_clang()
         ):
-            raise ValueError(
+            raise PconsValueError(
                 f"{self.name} can't link its runtime static: on Apple's "
                 f"platforms, clang links the system's C++ runtime, which is "
                 f"shared only."

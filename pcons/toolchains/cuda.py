@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import Platform, get_platform
+from pcons.core.errors import PconsValueError
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain, msvc_crt
@@ -146,7 +147,7 @@ class CudaToolchain(BaseToolchain):
         runtime = env.cuda.get("runtime")
         libs = self.CUDA_RUNTIMES.get(runtime)
         if libs is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"env.cuda.runtime is {runtime!r}; it takes "
                 f"{', '.join(repr(r) for r in self.CUDA_RUNTIMES)}."
             )
@@ -211,7 +212,7 @@ class CudaToolchain(BaseToolchain):
         """Raise for a preset with a triple; one without applies as usual."""
         if getattr(cross, "triple", None):
             name = getattr(cross, "name", cross)
-            raise ValueError(
+            raise PconsValueError(
                 f"Cross preset '{name}' targets triple '{cross.triple}', but "
                 f"CUDA cross targets aren't supported."
             )
@@ -233,7 +234,7 @@ class CudaToolchain(BaseToolchain):
 
         host = get_platform().arch
         if canonical(arch) != canonical(host):
-            raise ValueError(
+            raise PconsValueError(
                 f"{self.name} can't build for target arch '{arch}': nvcc builds "
                 f"for the host's ({host})."
             )
@@ -280,7 +281,7 @@ class CudaToolchain(BaseToolchain):
         """CUDA variant flags applied to the nvcc compiler."""
         spec = self.CUDA_VARIANTS.get(variant.lower())
         if spec is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"Unknown variant '{variant}'. "
                 f"Supported CUDA variants: debug, release, release-fastest, "
                 f"relwithdebinfo, "

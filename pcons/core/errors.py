@@ -351,3 +351,38 @@ class PackageNotFoundError(ConfigureError):
 
 class BuilderError(PconsError):
     """Error in a builder definition or invocation."""
+
+
+# A pcons error that is also the built-in exception its cause would raise, as
+# json.JSONDecodeError is a ValueError: `except ValueError` around a pcons call
+# keeps working, and pcons reports the error as one, without a traceback. Raise
+# these for a mistake in the build or its setup; a bare ValueError (and the
+# rest) is for pcons's own bugs, which do want the traceback.
+
+
+class PconsValueError(PconsError, ValueError):
+    """A build asked for a value pcons can't use."""
+
+
+class PconsTypeError(PconsError, TypeError):
+    """A build passed pcons the wrong kind of object."""
+
+
+class PconsRuntimeError(PconsError, RuntimeError):
+    """Something a build needs isn't there or didn't work."""
+
+
+class PconsFileNotFoundError(PconsError, FileNotFoundError):
+    """A file a build needs doesn't exist."""
+
+
+class PconsKeyError(PconsError, KeyError):
+    """A build looked up a name pcons doesn't know."""
+
+    def __str__(self) -> str:
+        # KeyError shows its argument as a repr, quoting the whole message.
+        return Exception.__str__(self)
+
+
+class PconsAttributeError(PconsError, AttributeError):
+    """A build asked an object for something it doesn't have."""

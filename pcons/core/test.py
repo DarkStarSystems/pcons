@@ -22,6 +22,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.errors import PconsKeyError, PconsRuntimeError, PconsTypeError
+
 if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.core.target import Target
@@ -140,17 +142,17 @@ def set_test_property(target: Target, key: str, value: Any) -> None:
         KeyError: ``key`` is not a valid test property name.
     """
     if target.target_type != "test":
-        raise TypeError(
+        raise PconsTypeError(
             f"set_test_property: {target.name!r} is not a Test target "
             f"(target_type={target.target_type!r})."
         )
     if target._resolved:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"Cannot modify test {target.name!r} after resolve(). "
             "Call set_test_property() before project.generate()."
         )
     if key not in _MUTABLE_TEST_KEYS:
-        raise KeyError(
+        raise PconsKeyError(
             f"Unknown test property {key!r}. "
             f"Valid properties: {sorted(_MUTABLE_TEST_KEYS)}."
         )
@@ -159,7 +161,7 @@ def set_test_property(target: Target, key: str, value: Any) -> None:
         # Defensive: the factory drops spec_partial after resolution, but
         # we already guarded with _resolved above. This catches the rare
         # case of a hand-built test target missing the partial dict.
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"Test {target.name!r} has no partial spec to update — "
             "is this really a target created by project.Test()?"
         )

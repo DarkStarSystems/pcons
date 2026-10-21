@@ -5197,7 +5197,7 @@ if platform.is_macos():
 
 ### No toolchain found
 
-**Error:** `RuntimeError: No C/C++ toolchain found`
+**Error:** `No C/C++ toolchain found. Tried: ...`
 
 **Solution:** Install a compiler:
 
@@ -5218,13 +5218,13 @@ if platform.is_macos():
 
 ### Missing sources
 
-**Error:** `MissingSourceError: File not found: src/missing.cpp`
+**Error:** `source file not found: src/missing.cpp`
 
 **Solution:** Check that all source files exist and paths are correct.
 
 ### Dependency cycles
 
-**Error:** `DependencyCycleError: Cycle detected: A -> B -> A`
+**Error:** `dependency cycle: A -> B -> A`
 
 **Solution:** Refactor to break the cycle. Two libraries shouldn't depend on each other.
 

@@ -44,6 +44,7 @@ from pcons.core.debug import is_enabled, trace
 from pcons.core.errors import (
     CircularReferenceError,
     MissingVariableError,
+    PconsTypeError,
     SubstitutionError,
 )
 from pcons.util.source_location import SourceLocation
@@ -367,14 +368,17 @@ class Namespace:
             parts = key.split(".", 1)
             sub = self._data.get(parts[0])
             if sub is None:
+                # The lookup catches this; it is not a user error.
                 raise KeyError(key)
             if isinstance(sub, Namespace):
                 return sub._resolve(parts[1])
             if isinstance(sub, dict):
                 return Namespace(sub)._resolve(parts[1])
+            # The lookup catches this; it is not a user error.
             raise KeyError(key)
         if key in self._data:
             return self._data[key]
+        # The lookup catches this; it is not a user error.
         raise KeyError(key)
 
     def __contains__(self, key: str) -> bool:
@@ -391,13 +395,14 @@ class Namespace:
             elif isinstance(sub, dict):
                 sub[parts[1]] = value
             else:
-                raise TypeError(f"Cannot set {key}: {parts[0]} is not a namespace")
+                raise PconsTypeError(f"Cannot set {key}: {parts[0]} is not a namespace")
         else:
             self._data[key] = value
 
     def __getitem__(self, key: str) -> Any:
         value = self.get(key, _MISSING)
         if value is _MISSING:
+            # The lookup catches this; it is not a user error.
             raise KeyError(key)
         return value
 

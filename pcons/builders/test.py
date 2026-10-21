@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder_registry import builder
-from pcons.core.errors import PconsError
+from pcons.core.errors import PconsError, PconsTypeError, PconsValueError
 from pcons.core.paths import executable_form
 from pcons.core.target import Target
 from pcons.core.test import TestSpec, test_args
@@ -219,11 +219,11 @@ class TestBuilder:
                              timeout=30)
         """
         if not isinstance(name, str) or not name:
-            raise TypeError(
+            raise PconsTypeError(
                 f"Test name must be a non-empty string, got {type(name).__name__}."
             )
         if discover is not None and discover not in ("gtest", "doctest", "catch2"):
-            raise ValueError(
+            raise PconsValueError(
                 f"Test {name!r}: discover={discover!r} is not a known protocol. "
                 "Use 'gtest', 'doctest', or 'catch2' — or None to disable."
             )

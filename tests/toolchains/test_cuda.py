@@ -169,6 +169,17 @@ class TestCudaVariants:
         # Should NOT have debug flags
         assert "-G" not in env.cuda.flags
 
+    def test_an_unknown_variant_lists_the_known_ones(self, test_project):  # noqa: F811
+        from pcons.core.environment import Environment
+
+        toolchain = CudaToolchain()
+        toolchain._tools = {"cuda": CudaCompiler()}
+        env = Environment()
+        toolchain.setup(env)
+
+        with pytest.raises(ValueError, match="Unknown variant 'relase'.*release"):
+            apply_variant(toolchain, env, "relase")
+
     def test_apply_profile_variant(self, test_project):  # noqa: F811
         """Profile variant adds line info for profilers."""
         from pcons.core.environment import Environment

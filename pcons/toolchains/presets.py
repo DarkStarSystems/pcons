@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 from pcons.configure.platform import Platform
+from pcons.core.errors import PconsValueError
 
 # Deprecated env_vars keys mapped to pcons tool names (see CrossPreset).
 _ENV_VAR_TOOL_MAP: dict[str, str] = {
@@ -266,7 +267,7 @@ def android(
         CrossPreset configured for Android.
     """
     if stl not in _ANDROID_STL_LINK_FLAGS:
-        raise ValueError(
+        raise PconsValueError(
             f"Unknown Android STL '{stl}'. "
             f"Supported: {', '.join(_ANDROID_STL_LINK_FLAGS)}"
         )
@@ -277,7 +278,7 @@ def android(
         "x86": "i686-linux-android",
     }
     if arch not in triple_map:
-        raise ValueError(
+        raise PconsValueError(
             f"Unknown Android architecture '{arch}'. Supported: {', '.join(triple_map)}"
         )
 
@@ -428,7 +429,7 @@ def pyodide(
         CrossPreset configured for the PyEmscripten side-module ABI.
     """
     if abi not in PYEMSCRIPTEN_ABIS:
-        raise ValueError(
+        raise PconsValueError(
             f"Unknown PyEmscripten ABI '{abi}'. Supported: "
             f"{', '.join(PYEMSCRIPTEN_ABIS)}"
         )
