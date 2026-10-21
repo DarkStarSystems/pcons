@@ -298,7 +298,8 @@ jobs:
         # runtime library, so nothing links.
         run: |
           curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
-          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update -q
           sudo apt-get install -y -q flang-21 libflang-21-dev
           echo "FC=/usr/bin/flang-21" >> "$GITHUB_ENV"
@@ -709,22 +710,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # 26.04's gcc is 15, the first with `import std`, and its clang is 21.
+        os: [ubuntu-26.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "latest"
-      - name: Set up clang tools (Linux)
+      - name: Set up clang-scan-deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo update-alternatives --install /usr/bin/clang-scan-deps clang-scan-deps \
-            /usr/bin/clang-scan-deps-18 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ \
-            /usr/bin/clang++-18 100
-          sudo update-alternatives --install /usr/bin/clang clang \
-            /usr/bin/clang-18 100
+            /usr/bin/clang-scan-deps-21 100
       - name: Add Homebrew LLVM to PATH (macOS)
         if: runner.os == 'macOS'
         run: echo "$(brew --prefix llvm@18)/bin" >> $GITHUB_PATH
@@ -732,30 +730,7 @@ jobs:
         run: uv python install 3.12 && uv sync
       - name: Install libc++ for `import std;` (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y libc++-18-dev libc++abi-18-dev
-      - name: Install gcc-15 (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-
-          # Add the PPA by hand rather than with add-apt-repository, which
-          # asks Launchpad's API for the signing key and gets an HTTP 500
-          # GPGKeyTemporarilyNotFoundError on the runners while serving the
-          # same key fine elsewhere. The keyserver is a separate service.
-          sudo install -d /etc/apt/keyrings
-          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x60C317803A41BA51845E371A1E9377A2BA9EF27F" \
-            | sudo gpg --dearmor -o /etc/apt/keyrings/ubuntu-toolchain-r.gpg
-          . /etc/os-release
-          echo "deb [signed-by=/etc/apt/keyrings/ubuntu-toolchain-r.gpg] https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu ${VERSION_CODENAME} main" \
-            | sudo tee /etc/apt/sources.list.d/ubuntu-toolchain-r.list
-          sudo apt-get update
-
-          sudo apt-get install -y gcc-15 g++-15
-
-          sudo update-alternatives --install /usr/bin/gcc gcc \
-            /usr/bin/gcc-15 100
-          sudo update-alternatives --install /usr/bin/g++ g++ \
-            /usr/bin/g++-15 100
+        run: sudo apt-get install -y libc++-21-dev libc++abi-21-dev
       - name: Run C++20 modules example tests
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules or 30_cxx_partitions or 31_cxx_modules_optin or 32_cxx_import_std or 35_cxx_modules_deps or 39_bmi_compat" -v
       - name: Upload coverage to Codecov

@@ -6,6 +6,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -99,9 +100,32 @@ def _find_libcxx_modules_manifest(
         if not out or out == candidate:
             continue
         p = Path(out)
-        if p.is_file():
+        if not p.is_file():
+            continue
+        if _std_module_source_exists(p):
             return p.resolve()
+        # Debian and Ubuntu: clang reports the multiarch copy, whose relative
+        # paths only work from the llvm-N/lib symlink to it
+        # (llvm/llvm-project#172497). Don't resolve that symlink.
+        beside = _compiler_lib_dir(compiler_cmd)
+        if beside and _std_module_source_exists(beside / candidate):
+            return beside / candidate
+        return p.resolve()
     return None
+
+
+def _compiler_lib_dir(compiler_cmd: str) -> Path | None:
+    """The lib directory of the LLVM install the compiler belongs to."""
+    found = shutil.which(compiler_cmd)
+    return Path(found).resolve().parent.parent / "lib" if found else None
+
+
+def _std_module_source_exists(manifest: Path) -> bool:
+    """Whether the manifest's `std` module source is where it says."""
+    if not manifest.is_file():
+        return False
+    std = _parse_libcxx_manifest(manifest).get("std")
+    return std is not None and std["source-path"].is_file()
 
 
 def _parse_libcxx_manifest(manifest: Path) -> dict[str, dict[str, Any]]:

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.llvm."""
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -572,6 +573,18 @@ class TestLlvmCompileFlagsForTargetType:
         assert flags == []
 
 
+def _libcxx_manifest(lib_dir: Path) -> Path:
+    """A libc++.modules.json in lib_dir, with the std.cppm it points at."""
+    cppm = lib_dir.parent / "share/libc++/v1/std.cppm"
+    cppm.parent.mkdir(parents=True, exist_ok=True)
+    cppm.write_text("export module std;\n", encoding="utf-8")
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    manifest = lib_dir / "libc++.modules.json"
+    entry = {"logical-name": "std", "source-path": "../share/libc++/v1/std.cppm"}
+    manifest.write_text(json.dumps({"version": 1, "modules": [entry]}), "utf-8")
+    return manifest
+
+
 class TestLibcxxModulesManifest:
     """Tests for libc++ std-module manifest discovery and parsing.
 
@@ -585,8 +598,7 @@ class TestLibcxxModulesManifest:
     ) -> None:
         from pcons.toolchains.llvm import _find_libcxx_modules_manifest
 
-        manifest = tmp_path / "libc++.modules.json"
-        manifest.write_text("{}", encoding="utf-8")
+        manifest = _libcxx_manifest(tmp_path / "lib")
 
         class _Result:
             returncode = 0
@@ -620,8 +632,7 @@ class TestLibcxxModulesManifest:
         # issue #98.
         from pcons.toolchains.llvm import _find_libcxx_modules_manifest
 
-        manifest = tmp_path / "libc++.modules.json"
-        manifest.write_text("{}", encoding="utf-8")
+        manifest = _libcxx_manifest(tmp_path / "lib")
 
         def _fake_run(cmd: list[str], **_kw: object) -> object:
             query = next(
@@ -640,6 +651,44 @@ class TestLibcxxModulesManifest:
 
         monkeypatch.setattr("pcons.toolchains.llvm.subprocess.run", _fake_run)
         assert _find_libcxx_modules_manifest("clang++", ["-std=c++23"]) == manifest
+
+    def test_debian_multiarch_manifest_is_read_from_the_llvm_lib_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Debian and Ubuntu install the manifest in the multiarch lib dir,
+        # with a symlink to it from llvm-N/lib, and clang reports the
+        # multiarch copy; its relative paths only work from the symlink's
+        # directory (llvm/llvm-project#172497).
+        from pcons.toolchains.llvm import (
+            _find_libcxx_modules_manifest,
+            _parse_libcxx_manifest,
+        )
+
+        llvm = tmp_path / "llvm-21"
+        _libcxx_manifest(llvm / "lib").unlink()
+        multiarch = _libcxx_manifest(tmp_path / "multiarch" / "lib")
+        (multiarch.parent.parent / "share").rename(tmp_path / "unrelated")
+        beside = llvm / "lib" / "libc++.modules.json"
+        try:
+            beside.symlink_to(multiarch)
+        except OSError:
+            pytest.skip("symlinks need privileges here")
+        clang = llvm / "bin" / "clang++"
+
+        class _Result:
+            returncode = 0
+            stdout = f"{multiarch}\n"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.subprocess.run", lambda *_a, **_k: _Result()
+        )
+        monkeypatch.setattr("pcons.toolchains.llvm.shutil.which", lambda _: clang)
+        found = _find_libcxx_modules_manifest("clang++", [])
+        assert found == beside
+        assert found is not None
+        std = _parse_libcxx_manifest(found)["std"]["source-path"]
+        assert std == (llvm / "share/libc++/v1/std.cppm").resolve()
 
     def test_returns_none_when_compiler_echoes_query(
         self, monkeypatch: pytest.MonkeyPatch
