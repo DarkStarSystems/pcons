@@ -82,8 +82,8 @@ upgrade.
 - A custom toolchain needs no `_configure_tools()` and its tools no
   `configure()`: pcons never called them. It gets its tools from the
   registry's `tool_classes`, or from the finder that makes it.
-  `toolchain.configure()`, `Configure.find_toolchain()` and
-  `Configure.register_toolchain()` are gone.
+  `Configure.find_toolchain()` and `Configure.register_toolchain()` are
+  gone.
 - Static and object libraries compile as position-independent code on
   Linux, Android and the BSDs, so they can go into a shared library, as
   Meson builds them. Before, linking one into a shared library failed with
@@ -142,6 +142,11 @@ upgrade.
   starting like a path flag of a toolchain in the project (`-Iinclude`)
   had its path rewritten. Put a path in a command as a `Path` or a node,
   and pcons writes it for where the command runs.
+
+### Deprecated
+
+- `toolchain.configure(config)` does nothing, and never did. A script
+  that calls it gets a warning; delete the call. Pcons 0.32 removes it.
 
 ### Removed
 
