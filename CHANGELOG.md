@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Fortran is a first-class language now. LLVM flang and Intel ifx join
+gfortran, all three build on Windows too, and mixing Fortran with C and
+C++ in one program just works: each compiler gets its own flags for the
+variant and every preset, the right driver links the program, and each
+language's runtime comes along. Fortran include files, submodules and
+configure checks work too, and `pcons explain` shows how a mixed program
+links and why. The new [Fortran page](https://pcons.readthedocs.io/en/latest/fortran/)
+in the docs has the details. The mixed-toolchain rework changes a few
+things for C and C++ builds as well, so read "Changed" before you
+upgrade.
+
 ### Added
 
 - `pcons explain` says how a mixed-language program links: which
@@ -51,6 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `project.Test(..., skip_returncode=77)`: a test that exits with that code
   is reported as skipped, not failed, like CTest's `SKIP_RETURN_CODE`. For
   tests that can tell only at run time that they can't run.
+- The `pyproject.toml` build backend builds real packages. It takes the
+  usual `[project]` fields (description, readme, license and
+  license-files, authors, keywords, classifiers, urls, scripts,
+  entry-points and the rest) and writes Metadata-Version 2.4. Before,
+  any of them made the build fail. `[tool.pcons]` gains `build-dir`,
+  and `jobs` (or `-C jobs=N`) caps ninja's parallelism. (#215)
 
 ### Changed
 
@@ -326,6 +343,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not with a Python traceback that made it look like a crash. Pcons's
   errors are still the exceptions they were, so `except RuntimeError`
   keeps working, and a bug in pcons itself still shows its traceback.
+- A wheel build no longer shares saved settings with a plain `pcons`
+  run in the same directory: after `uv sync`, `pcons` used the packaging
+  settings, and the backend used your variant. An editable install under
+  build isolation warns that the next regen will fail. (#215)
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20): #215 (the `pyproject.toml` backend), and
+  raised #213
 
 ## [0.30.0] - 2026-09-27
 
