@@ -45,6 +45,7 @@ from pcons.contrib.installers._helpers import (
     as_installer_step,
     staging_dir,
 )
+from pcons.core.errors import PconsValueError
 from pcons.core.paths import last_component
 
 if TYPE_CHECKING:
@@ -94,7 +95,7 @@ def _validate_staging_path(project: Project, staging_dir: Path | str) -> None:
         for node in target.output_nodes:
             node_path = node.path
             if node_path.is_relative_to(staging_path):
-                raise ValueError(
+                raise PconsValueError(
                     f"Installer staging path '{staging_path}' conflicts with "
                     f"target '{target.name}' output: {node_path}. "
                     f"Rename the target's output or use a different build directory."
@@ -103,7 +104,7 @@ def _validate_staging_path(project: Project, staging_dir: Path | str) -> None:
     # Check for conflicts with existing nodes in project
     for node_path in project._nodes:
         if node_path.is_relative_to(staging_path):
-            raise ValueError(
+            raise PconsValueError(
                 f"Installer staging path '{staging_path}' conflicts with "
                 f"existing build node: {node_path}. "
                 f"This may indicate a naming conflict in your build configuration."

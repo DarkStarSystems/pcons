@@ -593,6 +593,7 @@ def write_or_check(mode: str) -> int:
             else:
                 print(f"{path} is up to date.")
         else:
+            # A pcons bug, not a user error.
             raise ValueError(f"unknown mode: {mode}")
     return rc
 

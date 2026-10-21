@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
+from pcons.core.errors import PconsValueError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -66,7 +67,7 @@ def newest_build_tools(sdk: str | Path) -> Path:
     """
     installed = sorted(_revisions(sdk), key=lambda p: _revision(p.name))
     if not installed:
-        raise ValueError(
+        raise PconsValueError(
             f"No build-tools revision under {Path(sdk) / 'build-tools'}. "
             f"Install one with the SDK manager."
         )
@@ -95,7 +96,7 @@ def build_tools_program(sdk: str | Path, program: str) -> Path:
         if (path := _program(revision, program)) is not None
     ]
     if not found:
-        raise ValueError(
+        raise PconsValueError(
             f"No {program} under {Path(sdk) / 'build-tools'}. Install the "
             f"SDK build tools."
         )

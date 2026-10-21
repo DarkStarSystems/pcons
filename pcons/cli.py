@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -43,7 +44,7 @@ from pcons._cli_click import (
     value_taking_options,
     watch_option,
 )
-from pcons.core.errors import PconsError
+from pcons.core.errors import PconsError, PconsKeyError
 
 if TYPE_CHECKING:
     from pcons.core.cache import BuildCache
@@ -52,6 +53,19 @@ if TYPE_CHECKING:
 
 # Set up logging
 logger = logging.getLogger("pcons")
+
+
+def _with_script_location(error: PconsError, cwd: Path) -> str:
+    """An error's message, after the build-script line that led to it."""
+    from pcons.util.source_location import script_location
+
+    where = None if error.location else script_location(error.__traceback__)
+    if where is None:
+        return str(error)
+    path = Path(where.filename)
+    if path.is_relative_to(cwd):
+        where = dataclasses.replace(where, filename=str(path.relative_to(cwd)))
+    return f"{where}: {error}"
 
 
 def setup_logging(verbose: bool = False, debug: str | None = None) -> None:
@@ -871,8 +885,9 @@ def run_script(
                 return exit_code, pcons.get_registered_projects()
             except PconsError as e:
                 # Expected configure/generate failures carry actionable messages;
-                # a Python traceback would only bury them.
-                logger.error("%s", e)
+                # a Python traceback would only bury them. The script line that
+                # led to one is what the traceback would have added.
+                logger.error("%s", _with_script_location(e, Path(old_cwd)))
                 _cancel_pending_generation()
                 _maybe_postmortem(e)
                 return 1, []
@@ -1537,11 +1552,11 @@ def _cached_target_lookup(build_dir: Path) -> Callable[[str], list[str] | None]:
                 if its_paths and spelling != token and _picks_out(spelling, token)
             )
             if not choices:
-                raise KeyError(
+                raise PconsKeyError(
                     f"'{token}' names several targets, and no spelling tells "
                     f"them apart. Give one an alias, or name the file it builds."
                 )
-            raise KeyError(
+            raise PconsKeyError(
                 f"'{token}' names several targets; pick one: {', '.join(choices)}"
             )
         if not paths:

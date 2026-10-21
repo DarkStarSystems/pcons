@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsRuntimeError, PconsValueError
 from pcons.toolchains.qt.builders import _require_qt_tool, _stamped_command
 from pcons.util.source_location import get_caller_location
 
@@ -97,7 +98,7 @@ class QtDeployBuilder:
 
         if platform.is_macos:
             if bundle is None:
-                raise ValueError(
+                raise PconsValueError(
                     "QtDeploy on macOS needs bundle=<path to the .app> "
                     "(macdeployqt operates on app bundles; see "
                     "pcons.contrib.bundle for building one)."
@@ -113,7 +114,7 @@ class QtDeployBuilder:
                 env, qt_tool("windeployqt"), *extra, *flags, "$SOURCE"
             )
         else:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 "QtDeploy supports macOS (macdeployqt) and Windows "
                 "(windeployqt). On Linux use linuxdeploy or "
                 "appimagetool on the installed tree."

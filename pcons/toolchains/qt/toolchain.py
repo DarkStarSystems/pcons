@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
+from pcons.core.errors import PconsValueError
 from pcons.core.node import FileNode
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gnu_common import GNU_COMPILE_PATH_FLAGS
@@ -156,7 +157,7 @@ class _QtGenBuilder(CommandBuilder):
             # Catch the classic slip of passing source= (the builder call
             # signature is (target, sources)) — silently building nothing
             # would be far more confusing than this error.
-            raise ValueError(
+            raise PconsValueError(
                 f"env.qt.{self.name}() needs sources, e.g. "
                 f'env.qt.{self.name}(sources="file{self.src_suffixes[0]}").'
             )

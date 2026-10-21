@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.errors import PconsValueError
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.toolchains.unix import UnixToolchain
@@ -125,7 +126,7 @@ class WasmToolchain(UnixToolchain):
         an empty realization that reads as "unrealized" (docs/presets.md).
         """
         if arch.lower() != "wasm32":
-            raise ValueError(
+            raise PconsValueError(
                 f"{self.name} targets wasm32 only; cannot set target arch '{arch}'."
             )
         return Preset(name="wasm32", category="arch", arch="wasm32")

@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.errors import PconsValueError
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.fortran import (
@@ -121,7 +122,7 @@ class IfxToolchain(FortranToolchain):
         # A wasm triple gets UnixToolchain's "use the dedicated toolchain".
         if triple and not triple.startswith("wasm32"):
             name = getattr(cross, "name", cross)
-            raise ValueError(
+            raise PconsValueError(
                 f"Cross preset '{name}' targets triple '{triple}', but {self.name} "
                 f"has no cross targets: it builds for the host it runs on."
             )
@@ -236,7 +237,7 @@ class IfxMsvcToolchain(FortranToolchainBase, MsvcCompatibleToolchain):
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """/MACHINE:X64, the only machine ifx builds for."""
         if self.MSVC_MACHINE_MAP.get(arch.lower()) != "X64":
-            raise ValueError(
+            raise PconsValueError(
                 f"{self.name} builds x64 only, so it can't target '{arch}'."
             )
         return super()._arch_contributions(arch)

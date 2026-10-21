@@ -189,7 +189,7 @@
   lib/src.cpp.o: tool=cxx cmd=g++ flags=[-O0 -g -fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-static-libgcc -static-libstdc++ -Wl,-soname,<target>] libs=[] libdirs=[]
 ### linux gcc | cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 
 ## linux gcc+gfortran
 ### linux gcc+gfortran | baseline
@@ -448,7 +448,7 @@
   fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O0 -g]
   fmain/fmain: tool=link cmd=gfortran flags=[-static-libgfortran -static-libquadmath -static-libgcc] libs=[] libdirs=[]
 ### linux gcc+gfortran | cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+gfortran | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -468,7 +468,7 @@
   fc: cmd=gfortran
   link: cmd=gcc flags=[-static-libgcc -static-libstdc++]
 ### linux gcc+gfortran | before add_toolchain: cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+gfortran | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
@@ -769,7 +769,7 @@
   fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O0 -g]
   fmain/fmain: tool=link cmd=gfortran flags=[-static-libgfortran -static-libquadmath -static-libgcc] libs=[] libdirs=[]
 ### linux gfortran+gcc | cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### linux gfortran+gcc | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -789,7 +789,7 @@
   fc: cmd=gfortran
   link: cmd=gfortran flags=[-static-libgfortran -static-libquadmath -static-libgcc]
 ### linux gfortran+gcc | before add_toolchain: cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### linux gfortran+gcc | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
@@ -1101,7 +1101,7 @@
   fmain/src.f90.o: tool=fc cmd=gfortran flags=[-O0 -g]
   fmain/fmain: tool=link cmd=gfortran flags=[-static-libgfortran -static-libquadmath -static-libgcc] libs=[] libdirs=[]
 ### linux llvm+gfortran | cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### linux llvm+gfortran | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -1124,7 +1124,7 @@
   link: cmd=clang flags=[-static-libgcc -static-libstdc++]
   metal: cmd=xcrun
 ### linux llvm+gfortran | before add_toolchain: cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### linux llvm+gfortran | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
@@ -2017,7 +2017,7 @@
   fmain/src.f90.o: tool=fc cmd=ifx flags=[-O0 -g -fPIE]
   fmain/fmain: tool=link cmd=ifx flags=[-static-intel -static-libgcc] libs=[] libdirs=[]
 ### linux gcc+ifx | cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+ifx | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -2037,7 +2037,7 @@
   fc: cmd=ifx
   link: cmd=gcc flags=[-static-libgcc -static-libstdc++]
 ### linux gcc+ifx | before add_toolchain: cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+ifx | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
@@ -2309,7 +2309,7 @@
   lib/src.cu.o: tool=cuda cmd=nvcc flags=[-g -G -O0 -Xcompiler=-fPIC]
   lib/liblib.so: tool=link cmd=g++ flags=[-static-libgcc -static-libstdc++ -Wl,-soname,<target>] libs=[cudart_static dl rt pthread] libdirs=[]
 ### linux gcc+cuda | cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+cuda | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -2329,7 +2329,7 @@
   cxx: cmd=g++
   link: cmd=gcc flags=[-static-libgcc -static-libstdc++]
 ### linux gcc+cuda | before add_toolchain: cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+cuda | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
   cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
@@ -2615,13 +2615,13 @@
   fmain/src.f90.o: tool=fc cmd=gfortran flags=[]
   fmain/fmain: tool=link cmd=gfortran flags=[] libs=[] libdirs=[]
 ### darwin llvm+gfortran | runtime static
-  ERROR ValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
+  ERROR PconsValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
 ### darwin llvm+gfortran | runtime static, variant debug
-  ERROR ValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
+  ERROR PconsValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
 ### darwin llvm+gfortran | arch x86_64
-  ERROR ValueError: gfortran cannot retarget the CPU to 'x86_64' by flag. Use a cross preset (e.g. linux_cross(triple=...)) or a cross toolchain instead; see docs/presets.md.
+  ERROR PconsValueError: gfortran cannot retarget the CPU to 'x86_64' by flag. Use a cross preset (e.g. linux_cross(triple=...)) or a cross toolchain instead; see docs/presets.md.
 ### darwin llvm+gfortran | cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### darwin llvm+gfortran | before add_toolchain: variant debug
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[-O0 -g] defines=[DEBUG _DEBUG]
@@ -2637,9 +2637,9 @@
   link: cmd=clang
   metal: cmd=xcrun
 ### darwin llvm+gfortran | before add_toolchain: runtime static
-  ERROR ValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
+  ERROR PconsValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
 ### darwin llvm+gfortran | before add_toolchain: cross aarch64-linux-gnu
-  ERROR ValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
+  ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 
 ## darwin llvm+flang
 ### darwin llvm+flang | baseline
@@ -2827,11 +2827,11 @@
   fmain/src.f90.o: tool=fc cmd=flang flags=[]
   fmain/fmain: tool=link cmd=flang flags=[] libs=[] libdirs=[]
 ### darwin llvm+flang | runtime static
-  ERROR ValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
+  ERROR PconsValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
 ### darwin llvm+flang | runtime static, variant debug
-  ERROR ValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
+  ERROR PconsValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
 ### darwin llvm+flang | arch x86_64
-  ERROR ValueError: flang cannot retarget the CPU to 'x86_64' by flag. Use a cross preset (e.g. linux_cross(triple=...)) or a cross toolchain instead; see docs/presets.md.
+  ERROR PconsValueError: flang cannot retarget the CPU to 'x86_64' by flag. Use a cross preset (e.g. linux_cross(triple=...)) or a cross toolchain instead; see docs/presets.md.
 ### darwin llvm+flang | cross aarch64-linux-gnu
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[--target=aarch64-linux-gnu]
@@ -2863,7 +2863,7 @@
   link: cmd=clang
   metal: cmd=xcrun
 ### darwin llvm+flang | before add_toolchain: runtime static
-  ERROR ValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
+  ERROR PconsValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
 ### darwin llvm+flang | before add_toolchain: cross aarch64-linux-gnu
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[--target=aarch64-linux-gnu]
@@ -3060,11 +3060,11 @@
   lib/src.cpp.o: tool=cxx cmd=clang++ flags=[-std=c++20]
   lib/liblib.dylib: tool=link cmd=swiftc flags=[-Wl,-install_name,@rpath/<target>] libs=[c++] libdirs=[]
 ### darwin swift+llvm | runtime static
-  ERROR ValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
+  ERROR PconsValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
 ### darwin swift+llvm | runtime static, variant debug
-  ERROR ValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
+  ERROR PconsValueError: llvm can't link its runtime static: on Apple's platforms, clang links the system's C++ runtime, which is shared only.
 ### darwin swift+llvm | arch x86_64
-  ERROR ValueError: swift can't build for target arch 'x86_64' by flag; use a cross preset (swiftc takes a -target triple).
+  ERROR PconsValueError: swift can't build for target arch 'x86_64' by flag; use a cross preset (swiftc takes a -target triple).
 ### darwin swift+llvm | cross aarch64-linux-gnu
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang flags=[--target=aarch64-linux-gnu]
@@ -3529,9 +3529,9 @@
 ### windows clang-cl+flang | feature hardened
   ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('hardened').
 ### windows clang-cl+flang | feature pthread
-  ERROR ValueError: Preset 'pthread' is not available with this toolchain on this system. Optional features can be guarded with env.has_preset('pthread').
+  ERROR PconsValueError: Preset 'pthread' is not available with this toolchain on this system. Optional features can be guarded with env.has_preset('pthread').
 ### windows clang-cl+flang | feature coverage
-  ERROR ValueError: Unknown preset 'coverage'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, pthread, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
+  ERROR PconsValueError: Unknown preset 'coverage'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, pthread, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
 ### windows clang-cl+flang | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /fp:fast]
@@ -3800,9 +3800,9 @@
 ### windows flang+clang-cl | feature hardened
   ERROR ValueError: Preset 'hardened' isn't available with flang, so it can't apply to the whole environment. Compile the sources it can't take in a clone of the environment made before the preset (target.add_sources(sources, env=clone)), or check first with env.has_preset('hardened').
 ### windows flang+clang-cl | feature pthread
-  ERROR ValueError: Preset 'pthread' is not available with this toolchain on this system. Optional features can be guarded with env.has_preset('pthread').
+  ERROR PconsValueError: Preset 'pthread' is not available with this toolchain on this system. Optional features can be guarded with env.has_preset('pthread').
 ### windows flang+clang-cl | feature coverage
-  ERROR ValueError: Unknown preset 'coverage'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, pthread, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
+  ERROR PconsValueError: Unknown preset 'coverage'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, pthread, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
 ### windows flang+clang-cl | feature fast-math
   ar: cmd=ar flags=[rcs]
   cc: cmd=clang-cl flags=[/nologo /MD /fp:fast]
@@ -4078,9 +4078,9 @@
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature pthread
-  ERROR ValueError: Unknown preset 'pthread'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
+  ERROR PconsValueError: Unknown preset 'pthread'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
 ### windows msvc+ifx-msvc | feature coverage
-  ERROR ValueError: Unknown preset 'coverage'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
+  ERROR PconsValueError: Unknown preset 'coverage'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
 ### windows msvc+ifx-msvc | feature fast-math
   cc: cmd=cl flags=[/nologo /MD /fp:fast]
   cxx: cmd=cl flags=[/nologo /Zc:__cplusplus /MD /fp:fast]
@@ -4348,9 +4348,9 @@
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature pthread
-  ERROR ValueError: Unknown preset 'pthread'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
+  ERROR PconsValueError: Unknown preset 'pthread'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
 ### windows clang-cl+ifx-msvc | feature coverage
-  ERROR ValueError: Unknown preset 'coverage'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
+  ERROR PconsValueError: Unknown preset 'coverage'. Toolchain built-ins here: fast-math, hardened, lto, openmp, profile, sanitize, warnings, werror; contributed presets are listed by pcons.list_presets().
 ### windows clang-cl+ifx-msvc | feature fast-math
   cc: cmd=clang-cl flags=[/nologo /MD /fp:fast]
   cxx: cmd=clang-cl flags=[/nologo /MD /fp:fast]

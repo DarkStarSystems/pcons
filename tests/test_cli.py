@@ -461,6 +461,30 @@ class TestRunScriptEnvironment:
         assert "Traceback" not in caplog.text
         assert not (tmp_path / "build" / "build.ninja").exists()
 
+    def test_a_mistake_in_the_script_is_reported_at_its_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        """The line the traceback would have shown leads the message."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "project = Project('demo')\n"
+            "def defaults():\n"
+            "    project.Default(42)\n"
+            "defaults()\n"
+        )
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        with caplog.at_level(logging.ERROR, logger="pcons"):
+            exit_code, _ = run_script(script, tmp_path / "build")
+
+        assert exit_code == 1
+        assert "pcons-build.py:4 in defaults(): Default() arguments" in caplog.text
+        assert "Traceback" not in caplog.text
+
     def test_run_script_cleans_up_new_environment_keys(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

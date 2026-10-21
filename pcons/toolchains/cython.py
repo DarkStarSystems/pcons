@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
+from pcons.core.errors import PconsRuntimeError
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gnu_common import GNU_COMPILE_PATH_FLAGS, GNU_LINK_PATH_FLAGS
 from pcons.tools.tool import BaseTool
@@ -288,7 +289,7 @@ def find_cython_toolchain() -> CythonToolchain:
     if toolchain is not None:
         return cast(CythonToolchain, toolchain)
 
-    raise RuntimeError(
+    raise PconsRuntimeError(
         "Cython not found. Install it with: pip install cython (or uv add cython)"
     )
 

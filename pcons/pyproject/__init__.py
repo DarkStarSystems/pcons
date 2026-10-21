@@ -26,6 +26,8 @@ from email.headerregistry import Address
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from pcons.core.errors import PconsFileNotFoundError, PconsRuntimeError
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -39,7 +41,7 @@ def _load_pyproject(source_dir: Path) -> dict[str, Any]:
 
     pyproject = source_dir / "pyproject.toml"
     if not pyproject.exists():
-        raise FileNotFoundError(f"pyproject.toml not found in {source_dir}")
+        raise PconsFileNotFoundError(f"pyproject.toml not found in {source_dir}")
 
     with open(pyproject, "rb") as f:
         return tomllib.load(f)
@@ -54,7 +56,7 @@ def _name_version(project: dict[str, Any]) -> tuple[str, str]:
     version = project.get("version")
     missing = [f for f, v in (("name", name), ("version", version)) if not v]
     if missing:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             "pyproject.toml [project] is missing required "
             f"{' and '.join(missing)}. pcons cannot build a distribution "
             "without it."
@@ -116,11 +118,11 @@ def _read_inside(source_dir: Path, relative: str, field: str) -> str:
     root = source_dir.resolve()
     path = (root / relative).resolve()
     if not path.is_relative_to(root):
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"pyproject [project] {field}: {relative!r} is outside the project."
         )
     if not path.is_file():
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"pyproject [project] {field}: file {relative!r} does not exist."
         )
     return path.read_text(encoding="utf-8")
@@ -134,16 +136,18 @@ def _readme(project: dict[str, Any], source_dir: Path) -> tuple[str, str] | None
     if isinstance(readme, str):
         content_type = _README_CONTENT_TYPES.get(Path(readme).suffix.lower())
         if content_type is None:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"pyproject [project] readme: cannot tell the content type of "
                 f"{readme!r}, use .md, .rst or .txt, or the table form."
             )
         return _read_inside(source_dir, readme, "readme"), content_type
     content_type = readme.get("content-type")
     if not content_type:
-        raise RuntimeError("pyproject [project] readme: 'content-type' is required.")
+        raise PconsRuntimeError(
+            "pyproject [project] readme: 'content-type' is required."
+        )
     if ("file" in readme) == ("text" in readme):
-        raise RuntimeError(
+        raise PconsRuntimeError(
             "pyproject [project] readme: give exactly one of 'file' and 'text'."
         )
     if "file" in readme:
@@ -183,7 +187,7 @@ def _license_files(project: dict[str, Any], source_dir: Path) -> list[str]:
             or as_windows.anchor
             or ".." in PurePosixPath(pattern).parts
         ):
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"pyproject [project] license-files: {pattern!r} is outside the project."
             )
         matches: set[str] = set()
@@ -192,13 +196,13 @@ def _license_files(project: dict[str, Any], source_dir: Path) -> list[str]:
             if not path.is_file():
                 continue
             if not path.is_relative_to(root):
-                raise RuntimeError(
+                raise PconsRuntimeError(
                     f"pyproject [project] license-files: {m!r} resolves outside "
                     "the project."
                 )
             matches.add(Path(m).as_posix())
         if not matches:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"pyproject [project] license-files: {pattern!r} matches no file."
             )
         found |= matches
@@ -213,7 +217,7 @@ def _license_lines(project: dict[str, Any], source_dir: Path) -> list[str]:
     if isinstance(license_, str):
         return [_header("License-Expression", license_)]
     if ("file" in license_) == ("text" in license_):
-        raise RuntimeError(
+        raise PconsRuntimeError(
             "pyproject [project] license: give exactly one of 'file' and 'text'."
         )
     if "file" in license_:
@@ -232,13 +236,13 @@ def _extra_lines(project: dict[str, Any]) -> list[str]:
     for extra, requirements in (project.get("optional-dependencies") or {}).items():
         normalized = re.sub(r"[-_.]+", "-", extra).lower()
         if not _EXTRA_NAME.fullmatch(normalized):
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"pyproject [project.optional-dependencies] extra {extra!r} is not "
                 "a valid name, use letters, digits and single '-', '_' or '.' "
                 "separators."
             )
         if normalized in extras:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"pyproject [project.optional-dependencies] extra {extra!r} "
                 f"collides with another extra after normalization to {normalized!r}."
             )
@@ -260,7 +264,7 @@ def _entry_points(project: dict[str, Any]) -> str:
     groups: dict[str, dict[str, str]] = {}
     for group, entries in (project.get("entry-points") or {}).items():
         if group in ("console_scripts", "gui_scripts"):
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"pyproject [project.entry-points] must not define {group!r}, "
                 "use [project.scripts] or [project.gui-scripts]."
             )
@@ -307,7 +311,7 @@ def _render_metadata(
         if field not in _HONORED_PROJECT_FIELDS and value
     )
     if unsupported:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             "pcons build backend cannot yet honor these pyproject [project] "
             f"fields and refuses to drop them silently: {', '.join(unsupported)}. "
             "Remove them, or add support in pcons.pyproject."
@@ -321,7 +325,9 @@ def _render_metadata(
     description = project.get("description")
     if description:
         if any(c in description for c in "\r\n"):
-            raise RuntimeError("pyproject [project] description must be a single line.")
+            raise PconsRuntimeError(
+                "pyproject [project] description must be a single line."
+            )
         lines.append(f"Summary: {description}")
     if project.get("keywords"):
         lines.append(_header("Keywords", ",".join(project["keywords"])))
@@ -381,17 +387,17 @@ def _build_dir(source_dir: Path, pcons_cfg: dict[str, Any]) -> Path:
     """
     value = pcons_cfg.get("build-dir", "build/wheel")
     if not isinstance(value, str) or not value:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"pyproject [tool.pcons] build-dir must be a non-empty path, got {value!r}."
         )
     windows_path = PureWindowsPath(value)
     if windows_path.drive and not windows_path.is_absolute():
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"pyproject [tool.pcons] build-dir must not be drive-relative, got {value!r}."
         )
     build_dir = source_dir / value
     if source_dir.resolve().is_relative_to(build_dir.resolve()):
-        raise RuntimeError(
+        raise PconsRuntimeError(
             "pyproject [tool.pcons] build-dir must not be the project directory "
             f"or one of its parents, got {value!r}."
         )
@@ -454,7 +460,7 @@ def _run_pcons(
 
     build_script = source_dir / "pcons-build.py"
     if not build_script.exists():
-        raise FileNotFoundError(f"pcons-build.py not found in {source_dir}")
+        raise PconsFileNotFoundError(f"pcons-build.py not found in {source_dir}")
 
     exit_code, _ = run_script(
         build_script,
@@ -465,7 +471,7 @@ def _run_pcons(
         fresh=True,
     )
     if exit_code != 0:
-        raise RuntimeError(f"pcons-build.py exited with code {exit_code}")
+        raise PconsRuntimeError(f"pcons-build.py exited with code {exit_code}")
 
 
 def _jobs(
@@ -492,7 +498,7 @@ def _jobs(
     except ValueError:
         jobs = 0
     if jobs < 1:
-        raise RuntimeError(f"{source} must be a positive integer, got {value!r}.")
+        raise PconsRuntimeError(f"{source} must be a positive integer, got {value!r}.")
     return jobs
 
 
@@ -509,7 +515,7 @@ def _run_ninja(
 
     exit_code = run_ninja(build_dir, targets=targets, jobs=jobs)
     if exit_code != 0:
-        raise RuntimeError(f"ninja exited with code {exit_code}")
+        raise PconsRuntimeError(f"ninja exited with code {exit_code}")
 
 
 def _write_wheel(
@@ -782,7 +788,7 @@ def _build(
         ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
 
         if ext_suffix and not any(p.name.endswith(ext_suffix) for p in staged):
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"No extension modules (with suffix {ext_suffix!r})"
                 f" found in staging directory {staging_dir} after building"
                 f" install-target {install_target!r}"

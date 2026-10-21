@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsTypeError
 from pcons.core.node import Node
 from pcons.core.resolver import NoOpFactory
 from pcons.core.target import Target
@@ -372,12 +373,12 @@ def _validate_builder_name(name: object, builder_name: str) -> None:
         from pcons.core.environment import Environment as Env
 
         if isinstance(name, Env):
-            raise TypeError(
+            raise PconsTypeError(
                 f"{builder_name}() first argument must be a name string, "
                 f"got an Environment. "
                 f'Use {builder_name}("name", env, sources=[...]).'
             )
-        raise TypeError(
+        raise PconsTypeError(
             f"{builder_name}() first argument must be a name string, "
             f"got {type(name).__name__}."
         )

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from pcons.configure.checks import cache_signature
 from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
+from pcons.core.errors import PconsFileNotFoundError
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -213,7 +214,7 @@ class Configure:
 
         if found_path is None:
             if required:
-                raise FileNotFoundError(f"Required program not found: {name}")
+                raise PconsFileNotFoundError(f"Required program not found: {name}")
             return None
 
         # Try to get version
@@ -448,7 +449,7 @@ def load_config(path: Path | str = "build/pcons_config.json") -> dict[str, Any]:
     """
     path = Path(path)
     if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
+        raise PconsFileNotFoundError(f"Config file not found: {path}")
 
     with open(path) as f:
         data: dict[str, Any] = json.load(f)

@@ -24,12 +24,14 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsError
+
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.target import Target
 
 
-class InstallerError(Exception):
+class InstallerError(PconsError):
     """Base exception for installer-related errors."""
 
 

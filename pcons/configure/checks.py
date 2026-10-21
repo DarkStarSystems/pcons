@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import trace
-from pcons.core.errors import PconsError
+from pcons.core.errors import PconsError, PconsValueError
 from pcons.core.paths import _script_dir_path
 from pcons.tools.tool import PROBES, BaseTool, Probe
 
@@ -157,7 +157,7 @@ def _decode_c_string(value: str, name: str) -> str:
     """
     remainder = _STRING_LITERAL.sub("", value).strip()
     if remainder or not value.strip():
-        raise ValueError(
+        raise PconsValueError(
             f"Macro {name} is {value!r}, which is not a string literal. "
             f"Drop as_string=True to get the expansion text as-is."
         )

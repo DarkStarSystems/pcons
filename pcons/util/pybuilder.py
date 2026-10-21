@@ -42,6 +42,8 @@ import sys
 from types import ModuleType
 from typing import Any
 
+from pcons.core.errors import PconsTypeError, PconsValueError
+
 PROTOCOL_VERSION = 1
 
 USAGE = (
@@ -168,7 +170,7 @@ def run(
         inputs = discovered_inputs(result, payload["function"])
         write_depfile(depfile, targets[0], inputs)
     elif result is not None:
-        raise TypeError(
+        raise PconsTypeError(
             f"{payload['function']}() returned {type(result).__name__}. A "
             f"PyBuilder function returns None, unless its builder is "
             f'declared discovers=True: then it may return {{"inputs": '
@@ -199,21 +201,21 @@ def discovered_inputs(result: object, function: str) -> list[str]:
     if result is None:
         return []
     if not isinstance(result, dict):
-        raise TypeError(
+        raise PconsTypeError(
             f"{function}() returned {type(result).__name__}. A PyBuilder "
             f'that discovers its inputs returns {{"inputs": [...]}}, the '
             f"files it read, or None."
         )
     unknown = sorted(str(key) for key in result if key != "inputs")
     if unknown:
-        raise ValueError(
+        raise PconsValueError(
             f"{function}() returned {', '.join(unknown)}, which a PyBuilder's "
             f'return value doesn\'t define. Only "inputs" is, the list of '
             f"files the function read."
         )
     inputs = result.get("inputs", [])
     if isinstance(inputs, (str, bytes)) or not isinstance(inputs, (list, tuple)):
-        raise TypeError(
+        raise PconsTypeError(
             f'{function}() returned inputs={inputs!r}. "inputs" is a list of '
             f"the files the function read, one path each."
         )

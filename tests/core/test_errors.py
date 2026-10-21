@@ -94,3 +94,60 @@ class TestToolNotFoundError:
         err = ToolNotFoundError("gcc")
         assert "gcc" in str(err)
         assert err.tool == "gcc"
+
+
+class TestBuildErrorsAreReportedAsSuch:
+    """A mistake in a build is a PconsError, which pcons reports as one line;
+    anything else gets a traceback, as a bug in pcons should."""
+
+    BUILTINS = (
+        "ValueError",
+        "TypeError",
+        "RuntimeError",
+        "KeyError",
+        "FileNotFoundError",
+    )
+
+    def test_each_is_also_the_builtin_it_replaces(self):
+        """So `except ValueError` around a pcons call keeps working."""
+        import builtins
+
+        from pcons.core import errors
+
+        for name in self.BUILTINS:
+            cls = getattr(errors, f"Pcons{name}")
+            assert issubclass(cls, PconsError)
+            assert issubclass(cls, getattr(builtins, name))
+
+    def test_a_key_error_reads_as_its_message(self):
+        from pcons.core.errors import PconsKeyError
+
+        assert (
+            str(PconsKeyError("Target 'app' not found.")) == "Target 'app' not found."
+        )
+
+    def test_pcons_raises_a_builtin_only_for_its_own_bugs(self):
+        """A bare built-in raise is for pcons's own bugs and needs a comment
+        above it saying why it isn't a user error; anything else raises the
+        Pcons* error of the same name."""
+        import ast
+        from pathlib import Path
+
+        import pcons
+
+        unexplained = []
+        package = Path(pcons.__file__).parent
+        for path in sorted(package.rglob("*.py")):
+            source = path.read_text(encoding="utf-8")
+            lines = source.splitlines()
+            for node in ast.walk(ast.parse(source)):
+                if not isinstance(node, ast.Raise) or node.exc is None:
+                    continue
+                call = node.exc.func if isinstance(node.exc, ast.Call) else node.exc
+                if not (isinstance(call, ast.Name) and call.id in self.BUILTINS):
+                    continue
+                if "not a user error" not in lines[node.lineno - 2]:
+                    where = path.relative_to(package.parent).as_posix()
+                    unexplained.append(f"{where}:{node.lineno} raises {call.id}")
+
+        assert not unexplained, "\n".join(unexplained)

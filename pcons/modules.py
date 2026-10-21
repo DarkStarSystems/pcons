@@ -45,6 +45,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsAttributeError
+
 if TYPE_CHECKING:
     pass
 
@@ -180,7 +182,7 @@ class _ModulesNamespace(ModuleType):
         module = _loaded_modules.get(name)
         if module is not None:
             return module
-        raise AttributeError(
+        raise PconsAttributeError(
             f"No module named 'pcons.modules.{name}'. "
             f"Available: {list(_loaded_modules.keys())}"
         )

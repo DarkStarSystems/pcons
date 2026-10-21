@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsValueError
 from pcons.core.subst import PathToken
 from pcons.toolchains.qt.builders import (
     _qrc_xml,
@@ -134,7 +135,7 @@ def _qml_entries(
         try:
             path = Path(os.path.normpath(root / qml)).relative_to(root)
         except ValueError:
-            raise ValueError(
+            raise PconsValueError(
                 f"QtQmlModule '{name}': qml_files entry '{qml}' is not under "
                 f"'{root}', the directory qml_files is relative to. An entry "
                 "is also the file's path inside the module resource, so one "
@@ -144,14 +145,14 @@ def _qml_entries(
             ) from None
         resource_path = path.as_posix()
         if resource_path in seen:
-            raise ValueError(
+            raise PconsValueError(
                 f"QtQmlModule '{name}': qml_files lists '{resource_path}' "
                 "twice, and one entry would overwrite the other in the "
                 "resource."
             )
         clash = declared_by.get(path.stem)
         if clash is not None:
-            raise ValueError(
+            raise PconsValueError(
                 f"QtQmlModule '{name}': '{clash}' and '{resource_path}' both "
                 f"declare the QML type '{path.stem}'. The engine resolves the "
                 "name to one of them and the other is unreachable. Rename one "

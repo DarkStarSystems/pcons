@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.builder import anchor_target_path, anchor_target_paths
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsValueError
 from pcons.core.node import BuildInfo, FileNode, PathRole
 from pcons.core.resolver import PendingSourceFactory
 from pcons.core.subst import PathToken, SourcePath, TargetPath
@@ -260,7 +261,7 @@ def install_dir(env: Environment, target_type: str) -> str:
     """
     toolchains = env.toolchains
     if not toolchains:
-        raise ValueError(
+        raise PconsValueError(
             "install_dir() requires an environment with a toolchain; "
             "pass an explicit directory string to Install() instead."
         )

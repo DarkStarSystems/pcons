@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
+from pcons.core.errors import PconsRuntimeError, PconsValueError
 from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.toolchains.fortran_scanner import (
     DEFAULT_ANCESTOR_FILE,
@@ -421,7 +422,7 @@ class FortranToolchain(FortranToolchainBase, UnixToolchain):
         """None of these drivers retargets the CPU by flag, on any platform:
         gfortran ignores ``-arch`` (and builds for the host) and flang
         rejects it."""
-        raise ValueError(
+        raise PconsValueError(
             f"{self.name} cannot retarget the CPU to '{arch}' by flag. Use a "
             f"cross preset (e.g. linux_cross(triple=...)) or a cross "
             f"toolchain instead; see docs/presets.md."
@@ -464,7 +465,7 @@ def find_fortran_toolchain(
         raise toolchain_registry.no_compatible_toolchain(
             "fortran", "Fortran", abi, tried
         )
-    raise RuntimeError(
+    raise PconsRuntimeError(
         f"No Fortran toolchain found. Tried: {', '.join(tried)}. "
         "Make sure gfortran, flang or ifx is installed and in PATH."
     )

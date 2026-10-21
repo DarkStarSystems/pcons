@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.errors import PconsValueError
 from pcons.core.flags import (
     get_passthrough_flags_from_toolchains,
     get_separated_arg_flags_from_toolchains,
@@ -248,7 +249,7 @@ def apply_requirements_to_env(
 
     for lib in eff.link_libs:
         if isinstance(lib, _Target):
-            raise ValueError(
+            raise PconsValueError(
                 f"env.use() got a Target ('{lib.name}') in link_libs; "
                 f"linking a build target is per-target information — use "
                 f"target.link({lib.name!r}) instead."

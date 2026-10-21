@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsRuntimeError
+
 # Re-export the registry for users who want to register custom toolchains
 from pcons.tools.toolchain import toolchain_registry
 
@@ -227,7 +229,7 @@ def env_selected_toolchain(
             toolchain = entry.create_toolchain()
             if not abi_compatible(toolchain.abi, abi):
                 subject = f"${var} ({path}, a {family} compiler)"
-                raise RuntimeError(
+                raise PconsRuntimeError(
                     toolchain_registry.abi_mismatch(subject, toolchain, abi)
                     + f" Unset ${var}, or set it to a compatible compiler."
                 )
@@ -280,7 +282,7 @@ def find_c_toolchain(
     tried = toolchain_registry.get_tried_names("c", prefer)
     if abi is not None:
         raise toolchain_registry.no_compatible_toolchain("c", "C/C++", abi, tried)
-    raise RuntimeError(
+    raise PconsRuntimeError(
         f"No C/C++ toolchain found. Tried: {', '.join(tried)}. "
         "Make sure a compiler (clang, clang-cl, gcc, or MSVC) is installed and in PATH."
     )
