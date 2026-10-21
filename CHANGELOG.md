@@ -352,6 +352,11 @@ upgrade.
   run in the same directory: after `uv sync`, `pcons` used the packaging
   settings, and the backend used your variant. An editable install under
   build isolation warns that the next regen will fail. (#215)
+- `import std;` with clang and libc++ works on Debian and Ubuntu (Ubuntu
+  26.04's clang 21, for one). Clang there reports a copy of
+  `libc++.modules.json` whose paths lead nowhere
+  ([llvm#172497](https://github.com/llvm/llvm-project/issues/172497)),
+  so pcons reads the one in clang's own `lib` directory.
 
 ### Contributors
 
