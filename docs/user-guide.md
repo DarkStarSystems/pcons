@@ -317,34 +317,14 @@ env = project.Environment(toolchain="swift")
 env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
 ```
 
-**Fortran** is available as `toolchain="fortran"`, which finds gfortran, LLVM's flang or Intel's ifx (`$FC` picks one; see above). Name one to require it: `toolchain="flang"`. All standard Fortran source extensions work. Modules and submodules are ordered at build time by Ninja dyndep (requires Ninja ≥ 1.10), so sources can be listed in any order:
+**Fortran** is available as `toolchain="fortran"`, which finds gfortran, LLVM's flang or Intel's ifx (`$FC` picks one; see above). Ask for one by name to require it: `toolchain="flang"`. Modules and submodules are compiled in dependency order, so sources can be listed in any order:
 
 ```python
 env = project.Environment(toolchain="fortran")
 project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 ```
 
-Files included with `#include` or Fortran's `INCLUDE` are found the way the compiler finds them: beside the including file, then in `env.fc.includes` and the include directories of linked targets and packages. Editing one recompiles every source that includes it. Pcons doesn't run the preprocessor to find them, so an include inside an `#if` counts even when the condition is false.
-
-The compilers differ in a few ways:
-
-- **flang** needs LLVM 21 or newer. It has no `-Os`, so `minsizerel` builds use `-O2`. It has no `sanitize`, `profile`, `hardened` or `coverage`, and its `warnings` preset adds nothing: flang's own warnings are always on, and it ignores `-Wall`.
-- **ifx** needs the oneAPI environment: `source /opt/intel/oneapi/setvars.sh` on Linux, `setvars.bat` on Windows. On Linux it compiles position-independent code, so C and C++ drivers can link its objects. It has no `coverage`, its `sanitize` is AddressSanitizer only, and on Windows it has no `lto`. It also rewrites every `.mod` file it compiles, even when nothing in it changed, so editing a module's implementation recompiles everything that uses the module. gfortran and flang only recompile those when the module's interface changes.
-- **gfortran** has every preset GCC has.
-- Each compiler realizes the presets with its own flags (ifx's `warnings` is `-warn all`).
-
-On Windows, each compiler mixes with the C and C++ compilers that share its ABI:
-
-- **gfortran** (MSYS2's MinGW build) is GNU-ABI, so it mixes only with MinGW's gcc and g++. Pure Fortran works with any setup.
-- **flang** and **ifx** are MSVC-ABI and mix with MSVC and clang-cl. They use the DLL C runtime (`/MD`, `/MDd` for debug), as pcons' MSVC builds do, or the static one with `env.set_runtime_linkage("static")`. ifx takes MSVC-style options (`/module:`, `/warn:all`) and links with `link.exe`. A program with ifx-compiled sources is linked as a console program (`/SUBSYSTEM:CONSOLE`), since its Fortran main is in Intel's runtime; a C++ `WinMain` program with Fortran sources sets `/SUBSYSTEM:WINDOWS` in `env.link.flags`. The official LLVM installer for Windows doesn't include flang; conda-forge's `flang_win-64` package does, with its runtime library (its `flang` package is the compiler alone), but without the intrinsic modules `USE iso_c_binding` and the rest need: copy `lib\clang\23\finclude` from LLVM's Windows release archive of the same version (`clang+llvm-23.1.3-x86_64-pc-windows-msvc.tar.zst`) into the environment's `Library\lib\clang\23`. Visual Studio's bundled LLVM has a `flang.exe` without its intrinsic modules, so pcons doesn't use it (and says why).
-
-A Windows DLL exports only what it's told to. flang ignores `!DIR$ ATTRIBUTES DLLEXPORT`, so a flang DLL exports nothing unless its routines are listed: give them `BIND(C)` and name them in `exported_symbols` (see [Exporting Only Some Symbols](#exporting-only-some-symbols)). A DLL that exports nothing has no import library, and a program linking it fails with "no such file" for its `.lib`. ifx honors the directive.
-
-`env.add_toolchain()` picks a toolchain with the same ABI as the environment's primary one: `"fortran"` beside MSVC or clang-cl finds flang or ifx, not gfortran, and `"c"` beside gfortran finds MinGW gcc. Naming an incompatible one (by name, or with `$FC`/`$CC`/`$CXX`) is an error that says which toolchains would fit. Only an environment's own toolchains have to match: a project can have a MinGW environment and an MSVC one side by side. For clang and flang, pcons asks the compiler (`-print-target-triple`), so MSYS2's clang64 clang and flang count as MinGW and LLVM's own builds as MSVC.
-
-A program that uses OpenMP in both C or C++ and flang's Fortran needs a C compiler from flang's own LLVM. Beside flang, `"c"` finds the usual C compiler, and Apple's clang or gcc brings a different OpenMP runtime: a program that loads two crashes (`OMP: Error #15`) or doesn't link. Set `CC` and `CXX` to that LLVM's compilers: `/opt/homebrew/opt/llvm/bin/clang` and `clang++` for Homebrew's flang, `clang-21` and `clang++-21` beside apt.llvm.org's `flang-21`, or the `clang-cl` beside conda-forge's flang on Windows.
-
-Beside gfortran, `"c"` also finds the usual C compiler, typically clang (Apple's on macOS), whose OpenMP runtime isn't GCC's. That mostly works: LLVM's runtime also implements GCC's interface, so with the Fortran code in a static library one runtime serves both languages. With it in a shared library, each side loads its own. The program runs, but the two don't share settings (`omp_set_num_threads()` in C doesn't reach the Fortran code), and their thread pools can oversubscribe the cores. To get one runtime, set `CC` and `CXX` to gfortran's own gcc and g++ (`gcc-16` and `g++-16` from Homebrew's `gcc`, say).
+[Fortran](fortran.md) has the rest: how the compilers differ, mixing Fortran with C and C++, OpenMP, Windows, packages and configure checks.
 
 **Mixed-language builds** use `env.add_toolchain()`. A program is linked by the compiler of its strongest language, C++, then C, then Fortran, whichever toolchain came first: a C or C++ driver can take the Fortran runtime as libraries, which a Fortran driver can't do for a C compiler's sanitizer or coverage runtimes. CUDA links through the C++ driver, and Swift objects link with swiftc where Swift is the primary toolchain, else with clang++ and the Swift runtime. Pcons adds the runtime libraries the other languages' objects need: `-lgfortran` (or flang's or ifx's) for Fortran objects, `-lstdc++` or `-lc++` for C++ objects, Swift's runtime for Swift objects. That holds for objects in static libraries too, even ones built in another environment.
 

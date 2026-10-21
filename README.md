@@ -32,6 +32,7 @@ Pcons can build not just executables, but also tar/zip archives, python packages
 
 ## What's in the box
 
+- **[Fortran](https://pcons.readthedocs.io/en/latest/fortran/)**: gfortran and flang on Linux, macOS and Windows, and Intel's ifx on Linux and Windows; modules and submodules ordered automatically, and Fortran mixed with C and C++ in one program
 - **[Qt 6](https://pcons.readthedocs.io/en/latest/qt/)**: `find_qt()`, automoc/autouic/autorcc, QML modules, translations, and `ninja deploy`
 - **C++20 modules**: named modules, partitions, and `import std` on GCC, Clang and MSVC, with automatic dependency scanning
 - **[Tests and fuzzing](https://pcons.readthedocs.io/en/latest/testing/)**: `project.Test()`, `pcons test`, gtest/doctest/Catch2 case discovery, JUnit XML, libFuzzer/AFL++
@@ -56,7 +57,7 @@ Here's a [comparison](COMPARISONS.md) between pcons and other common modern buil
 
 ✅ **Ready for small-scale production use** - and still under active development, so feedback is very welcome. It's working in several medium-sized projects.
 
-Core functionality is working and well tested across Linux, macOS and Windows, on every commit: C/C++/ObjC/Fortran/Swift/CUDA compilation, C++20 modules, Qt 6, static and shared libraries, install targets, installers, cross-compilation, and mixed-language builds. There are 66 self-contained [examples](examples/), and every one is built and verified in CI. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
+Core functionality is working and well tested across Linux, macOS and Windows, on every commit: C/C++/ObjC/Fortran/Swift/CUDA compilation, C++20 modules, Qt 6, static and shared libraries, install targets, installers, cross-compilation, and mixed-language builds. There are nearly 100 self-contained [examples](examples/), and every one is built and verified in CI. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 
 ### Rust / Go interop
 
