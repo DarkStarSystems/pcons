@@ -765,6 +765,10 @@ class Toolchain(Protocol):
         """Tools in this toolchain, keyed by tool name."""
         ...
 
+    def tool_command(self, name: str) -> str | None:
+        """The program tool *name* runs (see BaseToolchain.tool_command)."""
+        ...
+
     @property
     def abi(self) -> str | None:
         """Which binary interface this toolchain's objects follow, as an
@@ -1144,7 +1148,7 @@ class BaseToolchain:
             )
         return presets
 
-    def _tool_command(self, name: str) -> str | None:
+    def tool_command(self, name: str) -> str | None:
         """The program this toolchain's tool *name* runs: what its variable
         (``$CXX``) chooses, else its default command, found on PATH. Every
         question about the compiler that will build asks this. None if this

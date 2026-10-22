@@ -391,14 +391,14 @@ class UnixToolchain(BaseToolchain):
         return None
 
     def _compiler_is_apple_clang(self, tool_name: str = "cxx") -> bool:
-        """Whether the compiler the *tool_name* tool runs (_tool_command) is
+        """Whether the compiler the *tool_name* tool runs (tool_command) is
         Apple clang: on macOS ``gcc``/``g++`` are usually Apple clang
         shims, so the toolchain name alone can't answer this."""
         import sys
 
         if sys.platform != "darwin" or tool_name not in self._tools:
             return False
-        exe = self._tool_command(tool_name)
+        exe = self.tool_command(tool_name)
         return exe is not None and is_apple_clang(exe)
 
     # =========================================================================
