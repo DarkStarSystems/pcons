@@ -1,6 +1,6 @@
 # Comparison with other software build tools
 
-I started PCons because I love the philosophy of SCons: use python as the build language, with good tool support, variable substitution, and sensible control structures. But modern python has outstripped SCons's architecture years ago, and CMake has become the dominant build tool, because of things like transitive depencencies, conan integration, and wide adoption. But cmake uses a custom DSL (one which I don't like, and I've heard that from others). 
+I started pcons because I love the philosophy of SCons: use python as the build language, with good tool support, variable substitution, and sensible control structures. But modern python has outstripped SCons's architecture years ago, and CMake has become the dominant build tool, because of things like transitive dependencies, Conan integration, and wide adoption. But CMake uses a custom DSL (one which I don't like, and I've heard that from others). 
 But what about the other popular modern build tools like Bazel and Meson?
 
 # pcons vs Bazel vs Meson: Detailed Comparison
@@ -27,7 +27,7 @@ But what about the other popular modern build tools like Bazel and Meson?
 
 ## Build Execution
 
-**pcons** generates Ninja (or Makefile/Xcode) files. The user (or pcons) then runs `ninja` directly. pcons is never involved in the actual build execution. This is a clean separation but means pcons has no visibility into build progress or failures at build time. It can set up builds for ccache or sccache.
+**pcons** generates Ninja (or Makefile/Xcode) files, and Ninja schedules and runs the build. `pcons` (or `pcons build`) runs ninja for you, regenerating first when the build script changed, and checks after every successful build that it converged: a command that never creates the output it declares would otherwise rerun forever. `pcons --watch` rebuilds as you edit. A step that costs more to start than to run (a Python tool, say) can run inside a persistent worker. It can set up builds for ccache or sccache.
 
 **Bazel** has its own build execution engine. It doesn't generate Ninja files — it runs actions itself (or delegates to remote execution). This enables features like remote caching, remote execution (RBE), distributed builds, and fine-grained incremental builds with action-level caching.
 
@@ -37,7 +37,7 @@ But what about the other popular modern build tools like Bazel and Meson?
 
 ## Language & Toolchain Support
 
-**pcons** is C/C++-focused in practice, with GCC, Clang/LLVM, MSVC, and Clang-CL supported, including C++20 modules. Fortran is also built-in. Specialized toolchains for CUDA, Cython, WebAssembly (WASI + Emscripten), Metal shaders, and Windows RC files. A contrib LaTeX toolchain (via `latexmk`) demonstrates that the architecture handles non-compiled workflows with multi-pass builds, bibliography, and index generation. Rust crates can be wired in via `project.CargoBuild()` — pcons drives `cargo build` as a sub-build and links the resulting staticlib/cdylib into C/C++ consumers. The architecture is fully extensible via a toolchain registry, so adding new languages is a first-class operation. Users can also easily add tools, toolchains and builders. Polyglot projects *should* work well and are a design goal, but it is still early days.
+**pcons** is C/C++-focused in practice, with GCC, Clang/LLVM, MSVC, and Clang-CL supported, including C++20 modules and `import std;` with clang, GCC and MSVC. Fortran is first-class: gfortran, LLVM flang and Intel ifx, on Linux, macOS and Windows. Swift is built in too. C, C++, Fortran and Swift mix in one program: each compiler gets its own flags, the strongest language's driver links it, and each language's runtime comes along. Specialized toolchains for CUDA, Cython, WebAssembly (WASI + Emscripten), Metal shaders, and Windows RC files. A contrib LaTeX toolchain (via `latexmk`) demonstrates that the architecture handles non-compiled workflows with multi-pass builds, bibliography, and index generation. Rust crates can be wired in via `project.CargoBuild()` — pcons drives `cargo build` as a sub-build and links the resulting staticlib/cdylib into C/C++ consumers. The architecture is fully extensible via a toolchain registry, so adding new languages is a first-class operation. Users can also easily add tools, toolchains and builders, or write a build step as a plain Python function (`env.PyBuilder()`).
 
 **Bazel** has comprehensive, community-maintained rules for virtually every language: `rules_cc`, `rules_java`, `rules_go`, `rules_python`, `rules_rust`, `rules_proto`, `rules_nodejs`, etc. The monorepo model also means polyglot projects (mixing Java + Go + Python in one repo) work well.
 
@@ -57,7 +57,7 @@ Qt is a good stress-test of a build system: three code generators (moc/uic/rcc),
 - **Silent failures are loud.** A header that gains `Q_OBJECT` after generation fails the build with a "re-run pcons" message naming the file (a cheap guard edge with a depfile over every scanned file and directory). A `.cpp` with `Q_OBJECT` but no `#include "foo.moc"` is a generate-time error showing the exact line to add — in CMake both cases surface as undefined-vtable link errors, often much later.
 - **One call for QML modules.** `QtQmlModule` handles qmltyperegistrar, `qmldir` synthesis, and resource embedding under `:/qt/qml/<uri>/` with no backing-target/plugin-target split.
 
-**CMake** is Qt's own build system and the most complete: `qt_add_executable`, `qt_add_qml_module`, AUTOMOC/AUTOUIC/AUTORCC, static-plugin handling, qmlcachegen AOT compilation, and deployment scripts. The cost is opacity: build-time scanning, mystery `_autogen` rebuilds, errors reported against generated files, and the aggregate-TU rebuild tax. Areas where CMake is still ahead of pcons: qmlcachegen, QML plugin libraries/singletons and static-Qt plugin imports.
+**CMake** is Qt's own build system and the most complete: `qt_add_executable`, `qt_add_qml_module`, AUTOMOC/AUTOUIC/AUTORCC, static-plugin handling, qmlcachegen AOT compilation, and deployment scripts. The cost is opacity: build-time scanning, mystery `_autogen` rebuilds, errors reported against generated files, and the aggregate-TU rebuild tax. Areas where CMake is still ahead of pcons: qmlcachegen, QML plugin libraries and static-Qt plugin imports.
 
 **Bazel** has no official Qt support; community rule sets (e.g. `rules_qt`) wrap moc/uic/rcc in explicit per-target macros. Workable, but headers must be listed by hand and hermetic Qt toolchain setup is on you.
 
@@ -67,7 +67,7 @@ Qt is a good stress-test of a build system: three code generators (moc/uic/rcc),
 
 ## Package / Dependency Management
 
-**pcons** integrates with external package managers (pkg-config, Conan, vcpkg) but doesn't manage downloads itself at configure time. The `pcons-fetch` tool can build and install dependencies from source, wrapping CMake and autotools projects. Dependencies are represented as `ImportedTarget` objects with full usage-requirement propagation.
+**pcons** integrates with external package managers (pkg-config, Conan, vcpkg) but doesn't manage downloads itself at configure time. The `pcons-fetch` tool can build and install dependencies from source, wrapping CMake and autotools projects. Dependencies are represented as `ImportedTarget` objects with full usage-requirement propagation. A vendored project with its own `pcons-build.py` comes in with `add_subdirectory(..., build_tier="manual")`, so only what you use of it gets built (Meson's subprojects are the closest match). pcons is also a PEP 517 build backend (`build-backend = "pcons.pyproject"`), building wheels, sdists and editable installs of Python packages with compiled extensions, as meson-python does for Meson.
 
 **Bazel** has `MODULE.bazel` (Bzlmod) for declaring external dependencies, with a registry model. It can download and build external deps hermetically. First-class support for Go modules, Maven, npm, etc. Remote repositories are a core Bazel concept.
 
@@ -77,7 +77,9 @@ Qt is a good stress-test of a build system: three code generators (moc/uic/rcc),
 
 ## Incremental Build Quality
 
-**pcons** relies entirely on Ninja for incrementality. Ninja's depfile mechanism handles header dependency tracking correctly. Build correctness is high for standard C/C++ patterns. Commands that may produce unchanged output (code generators, configure steps) can use `restat=True` to avoid unnecessary downstream rebuilds.
+**pcons** relies entirely on Ninja for incrementality. Ninja's depfile mechanism handles header dependency tracking correctly. Build correctness is high for standard C/C++ patterns. Commands that may produce unchanged output (code generators, configure steps) can use `restat=True` to avoid unnecessary downstream rebuilds, and `write_if_different=True` makes that work even for a generator that rewrites every output on every run.
+
+Dependencies that live inside source files, such as a C++20 `import`, a Fortran `USE`, or one asset file referencing another, are found by Scanners: a scan step runs during the build and hands Ninja what it found (as a dyndep file). That works even when the sources are themselves generated during the build. This needs the Ninja backend.
 
 For Bazel-style action-level caching (skip recompilation when an input is byte-identical to a previous version, even if its mtime changed), pcons has built-in `ccache`/`sccache` support: call `env.use_compiler_cache()` in your build script (auto-detects sccache then ccache, or pass `"ccache"`/`"sccache"` explicitly). That's one use of a general mechanism: any command can run behind a launcher, per tool or per edge, and launchers stack. `compile_commands.json` still reports the compiler itself, not the wrapper. Pcons can also drive [n2](https://github.com/evmar/n2), a Rust rewrite of Ninja, via `pcons --ninja=n2` or `NINJA=n2` for more advanced (but not fully content-based) rebuild tracking; see the [author's design notes](https://neugierig.org/software/blog/2022/03/n2.html).
 
@@ -89,7 +91,7 @@ For Bazel-style action-level caching (skip recompilation when an input is byte-i
 
 ## Cross-Compilation
 
-**pcons** supports cross-compilation via toolchain presets (Android NDK, iOS, WebAssembly, Linux cross) and `env.set_target_arch()`. It's relatively straightforward because the environment model cleanly separates host vs. target concerns.
+**pcons** supports cross-compilation via toolchain presets (Android NDK, iOS, WebAssembly, Linux cross, bare-metal triples like `arm-none-eabi`) and `env.set_target_arch()`. Outputs are named and installed for the platform being built for, not the one doing the building. It's relatively straightforward because the environment model cleanly separates host vs. target concerns.
 
 **Bazel** has a powerful but complex platform/transition model (`--platforms`, `--cpu`, `--crosstool_top`). Getting cross-compilation right in Bazel requires deep knowledge of toolchain definitions and platform constraints. Very powerful once configured.
 
@@ -99,7 +101,7 @@ For Bazel-style action-level caching (skip recompilation when an input is byte-i
 
 ## IDE Integration
 
-**pcons** auto-generates `compile_commands.json` alongside every build, enabling clangd, CLion, VS Code C++ extension, etc. Good IDE support for the generated artifacts.
+**pcons** auto-generates `compile_commands.json` alongside every build, enabling clangd, CLion, VS Code C++ extension, etc., and can generate an Xcode project. `pcons explain` shows each target's commands, which variant, preset or environment contributed each flag, and the build-script line that created each target. `--pdb` opens the Python debugger where a build script failed.
 
 **Bazel** has IDE integration via separate tools: `hedron_compile_commands` for `compile_commands.json`, Bazel plugins for VS Code and IntelliJ. Can be cumbersome to set up.
 
@@ -109,7 +111,7 @@ For Bazel-style action-level caching (skip recompilation when an input is byte-i
 
 ## Scalability
 
-**pcons** has not been tested on very large codebases. The lazy node resolution and Python-based configuration should scale reasonably for medium projects, but there's no known production usage at Google/Meta scale.
+**pcons** builds real projects, including OpenEXR and Ninja itself (whose pcons build matches its CMake build feature for feature), and a no-change rebuild is a no-op. It hasn't been tried at monorepo scale, and there's no known production usage at Google/Meta scale.
 
 **Bazel** was designed at Google for monorepos with millions of lines of code and thousands of engineers. Incremental analysis, parallel action execution, and remote build execution make it viable at enormous scale. Significant overhead for small projects.
 
@@ -139,7 +141,7 @@ For Bazel-style action-level caching (skip recompilation when an input is byte-i
 
 ## Windows Support
 
-**pcons** has first-class Windows support: MSVC toolchain, Clang-CL, Windows RC compiler, MSIX/AppX installer generation, SxS manifests. First-class support for `msvcup` as well (minimal VC and SDK install). CI tests run on Windows.
+**pcons** has first-class Windows support: MSVC toolchain, Clang-CL, clang and flang targeting the MSVC ABI, Fortran with all three compilers, Windows RC compiler, MSIX/AppX installer generation, SxS manifests. First-class support for `msvcup` as well (minimal VC and SDK install). CI tests run on Windows.
 
 **Bazel** supports Windows but it's historically been the weakest platform. Improving rapidly but still has rough edges (path length limits, MSVC integration complexity).
 
@@ -287,7 +289,7 @@ pcons and Meson are comparable in capability for standard configure checks. pcon
 
 All three systems treat tests as first-class build artifacts, but the split between *declaring* tests and *running* them differs.
 
-**pcons** declares tests with `project.Test(name, program, args=..., labels=..., timeout=..., should_fail=..., disabled=..., serial=..., env=..., cwd=..., depends_on=..., discover=...)`. Configure-time emits a versioned JSON manifest at `<build_dir>/tests.json`; `pcons test` (or `ninja test` / `make test`) reads it and runs the tests with parallelism, label/regex filters, JUnit XML output, and CTest-style reporting. `discover="gtest"` / `"doctest"` / `"catch2"` runs the binary's list-cases flag and expands into one entry per case, so you get per-case results without enumerating them in the build script. `depends_on` gates a test on its dependencies — failed deps cause dependents to skip; filtering auto-pulls deps in to preserve fixtures. `set_test_properties(*targets, **props)` mirrors CMake for after-the-fact tweaks. The build system itself never executes a test — same separation as compile/link → ninja. The manifest is open-able JSON, so any external runner (CI scripts, IDE plugins) can consume it without depending on pcons internals.
+**pcons** declares tests with `project.Test(name, program, args=..., labels=..., timeout=..., should_fail=..., disabled=..., serial=..., env=..., cwd=..., depends_on=..., discover=...)`. Configure-time emits a versioned JSON manifest at `<build_dir>/tests.json`; `pcons test` (or `ninja test` / `make test`) reads it and runs the tests with parallelism, label/regex filters, JUnit XML output, and CTest-style reporting. `discover="gtest"` / `"doctest"` / `"catch2"` runs the binary's list-cases flag and expands into one entry per case, so you get per-case results without enumerating them in the build script. `depends_on` gates a test on its dependencies — failed deps cause dependents to skip; filtering auto-pulls deps in to preserve fixtures. `skip_returncode=77` lets a test report itself skipped at run time (a missing tool, absent hardware), the automake and Meson convention. `pcons test` builds the test programs first, and the testing docs have fuzzing recipes for libFuzzer, AFL++ and Honggfuzz. `set_test_properties(*targets, **props)` mirrors CMake for after-the-fact tweaks. The build system itself never executes a test — same separation as compile/link → ninja. The manifest is open-able JSON, so any external runner (CI scripts, IDE plugins) can consume it without depending on pcons internals.
 
 **Bazel** makes tests a rule type (`cc_test`, `py_test`, etc.) with `size`, `timeout`, `flaky`, `shard_count`, `tags`, `env`, `data`. `bazel test //...` builds and runs in one shot, producing per-test XML. Layered rule sets like `rules_fuzzing` (the `cc_fuzz_test` rule) reuse the same test infrastructure for regression replay, plus separate run/binary targets for actual fuzzing — a good example of how a first-class test concept lets richer features compose on top.
 
@@ -304,7 +306,7 @@ One of pcons's practical advantages is how little code it takes to describe a no
 ### pcons
 
 ```python
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 project = Project("sim", build_dir="build")
 base_env = project.Environment(toolchain=find_c_toolchain())
@@ -320,11 +322,9 @@ for variant in ["debug", "release"]:
     env.set_variant(variant)
     prog = project.Program(f"sim_{variant}", env, sources=["src/main.c"])
     prog.private.link_libs.append(libphysics)
-
-Generator().generate(project)
 ```
 
-This is **~15 lines of real Python**. Transitive include propagation is implicit via `public.link_libs`. Variants are a plain `for` loop — no special syntax. The entire Python ecosystem (pathlib, os, subprocess, conditionals, comprehensions) is available without restriction.
+This is **~13 lines of real Python**, with no generate call: pcons writes the build files once the script finishes. Transitive include propagation is implicit via `public.link_libs`. Variants are a plain `for` loop — no special syntax. The entire Python ecosystem (pathlib, os, subprocess, conditionals, comprehensions) is available without restriction.
 
 ### Bazel
 
@@ -352,6 +352,7 @@ cc_binary(
 
 Bazel's BUILD syntax is clean and readable for a single configuration. However:
 - **No built-in variant loop** — debug/release variants require `select()` expressions or separate targets, and defining custom build configs involves `config_setting()` rules and command-line flags (`--compilation_mode=dbg`).
+- **Custom build steps** need a Starlark rule (or a `genrule` shelling out to a script); in pcons a Python function can be one, via `env.PyBuilder()`.
 - **Starlark's restrictions** are invisible here but bite you the moment you need conditional logic, file globbing across directories, or computed target names.
 - **Multi-directory projects** require a `BUILD` file in each directory or careful use of `glob()`.
 - **Workspace setup** (`MODULE.bazel` or `WORKSPACE`, toolchain registration) adds boilerplate before you write a single target.
@@ -385,12 +386,12 @@ Meson is concise for the basic case and readable. However:
 
 | Aspect                             | pcons                    | Bazel                         | Meson                              |
 |------------------------------------|--------------------------|-------------------------------|------------------------------------|
-| Lines for libs + exe example       | ~15                      | ~20 (+ workspace boilerplate) | ~15                                |
+| Lines for libs + exe example       | ~13                      | ~20 (+ workspace boilerplate) | ~15                                |
 | Variant builds                     | Plain `for` loop         | `select()` + config settings  | Global `--buildtype` only          |
 | Conditional logic                  | Full Python              | Starlark (restricted)         | Limited DSL constructs             |
 | File/path manipulation             | `pathlib`, `os`          | `glob()` only                 | `files()`, `include_directories()` |
 | Escape hatch when DSL isn't enough | Not needed (it's Python) | Custom rules in Starlark      | `run_command()` (limited)          |
-| Debuggability                      | Full Python debugger     | `bazel query`, limited        | Print statements only              |
+| Debuggability                      | Python debugger, `pcons explain` | `bazel query`, limited | Print statements only              |
 
 pcons and Meson are comparable in line count for simple cases. pcons pulls ahead as complexity grows — variants, computed paths, platform-specific logic, and anything non-standard are just Python, with no DSL boundary to fight.
 
@@ -402,13 +403,13 @@ pcons and Meson are comparable in line count for simple cases. pcons pulls ahead
 |-------------------------|---------------------------------------------------|----------------------------------------|------------------------------------|
 | **Config language**     | Python 3.11+                                      | Starlark (subset of Python)            | Custom DSL                         |
 | **Execution model**     | Generates Ninja/Make/Xcode                        | Executes directly (or RBE)             | Generates Ninja/VS/Xcode           |
-| **Primary use case**    | C/C++, CUDA, Wasm (extensible)                    | Polyglot monorepos                     | C/C++ and many compiled languages  |
+| **Primary use case**    | C/C++, Fortran, CUDA, Swift, Wasm (extensible)    | Polyglot monorepos                     | C/C++ and many compiled languages  |
 | **Hermeticity**         | None                                              | Strict (sandboxed)                     | None (DSL-limited)                 |
 | **Remote caching**      | No                                                | Yes (built-in)                         | No                                 |
 | **Incremental builds**  | Via Ninja                                         | Content-addressed cache                | Via Ninja                          |
 | **Cross-compilation**   | Presets + env model                               | Platform/transition model              | Machine files                      |
-| **Package mgmt**        | pkg-config, Conan, vcpkg, pcons-fetch             | Bzlmod, Maven, npm, etc.               | WrapDB, pkg-config, subprojects    |
-| **IDE support**         | compile_commands.json                             | Via external tools                     | compile_commands.json native       |
+| **Package mgmt**        | pkg-config, Conan, vcpkg, pcons-fetch; PEP 517 backend | Bzlmod, Maven, npm, etc.               | WrapDB, pkg-config, subprojects    |
+| **IDE support**         | compile_commands.json, Xcode                      | Via external tools                     | compile_commands.json native       |
 | **Windows support**     | Excellent (MSVC, Clang-CL, MSIX)                  | Fair (improving)                       | Excellent                          |
 | **Scalability**         | Small-medium projects                             | Massive monorepos                      | Large projects                     |
 | **Setup overhead**      | Very low (`uvx pcons`)                            | High (Bazel/Bazelisk, workspace setup) | Low (pip/brew + ninja)             |
@@ -417,10 +418,12 @@ pcons and Meson are comparable in line count for simple cases. pcons pulls ahead
 | **Graph output**        | Mermaid, DOT built-in                             | `bazel query`                          | None built-in                      |
 | **Platform installers** | .pkg, .dmg, MSIX built-in                         | External rules needed                  | External tools needed              |
 | **Learning curve**      | Low (plain Python)                                | High (Starlark + concepts)             | Low-Medium (custom DSL)            |
-| **Production maturity** | Beta (v0.25.x, active dev)                        | Very mature (Google-backed)            | Mature (used by GNOME, Mesa, etc.) |
+| **Production maturity** | Beta (v0.31, active dev)                          | Very mature (Google-backed)            | Mature (used by GNOME, Mesa, etc.) |
 | **Wasm support**        | WASI + Emscripten built-in                        | Via custom rules                       | Limited                            |
 | **Compiler caching**    | ccache/sccache, or any launcher                   | Remote cache built-in                  | ccache integration                 |
 | **Testing**             | `project.Test()` + JSON manifest + `pcons test` / `ninja test` / `make test`; gtest/doctest/catch2 discovery; fixtures via `depends_on` | `cc_test` + `bazel test`        | `test()` + `meson test`            |
+| **Rebuild on edit**     | `pcons --watch`                                   | ibazel (external)                      | None built-in                      |
+| **Flag provenance**     | `pcons explain`                                   | `bazel aquery` (commands only)         | None built-in                      |
 
 ---
 
