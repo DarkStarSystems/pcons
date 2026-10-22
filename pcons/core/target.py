@@ -97,6 +97,12 @@ _KNOWN_USAGE_REQUIREMENTS: set[str] = {
 }
 
 
+#: The usage requirements a link reads.
+_LINK_REQUIREMENTS: frozenset[str] = frozenset(
+    {"link_flags", "link_libs", "link_dirs", "frameworks", "framework_dirs"}
+)
+
+
 def _unknown_requirement_message(name: str) -> str:
     """Explain an unrecognized usage-requirement name, and guess the intent."""
     import difflib
@@ -283,6 +289,15 @@ class UsageRequirements(_UsageRequirementsStubs):
         result = UsageRequirements()
         for k, v in self._data.items():
             result._data[k] = type(v)(v)
+        return result
+
+    def for_link(self) -> UsageRequirements:
+        """A copy holding only what a link reads: libraries, their
+        directories, link flags and frameworks."""
+        result = UsageRequirements()
+        for k, v in self._data.items():
+            if k in _LINK_REQUIREMENTS:
+                result._data[k] = type(v)(v)
         return result
 
     def make_includes_system(self) -> None:
