@@ -811,7 +811,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                     iprefix="/I",
                     isysprefix="/external:I",
                     dprefix="/D",
-                    root=project.root_dir,
                 )
                 obj_rel = rel(obj_node.path)
                 key = bmi_key_for_flags(flags, flag_spec)
@@ -847,7 +846,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         ) -> dict[str, object]:
             facts = edge_facts[id(governed)]
             return {
-                "SCAN_FLAGS": list(cast("list[str]", facts["flags"])),
+                "SCAN_FLAGS": list(cast("list[object]", facts["flags"])),
                 # /Fo takes the joined form; the p1689 primary-output is
                 # named after it, so the scan must know the real object.
                 "SCAN_FO": f"/Fo{facts['obj_rel']}",

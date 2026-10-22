@@ -425,7 +425,6 @@ class GccToolchain(UnixToolchain):
                     base_flags,
                     context,
                     extra_flags=("-fmodules",),
-                    root=project.root_dir,
                 )
                 obj_rel = rel(obj_node.path)
                 key = bmi_key_for_flags(flags, flag_spec)
@@ -474,7 +473,7 @@ class GccToolchain(UnixToolchain):
         ) -> dict[str, object]:
             facts = edge_facts[id(governed)]
             return {
-                "SCAN_FLAGS": list(cast("list[str]", facts["flags"])),
+                "SCAN_FLAGS": list(cast("list[object]", facts["flags"])),
                 # -fdeps-target= takes the joined form only, so the whole
                 # flag rides the variable.
                 "SCAN_DEPS_TARGET": f"-fdeps-target={facts['obj_rel']}",

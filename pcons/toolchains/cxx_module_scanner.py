@@ -19,9 +19,12 @@ from __future__ import annotations
 import hashlib
 import logging
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from pcons.core.subst import PathToken, path_flag
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +296,7 @@ def select_std_module_flags(
     return out
 
 
-def bmi_key_for_flags(flags: list[str], spec: StdModuleFlagSpec) -> str:
+def bmi_key_for_flags(flags: Sequence[str | PathToken], spec: StdModuleFlagSpec) -> str:
     """Compute a short hash identifying a BMI-compatibility class.
 
     A Binary Module Interface (``.gcm`` / ``.pcm`` / ``.ifc``) can only be
@@ -308,7 +311,9 @@ def bmi_key_for_flags(flags: list[str], spec: StdModuleFlagSpec) -> str:
     The hash is order-independent: BMI compatibility does not depend on the
     order BMI-sensitive flags appear on the command line.
     """
-    relevant = select_std_module_flags(list(flags), spec)
+    relevant = select_std_module_flags(
+        [flag for flag in flags if isinstance(flag, str)], spec
+    )
     canonical = "\0".join(sorted(relevant))
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
 
@@ -321,27 +326,16 @@ def merge_scan_compile_flags(
     iprefix: str = "-I",
     isysprefix: str = "-isystem",
     dprefix: str = "-D",
-    root: Path | None = None,
-) -> list[str]:
+) -> list[str | PathToken]:
     """Build a per-TU compile-flag list for module scanning.
 
     Starts from *base_flags*, injects *extra_flags* (deduped, e.g. GCC's
     ``-fmodules``), then appends the build context's flags (deduped),
-    includes, and defines, in that order.
-
-    With *root*, relative include paths are anchored there and made
-    absolute. These flags are chosen at configure time, from the project
-    root, and used by a scan edge that runs from the build directory, so
-    they must work from either place.
+    includes, and defines, in that order. The include directories are
+    ``PathToken``s, written as the compile writes them.
     """
-
-    def include_path(inc: Any) -> str:
-        if root is not None and not Path(str(inc)).is_absolute():
-            return str(root / str(inc))
-        return str(inc)
-
     seen = set(base_flags)
-    compile_flags = list(base_flags)
+    compile_flags: list[str | PathToken] = list(base_flags)
     for flag in extra_flags:
         if flag not in seen:
             compile_flags.append(flag)
@@ -352,11 +346,11 @@ def merge_scan_compile_flags(
                 compile_flags.append(flag)
                 seen.add(flag)
         for inc in context.includes:
-            compile_flags.append(f"{iprefix}{include_path(inc)}")
+            compile_flags.append(path_flag(iprefix, inc))
         # Vendored SDK headers live here; without them the scanner can't
         # preprocess the TU it is scanning.
         for inc in getattr(context, "system_includes", ()):
-            compile_flags.append(f"{isysprefix}{include_path(inc)}")
+            compile_flags.append(path_flag(isysprefix, inc))
         for define in context.defines:
             compile_flags.append(f"{dprefix}{define}")
     return compile_flags

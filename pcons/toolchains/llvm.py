@@ -546,9 +546,7 @@ class LlvmToolchain(UnixToolchain):
                     and "-x" not in context.flags
                 ):
                     context.flags.extend(["-x", "c++-module"])
-                flags = merge_scan_compile_flags(
-                    base_flags, context, root=project.root_dir
-                )
+                flags = merge_scan_compile_flags(base_flags, context)
                 obj_rel = rel(obj_node.path)
                 key = bmi_key_for_flags(flags, flag_spec)
                 edge_facts[id(obj_node)] = {
@@ -588,7 +586,7 @@ class LlvmToolchain(UnixToolchain):
             # file, so flags with spaces survive; a pre-joined string would
             # be quoted whole, into one argument.
             return {
-                "SCAN_FLAGS": list(cast("list[str]", facts["flags"])),
+                "SCAN_FLAGS": list(cast("list[object]", facts["flags"])),
                 "SCAN_OBJ": str(facts["obj_rel"]),
             }
 
