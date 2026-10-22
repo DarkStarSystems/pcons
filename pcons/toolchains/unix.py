@@ -8,6 +8,7 @@ from __future__ import annotations
 import functools
 import itertools
 import logging
+import os
 import shlex
 import subprocess
 from pathlib import PurePosixPath
@@ -131,6 +132,42 @@ def _driver_rpaths(driver: str) -> frozenset[str]:
             path for flag, path in itertools.pairwise(tokens) if flag == "-rpath"
         )
     return frozenset(rpaths)
+
+
+#: The -x language a compile tool's header search is probed in.
+_PROBE_LANGUAGES = {
+    "cc": "c",
+    "cxx": "c++",
+    "objc": "objective-c",
+    "objcxx": "objective-c++",
+}
+
+
+@functools.cache
+def _implicit_include_dirs(compiler: str, language: str) -> frozenset[str]:
+    """The ``#include <...>`` search list *compiler* prints under ``-v``,
+    resolved (cached)."""
+    try:
+        out = subprocess.run(
+            [compiler, "-E", "-x", language, "-v", "-"],
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stderr
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    dirs: set[str] = set()
+    searching = False
+    for line in out.splitlines():
+        if line.startswith("#include <...> search starts here:"):
+            searching = True
+        elif line.startswith("End of search list."):
+            break
+        elif searching:
+            path = line.strip().removesuffix(" (framework directory)")
+            dirs.add(os.path.realpath(path))
+    return frozenset(dirs)
 
 
 #: Driver flags that hand the token after them to a sub-tool. Named here so
@@ -731,6 +768,13 @@ class UnixToolchain(BaseToolchain):
         if env.runtime_linkage == "static":
             return LinkNeeds(libs=(static_archive(lib, platform),))
         return LinkNeeds(libs=(lib,))
+
+    def implicit_include_dirs(self, compiler: str, tool: str) -> frozenset[str]:
+        """What the driver's ``-v`` lists as its ``#include <...>`` search."""
+        language = _PROBE_LANGUAGES.get(tool)
+        if language is None:
+            return frozenset()
+        return _implicit_include_dirs(compiler, language)
 
     def realize_link_needs(
         self,

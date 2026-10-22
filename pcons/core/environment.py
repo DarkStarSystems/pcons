@@ -1767,7 +1767,7 @@ class Environment(_EnvironmentStubs):
                 if d not in link.frameworkdirs:
                     link.frameworkdirs.append(d)
 
-    def use(self, package: Any, *, system: bool = False) -> None:
+    def use(self, package: Any, *, system: bool | None = None) -> None:
         """Apply a package's settings to this environment.
 
         This is the preferred way to use external packages. It applies all
@@ -1789,17 +1789,20 @@ class Environment(_EnvironmentStubs):
         Args:
             package: A PackageDescription, ImportedTarget, or any object with
                     include_dirs, defines, libraries, etc. attributes.
-            system: If True, the package's include directories are applied as
+            system: Whether the package's include directories are applied as
                    system includes (-isystem, /external:I), so warnings from
-                   its headers are suppressed. The package is left unchanged.
+                   its headers are suppressed. Left out: an ImportedTarget's
+                   own choice, yes for a package description, and no for a
+                   target this build makes. The package itself is left
+                   unchanged.
 
         Example:
             # Find and use a package
             pkg = finder.find("fmt")
             env.use(pkg)
 
-            # Third-party headers, held to no warning set of ours
-            env.use(finder.find("doctest"), system=True)
+            # Headers held to our own warning set too
+            env.use(finder.find("mylib"), system=False)
 
             # Or with ImportedTarget
             target = ImportedTarget.from_package(pkg)
@@ -1822,6 +1825,12 @@ class Environment(_EnvironmentStubs):
             reqs = requirements_from_package(package)
             languages = set(getattr(package, "languages", ()) or ())
 
+        if system is None:
+            system = (
+                bool(getattr(package, "system", False))
+                if getattr(package, "is_imported", False)
+                else not hasattr(package, "public")
+            )
         if system:
             # Clone first: system= describes this use, not the package, which
             # may be used unsystem'd elsewhere.

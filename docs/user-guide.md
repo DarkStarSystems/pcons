@@ -1435,15 +1435,14 @@ app.link(sdk)
 
 Everything that works for `includes` works here: transitive propagation, deduplication, and path relativization in the generated build files. See `examples/58_system_includes`.
 
-An external package takes the same treatment through a `system=` argument, which moves its include dirs across without any list surgery:
+An external package gets the same treatment by default: the include directories of `find_package()`, `ImportedTarget.from_package()` and `env.use()` are system includes, as CMake makes an imported target's. Pass `system=False` to hold a package's headers to your warnings too:
 
 ```python
-doctest = project.find_package("doctest", system=True)
-nanobind = ImportedTarget.from_package(description, system=True)
-env.use(description, system=True)
+mylib = project.find_package("mylib", system=False)
+env.use(description, system=False)
 ```
 
-`system=` is off by default, deliberately: `-isystem` on a directory the compiler already searches — which is what a system or pkg-config prefix usually is — reorders the include search and can break the standard library. Best to use it on prefixes owned by a package manager or a fetched source tree. Packages fetched by `pcons-fetch` are already recorded that way, and opt out per package with `system = false` in `deps.toml`.
+A directory the compiler already searches by itself, such as `/usr/include`, is left out of the system includes: named there, it would move ahead in the compiler's search, and GCC's C++ headers, which `#include_next` the C library's, would stop finding them. pcons asks each compiler for its own list (`-v`), as CMake does. Packages fetched by `pcons-fetch` opt out per package with `system = false` in `deps.toml`.
 
 A package that uses  `-isystem` in its pkg-config `Cflags` needs also works: both the pkg-config and Conan finders read it into `system_include_dirs`, so even MSVC properly gets `/external:I`.
 

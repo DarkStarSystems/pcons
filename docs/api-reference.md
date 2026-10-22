@@ -20,7 +20,7 @@ API:
 | `project.resolve()` | Resolve all dependencies |
 | `project.node(path)` | Get/create a file node; a relative path is read like `sources=` |
 | `project.find_package(name, ...)` | Find external package (returns ImportedTarget) |
-| `project.find_package(name, system=True)` | Same, with the package's headers as system headers (`-isystem`) |
+| `project.find_package(name, system=False)` | Same, with the package's headers as ordinary includes, not system headers (`-isystem`) |
 | `project.find_package(name, env=env)` | Same, searching and caching for that environment only |
 | `project.add_package_finder(finder)` | Prepend a custom package finder |
 | `project.add_package_finder(finder, env=env)` | Same, used in that environment only |

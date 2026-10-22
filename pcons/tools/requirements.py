@@ -8,6 +8,7 @@ all dependencies' public requirements (transitive).
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -456,7 +457,7 @@ def compute_effective_requirements(
     # flags reach only the compilers of the languages they're for.
     language = tool_language(env, tool_name) if tool_name else None
     for dep in target.transitive_dependencies():
-        reqs = dep.public
+        reqs = dep.public_for_dependents()
         if getattr(dep, "is_imported", False) and language is not None:
             if language not in (dep.required_languages or C_FAMILY):
                 reqs = reqs.clone()
@@ -475,6 +476,19 @@ def compute_effective_requirements(
                     _anchor_dir_lists_for(dep.public.for_link(), dep),
                     origin=(dep.name, "public"),
                 )
+
+    # A compiler's own include directories stay where it searches them.
+    # Named as system includes they'd move ahead in that search, and GCC's
+    # C++ headers, which #include_next the C library's, would break.
+    if for_compilation and tool_name and result.system_includes:
+        toolchain = env.toolchain_for(tool_name)
+        if toolchain is not None:
+            implicit = toolchain.implicit_include_dirs(
+                str(getattr(env, tool_name).cmd), tool_name
+            )
+            result.system_includes = [
+                d for d in result.system_includes if os.path.realpath(d) not in implicit
+            ]
 
     return result
 

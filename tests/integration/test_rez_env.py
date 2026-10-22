@@ -342,7 +342,7 @@ class TestLayoutOverride:
             layouts={"custom": RezLayout(include_dirs=("api",), libraries=("custom",))},
         )
 
-        assert str(root / "api") in env.cxx.includes
+        assert str(root / "api") in env.cxx.system_includes
         assert "custom" in env.link.libs
 
 
@@ -459,7 +459,7 @@ class TestRezEnvironment:
         env = test_project.Environment(toolchain=gcc_toolchain)
         assert rez_environment(env) is None
 
-        assert str(root / "include") in env.cxx.includes
+        assert str(root / "include") in env.cxx.system_includes
         assert str(root / "lib") in env.link.libdirs
         assert "hello_lib" in env.link.libs
 

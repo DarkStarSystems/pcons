@@ -769,6 +769,10 @@ class Toolchain(Protocol):
         """The program tool *name* runs (see BaseToolchain.tool_command)."""
         ...
 
+    def implicit_include_dirs(self, compiler: str, tool: str) -> frozenset[str]:
+        """Where *compiler* finds headers unasked (see BaseToolchain)."""
+        ...
+
     @property
     def abi(self) -> str | None:
         """Which binary interface this toolchain's objects follow, as an
@@ -1165,6 +1169,14 @@ class BaseToolchain:
             return chosen
         cmd = tool.default_vars().get("cmd")
         return (shutil.which(cmd) or cmd) if isinstance(cmd, str) else None
+
+    def implicit_include_dirs(self, compiler: str, tool: str) -> frozenset[str]:
+        """The directories *compiler*, run as this toolchain's *tool*,
+        searches for headers without being told, resolved. A package's
+        system include directory among them is left to the compiler: named
+        as a system include it would move ahead in the search. Base: none
+        known."""
+        return frozenset()
 
     def compiler_override_conflict(self) -> str | None:
         """The error to give when the user's ``$CC``, ``$CXX`` or ``$FC``

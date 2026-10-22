@@ -2090,7 +2090,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: Literal[True] = True,
-        system: bool = False,
+        system: bool = True,
     ) -> Target: ...
 
     @overload
@@ -2102,7 +2102,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: bool,
-        system: bool = False,
+        system: bool = True,
     ) -> Target | None: ...
 
     def find_package(
@@ -2113,7 +2113,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: bool = True,
-        system: bool = False,
+        system: bool = True,
     ) -> Target | None:
         """Find an external package and return it as an ImportedTarget.
 
@@ -2138,13 +2138,12 @@ class Project(_ProjectBuilders):
             components: Optional list of package components.
             required: If True (default), raises PackageNotFoundError when
                      the package is not found. If False, returns None.
-            system: If True, the package's include directories are treated as
-                   system headers (-isystem, /external:I), so warnings from
-                   its headers are suppressed in every dependent. Off by
-                   default: -isystem on a directory the compiler already
-                   searches (/usr/include) reorders the search and can break
-                   the standard library. Use it for prefixes owned by a
-                   package manager or a fetched source tree.
+            system: The package's include directories are system headers
+                   (-isystem, /external:I), so warnings from its headers are
+                   suppressed in every dependent, as CMake does for imported
+                   targets. A directory the compiler already searches
+                   (/usr/include) is left to the compiler. False makes them
+                   ordinary include directories.
 
         Returns:
             An ImportedTarget representing the package, or None if not
@@ -2157,7 +2156,7 @@ class Project(_ProjectBuilders):
             zlib = project.find_package("zlib")
             openssl = project.find_package("openssl", version=">=3.0")
             boost = project.find_package("boost", components=["filesystem"])
-            doctest = project.find_package("doctest", system=True)
+            mylib = project.find_package("mylib", system=False)  # its warnings too
 
             app.link(zlib)
             env.use(openssl)
