@@ -167,8 +167,25 @@ class ConanFinder(BaseFinder):
 
     @property
     def pkgconfig_dir(self) -> Path:
-        """Path to the directory containing generated .pc files."""
-        return self.output_folder
+        """The directory holding the .pc files Conan generated.
+
+        The output folder, unless the recipe uses cmake_layout, which puts
+        them in a subfolder depending on whether the CMake generator is
+        single- or multi-config:
+
+          single-config (Make/Ninja, e.g. gcc):  build/<build_type>/generators/
+          multi-config (MSVC/Xcode):              build/generators/
+
+        Found by searching rather than by enumerating layouts, so any future
+        layout is handled too, preferring a directory named "generators".
+        """
+        if list(self.output_folder.glob("*.pc")):
+            return self.output_folder
+        candidates = sorted(
+            {p.parent for p in self.output_folder.rglob("*.pc")},
+            key=lambda d: (d.name != "generators", str(d)),
+        )
+        return candidates[0] if candidates else self.output_folder
 
     def _run_conan(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         """Run conan with arguments.
@@ -780,29 +797,12 @@ class ConanFinder(BaseFinder):
         Conan fully controls these files, so they are parsed directly
         rather than via a system pkg-config, whose presence and
         implementation vary (e.g. Strawberry Perl's fails to resolve
-        transitive Requires). Searches cmake_layout subfolders if no .pc
-        files are in the main output folder.
+        transitive Requires), from ``pkgconfig_dir``.
 
         Returns:
             Dict mapping package names to PackageDescription objects.
         """
-        # Find the directory containing .pc files. With cmake_layout their
-        # location depends on whether the CMake generator is single- or
-        # multi-config:
-        #   single-config (Make/Ninja, e.g. gcc):  build/<build_type>/generators/
-        #   multi-config (MSVC/Xcode):              build/generators/
-        # Search recursively rather than enumerating layouts, so any future
-        # layout is handled too. Prefer a directory literally named "generators".
-        pc_dir = self.output_folder
-        if not list(pc_dir.glob("*.pc")):
-            candidates = sorted(
-                {p.parent for p in self.output_folder.rglob("*.pc")},
-                key=lambda d: (d.name != "generators", str(d)),
-            )
-            if candidates:
-                pc_dir = candidates[0]
-
-        return self._parse_pc_files_manually(pc_dir)
+        return self._parse_pc_files_manually(self.pkgconfig_dir)
 
     def _parse_pc_files_manually(
         self, pc_dir: Path | None = None
