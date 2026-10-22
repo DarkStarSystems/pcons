@@ -26,7 +26,6 @@ Example:
 
 from __future__ import annotations
 
-import json
 import sys
 import tomllib
 from collections.abc import Sequence
@@ -35,6 +34,7 @@ from typing import TYPE_CHECKING
 
 from pcons.core.builder_registry import builder
 from pcons.core.errors import PconsFileNotFoundError, PconsValueError
+from pcons.core.subst import PathToken
 from pcons.packages.description import PackageDescription
 from pcons.packages.imported import ImportedTarget
 
@@ -224,14 +224,17 @@ class CargoBuildBuilder:
         # Build the cargo command line. The dep-info base directory makes
         # cargo name the artifact in its dep-info file as the build tool
         # does, relative to the directory it runs in, which make needs to
-        # match the file to its rule. Sources stay absolute.
+        # match the file to its rule. Sources stay absolute. Every path is
+        # a PathToken, written as seen from where cargo runs.
         execution_dir = project.top_path_resolver.execution_dir
-        cargo_cmd: list[str] = [
+        cargo_cmd: list[str | PathToken] = [
             cargo,
             "build",
-            f"--manifest-path={manifest_path}",
-            f"--target-dir={target_root}",
-            f"--config=build.dep-info-basedir={json.dumps(str(execution_dir))}",
+            PathToken("--manifest-path=", str(manifest_path), "project"),
+            PathToken("--target-dir=", str(target_root), "project"),
+            PathToken(
+                '--config=build.dep-info-basedir="', str(execution_dir), "project", '"'
+            ),
         ]
         if profile == "release":
             cargo_cmd.append("--release")

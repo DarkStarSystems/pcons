@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from pcons.core.explain import Explanation
     from pcons.core.node import FileNode
     from pcons.core.preset import Intent, Preset, ToolContribution
+    from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.tools import pybuilder
     from pcons.tools.toolchain import Toolchain
@@ -61,7 +62,7 @@ _SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
 
 
 #: One token of a list-form command, as written.
-CommandToken: TypeAlias = "str | Path | Target | FileNode"
+CommandToken: TypeAlias = "str | Path | PathToken | Target | FileNode"
 
 #: What ``env.Command(target=...)`` takes, one file or several.
 CommandTargets: TypeAlias = "str | Path | Sequence[str | Path]"
