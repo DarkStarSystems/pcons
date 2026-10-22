@@ -984,10 +984,14 @@ class Toolchain(Protocol):
         ...
 
     def realize_link_needs(
-        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+        self,
+        needs: LinkNeeds,
+        target: Target,
+        existing_flags: Sequence[FlagToken],
+        driver: str | None = None,
     ) -> list[FlagToken]:
         """Link flags for the needs that aren't libraries, as this
-        toolchain's linker takes them."""
+        toolchain's linker takes them. *driver* is the command that links."""
         ...
 
     def after_resolve(
@@ -1420,7 +1424,11 @@ class BaseToolchain:
         return LinkNeeds()
 
     def realize_link_needs(
-        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+        self,
+        needs: LinkNeeds,
+        target: Target,
+        existing_flags: Sequence[FlagToken],
+        driver: str | None = None,
     ) -> list[FlagToken]:
         """Link flags realizing *needs*' rpaths, objects and console entry
         point, for a link this toolchain's driver runs (libraries and

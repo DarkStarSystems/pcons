@@ -65,6 +65,41 @@ def test_an_rpath_the_script_gave_is_not_repeated(test_project) -> None:
         assert tc.realize_link_needs(needs, target, ["-Wl,-rpath,@loader_path"]) == []
 
 
+def test_an_rpath_the_driver_gives_is_not_repeated(test_project) -> None:
+    """GCC's driver passes @loader_path and its own library directories on
+    Apple platforms; ld64 warns about a second copy."""
+    tc = GccToolchain()
+    target = Target("app", target_type="program")
+    needs = LinkNeeds(relative_rpaths=(".", "../lib"), rpaths=("/gcc/lib", "/other"))
+
+    with (
+        patch.object(
+            GccToolchain, "_target_platform", return_value=_platform("darwin")
+        ),
+        patch(
+            "pcons.toolchains.unix._driver_rpaths",
+            return_value=frozenset({"@loader_path", "/gcc/lib"}),
+        ) as probe,
+    ):
+        flags = tc.realize_link_needs(needs, target, [], driver="gcc-16")
+    probe.assert_called_once_with("gcc-16")
+    assert flags == ["-Wl,-rpath,/other", "-Wl,-rpath,@loader_path/../lib"]
+
+
+def test_driver_rpaths_come_from_what_it_would_run() -> None:
+    from pcons.toolchains.unix import _driver_rpaths
+
+    stderr = (
+        "Using built-in specs.\n"
+        ' "/usr/bin/ld" -o a.out -rpath "@loader_path" -rpath /opt/gcc/lib probe.o\n'
+    )
+    _driver_rpaths.cache_clear()
+    with patch("pcons.toolchains.unix.subprocess.run") as run:
+        run.return_value.stderr = stderr
+        assert _driver_rpaths("gcc-x") == {"@loader_path", "/opt/gcc/lib"}
+    _driver_rpaths.cache_clear()
+
+
 @pytest.fixture
 def libraries(tmp_path, gcc_toolchain):
     """A program in bin/ linking a shared library, which links another
