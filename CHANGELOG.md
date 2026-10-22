@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A program linking a static library now gets the libraries of packages
+  that library links privately (`link_private()`), which it needs since
+  the archive doesn't contain them. It failed to link.
+- The Conan profile follows the compilers the build uses, `$CC`/`$CXX`
+  included. With `CXX=g++-16` on macOS it said apple-clang, and Conan
+  built the dependencies with Apple clang.
+- `ConanFinder.pkgconfig_dir` names the directory the `.pc` files are in
+  for a recipe using `cmake_layout`.
+- On macOS, a program that GCC or gfortran links no longer gets
+  `@loader_path` twice, which made ld64 warn "duplicate -rpath".
+- `build.ninja` stays relocatable with C++20 modules and with
+  `CargoBuild`: the module scan's include directories and cargo's
+  paths are written relative to the build, as the compiles' are.
+- The "not relocatable" warning names the path and the target whose
+  command has it, and shortens a long flag.
+
 ## [0.31.0] - 2026-10-21
 
 Fortran is a first-class language now. LLVM flang and Intel ifx join
