@@ -217,6 +217,18 @@ class BuildPath:
     path: str
 
 
+def path_flag(prefix: str, path: ProjectPath | BuildPath | Path | str) -> PathToken:
+    """*path* behind *prefix* (``-I``, ``/I``), for the generators to write
+    as seen from where the command runs. A plain relative path is the
+    project's, as a ``ProjectPath`` is.
+    """
+    if isinstance(path, BuildPath):
+        return PathToken(prefix, path.path, "build")
+    if isinstance(path, ProjectPath):
+        return PathToken(prefix, path.path, "project")
+    return PathToken(prefix, str(path), "project")
+
+
 @dataclass(frozen=True)
 class TargetPath:
     """Marker for the target output path, converted to a PathToken with the
@@ -834,10 +846,8 @@ def _call_function(
                     )
                 name, value = item
                 item = str(name) if value is None else f"{name}={value}"
-            if isinstance(item, ProjectPath):
-                result.append(PathToken(prefix, item.path, "project"))
-            elif isinstance(item, BuildPath):
-                result.append(PathToken(prefix, item.path, "build"))
+            if isinstance(item, (ProjectPath, BuildPath)):
+                result.append(path_flag(prefix, item))
             elif isinstance(item, (SourcePath, TargetPath)):
                 result.append(_attach_path_marker(item, prefix, ""))
             else:
