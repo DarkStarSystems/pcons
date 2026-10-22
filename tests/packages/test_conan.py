@@ -37,6 +37,14 @@ class TestConanFinderBasic:
         finder = ConanFinder(output_folder=tmp_path / "deps")
         assert finder.pkgconfig_dir == tmp_path / "deps"
 
+    def test_pkgconfig_dir_follows_cmake_layout(self, tmp_path: Path) -> None:
+        """A recipe with cmake_layout writes its .pc files a few levels down."""
+        finder = ConanFinder(output_folder=tmp_path / "deps")
+        generators = tmp_path / "deps" / "build" / "Release" / "generators"
+        generators.mkdir(parents=True)
+        (generators / "zlib.pc").write_text("Name: zlib\n")
+        assert finder.pkgconfig_dir == generators
+
     def test_repr(self) -> None:
         """Test string representation."""
         finder = ConanFinder(
