@@ -1032,7 +1032,20 @@ def _run_generate(
         print(f"{what} stderr:\n{result.stderr}")
         variant_msg = f" (variant={variant})" if variant else ""
         pytest.fail(f"{what} failed with code {result.returncode}{variant_msg}")
+    smells = [
+        line
+        for line in (result.stdout + result.stderr).splitlines()
+        if any(smell in line for smell in _COMMAND_SMELLS)
+    ]
+    if smells:
+        pytest.fail(
+            "the build worked, but a command was written badly:\n" + "\n".join(smells)
+        )
 
+
+#: Build output that means pcons wrote a command badly, though it ran: a
+#: repeated rpath (ld64 warns), a path that ties build.ninja to this tree.
+_COMMAND_SMELLS = ("duplicate -rpath", "not relocatable")
 
 _variable_expr = re.compile(r"\$\{([^}]+)\}")
 
