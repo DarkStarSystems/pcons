@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `lib.set_option("whole_archive", True)` links every object of a static
+  library into whatever links it, including ones nothing references, such
+  as a plugin that registers itself. See `examples/98_whole_archive`.
+- `env.use_include_what_you_use()` runs include-what-you-use alongside
+  each C and C++ compile, as `use_clang_tidy()` runs clang-tidy, to report
+  `#include`s a source doesn't need or is missing.
+- `target.set_option("max_jobs", N)` lets at most N of a target's build
+  steps run at once, for compiles that need lots of memory.
+
+### Changed
+
+- A found package's headers are system headers by default
+  (`find_package()`, `ImportedTarget.from_package()`, `env.use()`), as
+  CMake makes an imported target's, so they don't set off your warnings
+  or `-Werror`. `system=False` turns that off. A directory the compiler
+  searches anyway, such as `/usr/include`, is left out of the system
+  includes, so GCC's C++ headers keep working.
+
 ### Fixed
+
+- MSVC finds headers in system include directories: cl.exe ignores
+  `/external:I` without `/external:W0`, which it never got.
 
 - A program linking a static library now gets the libraries of packages
   that library links privately (`link_private()`), which it needs since
