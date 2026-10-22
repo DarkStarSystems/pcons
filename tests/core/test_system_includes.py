@@ -237,3 +237,37 @@ class TestCompilersOwnDirectories:
         _implicit_include_dirs.cache_clear()
         assert os.path.realpath("/usr/include") in dirs
         assert any(Path(d).as_posix().endswith("/Library/Frameworks") for d in dirs)
+
+
+class TestToolsWithoutASystemForm:
+    def test_a_fortran_compile_gets_them_as_ordinary_includes(self, tmp_path):
+        """gfortran finds a package's .mod files on its include path, which
+        has no system form; a system package's directory must stay on it."""
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+        from pcons.toolchains.gcc import GccArchiver
+        from pcons.toolchains.gfortran import (
+            GfortranCompiler,
+            GfortranLinker,
+            GfortranToolchain,
+        )
+
+        toolchain = GfortranToolchain()
+        toolchain._tools = {
+            "fc": GfortranCompiler(),
+            "ar": GccArchiver(),
+            "link": GfortranLinker(),
+        }
+        (tmp_path / "main.f90").write_text("program main\nend program\n")
+        project = Project("t", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=toolchain)
+        netcdf = ImportedTarget.from_package(
+            PackageDescription(name="netcdf-fortran", include_dirs=["/opt/nc/include"])
+        )
+        app = project.Program("app", env, sources=["main.f90"])
+        app.link(netcdf)
+
+        effective = compute_effective_requirements(app, env, tool_name="fc")
+
+        assert Path("/opt/nc/include") in effective.includes
+        assert effective.system_includes == []

@@ -477,6 +477,21 @@ def compute_effective_requirements(
                     origin=(dep.name, "public"),
                 )
 
+    # A tool with no system form of an include directory (a Fortran
+    # compiler, which finds a package's .mod files on its include path)
+    # takes those directories as ordinary ones.
+    if (
+        for_compilation
+        and tool_name
+        and result.system_includes
+        and env.has_tool(tool_name)
+        and getattr(env, tool_name).get("system_includes") is None
+    ):
+        for directory in result.system_includes:
+            if directory not in result.includes:
+                result.includes.append(directory)
+        result.system_includes = []
+
     # A compiler's own include directories stay where it searches them.
     # Named as system includes they'd move ahead in that search, and GCC's
     # C++ headers, which #include_next the C library's, would break.
