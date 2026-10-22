@@ -2844,6 +2844,16 @@ main.link(plugins)
 ```
 
 Each linker gets its own form, in the library's place on the link line: `-Wl,-force_load,` on Apple, `-Wl,--whole-archive ... -Wl,--no-whole-archive` with GNU ld and lld, `/WHOLEARCHIVE:` with MSVC's link. See `examples/98_whole_archive`.
+### Limiting How Many of a Target's Steps Run at Once
+
+Some sources take gigabytes of memory to compile (heavy templates, big generated files), and ninja's default parallelism runs as many of them at once as there are cores. `max_jobs` caps how many of one target's build steps run at the same time, while the rest of the build keeps its full parallelism:
+
+```python
+tests = project.Program("tests", env, sources=test_sources)
+tests.set_option("max_jobs", 2)
+```
+
+It is a ninja pool of that depth, holding the target's compiles and its link. Make has no equivalent, so the Makefile generator ignores it.
 
 ### Exporting Only Some Symbols
 

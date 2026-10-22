@@ -155,6 +155,13 @@ def register_target_option(name: str, description: str) -> None:
     _KNOWN_TARGET_OPTIONS[name] = description
 
 
+register_target_option(
+    "max_jobs",
+    "how many of this target's build steps may run at once, for compiles too "
+    "big to run many of in parallel (a ninja pool; make has no equivalent)",
+)
+
+
 def known_target_options() -> dict[str, str]:
     """Every target option currently declared, name → description."""
     return dict(_KNOWN_TARGET_OPTIONS)
