@@ -284,7 +284,14 @@ def _tool_lines(env: Environment) -> Iterator[str]:
             continue
         tool = getattr(env, name)
         parts = [f"cmd={_cmd(getattr(tool, 'cmd', None))}"]
-        for field in ("flags", "defines", "libs", "libdirs", "includes"):
+        for field in (
+            "flags",
+            "defines",
+            "libs",
+            "libdirs",
+            "includes",
+            "system_includes",
+        ):
             value = getattr(tool, field, None)
             if isinstance(value, list) and value:
                 parts.append(f"{field}=[{_tokens(value)}]")

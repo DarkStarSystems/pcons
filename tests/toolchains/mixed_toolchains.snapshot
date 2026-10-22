@@ -471,8 +471,8 @@
   ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+gfortran | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
-  cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
-  cxx: cmd=g++ flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
+  cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
+  cxx: cmd=g++ flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
   fc: cmd=gfortran defines=[PKG_DEFINE] includes=[/pkg/include]
   link: cmd=gcc flags=[-Wl,--as-needed] libs=[pkg] libdirs=[/pkg/lib]
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
@@ -792,8 +792,8 @@
   ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### linux gfortran+gcc | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
-  cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
-  cxx: cmd=g++ flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
+  cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
+  cxx: cmd=g++ flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
   fc: cmd=gfortran defines=[PKG_DEFINE] includes=[/pkg/include]
   link: cmd=gfortran flags=[-Wl,--as-needed] libs=[pkg] libdirs=[/pkg/lib]
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
@@ -1127,8 +1127,8 @@
   ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but gfortran selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. fc=aarch64-linux-gnu-gfortran), or use flang, which retargets via --target.
 ### linux llvm+gfortran | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
-  cc: cmd=clang flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
-  cxx: cmd=clang++ flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
+  cc: cmd=clang flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
+  cxx: cmd=clang++ flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
   fc: cmd=gfortran defines=[PKG_DEFINE] includes=[/pkg/include]
   link: cmd=clang flags=[-Wl,--as-needed] libs=[pkg] libdirs=[/pkg/lib]
   metal: cmd=xcrun
@@ -1432,8 +1432,8 @@
   metal: cmd=xcrun
 ### linux llvm+flang | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
-  cc: cmd=clang flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
-  cxx: cmd=clang++ flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
+  cc: cmd=clang flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
+  cxx: cmd=clang++ flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
   fc: cmd=flang defines=[PKG_DEFINE] includes=[/pkg/include]
   link: cmd=clang flags=[-Wl,--as-needed] libs=[pkg] libdirs=[/pkg/lib]
   metal: cmd=xcrun
@@ -1737,8 +1737,8 @@
   metal: cmd=xcrun
 ### linux flang+llvm | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
-  cc: cmd=clang flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
-  cxx: cmd=clang++ flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
+  cc: cmd=clang flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
+  cxx: cmd=clang++ flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
   fc: cmd=flang defines=[PKG_DEFINE] includes=[/pkg/include]
   link: cmd=flang flags=[-Wl,--as-needed] libs=[pkg] libdirs=[/pkg/lib]
   metal: cmd=xcrun
@@ -2040,8 +2040,8 @@
   ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+ifx | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
-  cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
-  cxx: cmd=g++ flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
+  cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
+  cxx: cmd=g++ flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
   fc: cmd=ifx defines=[PKG_DEFINE] includes=[/pkg/include]
   link: cmd=gcc flags=[-Wl,--as-needed] libs=[pkg] libdirs=[/pkg/lib]
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
@@ -2332,9 +2332,9 @@
   ERROR PconsValueError: Cross preset 'linux-aarch64' targets triple 'aarch64-linux-gnu', but GCC selects targets by binary, not by flag. Provide cross-compiler commands in the preset's tool_cmds (e.g. cc=aarch64-linux-gnu-gcc), or use a clang-based toolchain, which retargets via --target.
 ### linux gcc+cuda | upstream: env.use(package)
   ar: cmd=ar flags=[rcs]
-  cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
+  cc: cmd=gcc flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
   cuda: cmd=nvcc
-  cxx: cmd=g++ flags=[-pthread] defines=[PKG_DEFINE] includes=[/pkg/include]
+  cxx: cmd=g++ flags=[-pthread] defines=[PKG_DEFINE] system_includes=[/pkg/include]
   link: cmd=gcc flags=[-Wl,--as-needed] libs=[pkg] libdirs=[/pkg/lib]
   app/src.c.o: tool=cc cmd=gcc flags=[-pthread]
   app/src.cpp.o: tool=cxx cmd=g++ flags=[-pthread]

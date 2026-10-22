@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """System include directories (-isystem / /external:I / -imsvc)."""
 
+import os
 from pathlib import Path
 
 from pcons.core.project import Project
@@ -156,3 +157,57 @@ class TestGeneratedCommand:
         content = (tmp_path / "build" / "build.ninja").read_text()
         assert "-isystem$topdir/vendor" in content
         assert f"-isystem{tmp_path}" not in content
+
+
+class TestCompilersOwnDirectories:
+    """A package's include dir the compiler already searches stays out of the
+    system includes: -isystem would move it ahead in the search, and GCC's C++
+    headers, which #include_next the C library's, would break."""
+
+    def test_they_are_left_to_the_compiler(self, tmp_path, gcc_toolchain):
+        from unittest.mock import patch
+
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+
+        (tmp_path / "main.c").write_text("int main(void) { return 0; }\n")
+        project = Project("t", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        zlib = ImportedTarget.from_package(
+            PackageDescription(
+                name="z", include_dirs=["/usr/include", "/opt/z/include"]
+            )
+        )
+        app = project.Program("app", env, sources=["main.c"])
+        app.link(zlib)
+
+        with patch(
+            "pcons.toolchains.unix._implicit_include_dirs",
+            return_value=frozenset({os.path.realpath("/usr/include")}),
+        ) as probe:
+            eff = compute_effective_requirements(app, env, tool_name="cc")
+
+        probe.assert_called_once_with(str(env.cc.cmd), "c")
+        assert eff.system_includes == [Path("/opt/z/include")]
+        assert Path("/usr/include") not in eff.includes
+
+    def test_the_probe_reads_the_search_list(self):
+        from unittest.mock import patch
+
+        from pcons.toolchains.unix import _implicit_include_dirs
+
+        stderr = (
+            '#include "..." search starts here:\n'
+            "#include <...> search starts here:\n"
+            " /usr/lib/gcc/x86_64-linux-gnu/14/include\n"
+            " /usr/include\n"
+            " /Library/Frameworks (framework directory)\n"
+            "End of search list.\n"
+        )
+        _implicit_include_dirs.cache_clear()
+        with patch("pcons.toolchains.unix.subprocess.run") as run:
+            run.return_value.stderr = stderr
+            dirs = _implicit_include_dirs("gcc-x", "c")
+        _implicit_include_dirs.cache_clear()
+        assert os.path.realpath("/usr/include") in dirs
+        assert any(Path(d).as_posix().endswith("/Library/Frameworks") for d in dirs)

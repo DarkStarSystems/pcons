@@ -1411,7 +1411,17 @@ class Target:
             if dep.qualified_name in visited:
                 continue
             visited.add(dep.qualified_name)
-            result.merge(dep.public)
+            result.merge(dep.public_for_dependents())
+
+    def public_for_dependents(self) -> UsageRequirements:
+        """The public requirements as a dependent compiles with them: an
+        imported package asked for as ``system`` (the default) gives its
+        include directories as system ones."""
+        if not (getattr(self, "system", False) and self.public.include_dirs):
+            return self.public
+        reqs = self.public.clone()
+        reqs.make_includes_system()
+        return reqs
 
     def get_all_languages(self) -> set[str]:
         """The languages of this target and everything it links (e.g.

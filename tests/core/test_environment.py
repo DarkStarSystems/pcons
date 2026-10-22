@@ -561,7 +561,7 @@ class TestUseUnifiedWithRequirements:
 
     def test_use_applies_package(self, test_project):  # noqa: F811
         env = self._env()
-        env.use(self._pkg())
+        env.use(self._pkg(), system=False)
 
         inc = str(Path("/opt/fancy/include"))
         assert inc in env.cc.includes
@@ -595,7 +595,7 @@ class TestUseUnifiedWithRequirements:
         env.use(pkg)
         env.use(pkg)
 
-        assert env.cc.includes.count(str(Path("/opt/fancy/include"))) == 1
+        assert env.cc.system_includes.count(str(Path("/opt/fancy/include"))) == 1
         assert env.link.libs.count("fancy") == 1
         assert env.link.flags.count("-Wl,-rpath,/opt/fancy/lib") == 1
 
@@ -605,15 +605,15 @@ class TestUseUnifiedWithRequirements:
         from pcons.packages.imported import ImportedTarget
 
         env = self._env()
-        env.use(ImportedTarget.from_package(self._pkg()))
+        env.use(ImportedTarget.from_package(self._pkg(), system=False))
 
         assert str(Path("/opt/fancy/include")) in env.cc.includes
         assert "fancy" in env.link.libs
 
-    def test_use_system_applies_isystem_includes(self, test_project):  # noqa: F811
-        """system=True puts the package's include dirs on the system list."""
+    def test_use_applies_isystem_includes_by_default(self, test_project):  # noqa: F811
+        """A package's include dirs go on the system list unless system=False."""
         env = self._env()
-        env.use(self._pkg(), system=True)
+        env.use(self._pkg())
 
         inc = str(Path("/opt/fancy/include"))
         assert inc in env.cc.system_includes

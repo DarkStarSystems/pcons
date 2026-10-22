@@ -78,7 +78,7 @@ class ImportedTarget(Target):
         httplib.link(openssl)  # transitive: consumers of httplib get openssl too
     """
 
-    __slots__ = ("package", "is_imported", "requested_components")
+    __slots__ = ("package", "is_imported", "requested_components", "system")
 
     def __init__(
         self,
@@ -86,7 +86,7 @@ class ImportedTarget(Target):
         *,
         package: PackageDescription | None = None,
         requested_components: Sequence[str] | None = None,
-        system: bool = False,
+        system: bool = True,
         env: Environment | None = None,
     ) -> None:
         """Create an imported target.
@@ -95,15 +95,16 @@ class ImportedTarget(Target):
             name: Target name (usually the package name).
             package: Package description with all the details.
             requested_components: Which components were requested.
-            system: Treat the package's headers as system headers, so
-                warnings from them are suppressed in every dependent.
+            system: Compile against the package's headers as system headers,
+                so warnings from them are suppressed in every dependent (the
+                default). The include directories stay in ``include_dirs``;
+                a dependent's compile makes them system ones.
             env: The environment the package was located for. Two
                 environments may hold two different results for one
                 package name, and this is what tells the targets apart.
         """
         super().__init__(name, env=env)
-        if system and package is not None:
-            package = package.as_system()
+        self.system = system
         self.package = package
         self.is_imported = True
         self.requested_components = requested_components or []
@@ -137,7 +138,7 @@ class ImportedTarget(Target):
         package: PackageDescription,
         components: Sequence[str] | None = None,
         *,
-        system: bool = False,
+        system: bool = True,
         env: Environment | None = None,
     ) -> ImportedTarget:
         """Create an imported target from a package description.
@@ -147,7 +148,7 @@ class ImportedTarget(Target):
             components: Optional list of components to include.
             system: Treat the package's headers as system headers
                 (``-isystem``, ``/external:I``), so their warnings are
-                suppressed in every dependent.
+                suppressed in every dependent (the default).
             env: The environment the package was located for.
 
         Returns:

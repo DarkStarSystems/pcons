@@ -233,11 +233,11 @@ class TestImportedTarget:
         app.link_private(httplib)
 
         reqs = app.collect_usage_requirements()
-        # httplib's own requirements
-        assert Path("/usr/include") in reqs.include_dirs
+        # httplib's own requirements (system headers, as packages' are)
+        assert Path("/usr/include") in reqs.system_include_dirs
         assert "CPPHTTPLIB_OPENSSL_SUPPORT" in reqs.defines
         # openssl's requirements, propagated transitively via link()
-        assert Path("/usr/include/openssl") in reqs.include_dirs
+        assert Path("/usr/include/openssl") in reqs.system_include_dirs
         assert "ssl" in reqs.link_libs
         assert "crypto" in reqs.link_libs
         # Library dirs propagate as link_dirs
@@ -246,30 +246,39 @@ class TestImportedTarget:
 
 
 class TestSystemIncludes:
-    """system=True: the package's headers reach consumers as -isystem."""
+    """A package's headers reach consumers as -isystem, unless system=False.
+    The target records them as the package gave them."""
 
-    def test_from_package_moves_the_include_dirs(self, test_project):  # noqa: F811
+    def test_from_package_keeps_the_include_dirs(self, test_project):  # noqa: F811
         pkg = PackageDescription(name="doctest", include_dirs=["/opt/doctest/include"])
 
-        target = ImportedTarget.from_package(pkg, system=True)
+        target = ImportedTarget.from_package(pkg)
 
-        assert list(target.public.include_dirs) == []
-        assert list(target.public.system_include_dirs) == [Path("/opt/doctest/include")]
+        assert target.system
+        assert list(target.public.include_dirs) == [Path("/opt/doctest/include")]
+        assert list(target.public.system_include_dirs) == []
 
     def test_the_package_description_is_left_alone(self, test_project):  # noqa: F811
         pkg = PackageDescription(name="doctest", include_dirs=["/opt/doctest/include"])
 
-        ImportedTarget.from_package(pkg, system=True)
+        ImportedTarget.from_package(pkg)
 
         assert pkg.include_dirs == ["/opt/doctest/include"]
 
-    def test_the_target_reports_the_moved_dirs(self, test_project):  # noqa: F811
-        pkg = PackageDescription(name="nanobind", include_dirs=["/opt/nb/include"])
+    def test_system_false_reaches_a_consumer_as_ordinary(self, test_project):  # noqa: F811
+        from pcons.core.target import Target
 
-        target = ImportedTarget.from_package(pkg, system=True)
+        mylib = ImportedTarget.from_package(
+            PackageDescription(name="mylib", include_dirs=["/opt/mylib/include"]),
+            system=False,
+        )
+        app = Target("app")
+        app.link_private(mylib)
 
-        assert target.include_dirs == []
-        assert target.system_include_dirs == [Path("/opt/nb/include")]
+        reqs = app.collect_usage_requirements()
+
+        assert Path("/opt/mylib/include") in reqs.include_dirs
+        assert Path("/opt/mylib/include") not in reqs.system_include_dirs
 
     def test_a_declared_system_dir_needs_no_flag(self, test_project):  # noqa: F811
         pkg = PackageDescription(
@@ -285,7 +294,6 @@ class TestSystemIncludes:
 
         doctest = ImportedTarget.from_package(
             PackageDescription(name="doctest", include_dirs=["/opt/doctest/include"]),
-            system=True,
         )
         app = Target("app")
         app.link_private(doctest)
