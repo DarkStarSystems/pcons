@@ -110,6 +110,23 @@ class TestPathFlagRelativization:
 
         assert "not relocatable" in caplog.text
 
+    def test_warning_names_the_path_and_the_edge_not_a_long_token(
+        self, tmp_path, gcc_toolchain, caplog
+    ):
+        """A hand-joined token can be a whole flag list; the warning shows the
+        path, which edge carries it, and the flag only when it is short."""
+        vendor = tmp_path / "vendor"
+        joined = " ".join([*(f"-DFLAG{i}=1" for i in range(30)), f"-I{vendor}"])
+        project = _project_with_flags(tmp_path, gcc_toolchain, [f"-Wp,{joined}"])
+
+        with caplog.at_level(logging.WARNING):
+            _generate(project, tmp_path)
+
+        assert f"\n  {vendor}\n" in caplog.text
+        assert "in target " in caplog.text
+        assert "-DFLAG29" not in caplog.text
+        assert caplog.text.count("not relocatable") == 1
+
     def test_recognized_flags_do_not_warn(self, tmp_path, gcc_toolchain, caplog):
         project = _project_with_flags(
             tmp_path, gcc_toolchain, [f"-I{tmp_path / 'vendor'}"]

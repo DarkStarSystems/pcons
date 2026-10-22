@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 #: How a build statement names the project top: ninja's own variable.
 TOPDIR = "$topdir"
 
+#: The longest flag a warning shows whole.
+_SHORT_FLAG = 100
+
 
 class NinjaGenerator(BaseGenerator):
     """Generator that produces Ninja build files.
@@ -217,6 +220,7 @@ class NinjaGenerator(BaseGenerator):
                 source_count=len(build_info.get("sources") or []),
                 target_count=len(all_targets) or len(explicit_outputs) or 1,
                 cwd=cwd,
+                edge=self._edge_label(node, target),
             )
             # Launcher tokens are a program and its arguments, not paths in the
             # graph, so they are passed through as written rather than
@@ -751,7 +755,10 @@ class NinjaGenerator(BaseGenerator):
         if node_vars and isinstance(node_vars, dict):
             for name, value in cast("dict[str, object]", node_vars).items():
                 self._check_node_var_name(name, node)
-                f.write(f"  {name} = {self._render_node_var(value, cwd, path_flags)}\n")
+                text = self._render_node_var(
+                    value, cwd, path_flags, edge=self._edge_label(node, target)
+                )
+                f.write(f"  {name} = {text}\n")
 
         # Custom per-build variables from build_info (legacy support)
         custom_vars = build_info.get("variables")
@@ -775,7 +782,12 @@ class NinjaGenerator(BaseGenerator):
             )
 
     def _render_node_var(
-        self, value: object, cwd: Path | None, path_flags: frozenset[str]
+        self,
+        value: object,
+        cwd: Path | None,
+        path_flags: frozenset[str],
+        *,
+        edge: str = "",
     ) -> str:
         """One per-node value as ninja variable text.
 
@@ -788,7 +800,7 @@ class NinjaGenerator(BaseGenerator):
         tokens = value if isinstance(value, list) else [value]
         return to_shell_command(
             self._relativize_command_tokens(
-                cast("list[str]", tokens), cwd=cwd, path_flags=path_flags
+                cast("list[str]", tokens), cwd=cwd, path_flags=path_flags, edge=edge
             ),
             shell="ninja",
         )
@@ -1054,8 +1066,10 @@ class NinjaGenerator(BaseGenerator):
             token,
         )
 
-    def _warn_absolute_in_tree(self, flag: str, path_flags: frozenset[str]) -> None:
-        """Warn once per flag that carries an absolute path from inside the
+    def _warn_absolute_in_tree(
+        self, flag: str, path_flags: frozenset[str], edge: str = ""
+    ) -> None:
+        """Warn once per path that a flag carries absolutely from inside the
         project tree.
 
         pcons rewrites the paths in flags it recognizes to ``$topdir/...`` so
@@ -1063,24 +1077,38 @@ class NinjaGenerator(BaseGenerator):
         it couldn't see through — a flag spelling we don't know, or one
         assembled by hand — silently defeats that, and silence is the real
         problem. Paths outside the tree (SDKs, system prefixes) are fine and
-        stay quiet.
+        stay quiet. The warning names the path and the edge, and shows the
+        flag only when it's short: a hand-joined token can be a whole flag
+        list.
         """
         if self._project_root is None:
             return
-        if str(self._project_root) not in flag:
+        root = str(self._project_root)
+        found = re.search(re.escape(root) + r"[^\s\"']*", flag)
+        if found is None:
             return
-        if flag in self._warned_absolute_paths:
+        path = found.group(0)
+        if path in self._warned_absolute_paths:
             return
-        self._warned_absolute_paths.add(flag)
+        self._warned_absolute_paths.add(path)
+        shown = flag if len(flag) <= _SHORT_FLAG else f"{flag[:_SHORT_FLAG]}..."
         logger.warning(
-            "Flag carries an absolute path inside the project tree, so "
-            "build.ninja is not relocatable:\n  %s\n"
+            "An absolute path inside the project tree makes build.ninja not "
+            "relocatable:\n  %s\n  in %s, in the flag %s\n"
             "  pcons rewrites paths in the flags it knows for this tool (%s). "
             "For anything else, use the tool's includes/libdirs lists or a "
             "PathToken.",
-            flag,
+            path,
+            edge or "a command",
+            shown,
             ", ".join(sorted(path_flags)) or "none",
         )
+
+    @staticmethod
+    def _edge_label(node: FileNode, target: Target | None) -> str:
+        """How a warning names a build edge: its target, and what it writes."""
+        written = node.path.as_posix()
+        return f"target {target.name} ({written})" if target is not None else written
 
     def _relativize_command_tokens(
         self,
@@ -1090,8 +1118,11 @@ class NinjaGenerator(BaseGenerator):
         target_count: int = 0,
         cwd: Path | None = None,
         path_flags: frozenset[str] = frozenset(),
+        edge: str = "",
     ) -> list[str]:
         """Relativize command tokens for ninja execution.
+
+        *edge* says which build edge the tokens belong to, for warnings.
 
         SourcePath/TargetPath markers become $in/$out (or $source_N/$target_N
         in indexed mode), PathTokens are relativized, and a plain string that
@@ -1205,7 +1236,7 @@ class NinjaGenerator(BaseGenerator):
                     s, path_flags, lambda p: self._text(p, built=False, cwd=cwd)
                 )
                 if relativized.startswith("-"):
-                    self._warn_absolute_in_tree(relativized, path_flags)
+                    self._warn_absolute_in_tree(relativized, path_flags, edge)
                 if cwd is None:
                     self._warn_build_dir_in_command(relativized)
                 result.append(relativized)
