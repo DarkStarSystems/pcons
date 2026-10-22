@@ -159,7 +159,9 @@ class TestContextRealization:
         compile_rule = next(
             line
             for line in (tmp_path / "build" / "build.ninja").read_text().splitlines()
-            if line.strip().startswith("command = cl.exe") and "/c " in line
+            if line.strip().startswith("command =")
+            and "cl.exe" in line
+            and "/c " in line
         )
 
         assert ("/external:I" in compile_rule) is system
