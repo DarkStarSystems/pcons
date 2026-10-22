@@ -1526,6 +1526,36 @@ class Environment(_EnvironmentStubs):
 
         apply_clang_tidy(self, tool, args)
 
+    def use_include_what_you_use(
+        self, tool: str | None = None, args: Sequence[str] = ()
+    ) -> None:
+        """Check every C and C++ source's #includes as it compiles.
+
+        include-what-you-use (IWYU, https://include-what-you-use.org) reads
+        each source with that compile's own flags and reports the
+        ``#include`` lines it doesn't need and the headers it uses without
+        including them, so headers stay minimal and a source doesn't build
+        only by accident of what another header pulls in. CMake's
+        ``CXX_INCLUDE_WHAT_YOU_USE`` property does the same.
+
+        Each compile first runs IWYU on its source, then compiles; the
+        compile runs either way. IWYU only reports, unless *args* hold its
+        own ``--error`` option, which makes its findings fail the build.
+        Composes with ``use_clang_tidy()`` and ``use_compiler_cache()`` in
+        any order. The driver is :mod:`pcons.tools.co_compile`.
+
+        Args:
+            tool: The include-what-you-use program, by name or path. None
+                  looks for "include-what-you-use" in PATH; a missing one is a
+                  warning and the compiles are left alone.
+            args: Extra IWYU arguments, e.g.
+                  ``["-Xiwyu", "--mapping_file=qt.imp"]`` or
+                  ``["-Xiwyu", "--error"]``.
+        """
+        from pcons.tools.co_compile import apply_include_what_you_use
+
+        apply_include_what_you_use(self, tool, args)
+
     def apply_preset(self, name: KnownFeaturePreset | str) -> None:
         """Apply a named feature preset to this environment.
 

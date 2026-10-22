@@ -500,6 +500,31 @@ class TestClangTidy:
 
         assert env.cxx.launcher.count("pcons.tools.co_compile") == 1
 
+    @pytest.mark.parametrize("tidy_first", [True, False])
+    def test_include_what_you_use_shares_the_launcher(
+        self, test_project, monkeypatch, tidy_first
+    ) -> None:  # noqa: F811
+        """Both analyzers run from one co_compile launcher, before one compile."""
+        monkeypatch.setattr(
+            co_compile.shutil,
+            "which",
+            self._installed("clang-tidy", "include-what-you-use"),
+        )
+        env = self._env_with_compilers()
+        env.cxx.launcher = ["ccache"]
+
+        calls = [env.use_clang_tidy, env.use_include_what_you_use]
+        for use in calls if tidy_first else reversed(calls):
+            use()
+        env.use_include_what_you_use()
+
+        launcher = env.cxx.launcher
+        assert launcher.count("pcons.tools.co_compile") == 1
+        assert launcher.count("--iwyu") == 1
+        assert "/usr/bin/include-what-you-use" in launcher
+        assert "/usr/bin/clang-tidy" in launcher
+        assert launcher[-2:] == ["--", "ccache"]
+
     @pytest.mark.parametrize("cache_first", [True, False])
     def test_runs_outside_a_compiler_cache(
         self, test_project, monkeypatch, cache_first
