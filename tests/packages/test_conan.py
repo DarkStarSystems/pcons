@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pcons.core.project import Project
 from pcons.packages.finders.conan import ConanFinder
 
 
@@ -804,31 +805,19 @@ Cflags: -I/opt/pcons_test/include
         assert result is None
 
 
-class _FakeCompilerTool:
-    """Stand-in for a Tool: only ``default_vars()['cmd']`` is read by
-    ``ConanFinder._get_toolchain_compiler_cmd``.
-    """
-
-    def __init__(self, cmd: str) -> None:
-        self._cmd = cmd
-
-    def default_vars(self) -> dict[str, str]:
-        return {"cmd": self._cmd}
-
-
 class _FakeToolchain:
-    """Stand-in for a Toolchain exposing only ``.name`` and ``.tools`` —
-    the attributes ConanFinder's compiler detection reads. Real toolchains
+    """Stand-in for a Toolchain exposing only ``.name`` and ``tool_command()``
+    — what ConanFinder's compiler detection reads. Real toolchains
     never expose a ``.version`` attribute, so tests must go through the
     same cc/cxx command path the real code uses, not a shortcut.
     """
 
     def __init__(self, name: str, cc_cmd: str, cxx_cmd: str | None = None) -> None:
         self.name = name
-        self.tools = {
-            "cc": _FakeCompilerTool(cc_cmd),
-            "cxx": _FakeCompilerTool(cxx_cmd or cc_cmd),
-        }
+        self._cmds = {"cc": cc_cmd, "cxx": cxx_cmd or cc_cmd}
+
+    def tool_command(self, name: str) -> str | None:
+        return self._cmds.get(name)
 
 
 class TestConanFinderWithToolchain:
@@ -1191,6 +1180,50 @@ class TestConanFinderWithToolchain:
 
         content = finder.profile_path.read_text()
         assert "compiler=gcc" in content
+
+    @staticmethod
+    def _gcc16(cmd, **kwargs):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "gcc-16 (Homebrew GCC 16.2.0) 16.2.0\n"
+        result.stderr = ""
+        return result
+
+    def test_sync_profile_uses_the_environments_compilers(
+        self, tmp_path: Path, gcc_toolchain
+    ) -> None:
+        """The compilers the build uses, not the toolchain's defaults: what
+        $CC/$CXX or the script chose."""
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.cc.cmd = "/opt/gcc/bin/gcc-16"
+        env.cxx.cmd = "/opt/gcc/bin/g++-16"
+        finder = ConanFinder(output_folder=tmp_path)
+
+        with patch("subprocess.run", side_effect=self._gcc16) as run:
+            finder.sync_profile(env=env)
+
+        assert run.call_args.args[0][0] == "/opt/gcc/bin/gcc-16"
+        content = finder.profile_path.read_text()
+        assert "compiler=gcc\n" in content
+        assert "compiler.version=16\n" in content
+        assert "CC=/opt/gcc/bin/gcc-16\n" in content
+        assert "CXX=/opt/gcc/bin/g++-16\n" in content
+
+    def test_sync_profile_toolchain_follows_cc(
+        self, tmp_path: Path, gcc_toolchain, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With only a toolchain, its tools' $CC/$CXX still decide."""
+        cc = tmp_path / "gcc-16"
+        cc.write_text("")
+        monkeypatch.setenv("CC", str(cc))
+        monkeypatch.delenv("CXX", raising=False)
+        finder = ConanFinder(output_folder=tmp_path / "out")
+
+        with patch("subprocess.run", side_effect=self._gcc16):
+            finder.sync_profile(toolchain=gcc_toolchain)
+
+        assert f"CC={cc}\n" in finder.profile_path.read_text()
 
 
 class TestConanFinderCommandResolution:

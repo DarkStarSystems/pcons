@@ -204,11 +204,11 @@ def test_a_tools_command_is_its_variable_else_its_default(monkeypatch, tmp_path)
     """Every question about the compiler that will build asks this."""
     monkeypatch.delenv("CXX", raising=False)
     toolchain = _registry_toolchain("llvm")
-    assert toolchain._tool_command("cxx") is not None
+    assert toolchain.tool_command("cxx") is not None
     users = _fake_compiler(tmp_path, "clang++")
     monkeypatch.setenv("CXX", str(users))
-    assert toolchain._tool_command("cxx") == str(users)
-    assert toolchain._tool_command("no-such-tool") is None
+    assert toolchain.tool_command("cxx") == str(users)
+    assert toolchain.tool_command("no-such-tool") is None
 
 
 class TestFamilyValidation:

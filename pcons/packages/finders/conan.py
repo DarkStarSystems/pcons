@@ -193,6 +193,7 @@ class ConanFinder(BaseFinder):
         toolchain: Toolchain | None = None,
         build_type: str = "Release",
         runtime_linkage: str = "shared",
+        compiler_cmd: str | None = None,
     ) -> dict[str, str]:
         """Detect compiler settings for Conan profile.
 
@@ -202,6 +203,8 @@ class ConanFinder(BaseFinder):
                 for MSVC (mandatory in Conan 2 profiles).
             runtime_linkage: The environment's runtime linkage, which is
                 compiler.runtime for MSVC.
+            compiler_cmd: The compiler the build uses, which is asked for
+                its kind and version. Left out, the toolchain's.
 
         Returns:
             Dict of Conan settings.
@@ -227,12 +230,13 @@ class ConanFinder(BaseFinder):
         # The version is detected by running the toolchain's actual
         # compiler command below — never a bare "gcc"/"clang" from PATH,
         # which could silently differ from the [buildenv] CC/CXX compiler.
-        compiler_cmd: str | None = None
         if toolchain is not None:
             compiler_name = toolchain.name.lower()
-            compiler_cmd = self._get_toolchain_compiler_cmd(
-                toolchain, "cc"
-            ) or self._get_toolchain_compiler_cmd(toolchain, "cxx")
+            compiler_cmd = (
+                compiler_cmd
+                or toolchain.tool_command("cc")
+                or toolchain.tool_command("cxx")
+            )
             if "gcc" in compiler_name:
                 if self._platform.is_macos and self._is_apple_clang(compiler_cmd):
                     # /usr/bin/gcc on macOS is a shim for Apple Clang, so a
@@ -431,7 +435,7 @@ class ConanFinder(BaseFinder):
         Args:
             compiler: Compiler name (gcc, clang, apple-clang, msvc).
             compiler_cmd: The actual command to invoke, e.g. from
-                ``_get_toolchain_compiler_cmd`` — this must match what
+                ``Toolchain.tool_command`` — this must match what
                 [buildenv] CC/CXX use, so profile detection doesn't run a
                 bare "gcc"/"clang" off PATH while the build itself uses a
                 different, toolchain-selected compiler. Falls back to a
@@ -564,10 +568,8 @@ class ConanFinder(BaseFinder):
                 None,
             )
 
-        cc_cmd = cxx_cmd = None
-        if toolchain is not None:
-            cc_cmd = self._get_toolchain_compiler_cmd(toolchain, "cc")
-            cxx_cmd = self._get_toolchain_compiler_cmd(toolchain, "cxx")
+        cc_cmd = self._compiler_cmd(toolchain, env, "cc")
+        cxx_cmd = self._compiler_cmd(toolchain, env, "cxx")
 
         lines: list[str] = []
         lines.append("[settings]")
@@ -578,6 +580,7 @@ class ConanFinder(BaseFinder):
             toolchain,
             build_type,
             env.runtime_linkage if env is not None else "shared",
+            compiler_cmd=cc_cmd or cxx_cmd,
         )
         settings["build_type"] = build_type
 
@@ -642,29 +645,21 @@ class ConanFinder(BaseFinder):
             conf["tools.build:compiler_executables"] = executables
         return conf
 
-    def _get_toolchain_compiler_cmd(
-        self, toolchain: Toolchain, tool_name: str
+    def _compiler_cmd(
+        self, toolchain: Toolchain | None, env: Any, tool_name: str
     ) -> str | None:
-        """Get compiler command from toolchain.
-
-        Args:
-            toolchain: Toolchain to query.
-            tool_name: Tool name ("cc" for C compiler, "cxx" for C++ compiler).
-
-        Returns:
-            Compiler command string, or None if not found.
-        """
-        if hasattr(toolchain, "tools"):
-            tools_dict = toolchain.tools
-            if tool_name in tools_dict:
-                tool = tools_dict[tool_name]
-                default_vars_method = getattr(tool, "default_vars", None)
-                if callable(default_vars_method):
-                    defaults = default_vars_method()
-                    cmd = defaults.get("cmd")
-                    if cmd:
-                        return str(cmd)
-        return None
+        """The command *toolchain*'s *tool_name* compiles with: the
+        environment's, which already follows $CC/$CXX and the script, when
+        that tool is the toolchain's there; else the toolchain's own."""
+        if (
+            env is not None
+            and env.has_tool(tool_name)
+            and env.toolchain_for(tool_name) is toolchain
+        ):
+            return str(getattr(env, tool_name).cmd)
+        if toolchain is None:
+            return None
+        return toolchain.tool_command(tool_name)
 
     def _compute_cache_key(self) -> str:
         """Compute a hash for caching purposes.
