@@ -324,7 +324,7 @@ for variant in ["debug", "release"]:
     prog.private.link_libs.append(libphysics)
 ```
 
-This is **~13 lines of real Python**, with no generate call: pcons writes the build files once the script finishes. Transitive include propagation is implicit via `public.link_libs`. Variants are a plain `for` loop — no special syntax. The entire Python ecosystem (pathlib, os, subprocess, conditionals, comprehensions) is available without restriction.
+This is **~13 lines of real Python**. Transitive include propagation is implicit via `public.link_libs`. Variants are a plain `for` loop — no special syntax. The entire Python ecosystem (pathlib, os, subprocess, conditionals, comprehensions) is available without restriction.
 
 ### Bazel
 
