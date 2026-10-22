@@ -40,6 +40,12 @@ register_target_option(
     "into a shared library",
 )
 register_target_option(
+    "whole_archive",
+    "True links every object of this static library into whatever links it, "
+    "including those nothing references: objects that register themselves "
+    "from a static constructor (plugins, factories, test cases)",
+)
+register_target_option(
     "exported_symbols",
     "symbols a shared library or executable exports, as C names (patterns "
     "allowed on macOS and Linux); everything else is hidden, except that on "
@@ -940,8 +946,16 @@ class Toolchain(Protocol):
         position-independent code."""
         ...
 
+    def whole_archive_tokens(
+        self, archive: PathToken, env: Environment | None = None
+    ) -> list[FlagToken] | None:
+        """How this linker takes an archive whose every object is linked in
+        (the ``whole_archive`` option), in the archive's place on the link
+        line; None if it can't."""
+        ...
+
     def link_group_tokens(
-        self, archives: Sequence[PathToken], env: Environment | None = None
+        self, archives: Sequence[FlagToken], env: Environment | None = None
     ) -> list[FlagToken] | None:
         """How this linker takes archives that need each other's symbols.
 
@@ -1662,9 +1676,15 @@ class BaseToolchain:
         return []
 
     def link_group_tokens(
-        self, archives: Sequence[PathToken], env: Environment | None = None
+        self, archives: Sequence[FlagToken], env: Environment | None = None
     ) -> list[FlagToken] | None:
         """Archives in a link cycle stay plain link inputs. Base: None."""
+        return None
+
+    def whole_archive_tokens(
+        self, archive: PathToken, env: Environment | None = None
+    ) -> list[FlagToken] | None:
+        """No known way to link a whole archive. Base: None."""
         return None
 
     def _write_link_input(self, target: Target, suffix: str, text: str) -> Path:

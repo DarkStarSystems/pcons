@@ -226,7 +226,7 @@ class NinjaGenerator(BaseGenerator):
             # graph, so they are passed through as written rather than
             # rewritten for the execution directory. Quoting still applies.
             # A template may name a per-edge variable this edge never set
-            # (a link's LINK_GROUPS, say); ninja expands it empty, so it is
+            # (a link's LINK_ARCHIVES, say); ninja expands it empty, so it is
             # a ninja variable here too, not text to escape.
             named = {t.name for t in command_tokens if isinstance(t, NodeVar)}
             command = to_shell_command(

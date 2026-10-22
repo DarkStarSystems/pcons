@@ -11,6 +11,7 @@ import logging
 import os
 import shlex
 import subprocess
+from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -575,8 +576,21 @@ class UnixToolchain(BaseToolchain):
             return platform.static_lib_suffix == ".lib"
         return self.abi == "msvc"
 
+    def whole_archive_tokens(
+        self, archive: PathToken, env: Environment | None = None
+    ) -> list[FlagToken] | None:
+        """Apple's ld force-loads one archive; GNU ld and lld bracket it; an
+        MSVC-ABI link (clang targeting it) takes link.exe's option. Which
+        linker is *env*'s target's, not the host's."""
+        platform = env.target if env is not None else get_platform()
+        if platform.is_apple:
+            return [replace(archive, prefix="-Wl,-force_load,")]
+        if self._targets_msvc_abi(platform):
+            return [archive, replace(archive, prefix="-Wl,/WHOLEARCHIVE:")]
+        return ["-Wl,--whole-archive", archive, "-Wl,--no-whole-archive"]
+
     def link_group_tokens(
-        self, archives: Sequence[PathToken], env: Environment | None = None
+        self, archives: Sequence[FlagToken], env: Environment | None = None
     ) -> list[FlagToken] | None:
         """GNU ld and lld resolve a cycle of archives only inside a group;
         Apple's ld rescans on its own and takes no group option. Which

@@ -2821,6 +2821,18 @@ env.Command(
 
 The variables are written into the generated build file, in front of the one command they belong to: `env NAME=VALUE` on POSIX, a small pcons helper on Windows (which has no `env`). So they survive a direct `ninja` or `make` run, and no other command sees them. Setting `os.environ` in the build script would do neither — it reaches every command, and only while pcons itself runs. See `examples/73_command_env`.
 
+### Linking a Whole Static Library
+
+A linker takes an object out of a static library only when something needs one of its symbols. An object that registers itself from a static constructor (a plugin, a factory, a test case) is needed by nothing, so it's left out, and the program never finds it. The `whole_archive` option on the library links every one of its objects into whatever links it:
+
+```python
+plugins = project.StaticLibrary("plugins", env, sources=["hello_plugin.cpp"])
+plugins.set_option("whole_archive", True)
+main.link(plugins)
+```
+
+Each linker gets its own form, in the library's place on the link line: `-Wl,-force_load,` on Apple, `-Wl,--whole-archive ... -Wl,--no-whole-archive` with GNU ld and lld, `/WHOLEARCHIVE:` with MSVC's link. See `examples/98_whole_archive`.
+
 ### Exporting Only Some Symbols
 
 Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file for any MSVC-ABI link (MSVC, clang-cl, and clang or flang targeting the MSVC ABI).
