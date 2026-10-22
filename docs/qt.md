@@ -331,13 +331,13 @@ Worth knowing before porting a large CMake project:
   already decided which objects to build, so that source is recompiled
   on the next run instead. Run ninja twice, or touch the source.
 - **Not yet implemented:** qmlcachegen AOT compilation, QML plugin
-  libraries / singletons / subdirectory QML files, static-Qt plugin
-  imports (`Q_IMPORT_PLUGIN`), per-file resource compression options and
-  big-resource two-pass rcc, lupdate's automatic per-target source
-  collection, and Designer plugin builds. Branch switches that change
-  the source list need a pcons re-run (there is no CMake-style
-  self-regeneration yet). A source *gaining* or *losing* `Q_OBJECT` does
-  not: the automoc edge notices that on its own.
+  libraries, static-Qt plugin imports (`Q_IMPORT_PLUGIN`), per-file
+  resource compression options and big-resource two-pass rcc, lupdate's
+  automatic per-target source collection, and Designer plugin builds.
+  Ninja re-runs pcons when the build script changes, but not when a glob
+  would match a new file, so a branch switch that adds or removes sources
+  without touching the script needs a pcons re-run. A source *gaining* or
+  *losing* `Q_OBJECT` does not: the automoc edge notices that on its own.
 
 ## Platform notes
 
