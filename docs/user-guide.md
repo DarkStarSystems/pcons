@@ -2140,6 +2140,18 @@ Under the hood this is a launcher, `python -m pcons.tools.co_compile`, and it co
 
 See `examples/76_clang_tidy`.
 
+### Checking #includes With include-what-you-use
+
+[include-what-you-use](https://include-what-you-use.org) (IWYU) reads each source with its compile's flags and reports the `#include` lines it doesn't need, and the headers it uses without including them, so a source doesn't compile only because another header happens to pull something in. `env.use_include_what_you_use()` runs it alongside each C and C++ compile, the way `use_clang_tidy()` runs clang-tidy, and the two can be combined:
+
+```python
+env.use_include_what_you_use()
+env.use_include_what_you_use(args=["-Xiwyu", "--mapping_file=qt.imp"])
+env.use_include_what_you_use(args=["-Xiwyu", "--error"])   # findings fail the build
+```
+
+IWYU only reports by default: older versions exit nonzero whatever they found, so its status is ignored unless `args` hold its own `--error` option. This is CMake's `CXX_INCLUDE_WHAT_YOU_USE`.
+
 ---
 
 ## Working with External Dependencies
