@@ -575,6 +575,10 @@ class CompileLinkFactory:
             ):
                 if flag not in effective.compile_flags:
                     effective.compile_flags.append(flag)
+        if effective.system_includes and toolchain is not None:
+            for flag in toolchain.system_include_flags():
+                if flag not in effective.compile_flags:
+                    effective.compile_flags.append(flag)
 
         return effective
 

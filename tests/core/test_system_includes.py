@@ -4,14 +4,13 @@
 import os
 from pathlib import Path
 
+import pytest
+
 from pcons.core.project import Project
 from pcons.core.target import UsageRequirements
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains.build_context import (
-    CompileLinkContext,
-    MsvcCompileLinkContext,
-)
+from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
@@ -132,12 +131,39 @@ class TestContextRealization:
 
         assert [p.path for p in overrides["system_includes"]] == ["vendor"]
 
-    def test_msvc_adds_external_w0_only_when_there_are_any(self):
-        with_sdk = MsvcCompileLinkContext(system_includes=["vendor"], mode="compile")
-        without = MsvcCompileLinkContext(flags=["/W4"], mode="compile")
+    @pytest.mark.parametrize("system", [True, False])
+    def test_msvc_gets_external_w0_only_when_there_are_any(self, tmp_path, system):
+        """cl.exe ignores /external:I without an /external:W level (D9007)."""
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+        from pcons.toolchains import msvc
 
-        assert "/external:W0" in with_sdk.get_env_overrides()["flags"]
-        assert "/external:W0" not in (without.get_env_overrides().get("flags") or [])
+        toolchain = msvc.MsvcToolchain()
+        toolchain._tools = {
+            "cc": msvc.MsvcCompiler(),
+            "cxx": msvc.MsvcCxxCompiler(),
+            "lib": msvc.MsvcLibrarian(),
+            "link": msvc.MsvcLinker(),
+        }
+        (tmp_path / "m.cpp").write_text("int main() { return 0; }\n")
+        project = Project("t", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=toolchain)
+        nanobind = ImportedTarget.from_package(
+            PackageDescription(name="nb", include_dirs=["/opt/nb/include"]),
+            system=system,
+        )
+        project.Program("app", env, sources=["m.cpp"]).link(nanobind)
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        compile_rule = next(
+            line
+            for line in (tmp_path / "build" / "build.ninja").read_text().splitlines()
+            if line.strip().startswith("command = cl.exe") and "/c " in line
+        )
+
+        assert ("/external:I" in compile_rule) is system
+        assert ("/external:W0" in compile_rule) is system
 
 
 class TestGeneratedCommand:
