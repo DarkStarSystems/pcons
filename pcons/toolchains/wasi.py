@@ -19,6 +19,7 @@ from pcons.core.errors import PconsRuntimeError
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gnu_common import (
+    clang_color_flags,
     gnu_archiver_builders,
     gnu_archiver_vars,
     gnu_compile_builders,
@@ -142,6 +143,7 @@ class WasiCCompiler(BaseTool):
             "clang",
             "cc",
             target_tokens=["--target=wasm32-wasi"],
+            color_flags=clang_color_flags(),
         )
 
     def builders(self) -> dict[str, Builder]:
@@ -159,6 +161,7 @@ class WasiCxxCompiler(BaseTool):
             "clang++",
             "cxx",
             target_tokens=["--target=wasm32-wasi"],
+            color_flags=clang_color_flags(),
         )
 
     def builders(self) -> dict[str, Builder]:

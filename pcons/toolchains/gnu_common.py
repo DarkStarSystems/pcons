@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from pcons.configure.platform import Platform, get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.errors import PconsValueError
-from pcons.core.subst import NodeVar, SourcePath, TargetPath
+from pcons.core.subst import ColorFlag, NodeVar, SourcePath, TargetPath
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -43,12 +43,28 @@ GNU_COMPILE_PATH_FLAGS: frozenset[str] = frozenset(
 )
 GNU_LINK_PATH_FLAGS: frozenset[str] = frozenset(["-L", "-F", "-isysroot", "--sysroot"])
 
+# Colored diagnostics, as GCC, gfortran and flang take them. They go before
+# the flags, so a -fdiagnostics-color=never there wins.
+GNU_COLOR_FLAGS: tuple[str, ...] = ("-fdiagnostics-color=always",)
+
+
+def clang_color_flags() -> tuple[str, ...]:
+    """Colored diagnostics for clang, in the form clang-cl also takes.
+
+    On Windows clang colors through the console API, which a pipe ignores,
+    unless told to write ANSI escapes instead.
+    """
+    if get_platform().is_windows:
+        return ("-fcolor-diagnostics", "-fansi-escape-codes")
+    return ("-fcolor-diagnostics",)
+
 
 def gnu_compile_vars(
     cmd: str,
     ns: str,
     *,
     target_tokens: list[str] | None = None,
+    color_flags: Sequence[str] = GNU_COLOR_FLAGS,
     extra_vars: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Default vars for a GNU-style compile tool (gcc/g++/clang/clang++).
@@ -58,6 +74,7 @@ def gnu_compile_vars(
         ns: Tool namespace ("cc" or "cxx"), used to build the $ns.* references.
         target_tokens: Extra tokens inserted right after the command, before
             flags (e.g. ["--target=wasm32-wasi", "$cc.sysroot_flag"] for WASI).
+        color_flags: What makes the compiler color its diagnostics.
         extra_vars: Additional default vars merged into the result (e.g. WASI's
             "sysroot_flag" placeholder).
     """
@@ -66,6 +83,7 @@ def gnu_compile_vars(
         objcmd.extend(target_tokens)
     objcmd.extend(
         [
+            f"${ns}.colorflags",
             f"${ns}.flags",
             f"${{prefix({ns}.iprefix, {ns}.includes)}}",
             f"${{prefix({ns}.isysprefix, {ns}.system_includes)}}",
@@ -79,6 +97,7 @@ def gnu_compile_vars(
     )
     result: dict[str, object] = {
         "cmd": cmd,
+        "colorflags": [ColorFlag(flag) for flag in color_flags],
         "flags": [],
         "iprefix": "-I",
         "includes": [],

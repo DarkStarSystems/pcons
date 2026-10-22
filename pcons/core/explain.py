@@ -135,7 +135,14 @@ def format_node_command(
     the standalone install/archive tools' templates, which the generators
     expand the same way.
     """
-    from pcons.core.subst import NodeVar, PathToken, SourcePath, TargetPath
+    from pcons.core.subst import (
+        ColorFlag,
+        NodeVar,
+        PathToken,
+        SourcePath,
+        TargetPath,
+        color_flags_allowed,
+    )
 
     build_info = getattr(node, "_build_info", None)
     if not build_info or "primary_node" in build_info:
@@ -231,6 +238,9 @@ def format_node_command(
             elif token.start is not None or token.stop is not None:
                 paths = paths[token.start : token.stop]
             return [token.prefix + p + token.suffix for p in paths]
+        if isinstance(token, ColorFlag):
+            # As ninja writes it; make and Xcode leave it out.
+            return [token.flag] if color_flags_allowed() else []
         if isinstance(token, NodeVar):
             value = node_vars.get(token.name, f"${token.name}")
             if isinstance(value, (list, PathToken, SourcePath, TargetPath)):

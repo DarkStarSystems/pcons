@@ -21,6 +21,7 @@ from pcons.core.subst import SourcePath, TargetPath
 from pcons.core.target import Target
 from pcons.toolchains._msvc_compat import msvc_crt
 from pcons.toolchains.gnu_common import (
+    clang_color_flags,
     gnu_archiver_builders,
     gnu_archiver_vars,
     gnu_compile_builders,
@@ -234,7 +235,7 @@ class ClangCCompiler(BaseTool):
         super().__init__("cc", language="c")
 
     def default_vars(self) -> dict[str, object]:
-        return gnu_compile_vars("clang", "cc")
+        return gnu_compile_vars("clang", "cc", color_flags=clang_color_flags())
 
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cc")
@@ -249,7 +250,7 @@ class ClangCxxCompiler(BaseTool):
         super().__init__("cxx", language="cxx")
 
     def default_vars(self) -> dict[str, object]:
-        base = gnu_compile_vars("clang++", "cxx")
+        base = gnu_compile_vars("clang++", "cxx", color_flags=clang_color_flags())
         # A scanned TU compiles with `modobjcmd`: `objcmd` plus a reference
         # to its collate-written modmap response file, placed *before* the
         # source because clang's -x (inside the modmap) applies only to

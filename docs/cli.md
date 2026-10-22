@@ -416,6 +416,8 @@ Read by pcons:
 | `PCONS_MODULES_PATH` | Extra add-on module directories, as if `--modules-path` |
 | `PCONS_DEBUG` | Subsystems to trace, as if `--debug` |
 | `NINJA` | Ninja-compatible runner to invoke, as if `--ninja` |
+| `NO_COLOR` | Non-empty: compile without colored diagnostics. Changing it recompiles everything. See [Colored Diagnostics](user-guide.md#colored-diagnostics) |
+| `FORCE_COLOR`, `CLICOLOR_FORCE` | Not `0`: colored diagnostics with any ninja-compatible runner, even into a file. `FORCE_COLOR` beats `NO_COLOR` |
 | `CC`, `CXX`, `FC`, `AR`, `RC`, `SWIFTC`, `CUDACXX` | Authoritative choice of that tool. A value that cannot be found is an error, never a fall-through to detection |
 
 Read by a build script, through `get_var()`:
