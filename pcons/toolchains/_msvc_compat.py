@@ -151,7 +151,11 @@ class MsvcCompatibleToolchain(BaseToolchain):
         return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
 
     def realize_link_needs(
-        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+        self,
+        needs: LinkNeeds,
+        target: Target,
+        existing_flags: Sequence[FlagToken],
+        driver: str | None = None,
     ) -> list[FlagToken]:
         """Objects as they are, and ``/SUBSYSTEM:CONSOLE`` for a console
         entry point the objects don't define (ifx's ``main`` is in its

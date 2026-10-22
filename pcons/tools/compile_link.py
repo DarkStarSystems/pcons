@@ -1197,12 +1197,22 @@ class CompileLinkFactory:
             *effective_link.framework_dirs,
             *(Path(d) for d in needs.framework_dirs),
         ]
+        # The program that links: the driver chosen above, else the
+        # environment's own link command.
+        link_program = linker_cmd or (
+            env.link.get("cmd") if env.has_tool("link") else None
+        )
         if linker is not None:
             base = link_base_flags
             if base is None and env.has_tool("link"):
                 base = env.link.get("flags")
             chosen = [*(base or ()), *link_flags]
-            link_flags += linker.realize_link_needs(needs, target, chosen)
+            link_flags += linker.realize_link_needs(
+                needs,
+                target,
+                chosen,
+                driver=str(link_program) if link_program else None,
+            )
 
         effective_link.link_flags = link_flags
         context_class = (
@@ -1233,8 +1243,7 @@ class CompileLinkFactory:
         # Explained when there was a choice to make, or the link adds
         # something the objects asked for.
         if need_rows or len(langs) > 1 or target.link_language is not None:
-            link_cmd = env.link.get("cmd") if env.has_tool("link") else None
-            program = Path(str(linker_cmd or link_cmd or "?"))
+            program = Path(str(link_program or "?"))
             driver_name = program.stem + program.suffix.lower()
             info["explanation"] = (
                 f"link: {driver_name}  ({driver.reason})",

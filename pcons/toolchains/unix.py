@@ -6,7 +6,9 @@ compile flags."""
 from __future__ import annotations
 
 import functools
+import itertools
 import logging
+import shlex
 import subprocess
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -104,6 +106,31 @@ def target_triple(compiler: str) -> str | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return out.strip() or None
+
+
+@functools.cache
+def _driver_rpaths(driver: str) -> frozenset[str]:
+    """The rpaths *driver* passes the linker by itself, from what ``-###``
+    says it would run (cached). Nothing runs: the input needn't exist."""
+    try:
+        out = subprocess.run(
+            [driver, "-###", "-o", "a.out", "probe.o"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stderr
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    rpaths: set[str] = set()
+    for line in out.splitlines():
+        try:
+            tokens = shlex.split(line)
+        except ValueError:
+            continue
+        rpaths.update(
+            path for flag, path in itertools.pairwise(tokens) if flag == "-rpath"
+        )
+    return frozenset(rpaths)
 
 
 #: Driver flags that hand the token after them to a sub-tool. Named here so
@@ -706,13 +733,17 @@ class UnixToolchain(BaseToolchain):
         return LinkNeeds(libs=(lib,))
 
     def realize_link_needs(
-        self, needs: LinkNeeds, target: Target, existing_flags: Sequence[FlagToken]
+        self,
+        needs: LinkNeeds,
+        target: Target,
+        existing_flags: Sequence[FlagToken],
+        driver: str | None = None,
     ) -> list[FlagToken]:
         """rpaths as ``-Wl,-rpath,``, a relative one from ``@loader_path``
-        (Mach-O) or ``$ORIGIN`` (ELF), unless the script gave it already;
-        objects as they are; excluded default libraries and a console entry
-        point only for the MSVC ABI, where the driver runs link.exe or
-        lld-link."""
+        (Mach-O) or ``$ORIGIN`` (ELF), unless the script or the *driver*
+        gives it already; objects as they are; excluded default libraries and
+        a console entry point only for the MSVC ABI, where the driver runs
+        link.exe or lld-link."""
         platform = self._target_platform(target)
         flags: list[FlagToken] = list(needs.objects)
         # The driver links each sanitizer's runtime as it would for its own
@@ -722,8 +753,11 @@ class UnixToolchain(BaseToolchain):
             for s in needs.sanitizers
             if not _sanitizes(existing_flags, s)
         ]
+        # ld64 warns about a repeated rpath, and GCC's driver passes its own
+        # (@loader_path and its library directories) on Apple platforms.
+        given = _driver_rpaths(driver) if driver and platform.is_apple else frozenset()
         if not platform.is_windows:
-            flags += [f"-Wl,-rpath,{d}" for d in needs.rpaths]
+            flags += [f"-Wl,-rpath,{d}" for d in needs.rpaths if d not in given]
         origin = (
             "@loader_path"
             if platform.is_apple
@@ -733,8 +767,13 @@ class UnixToolchain(BaseToolchain):
         )
         if origin is not None:
             for d in needs.relative_rpaths:
-                rpath = f"-Wl,-rpath,{origin}" + ("" if d == "." else f"/{d}")
-                if rpath not in existing_flags and rpath not in flags:
+                path = origin if d == "." else f"{origin}/{d}"
+                rpath = f"-Wl,-rpath,{path}"
+                if (
+                    path not in given
+                    and rpath not in existing_flags
+                    and rpath not in flags
+                ):
                     flags.append(rpath)
         if self._targets_msvc_abi(platform):
             if needs.console and not _chooses_subsystem(existing_flags):
