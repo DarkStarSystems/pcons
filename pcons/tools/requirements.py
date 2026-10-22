@@ -463,6 +463,19 @@ def compute_effective_requirements(
                 reqs.compile_flags.clear()
         result.merge(_anchor_dir_lists_for(reqs, dep), origin=(dep.name, "public"))
 
+    # Layer 4, for a link: an archive doesn't contain what its library links
+    # privately, so the link line reaches those libraries through it (see
+    # transitive_link_dependencies), and with them what they need to link,
+    # though not their headers or defines.
+    if not for_compilation:
+        reached = {dep.qualified_name for dep in target.transitive_dependencies()}
+        for dep in target.transitive_link_dependencies():
+            if dep.qualified_name not in reached:
+                result.merge(
+                    _anchor_dir_lists_for(dep.public.for_link(), dep),
+                    origin=(dep.name, "public"),
+                )
+
     return result
 
 

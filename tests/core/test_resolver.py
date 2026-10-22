@@ -1449,6 +1449,42 @@ class TestLinkInputOrder:
 
         self._assert_links_in_order(exe, lib_a, lib_b)
 
+    @staticmethod
+    def _zlib():
+        from pcons import ImportedTarget, PackageDescription
+
+        return ImportedTarget.from_package(
+            PackageDescription(
+                name="z",
+                libraries=["z"],
+                library_dirs=["/opt/zlib/lib"],
+                include_dirs=["/opt/zlib/include"],
+            )
+        )
+
+    @pytest.mark.parametrize("kind", ["StaticLibrary", "SharedLibrary"])
+    def test_package_a_library_links_privately(self, tmp_path, gcc_toolchain, kind):
+        """An archive doesn't contain what its library links privately, so a
+        program linking it needs the package's library too; a shared library
+        has linked it already. Its headers stay private either way."""
+        self._make_sources(tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        lib_a = getattr(project, kind)("a", env, sources=["a.c"])
+        lib_a.link_private(self._zlib())
+        exe = project.Program("exe", env, sources=["main.c"])
+        exe.link(lib_a)
+        project.resolve()
+
+        link = exe.output_nodes[0]._build_info["context"]
+        static = kind == "StaticLibrary"
+        assert ("z" in link.libs) is static
+        libdirs = [Path(str(d)).as_posix() for d in link.libdirs]
+        assert any(d.endswith("/opt/zlib/lib") for d in libdirs) is static
+        compile_ctx = exe.intermediate_nodes[0]._build_info["context"]
+        assert not any("zlib" in str(i) for i in compile_ctx.includes)
+
 
 class TestSourceTargetsResolveFirst:
     """A target whose sources are other targets gets its nodes in the same
