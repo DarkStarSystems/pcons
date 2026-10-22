@@ -75,6 +75,8 @@ class NinjaGenerator(BaseGenerator):
         self._warned_build_dir_paths: set[str] = set()
         # id(node) -> (rule_key, command); reset per generate()
         self._rule_key_cache: dict[int, tuple[str, str]] = {}
+        # id(target) -> the pool its max_jobs option gave it
+        self._pools: dict[int, str] = {}
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate build.ninja in output_dir."""
@@ -100,6 +102,7 @@ class NinjaGenerator(BaseGenerator):
             self._write_header(f, project)
             self._write_variables(f, project)
             self._write_rules(f, project)
+            self._write_pools(f, project)
             self._write_builds(f, project)
             self._write_regen(f, project, ninja_file)
             self._write_aliases(f, project)
@@ -533,6 +536,23 @@ class NinjaGenerator(BaseGenerator):
 
         return command
 
+    def _write_pools(self, f: TextIO, project: Project) -> None:
+        """A pool for each target whose ``max_jobs`` option caps how many of
+        its build steps run at once."""
+        self._pools = {}
+        for target in project.targets:
+            depth = target.get_option("max_jobs")
+            if depth is None:
+                continue
+            if not isinstance(depth, int) or isinstance(depth, bool) or depth < 1:
+                raise PconsValueError(
+                    f"'{target.name}' sets max_jobs to {depth!r}; it takes a "
+                    f"whole number of build steps, 1 or more."
+                )
+            name = "max_jobs_" + re.sub(r"\W", "_", target.qualified_name)
+            self._pools[id(target)] = name
+            f.write(f"pool {name}\n  depth = {depth}\n\n")
+
     def _write_builds(self, f: TextIO, project: Project) -> None:
         """Write build statements for all targets."""
         f.write("# Build statements\n")
@@ -664,6 +684,10 @@ class NinjaGenerator(BaseGenerator):
         f.write(
             f"build {output}: {rule_name} {explicit_deps}{implicit_deps}{order_only}\n"
         )
+
+        pool = self._pools.get(id(target)) if target is not None else None
+        if pool is not None:
+            f.write(f"  pool = {pool}\n")
 
         # Dyndep attribute for module dependencies
         dyndep = build_info.get("dyndep")
