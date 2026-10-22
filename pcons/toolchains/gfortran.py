@@ -12,7 +12,7 @@ from pcons.toolchains.fortran import (
     FortranToolchain,
 )
 from pcons.toolchains.gcc import GccArchiver
-from pcons.toolchains.gnu_common import require_cross_binaries
+from pcons.toolchains.gnu_common import GNU_COLOR_FLAGS, require_cross_binaries
 from pcons.toolchains.unix import UnixToolchain, static_archive
 from pcons.tools.toolchain import LinkNeeds
 
@@ -29,6 +29,7 @@ class GfortranCompiler(FortranCompiler):
 
     COMMANDS = ("gfortran",)
     MODDIR_FLAG = "-J"
+    COLOR_FLAGS = GNU_COLOR_FLAGS
     # Private entities, which submodules see but users of a module don't,
     # go here rather than into the .mod.
     ANCESTOR_FILE = "{name}.smod"

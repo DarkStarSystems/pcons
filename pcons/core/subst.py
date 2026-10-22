@@ -27,12 +27,15 @@ Generator-agnostic path markers, which generators render in native syntax:
 - TargetPath(basename=True): the output's filename alone, for a flag that
   names the library it is building (an install name, a SONAME).
 - NodeVar("NAME"): a per-edge value the toolchain attached to the node.
+- ColorFlag("-fdiagnostics-color=always"): a flag forcing colored messages,
+  written only where the build runner strips the color again off a terminal.
 - ToolPath(): the program a command runs, from ``env.Command(tool=...)``.
   A command template writes it as $TOOL.
 """
 
 from __future__ import annotations
 
+import os
 import platform
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -309,6 +312,50 @@ class NodeVar:
 
 
 @dataclass(frozen=True)
+class ColorFlag:
+    """Marker for a flag that makes a tool color its messages with ANSI escapes.
+
+    A tool writes those escapes only when its output is a terminal, and a
+    build runner hands it a pipe. Forcing color is safe only where the runner
+    removes the escapes again when its own output is not a terminal, so the
+    generator decides: ninja writes the flag (unless color is turned off; see
+    :func:`color_flags_allowed`); make, Xcode and compile_commands.json leave
+    it out.
+
+    Attributes:
+        flag: The flag as the tool takes it (``-fdiagnostics-color=always``).
+    """
+
+    flag: str
+
+
+def _env_flag(name: str) -> bool:
+    """Whether environment variable *name* is set to something other than 0."""
+    return os.environ.get(name, "0") not in ("", "0")
+
+
+def color_flags_forced() -> bool:
+    """Whether the user asked for ColorFlags even where escapes reach a pipe.
+
+    ``FORCE_COLOR`` wins over ``NO_COLOR``; ``CLICOLOR_FORCE`` doesn't, as
+    ninja reads them.
+    """
+    return _env_flag("FORCE_COLOR") or (
+        _env_flag("CLICOLOR_FORCE") and not os.environ.get("NO_COLOR")
+    )
+
+
+def color_flags_allowed() -> bool:
+    """Whether a generator may write ColorFlag markers at all.
+
+    Not when ``NO_COLOR`` is set (https://no-color.org), unless color is
+    forced. Read when the build files are written, so changing either changes
+    every command that carries a ColorFlag, and the next build reruns them.
+    """
+    return color_flags_forced() or not os.environ.get("NO_COLOR")
+
+
+@dataclass(frozen=True)
 class SourcePath:
     """Marker for a source input path, converted to a PathToken with the
     actual path during resolution.
@@ -344,7 +391,12 @@ class SourcePath:
 
 # Type alias for command tokens (can be string, PathToken, or marker objects)
 # SourcePath/TargetPath markers are preserved through subst() for generators to handle
-CommandToken = str | PathToken | SourcePath | TargetPath | ToolPath | NodeVar
+CommandToken = (
+    str | PathToken | SourcePath | TargetPath | ToolPath | NodeVar | ColorFlag
+)
+
+# Tokens substitution passes through untouched, for the generators.
+_MARKERS = (PathToken, SourcePath, TargetPath, NodeVar, ColorFlag)
 
 # A flag, which may carry a path (PathToken) or something the generator
 # resolves per edge (TargetPath, e.g. an install name naming its own output).
@@ -557,7 +609,7 @@ def _subst_command(
     result: list[CommandToken] = []
     for token in tokens:
         # Preserve marker objects through substitution
-        if isinstance(token, (SourcePath, TargetPath, PathToken, NodeVar)):
+        if isinstance(token, _MARKERS):
             result.append(token)
         elif isinstance(token, str):
             expanded = _expand_token(token, namespace, set(), location)
@@ -613,7 +665,7 @@ def _expand_token(
             var_result: list[CommandToken] = []
             for v in value:
                 # Preserve marker objects through substitution
-                if isinstance(v, (PathToken, SourcePath, TargetPath, NodeVar)):
+                if isinstance(v, _MARKERS):
                     var_result.append(v)
                 elif isinstance(v, (ProjectPath, BuildPath)):
                     var_result.append(str(v))
@@ -632,7 +684,7 @@ def _expand_token(
             return var_result
 
         # Preserve marker objects (SourcePath, TargetPath, PathToken) directly
-        if isinstance(value, (PathToken, SourcePath, TargetPath, NodeVar)):
+        if isinstance(value, _MARKERS):
             return value
 
         str_value = str(value)
@@ -1028,11 +1080,16 @@ def to_shell_command(
 
 
 def _flatten(items: list) -> list[str]:
-    """Flatten nested lists to flat list of strings."""
+    """Flatten nested lists to flat list of strings.
+
+    A ColorFlag still here was not asked for by a generator, so it is left out.
+    """
     result: list[str] = []
     for item in items:
         if isinstance(item, list):
             result.extend(_flatten(item))
+        elif isinstance(item, ColorFlag):
+            continue
         else:
             result.append(str(item))
     return result

@@ -726,12 +726,15 @@ class MakefileGenerator(BaseGenerator):
         _expand_source_target_tokens() to handle. A NodeVar expands to its
         value here: make has no per-edge variables, so the value goes inline,
         and expanding it before the loop means its own paths are relativized
-        with everything else.
+        with everything else. A ColorFlag is dropped: make passes a command's
+        color escapes through even when its output is not a terminal.
         """
-        from pcons.core.subst import NodeVar, SourcePath, TargetPath
+        from pcons.core.subst import ColorFlag, NodeVar, SourcePath, TargetPath
 
         expanded: list = []
         for token in tokens:
+            if isinstance(token, ColorFlag):
+                continue
             if isinstance(token, NodeVar):
                 # A variable the edge does not set contributes nothing, not
                 # an empty argument.

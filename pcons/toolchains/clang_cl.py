@@ -20,8 +20,9 @@ from typing import TYPE_CHECKING
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.errors import PconsValueError
 from pcons.core.preset import ToolContribution
-from pcons.core.subst import NodeVar, SourcePath, TargetPath
+from pcons.core.subst import ColorFlag, NodeVar, SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain, msvc_crt
+from pcons.toolchains.gnu_common import clang_color_flags
 from pcons.toolchains.msvc import MsvcAssembler, MsvcResourceCompiler
 from pcons.tools.tool import BaseTool, Probe
 from pcons.tools.toolchain import LinkNeeds
@@ -128,6 +129,7 @@ class ClangClCompiler(BaseTool):
     def default_vars(self) -> dict[str, object]:
         return {
             "cmd": "clang-cl",
+            "colorflags": [ColorFlag(flag) for flag in clang_color_flags()],
             "flags": ["/nologo"],
             "iprefix": "/I",
             "includes": [],
@@ -152,6 +154,7 @@ class ClangClCompiler(BaseTool):
                 "${prefix(cc.dprefix, cc.defines)}"
                 if self._language == "c"
                 else "${prefix(cxx.dprefix, cxx.defines)}",
+                "$cc.colorflags" if self._language == "c" else "$cxx.colorflags",
                 "$cc.flags" if self._language == "c" else "$cxx.flags",
                 SourcePath(),
             ],

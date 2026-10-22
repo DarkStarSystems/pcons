@@ -18,6 +18,7 @@ from pcons.toolchains.fortran import (
     FortranLinker,
     FortranToolchain,
 )
+from pcons.toolchains.gnu_common import GNU_COLOR_FLAGS
 from pcons.toolchains.llvm import LlvmArchiver
 from pcons.toolchains.unix import UnixToolchain, target_triple
 
@@ -32,6 +33,9 @@ class FlangCompiler(FortranCompiler):
 
     COMMANDS = ("flang",)
     MODDIR_FLAG = "-module-dir"
+    # Unlike clang, flang takes no -fansi-escape-codes, so on Windows it
+    # colors through the console API, which a build's pipe ignores.
+    COLOR_FLAGS = GNU_COLOR_FLAGS
     SUBMODULE_FILE = "{ancestor}-{name}.mod"
 
 

@@ -2073,6 +2073,25 @@ qualified names rather than picking one.
 See `examples/75_multi_env` for the smallest complete case, and
 `examples/74_bare_metal` for the cross-compiled one.
 
+### Colored Diagnostics
+
+Ninja runs each compile with its output going to a pipe, and a compiler that isn't writing to a terminal leaves its colors off. So in `build.ninja`, pcons asks GCC, Clang, clang-cl, gfortran and flang for colored warnings and errors outright. Ninja strips the colors again whenever its own output isn't a terminal, so a log file or a CI capture still gets plain text.
+
+To turn colors off, set `NO_COLOR` to any non-empty value. pcons reads it when it writes `build.ninja`, and the color flags are part of every compile command, so changing `NO_COLOR` recompiles everything. `pcons` notices the change and regenerates by itself; running `ninja` directly doesn't, so run `pcons generate` after changing it.
+
+The flags go only where something will strip them off a non-terminal:
+
+- **Make, Xcode and `compile_commands.json`** never get them. Make passes escape codes straight through, but it also leaves the compiler writing to your terminal, so it colors its output by itself there.
+- **n2 and samurai** pass them through as well, so pcons leaves the flags out when `--ninja` or `$NINJA` names a runner other than ninja.
+
+To get colors with n2 or samurai anyway, set `FORCE_COLOR` or `CLICOLOR_FORCE` to anything but `0`. Their output is then colored even when it goes to a file. `FORCE_COLOR` beats `NO_COLOR`; `CLICOLOR_FORCE` doesn't.
+
+To turn colors off for one environment, empty the tool's `colorflags`:
+
+```python
+env.cc.colorflags = []
+```
+
 ### Compiler Cache
 
 Speed up rebuilds by wrapping compile commands with [ccache](https://ccache.dev/) or [sccache](https://github.com/mozilla/sccache):
@@ -5240,6 +5259,20 @@ if platform.is_macos():
 **Error:** `dependency cycle: A -> B -> A`
 
 **Solution:** Refactor to break the cycle. Two libraries shouldn't depend on each other.
+
+### Things keep rebuilding
+
+Ask Ninja why it's running each step:
+
+```bash
+ninja -C build -d explain
+```
+
+The usual causes:
+
+- **A command doesn't create the output it declares.** Ninja finds the output missing and runs the command again on every build. pcons checks for this after each successful build and warns that "the build did not converge".
+- **A generator rewrites files that haven't changed.** Everything downstream of a fresh timestamp rebuilds. Give its `env.Command()` `write_if_different=True` (see [Custom Commands](#custom-commands-with-envcommand)).
+- **A command line changed.** Ninja reruns any step whose command differs from last time: new flags, a different compiler, or `NO_COLOR` set or unset (see [Colored Diagnostics](#colored-diagnostics)). This rebuilds once, not every time, unless something keeps changing between runs.
 
 ---
 

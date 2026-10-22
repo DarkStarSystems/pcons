@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `#include`s a source doesn't need or is missing.
 - `target.set_option("max_jobs", N)` lets at most N of a target's build
   steps run at once, for compiles that need lots of memory.
+- Compiler warnings and errors are colored under Ninja, for GCC, Clang,
+  clang-cl, gfortran and flang. Logs and CI output stay plain text; set
+  `NO_COLOR` to turn colors off, or `FORCE_COLOR` to get them with n2. See
+  [Colored Diagnostics](https://pcons.readthedocs.io/en/latest/user-guide/#colored-diagnostics).
 
 ### Changed
 
@@ -31,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - MSVC finds headers in system include directories: cl.exe ignores
   `/external:I` without `/external:W0`, which it never got.
-
 - A program linking a static library now gets the libraries of packages
   that library links privately (`link_private()`), which it needs since
   the archive doesn't contain them. It failed to link.

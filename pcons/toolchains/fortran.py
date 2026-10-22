@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, ClassVar, cast
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.errors import PconsRuntimeError, PconsValueError
-from pcons.core.subst import PathToken, SourcePath, TargetPath
+from pcons.core.subst import ColorFlag, PathToken, SourcePath, TargetPath
 from pcons.toolchains.fortran_scanner import (
     DEFAULT_ANCESTOR_FILE,
     DEFAULT_SUBMODULE_FILE,
@@ -104,6 +104,8 @@ class FortranCompiler(BaseTool):
     SUBMODULE_FILE: ClassVar[str] = DEFAULT_SUBMODULE_FILE
     # The file a submodule reads from its ancestor module, from {name}.
     ANCESTOR_FILE: ClassVar[str] = DEFAULT_ANCESTOR_FILE
+    # What makes the compiler color its diagnostics (see ColorFlag).
+    COLOR_FLAGS: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self) -> None:
         super().__init__("fc", language="fortran")
@@ -111,6 +113,7 @@ class FortranCompiler(BaseTool):
     def default_vars(self) -> dict[str, object]:
         return {
             "cmd": self.COMMANDS[0],
+            "colorflags": [ColorFlag(flag) for flag in self.COLOR_FLAGS],
             "flags": [],
             "iprefix": "-I",
             "includes": [],
@@ -121,6 +124,7 @@ class FortranCompiler(BaseTool):
             "ancestor_file": self.ANCESTOR_FILE,
             "objcmd": [
                 "$fc.cmd",
+                "$fc.colorflags",
                 "$fc.flags",
                 "${prefix(fc.iprefix, fc.includes)}",
                 "${prefix(fc.dprefix, fc.defines)}",

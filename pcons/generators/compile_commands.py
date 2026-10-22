@@ -277,10 +277,20 @@ class CompileCommandsGenerator(BaseGenerator):
         SourcePath expands to all of ``all_sources`` — each per-file entry
         repeats the whole command, the sourcekit-lsp/CMake Swift convention.
         """
-        from pcons.core.subst import NodeVar, PathToken, SourcePath, TargetPath
+        from pcons.core.subst import (
+            ColorFlag,
+            NodeVar,
+            PathToken,
+            SourcePath,
+            TargetPath,
+        )
 
         result: list[str] = []
         for token in tokens:
+            if isinstance(token, ColorFlag):
+                # A tool that reruns this command (clang-tidy, an IDE) reads
+                # the compiler's output through a pipe.
+                continue
             if isinstance(token, SourcePath):
                 if all_sources and len(all_sources) > 1 and token.index is None:
                     for s in all_sources:
