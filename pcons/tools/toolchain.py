@@ -773,6 +773,10 @@ class Toolchain(Protocol):
         """Where *compiler* finds headers unasked (see BaseToolchain)."""
         ...
 
+    def system_include_flags(self) -> list[str]:
+        """Flags a compile with system includes also needs (see BaseToolchain)."""
+        ...
+
     @property
     def abi(self) -> str | None:
         """Which binary interface this toolchain's objects follow, as an
@@ -1177,6 +1181,11 @@ class BaseToolchain:
         as a system include it would move ahead in the search. Base: none
         known."""
         return frozenset()
+
+    def system_include_flags(self) -> list[str]:
+        """Flags a compile needs whenever it has system include directories,
+        beyond the directories themselves. Base: none."""
+        return []
 
     def compiler_override_conflict(self) -> str | None:
         """The error to give when the user's ``$CC``, ``$CXX`` or ``$FC``

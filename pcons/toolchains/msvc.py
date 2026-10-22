@@ -396,8 +396,8 @@ class MsvcCompiler(BaseTool):
             "flags": ["/nologo"],
             "iprefix": "/I",
             "includes": [],
-            # /external:I needs /external:W0 to actually silence anything;
-            # see MsvcToolchain.get_compile_flags_for_system_includes.
+            # /external:I needs /external:W0, without which cl.exe ignores
+            # it (D9007); see MsvcToolchain.system_include_flags.
             "isysprefix": "/external:I",
             "system_includes": [],
             "dprefix": "/D",
@@ -710,6 +710,12 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
     def __init__(self) -> None:
         super().__init__("msvc")
+
+    def system_include_flags(self) -> list[str]:
+        """``/external:W0``: cl.exe ignores ``/external:I`` without an
+        ``/external:W`` level (D9007), and 0 is what makes the headers'
+        warnings go away."""
+        return ["/external:W0"]
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Add /MACHINE: (via base) and, for a cross arch, repoint the tools.

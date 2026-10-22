@@ -9,7 +9,7 @@ via get_env_overrides().
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from pcons.core.errors import PconsError
 
@@ -310,28 +310,6 @@ class MsvcCompileLinkContext(CompileLinkContext):
     define_prefix: str = "/D"
     libdir_prefix: str = "/LIBPATH:"
     lib_prefix: str = ""  # MSVC uses full library names (foo.lib)
-
-    def _compile_overrides(self) -> dict[str, object]:
-        """Add /external:W0 when there are system includes.
-
-        On MSVC, ``/external:I`` marks headers as external but changes nothing
-        by itself — the warning level for external headers is a separate
-        switch. Only emitted when there is something external, so builds that
-        never ask for system includes stay compatible with older cl.exe.
-        """
-        result = super()._compile_overrides()
-        if not self.system_includes:
-            return result
-        flags = result.get("flags")
-        merged: list[FlagToken]
-        if isinstance(flags, list):
-            merged = cast("list[FlagToken]", flags)
-        else:
-            merged = self._merge_with_base_flags(self._tool_name, self.flags)
-        if "/external:W0" not in merged:
-            merged.append("/external:W0")
-        result["flags"] = merged
-        return result
 
     def _format_libs(self, libs: list[str]) -> list[str]:
         # MSVC uses full library names (kernel32.lib, not -lkernel32).
