@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
     from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
     from pcons.core.flags import FlagToken
+    from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.toolchains.build_context import CompileLinkContext
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
@@ -149,6 +151,12 @@ class MsvcCompatibleToolchain(BaseToolchain):
         only ever build for Windows, so *target* does not change the answer.
         """
         return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
+
+    def whole_archive_tokens(
+        self, archive: PathToken, env: Environment | None = None
+    ) -> list[FlagToken] | None:
+        """link.exe names the archive as an input and again in its option."""
+        return [archive, replace(archive, prefix="/WHOLEARCHIVE:")]
 
     def realize_link_needs(
         self,

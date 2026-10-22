@@ -14,7 +14,7 @@ from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, NamedTuple
 
 from pcons.core.debug import is_enabled, trace, trace_value
-from pcons.core.errors import OutputCollisionError, PconsError
+from pcons.core.errors import OutputCollisionError, PconsError, PconsValueError
 from pcons.core.graph import strongly_connected_components
 from pcons.core.node import BuildInfo, FileNode, Node
 from pcons.core.paths import affix_filename
@@ -1103,11 +1103,11 @@ class CompileLinkFactory:
             for d in self._collect_dependency_outputs(target)
             if _is_link_input(d.path) and d.path not in auxiliary_input_paths
         ]
-        link_groups = self._link_groups(target, env, dep_libs)
-        if link_groups is None:
+        link_archives = self._arranged_archives(target, env, dep_libs)
+        if link_archives is None:
             output_node.add_inputs(dep_libs)
         else:
-            # The archives are on the command line through LINK_GROUPS
+            # The archives are on the command line through LINK_ARCHIVES
             # instead; the link still waits for them.
             output_node.depends(dep_libs)
 
@@ -1253,17 +1253,21 @@ class CompileLinkFactory:
                 f"link: {driver_name}  ({driver.reason})",
                 list(dict.fromkeys(need_rows)),
             )
-        if link_groups is not None:
-            info["vars"] = {"LINK_GROUPS": link_groups}
+        if link_archives is not None:
+            info["vars"] = {"LINK_ARCHIVES": link_archives}
         output_node._build_info = info
         return info
 
-    def _link_groups(
+    def _arranged_archives(
         self, target: Target, env: Environment, dep_libs: list[FileNode]
     ) -> list[FlagToken] | None:
         """The link inputs from *target*'s dependencies as the linker wants
-        them when some link each other in a cycle, or None when they can go
-        on the command line as they are.
+        them, or None when they can go on the command line as they are.
+
+        A static library with the ``whole_archive`` option is linked whole,
+        each of its objects whether referenced or not, in the form the
+        toolchain gives (``-force_load``, ``--whole-archive``,
+        ``/WHOLEARCHIVE``).
 
         Static libraries may depend on each other (see LINKABLE_IN_A_CYCLE);
         a linker that resolves symbols in one pass needs such archives in a
@@ -1276,6 +1280,16 @@ class CompileLinkFactory:
         if toolchain is None:
             return None
         closure = target.transitive_link_dependencies()
+        whole: set[int] = set()
+        for dep in closure:
+            if not dep.get_option("whole_archive"):
+                continue
+            if dep.target_type != "static_library":
+                raise PconsValueError(
+                    f"'{dep.name}' sets whole_archive, which only a static "
+                    f"library takes, but it is a {dep.target_type}."
+                )
+            whole.update(id(node) for node in dep.output_nodes)
         cyclic = {
             id(node)
             for members in strongly_connected_components(
@@ -1285,18 +1299,38 @@ class CompileLinkFactory:
             for member in members
             for node in member.output_nodes
         }
+
+        def tokens(nodes: list[FileNode]) -> list[FlagToken]:
+            result: list[FlagToken] = []
+            for node in nodes:
+                token = PathToken(path=node.path, path_type="project")
+                if id(node) not in whole:
+                    result.append(token)
+                    continue
+                wrapped = toolchain.whole_archive_tokens(token, env=env)
+                if wrapped is None:
+                    raise PconsValueError(
+                        f"{toolchain.name} has no way to link the whole of "
+                        f"{node.path.name} (whole_archive)."
+                    )
+                result.extend(wrapped)
+            return result
+
         span = [i for i, node in enumerate(dep_libs) if id(node) in cyclic]
-        if len(span) < 2:
-            return None
-        first, last = span[0], span[-1]
-
-        def tokens(nodes: list[FileNode]) -> list[PathToken]:
-            return [PathToken(path=n.path, path_type="project") for n in nodes]
-
-        group = toolchain.link_group_tokens(tokens(dep_libs[first : last + 1]), env=env)
-        if group is None:
-            return None
-        return [*tokens(dep_libs[:first]), *group, *tokens(dep_libs[last + 1 :])]
+        if len(span) >= 2:
+            first, last = span[0], span[-1]
+            group = toolchain.link_group_tokens(
+                tokens(dep_libs[first : last + 1]), env=env
+            )
+            if group is not None:
+                return [
+                    *tokens(dep_libs[:first]),
+                    *group,
+                    *tokens(dep_libs[last + 1 :]),
+                ]
+        if any(id(node) in whole for node in dep_libs):
+            return tokens(dep_libs)
+        return None
 
     def _order_compiles_after_dependency_outputs(self, target: Target) -> None:
         """Order every compile in *target* after the non-link outputs its

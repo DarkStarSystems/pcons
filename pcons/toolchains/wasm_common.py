@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
-    from pcons.core.subst import FlagToken, PathToken
+    from pcons.core.subst import FlagToken
     from pcons.tools.toolchain import SourceHandler
 
 
@@ -79,7 +79,7 @@ class WasmToolchain(UnixToolchain):
         return ".a"  # static library
 
     def link_group_tokens(
-        self, archives: Sequence[PathToken], env: Environment | None = None
+        self, archives: Sequence[FlagToken], env: Environment | None = None
     ) -> list[FlagToken] | None:
         """None: wasm-ld resolves archives in any order and takes the GNU
         group flags only for compatibility, so a cycle needs nothing."""

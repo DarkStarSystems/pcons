@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.errors import PconsValueError
 from pcons.core.preset import ToolContribution
-from pcons.core.subst import SourcePath, TargetPath
+from pcons.core.subst import NodeVar, SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain, msvc_crt
 from pcons.toolchains.msvc import MsvcAssembler, MsvcResourceCompiler
 from pcons.tools.tool import BaseTool, Probe
@@ -241,6 +241,7 @@ class ClangClLinker(BaseTool):
                 "$link.flags",
                 TargetPath(prefix="/OUT:"),
                 SourcePath(),
+                NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -251,6 +252,7 @@ class ClangClLinker(BaseTool):
                 TargetPath(prefix="/OUT:", index=0),
                 TargetPath(prefix="/IMPLIB:", index=1),
                 SourcePath(),
+                NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],

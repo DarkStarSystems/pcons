@@ -3,7 +3,7 @@
 
 Such a cycle is allowed: it has no build order to break, and every linker
 can resolve it, GNU ld and lld given a group. The link puts the group on
-the command line through the LINK_GROUPS variable, with the archives kept as
+the command line through the LINK_ARCHIVES variable, with the archives kept as
 implicit dependencies so the link still waits for them.
 """
 
@@ -131,7 +131,8 @@ class TestTheLinkLine:
 
         lib_a, lib_b = _archive(a), _archive(b)
         assert (
-            f"  LINK_GROUPS = -Wl,--start-group {lib_a} {lib_b} -Wl,--end-group" in edge
+            f"  LINK_ARCHIVES = -Wl,--start-group {lib_a} {lib_b} -Wl,--end-group"
+            in edge
         )
         explicit, implicit = edge[0].split(":", 1)[1].split(" | ", 1)
         assert lib_a not in explicit and lib_b not in explicit
@@ -156,7 +157,7 @@ class TestTheLinkLine:
 
         edge = _link_edge(_generate(project), "main")
 
-        (groups,) = [ln for ln in edge if ln.startswith("  LINK_GROUPS = ")]
+        (groups,) = [ln for ln in edge if ln.startswith("  LINK_ARCHIVES = ")]
         libs = groups.split(" = ", 1)[1].split()
         at = {t: libs.index(_archive(t)) for t in (a, b, c, d)}
         assert libs[0] == "-Wl,--start-group"
@@ -173,7 +174,7 @@ class TestTheLinkLine:
 
         edge = _link_edge(_generate(project), "main")
 
-        assert not any("LINK_GROUPS" in ln for ln in edge)
+        assert not any("LINK_ARCHIVES" in ln for ln in edge)
         assert f"{_archive(a)} {_archive(b)}" in edge[0].split(" | ", 1)[0]
 
     def test_no_cycle_no_group(self, tmp_path, gcc_toolchain, linux_platform):
@@ -185,14 +186,14 @@ class TestTheLinkLine:
 
         text = _generate(project)
 
-        assert "LINK_GROUPS =" not in text
+        assert "LINK_ARCHIVES =" not in text
         libs = f"{_archive(a)} {_archive(b)}"
         assert libs in _link_edge(text, "main")[0].split(" | ", 1)[0]
 
     def test_make_leaves_nothing_behind_without_a_cycle(
         self, tmp_path, gcc_toolchain, linux_platform
     ):
-        """The link template names LINK_GROUPS on every edge; an edge that
+        """The link template names LINK_ARCHIVES on every edge; an edge that
         does not set it must not get an empty argument."""
         project, env = _project(tmp_path, gcc_toolchain)
         a = project.StaticLibrary("a", env, sources=["a.c"])
@@ -218,3 +219,71 @@ class TestTheLinkLine:
 
         group = f"-Wl,--start-group {_archive(a)} {_archive(b)} -Wl,--end-group"
         assert group in text
+
+
+class TestWholeArchive:
+    """A static library with the whole_archive option is linked whole, in
+    each linker's form, in its place on the link line."""
+
+    @staticmethod
+    def _main_linking_whole(tmp_path, gcc_toolchain):
+        project, env = _project(tmp_path, gcc_toolchain)
+        plugins = project.StaticLibrary("a", env, sources=["a.c"])
+        plugins.set_option("whole_archive", True)
+        other = project.StaticLibrary("b", env, sources=["b.c"])
+        main = project.Program("main", env, sources=["main.c"])
+        main.link(plugins, other)
+        return project, plugins, other
+
+    @pytest.mark.parametrize(
+        ("triple", "expected"),
+        [
+            ("x86_64-linux-gnu", "{b} -Wl,--whole-archive {a} -Wl,--no-whole-archive"),
+            ("arm64-apple-darwin", "{b} -Wl,-force_load,{a}"),
+        ],
+    )
+    def test_each_linker_gets_its_form(self, tmp_path, gcc_toolchain, triple, expected):
+        with building_for(triple):
+            project, plugins, other = self._main_linking_whole(tmp_path, gcc_toolchain)
+            edge = _link_edge(_generate(project), "main")
+
+        a, b = _archive(plugins), _archive(other)
+        assert f"  LINK_ARCHIVES = {expected.format(a=a, b=b)}" in edge
+        explicit, implicit = edge[0].split(":", 1)[1].split(" | ", 1)
+        assert a not in explicit and a in implicit
+
+    def test_msvc_names_it_twice(self, test_project):
+        from pcons.core.subst import PathToken
+        from pcons.toolchains.msvc import MsvcToolchain
+
+        archive = PathToken(path="plugins.lib", path_type="build")
+
+        tokens = MsvcToolchain().whole_archive_tokens(archive)
+
+        assert tokens == [archive, PathToken("/WHOLEARCHIVE:", "plugins.lib", "build")]
+
+    def test_only_a_static_library_takes_it(self, tmp_path, gcc_toolchain):
+        project, env = _project(tmp_path, gcc_toolchain)
+        lib = project.SharedLibrary("a", env, sources=["a.c"])
+        lib.set_option("whole_archive", True)
+        project.Program("main", env, sources=["main.c"]).link(lib)
+
+        with pytest.raises(ValueError, match="only a static library takes"):
+            project.resolve()
+
+    def test_it_goes_inside_a_cycle_group(self, tmp_path, gcc_toolchain):
+        with building_for("x86_64-linux-gnu"):
+            project, env = _project(tmp_path, gcc_toolchain)
+            a = project.StaticLibrary("a", env, sources=["a.c"])
+            b = project.StaticLibrary("b", env, sources=["b.c"])
+            a.link(b)
+            b.link(a)
+            a.set_option("whole_archive", True)
+            project.Program("main", env, sources=["main.c"]).link(a)
+            edge = _link_edge(_generate(project), "main")
+
+        lib_a, lib_b = _archive(a), _archive(b)
+        assert (
+            f"  LINK_ARCHIVES = -Wl,--start-group -Wl,--whole-archive {lib_a} "
+            f"-Wl,--no-whole-archive {lib_b} -Wl,--end-group"
+        ) in edge

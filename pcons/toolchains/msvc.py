@@ -15,7 +15,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.errors import PconsValueError
 from pcons.core.preset import ToolContribution
-from pcons.core.subst import SourcePath, TargetPath
+from pcons.core.subst import NodeVar, SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.tools.tool import BaseTool, Probe
 from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
@@ -612,6 +612,7 @@ class MsvcLinker(BaseTool):
                 "$link.flags",
                 TargetPath(prefix="/OUT:"),
                 SourcePath(),
+                NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -622,6 +623,7 @@ class MsvcLinker(BaseTool):
                 TargetPath(prefix="/OUT:", index=0),
                 TargetPath(prefix="/IMPLIB:", index=1),
                 SourcePath(),
+                NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],

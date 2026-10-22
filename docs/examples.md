@@ -116,3 +116,4 @@ uvx pcons
 | [`96_fortran_configure_checks`](https://github.com/DarkStarSystems/pcons/tree/main/examples/96_fortran_configure_checks) | Demonstrates configure checks with a Fortran compiler: flags it accepts, and a feature probe passed to the source as a define |
 | [`96_static_runtime`](https://github.com/DarkStarSystems/pcons/tree/main/examples/96_static_runtime) | Build a C++ program with the shared and with static language runtimes |
 | [`97_sanitize`](https://github.com/DarkStarSystems/pcons/tree/main/examples/97_sanitize) | Build a program with AddressSanitizer and check it reports a planted overflow |
+| [`98_whole_archive`](https://github.com/DarkStarSystems/pcons/tree/main/examples/98_whole_archive) | A static library whose self-registering plugin nothing references is linked whole, so the program finds the plugin |

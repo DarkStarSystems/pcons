@@ -102,9 +102,10 @@ def _link_tail() -> list[object]:
         "-o",
         TargetPath(),
         SourcePath(),
-        # Archives that link each other in a cycle, grouped; see
-        # UnixToolchain.link_group_tokens. Empty on every other edge.
-        NodeVar("LINK_GROUPS"),
+        # Archives the linker wants other than as plain inputs: grouped for a
+        # cycle, or linked whole; see CompileLinkFactory._arranged_archives.
+        # Empty on every other edge.
+        NodeVar("LINK_ARCHIVES"),
         "${prefix(link.Lprefix, link.libdirs)}",
         "${prefix(link.lprefix, link.libs)}",
         "${prefix(link.Fprefix, link.frameworkdirs)}",
