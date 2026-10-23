@@ -486,6 +486,18 @@ Cflags: -I${includedir}
         finder.build_profile_path.write_text("[settings]\nos=Linux\n")
         assert not finder._is_cache_valid()
 
+    def test_a_failed_detection_says_so(self, tmp_path: Path) -> None:
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.sync_profile()
+        failed = MagicMock(returncode=1, stdout="", stderr="no compiler found")
+
+        with (
+            patch.object(finder, "is_available", return_value=True),
+            patch("subprocess.run", return_value=failed),
+            pytest.raises(RuntimeError, match="no compiler found"),
+        ):
+            finder.install()
+
 
 class TestConanFinderCaching:
     """Tests for caching functionality."""
@@ -958,6 +970,27 @@ class TestConanFinderWithToolchain:
         assert settings["compiler"] == "gcc"
         assert settings["compiler.version"] == "14"
         assert settings["compiler.libcxx"] == "libstdc++11"
+
+    def test_macos_homebrew_llvm_is_clang(self, tmp_path: Path) -> None:
+        """Only Apple's clang is apple-clang: Conan numbers the two
+        differently, so a Homebrew LLVM is clang, with libc++."""
+        finder = ConanFinder(output_folder=tmp_path)
+        finder._platform = _platform("darwin", "arm64")
+        toolchain = _FakeToolchain("llvm", cc_cmd="/opt/homebrew/opt/llvm/bin/clang")
+
+        def mock_run(cmd, **kwargs):
+            return MagicMock(
+                returncode=0,
+                stdout="Homebrew clang version 21.1.2\nTarget: arm64-apple-darwin25\n",
+                stderr="",
+            )
+
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(toolchain)
+
+        assert settings["compiler"] == "clang"
+        assert settings["compiler.version"] == "21"
+        assert settings["compiler.libcxx"] == "libc++"
 
     def test_detect_compiler_version_uses_toolchain_cmd_not_path(
         self, tmp_path: Path
