@@ -222,6 +222,9 @@ error. Specifically, the rules are as follows:
   macOS's `g++`-that-is-really-Apple-clang is identified correctly.
 - With `toolchain="fortran"`, `$FC` does the same for Fortran:
   `FC=flang-21` selects the flang toolchain.
+- A toolchain asked for by name uses the variable's compiler, which is
+  all it needs: `toolchain="gcc"` with `CC=gcc-16` works where only
+  `gcc-16` is installed.
 - An explicitly requested toolchain that *contradicts* the variable
   (`CXX=g++-15` with `toolchain="msvc"`) is an error. A preference list
   passes over such a toolchain: `toolchain=["llvm", "msvc"]` with `CC=cl`
