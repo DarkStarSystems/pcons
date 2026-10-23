@@ -50,6 +50,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   paths are written relative to the build, as the compiles' are.
 - The "not relocatable" warning names the path and the target whose
   command has it, and shortens a long flag.
+- A toolchain asked for by name, or in a preference list, takes the
+  compiler `$CC`, `$CXX`, `$FC`, `$CUDACXX` or `$SWIFTC` chooses, even
+  when only a versioned one such as `gcc-16` is installed. It used to need
+  the plain command (`gcc`) on PATH as well, and on macOS refused gcc
+  because `/usr/bin/gcc` is Apple clang. `find_cuda_toolchain()` follows
+  `$CUDACXX` too.
 
 ## [0.31.0] - 2026-10-21
 

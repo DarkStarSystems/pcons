@@ -11,7 +11,7 @@ import functools
 import logging
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.configure.platform import Platform, get_platform
 from pcons.core.errors import PconsValueError
@@ -293,12 +293,9 @@ class CudaToolchain(BaseToolchain):
 
 
 def find_cuda_toolchain() -> CudaToolchain | None:
-    """Return a CudaToolchain if nvcc is in PATH, else None."""
-    if shutil.which("nvcc"):
-        toolchain = CudaToolchain()
-        toolchain._tools = {"cuda": CudaCompiler()}
-        return toolchain
-    return None
+    """A CudaToolchain if nvcc is available (``$CUDACXX``, else ``nvcc`` on
+    PATH), else None."""
+    return cast("CudaToolchain | None", toolchain_registry.find_available("cuda"))
 
 
 # =============================================================================

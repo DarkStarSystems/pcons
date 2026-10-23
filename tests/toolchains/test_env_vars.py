@@ -266,6 +266,84 @@ class TestFamilyValidation:
         assert env.cxx.cmd == str(fake)
 
 
+class TestNamedToolchainsFollowTheVariables:
+    """A named toolchain is available when its variable chooses a compiler
+    of its family, though only versioned compilers are installed (#267)."""
+
+    FAMILIES = {
+        "gcc-16": "gcc",
+        "g++-16": "gcc",
+        "clang-23": "llvm",
+        "gfortran-16": "gfortran",
+        "flang-23": "flang",
+        "gcc": "llvm",  # macOS's gcc, which is Apple clang
+    }
+
+    @pytest.fixture(autouse=True)
+    def only_versioned_compilers(self, monkeypatch, tmp_path):
+        for var in ("CC", "CXX", "FC", "CUDACXX"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setattr(
+            compiler_id, "compiler_family", lambda p: self.FAMILIES.get(Path(p).stem)
+        )
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        monkeypatch.setenv("PATH", str(bin_dir))
+        return bin_dir
+
+    @pytest.mark.parametrize(
+        ("spec", "var", "compiler", "tool"),
+        [
+            ("gcc", "CC", "gcc-16", "cc"),
+            ("llvm", "CC", "clang-23", "cc"),
+            (["llvm", "gcc"], "CC", "gcc-16", "cc"),
+            (["llvm", "gcc"], "CC", "clang-23", "cc"),
+            ("gfortran", "FC", "gfortran-16", "fc"),
+            ("flang", "FC", "flang-23", "fc"),
+        ],
+    )
+    def test_the_variable_is_proof_enough(
+        self, test_project, monkeypatch, tmp_path, spec, var, compiler, tool
+    ):  # noqa: F811
+        chosen = _fake_compiler(tmp_path, compiler)
+        monkeypatch.setenv(var, str(chosen))
+
+        toolchain = toolchain_registry.resolve(spec)
+
+        env = Environment(toolchain=toolchain)
+        assert getattr(env, tool).cmd == str(chosen)
+
+    @pytest.mark.skipif(__import__("sys").platform == "win32", reason="sh script")
+    def test_apples_gcc_on_path_doesnt_matter(
+        self, test_project, monkeypatch, only_versioned_compilers, tmp_path
+    ):  # noqa: F811
+        apples = _fake_compiler(only_versioned_compilers, "gcc")
+        apples.write_text("#!/bin/sh\necho Apple clang version 17.0.0\n")
+        chosen = _fake_compiler(tmp_path, "gcc-16")
+        monkeypatch.setenv("CC", str(chosen))
+
+        env = Environment(toolchain=toolchain_registry.resolve("gcc"))
+
+        assert env.cc.cmd == str(chosen)
+
+    def test_a_compiler_of_another_family_says_so(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CC", str(_fake_compiler(tmp_path, "clang-23")))
+
+        with pytest.raises(RuntimeError, match=r"\$CC.*llvm-family.*'gcc'"):
+            toolchain_registry.resolve("gcc")
+
+    def test_without_the_variable_the_command_must_be_on_path(self):
+        with pytest.raises(RuntimeError, match="no usable 'gfortran' on PATH"):
+            toolchain_registry.resolve("gfortran")
+
+    def test_cuda_follows_cudacxx(self, monkeypatch, tmp_path):
+        from pcons.toolchains.cuda import find_cuda_toolchain
+
+        assert find_cuda_toolchain() is None
+        monkeypatch.setenv("CUDACXX", str(_fake_compiler(tmp_path, "nvcc-12")))
+        assert find_cuda_toolchain() is not None
+
+
 class TestOpenmpSniffUsesOverride:
     @pytest.mark.skipif(
         __import__("sys").platform == "win32", reason="POSIX shell script"
@@ -336,7 +414,9 @@ class TestAutoDetectSteering:
 
         assert env_selected_toolchain("fortran", "FC") is None
 
-    def test_explicit_prefer_list_respected(self, test_project, monkeypatch, tmp_path):  # noqa: F811
+    def test_explicit_prefer_list_passes_over_a_contradicted_toolchain(
+        self, test_project, monkeypatch, tmp_path
+    ):  # noqa: F811
         from pcons.toolchains import find_c_toolchain
 
         fake = _fake_compiler(tmp_path, "g++-99")
@@ -344,7 +424,7 @@ class TestAutoDetectSteering:
         monkeypatch.setattr(compiler_id, "compiler_family", lambda p: "gcc")
 
         toolchain = find_c_toolchain(prefer=["llvm", "gcc"])
-        assert toolchain.name == "llvm"
+        assert toolchain.name == "gcc"
 
 
 class TestCompilerFamily:

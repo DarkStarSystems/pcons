@@ -482,14 +482,9 @@ class ToolchainRegistry:
         errors: list[str] = []
         for name in spec:
             try:
-                toolchain = self._resolve_one(name, abi)
+                return self._resolve_one(name, abi)
             except (RuntimeError, ValueError) as e:
                 errors.append(f"{name}: {e}")
-                continue
-            conflict = toolchain.compiler_override_conflict()
-            if conflict is None:
-                return toolchain
-            errors.append(f"{name}: {conflict}")
         raise PconsRuntimeError(
             "No toolchain available from preference list "
             f"{list(spec)}:\n  " + "\n  ".join(errors)
@@ -520,15 +515,9 @@ class ToolchainRegistry:
 
         entry = self._toolchains.get(key)
         if entry is not None:
-            if entry.is_available is not None:
-                available = entry.is_available()
-            else:
-                available = shutil.which(entry.check_command) is not None
-            if not available:
-                raise PconsRuntimeError(
-                    f"Toolchain '{name}' is not available "
-                    f"('{entry.check_command}' not found in PATH)"
-                )
+            problem = entry.unavailable_reason(name)
+            if problem is not None:
+                raise PconsRuntimeError(problem)
             return entry.create_toolchain()
 
         known = ", ".join(sorted({*self._finders, *self._toolchains, *self._lazy}))
@@ -626,11 +615,7 @@ class ToolchainRegistry:
 
         # Try each entry
         for entry in entries_to_try:
-            if entry.is_available is not None:
-                available = entry.is_available()
-            else:
-                available = shutil.which(entry.check_command) is not None
-            if available:
+            if entry.unavailable_reason(entry.aliases[0]) is None:
                 toolchain = entry.create_toolchain()
                 if abi_compatible(toolchain.abi, abi):
                     return toolchain
@@ -738,6 +723,36 @@ class ToolchainEntry:
         self.description = description
         self.finder = finder
         self.is_available = is_available
+
+    def unavailable_reason(self, name: str) -> str | None:
+        """Why this toolchain, asked for as *name*, can't be used here, or
+        None if it can.
+
+        A compiler the user chose with its variable (``$CC``, ``$FC``,
+        ``$CUDACXX``, ...) proves the toolchain is there, as long as it
+        belongs to the toolchain's family; auto-detection follows the same
+        rule. Otherwise the toolchain's own check decides, or its command
+        on PATH.
+        """
+        from pcons.tools.tool import resolve_env_cmd_override
+
+        tools = [tool_class() for tool_class in self.tool_classes]
+        if any(
+            resolve_env_cmd_override(tool.env_var)
+            for tool in tools
+            if tool.env_var and tool.language
+        ):
+            return self.create_toolchain().compiler_override_conflict()
+        if self.is_available is not None:
+            available = self.is_available()
+        else:
+            available = shutil.which(self.check_command) is not None
+        if available:
+            return None
+        return (
+            f"Toolchain '{name}' is not available "
+            f"(no usable '{self.check_command}' on PATH)"
+        )
 
     def create_toolchain(self) -> BaseToolchain:
         """A toolchain instance with its tools."""
