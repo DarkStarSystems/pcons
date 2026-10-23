@@ -2412,6 +2412,10 @@ conan.sync_profile(
 
 The `cppstd` parameter sets `compiler.cppstd` in the Conan profile, which many packages require. If omitted, it's inferred from `env.cxx.flags` (e.g., `-std=c++23` becomes `compiler.cppstd=23`). You can also use the lower-level `conan.set_profile_setting("compiler.cppstd", "23")` before calling `sync_profile()`.
 
+The profile describes the platform the environment builds for. After `env.apply_cross_preset()`, that's the preset's target: its OS and CPU, Android's API level, C++ runtime and NDK, iOS's version and SDK, and the `--target` and `--sysroot` flags the environment compiles with. For a target pcons can't describe to Conan, `sync_profile()` raises; give the settings yourself with `conan.set_profile_setting("os", ...)` and `conan.set_profile_setting("arch", ...)`.
+
+Tools that dependencies need while they build, such as flex or protoc (Conan's `tool_requires`), have to run on this machine, so Conan builds them for it, with its usual compiler. pcons has Conan detect that profile once, into `pcons-build-profile` in the output folder, leaving out `$CC` and `$CXX`.
+
 A conf entry set with `conan.set_profile_conf()`, such as `tools.build:cxxflags`, is not part of Conan's package id: changing it reuses the binary Conan already built unless you tell Conan the conf matters:
 
 ```python
