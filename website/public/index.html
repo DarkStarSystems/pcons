@@ -159,6 +159,20 @@
     }
     .copy-btn:hover { border-color: var(--teal); color: #e2e8f0; }
 
+    /* Screenshot */
+    .screenshot {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 0 1.5rem 1rem;
+    }
+    .screenshot img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+    }
+
     /* Sections */
     section {
       max-width: var(--max-width);
@@ -374,6 +388,13 @@
       <button class="copy-btn"
               onclick="navigator.clipboard.writeText('uvx pcons');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
     </div>
+  </div>
+
+  <div class="screenshot">
+    <a href="pcons-screenshot.webp">
+      <img src="pcons-screenshot.webp" width="2104" height="1528"
+           alt="A pcons-build.py script and C++ source beside a terminal: uvx pcons builds a static library and a program, the program runs, pcons explain shows where each flag came from, and a second build has no work to do.">
+    </a>
   </div>
 
   <!-- Features -->
