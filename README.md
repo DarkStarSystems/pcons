@@ -1,6 +1,6 @@
 # Pcons
 
-A modern open-source cross-platform zero-install Python-based build system. Builds anything that requires a repeatable workflow, using a dependency graph. Easy to use, reliable and quick. Uses Ninja (or Makefile, XCode, or MSVS) to do the builds. Optimized for C/C++, Fortran, CUDA, wasm etc. but should work for anything that needs building.
+A modern open-source cross-platform zero-install Python-based build system. Builds anything that requires a repeatable workflow, using a dependency graph. Easy to use, reliable and quick. Uses Ninja (or Make or Xcode) to do the builds. Optimized for C/C++, Fortran, CUDA, wasm etc. but should work for anything that needs building.
 
 [![CI](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml/badge.svg)](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/DarkStarSystems/pcons/graph/badge.svg)](https://codecov.io/gh/DarkStarSystems/pcons)
