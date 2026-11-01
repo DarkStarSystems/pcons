@@ -29,6 +29,7 @@ from pcons.test_runner import (
     _discover_catch2,
     _discover_doctest,
     _discover_gtest,
+    _exit_description,
     _validate_deps,
     expand_discovered_tests,
     expand_filter_with_deps,
@@ -1351,3 +1352,16 @@ def test_the_pass_rate_leaves_skipped_tests_out(capsys):
         "100% tests passed, 0 tests failed out of 2 (1 skipped)"
         in capsys.readouterr().out
     )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "description"),
+    [
+        (3, "exit code 3"),
+        (-6, "killed by SIGABRT"),
+        # A real-time signal, which has no name.
+        (-200, "killed by signal 200"),
+    ],
+)
+def test_exit_description(returncode, description):
+    assert _exit_description(returncode) == description
