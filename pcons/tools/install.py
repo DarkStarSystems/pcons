@@ -65,8 +65,6 @@ class InstallContext:
     ) -> InstallContext:
         """Create an InstallContext from a target and optional environment.
 
-        Target settings take precedence over environment settings.
-
         Args:
             target: The install target being built.
             env: Optional environment with install defaults.
@@ -83,10 +81,6 @@ class InstallContext:
                 env_destdir = getattr(install_config, "destdir", None)
                 if env_destdir is not None and not effective_destdir:
                     effective_destdir = str(env_destdir)
-
-        target_destdir = getattr(target, "_install_destdir", None)
-        if target_destdir is not None:
-            effective_destdir = target_destdir
 
         return cls(
             destdir=effective_destdir,
