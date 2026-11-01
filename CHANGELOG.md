@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On macOS and Linux, a static library is written afresh each time it's
+  rebuilt. `ar` updated the old archive in place, which kept the objects
+  of removed sources and failed on a macOS universal (fat) archive.
 - A configure check whose compiler can't compile anything (missing,
   crashed, or given broken flags) stops configure with the compiler's
   error. It used to answer "no", or `None` from `check_type_size()`, and

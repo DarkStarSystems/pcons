@@ -247,11 +247,14 @@ def gnu_archiver_vars(cmd: str) -> dict[str, object]:
     Args:
         cmd: Default archiver command.
     """
-    return {
-        "cmd": cmd,
-        "flags": ["rcs"],
-        "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
-    }
+    libcmd: list[object] = ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()]
+    if not get_platform().is_windows:
+        # Written afresh from all its objects: ar would update the old archive
+        # in place, keeping members whose sources are gone, and fails
+        # outright on a macOS universal (fat) archive. Windows has no rm, and
+        # no fat archives.
+        libcmd = ["rm", "-f", TargetPath(), "&&", *libcmd]
+    return {"cmd": cmd, "flags": ["rcs"], "libcmd": libcmd}
 
 
 def gnu_archiver_builders(
