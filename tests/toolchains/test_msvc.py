@@ -210,12 +210,11 @@ class TestMsvcLinker:
         assert result.import_lib.path == Path("build/mylib.lib")
         assert result.export_file.path == Path("build/mylib.exp")
 
-    def test_sharedcmd_includes_implib(self):
-        link = MsvcLinker()
-        vars = link.default_vars()
-        sharedcmd = vars["sharedcmd"]
-        # Check that IMPLIB flag is in the command
-        assert any("/IMPLIB:" in str(item) for item in sharedcmd)
+    def test_sharedcmd_leaves_the_import_library_to_the_target(self):
+        """A DLL may declare none (import_library=False), so /IMPLIB: comes
+        from the target's link flags."""
+        sharedcmd = MsvcLinker().default_vars()["sharedcmd"]
+        assert not any("/IMPLIB:" in str(item) for item in sharedcmd)
 
 
 class TestMsvcToolchain:

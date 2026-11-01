@@ -3395,7 +3395,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | variant debug
@@ -3413,7 +3413,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-O0 -g -fms-runtime-lib=dll_dbg]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | variant release
@@ -3431,7 +3431,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /MD]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-O2 -fms-runtime-lib=dll]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | variant relwithdebinfo
@@ -3449,7 +3449,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-O2 -g -fms-runtime-lib=dll]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature warnings
@@ -3467,7 +3467,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /W4]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /W4]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature werror
@@ -3485,7 +3485,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /WX]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /WX]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -Werror]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature sanitize
@@ -3505,7 +3505,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /PROFILE] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /PROFILE] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /PROFILE /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /PROFILE] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature lto
@@ -3523,7 +3523,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD -flto]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD -flto]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -flto]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature hardened
@@ -3547,7 +3547,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /fp:fast]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /fp:fast]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -ffast-math]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | feature openmp
@@ -3565,7 +3565,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /NODEFAULTLIB:vcomp.lib] libs=[libomp.lib] libdirs=[/rt/libomp /rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /openmp]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /openmp]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /NODEFAULTLIB:vcomp.lib] libs=[libomp.lib] libdirs=[/rt/libomp]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /NODEFAULTLIB:vcomp.lib /IMPLIB:<target1>] libs=[libomp.lib] libdirs=[/rt/libomp]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll -fopenmp]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | cxx standard 20
@@ -3583,7 +3583,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /std:c++20]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=dll]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | runtime static
@@ -3601,7 +3601,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MT]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MT]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-fms-runtime-lib=static]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | runtime static, variant debug
@@ -3619,7 +3619,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[/rt/flang]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /Od /Z7 /MTd]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /Od /Z7 /MTd]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=flang flags=[-O0 -g -fms-runtime-lib=static_dbg]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[/rt/flang]
 ### windows clang-cl+flang | before add_toolchain: variant debug
@@ -3936,7 +3936,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | variant debug
@@ -3953,7 +3953,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /Od /Z7 /MDd]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /Od /Z7 /MDd]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /Od /Z7 /MDd]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | variant release
@@ -3970,7 +3970,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /O2 /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /O2 /MD]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /MD]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | variant relwithdebinfo
@@ -3987,7 +3987,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /O2 /Z7 /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /O2 /Z7 /MD]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /Z7 /MD]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature warnings
@@ -4004,7 +4004,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /W4]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /W4]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:all]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature werror
@@ -4021,7 +4021,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /WX]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /WX]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:errors]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature sanitize
@@ -4038,7 +4038,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /INFERASANLIBS /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /fsanitize=address]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /fsanitize=address]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /INFERASANLIBS /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature profile
@@ -4055,7 +4055,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /PROFILE /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo /PROFILE] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /PROFILE /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /PROFILE /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature lto
@@ -4074,7 +4074,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /GS /guard:cf]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /GS /guard:cf]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature pthread
@@ -4095,7 +4095,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /fp:fast]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /fp:fast]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fp:fast]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | feature openmp
@@ -4112,7 +4112,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD /openmp]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /openmp]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /Qopenmp]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | cxx standard 20
@@ -4129,7 +4129,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MD /std:c++20]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | runtime static
@@ -4146,7 +4146,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /MT]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /MT]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MT]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | runtime static, variant debug
@@ -4163,7 +4163,7 @@
   app/app.exe: tool=link cmd=link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=cl flags=[/nologo /Od /Z7 /MTd]
   lib/src.cpp.obj: tool=cxx cmd=cl flags=[/nologo /Zc:__cplusplus /Od /Z7 /MTd]
-  lib/lib.dll: tool=link cmd=link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /Od /Z7 /MTd]
   fmain/fmain.exe: tool=link cmd=link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows msvc+ifx-msvc | before add_toolchain: variant debug
@@ -4206,7 +4206,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | variant debug
@@ -4223,7 +4223,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /Od /Z7 /MDd]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /Od /Z7 /MDd]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | variant release
@@ -4240,7 +4240,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /MD]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /MD]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | variant relwithdebinfo
@@ -4257,7 +4257,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /O2 /Z7 /MD]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /O2 /Z7 /MD]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature warnings
@@ -4274,7 +4274,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /W4]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /W4]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:all]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature werror
@@ -4291,7 +4291,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /WX]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /WX]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /warn:errors]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature sanitize
@@ -4308,7 +4308,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /rt/clang/clang_rt.asan_dynamic.lib /INFERASANLIBS:NO /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /fsanitize=address]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /fsanitize=address]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /rt/clang/clang_rt.asan_dynamic.lib /INFERASANLIBS:NO] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /rt/clang/clang_rt.asan_dynamic.lib /INFERASANLIBS:NO /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fsanitize=address]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /rt/clang/clang_rt.asan_dynamic.lib /INFERASANLIBS:NO /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature profile
@@ -4325,7 +4325,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /PROFILE /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /PROFILE] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /PROFILE /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /PROFILE /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature lto
@@ -4344,7 +4344,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /GS /guard:cf]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /GS /guard:cf]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /GS /guard:cf]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DYNAMICBASE /NXCOMPAT /guard:cf /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature pthread
@@ -4365,7 +4365,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /fp:fast]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /fp:fast]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /fp:fast]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | feature openmp
@@ -4382,7 +4382,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE /NODEFAULTLIB:vcomp.lib] libs=[libomp.lib] libdirs=[/rt/libomp /rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD /openmp]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /openmp]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /NODEFAULTLIB:vcomp.lib] libs=[libomp.lib] libdirs=[/rt/libomp]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /NODEFAULTLIB:vcomp.lib /IMPLIB:<target1>] libs=[libomp.lib] libdirs=[/rt/libomp]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD /Qopenmp]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | cxx standard 20
@@ -4399,7 +4399,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MD]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MD /std:c++20]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MD]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | runtime static
@@ -4416,7 +4416,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /MT]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /MT]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /MT]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | runtime static, variant debug
@@ -4433,7 +4433,7 @@
   app/app.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
   lib/src.c.obj: tool=cc cmd=clang-cl flags=[/nologo /Od /Z7 /MTd]
   lib/src.cpp.obj: tool=cxx cmd=clang-cl flags=[/nologo /Od /Z7 /MTd]
-  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG] libs=[] libdirs=[]
+  lib/lib.dll: tool=link cmd=lld-link flags=[/nologo /DEBUG /IMPLIB:<target1>] libs=[] libdirs=[]
   fmain/src.f90.obj: tool=fc cmd=ifx flags=[/nologo /Od /Z7 /MTd]
   fmain/fmain.exe: tool=link cmd=lld-link flags=[/nologo /DEBUG /SUBSYSTEM:CONSOLE] libs=[] libdirs=[/rt/ifx]
 ### windows clang-cl+ifx-msvc | before add_toolchain: variant debug

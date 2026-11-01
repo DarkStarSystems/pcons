@@ -47,6 +47,19 @@ register_target_option(
     "allowed on macOS and Linux); everything else is hidden, except that on "
     "MSVC a .def file adds to __declspec(dllexport) rather than replacing it",
 )
+register_target_option(
+    "import_library",
+    "False declares no import library for a Windows DLL that exports nothing, "
+    "such as a resource-only DLL, for which link.exe writes none; nothing can "
+    "link against it",
+)
+
+
+def declares_import_library(target: Target) -> bool:
+    """Whether *target*, a shared library, declares an import library where
+    its toolchain's link writes one (see the ``import_library`` option)."""
+    return target.get_option("import_library") is not False
+
 
 if TYPE_CHECKING:
     from pcons.configure.platform import Platform
