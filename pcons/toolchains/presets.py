@@ -178,6 +178,9 @@ class CrossPreset:
                   the directory the tools were found in.
         sdk: Root of the Android SDK. Nothing in compiling or linking uses
              it; packaging does, and no other part of pcons knows it.
+        stl: The Android C++ runtime ("c++_shared", "c++_static", "none").
+             Its link flags already say it; this says it to a package
+             manager building the app's dependencies.
     """
 
     name: str
@@ -192,6 +195,7 @@ class CrossPreset:
     ndk: str | None = None
     ndk_host: str | None = None
     sdk: str | None = None
+    stl: str | None = None
 
     @property
     def target_platform(self) -> Platform | None:
@@ -311,6 +315,7 @@ def android(
         ndk=str(ndk_path),
         ndk_host=host_tag,
         sdk=sdk,
+        stl=stl,
         tool_cmds={
             "cc": str(bin_dir / f"{triple}-clang{wrapper_ext}"),
             "cxx": str(bin_dir / f"{triple}-clang++{wrapper_ext}"),

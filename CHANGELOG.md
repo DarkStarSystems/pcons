@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clang-cl, gfortran and flang. Logs and CI output stay plain text; set
   `NO_COLOR` to turn colors off, or `FORCE_COLOR` to get them with n2. See
   [Colored Diagnostics](https://pcons.readthedocs.io/en/latest/user-guide/#colored-diagnostics).
+- Conan dependencies for cross builds: `ConanFinder.sync_profile(env=env)`
+  describes the platform a cross preset builds for (Linux, Android, iOS,
+  bare metal), so Conan builds the dependencies for it with the
+  environment's compiler and target flags.
 
 ### Changed
 
@@ -56,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the plain command (`gcc`) on PATH as well, and on macOS refused gcc
   because `/usr/bin/gcc` is Apple clang. `find_cuda_toolchain()` follows
   `$CUDACXX` too.
+- Conan builds tools a dependency needs to build (flex, m4, protoc) with
+  this machine's usual compiler, not the build's. Building with Homebrew
+  GCC on macOS gave a `flex` that couldn't run `m4`, and libpq failed.
 
 ## [0.31.0] - 2026-10-21
 
