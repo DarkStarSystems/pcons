@@ -488,7 +488,6 @@ Cflags: -I${includedir}
 
     def test_a_failed_detection_says_so(self, tmp_path: Path) -> None:
         finder = ConanFinder(output_folder=tmp_path)
-        finder.sync_profile()
         failed = MagicMock(returncode=1, stdout="", stderr="no compiler found")
 
         with (
@@ -497,6 +496,8 @@ Cflags: -I${includedir}
             pytest.raises(RuntimeError, match="no compiler found"),
         ):
             finder.install()
+        # The host profile is written first, when the script hasn't.
+        assert finder.profile_path.exists()
 
 
 class TestConanFinderCaching:
@@ -1038,6 +1039,24 @@ class TestConanFinderWithToolchain:
 
         assert version == "15"
         assert invoked == ["clang"]  # not the non-existent "apple-clang"
+
+    @pytest.mark.parametrize(
+        ("os_name", "compiler", "libcxx"),
+        [("darwin", "apple-clang", "libc++"), ("linux", "gcc", "libstdc++11")],
+    )
+    def test_detect_compiler_settings_no_toolchain_follows_target(
+        self, tmp_path: Path, os_name: str, compiler: str, libcxx: str
+    ) -> None:
+        """With no toolchain, the default compiler is the target's, whatever
+        machine pcons runs on."""
+        finder = ConanFinder(output_folder=tmp_path)
+        with patch.object(finder, "_detect_compiler_version", return_value=None):
+            settings = finder._detect_compiler_settings(
+                target=_platform(os_name, "x86_64")
+            )
+
+        assert settings["compiler"] == compiler
+        assert settings["compiler.libcxx"] == libcxx
 
     def test_detect_compiler_settings_with_clang_toolchain(
         self, tmp_path: Path
