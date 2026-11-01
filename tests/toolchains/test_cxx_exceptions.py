@@ -81,3 +81,8 @@ def test_adding_a_toolchain_keeps_the_mode(project, set_first):
         env.cxx.set_exceptions("none")
 
     assert not [f for f in env.cxx.flags if f.startswith("/EH")]
+
+
+def test_a_toolchain_without_cxx_has_no_exception_mode():
+    """It leaves the setting to the toolchain that compiles C++."""
+    assert _create("cython").make_cxx_exceptions_preset("none") is None
