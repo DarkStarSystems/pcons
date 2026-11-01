@@ -26,7 +26,7 @@ from pcons.toolchains.gnu_common import (
     GNU_LINK_PATH_FLAGS,
     needs_pic,
 )
-from pcons.tools.toolchain import BaseToolchain, LinkNeeds
+from pcons.tools.toolchain import BaseToolchain, LinkNeeds, declares_import_library
 from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
@@ -545,7 +545,9 @@ class UnixToolchain(BaseToolchain):
         flags = self._exported_symbols_flags(target)
         if target.target_type == "shared_library":
             flags = [*self._install_name_flags(target, existing_flags), *flags]
-            if self._writes_import_library(self._target_platform(target)):
+            if self._writes_import_library(
+                self._target_platform(target)
+            ) and declares_import_library(target):
                 # Where get_import_library_name says (the link's second output)
                 flags.append(TargetPath(prefix="-Wl,/IMPLIB:", index=1))
         return flags

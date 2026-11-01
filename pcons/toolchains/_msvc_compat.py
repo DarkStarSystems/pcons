@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.core.errors import PconsValueError
 from pcons.core.preset import Preset, ToolContribution
-from pcons.tools.toolchain import BaseToolchain, LinkNeeds
+from pcons.core.subst import TargetPath
+from pcons.tools.toolchain import BaseToolchain, LinkNeeds, declares_import_library
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -201,16 +202,19 @@ class MsvcCompatibleToolchain(BaseToolchain):
         output_name: str,
         existing_flags: Sequence[FlagToken],
     ) -> list[FlagToken]:
-        """A module-definition file for ``exported_symbols``."""
-        symbols = (
-            target.get_option("exported_symbols")
-            if hasattr(target, "get_option")
-            else None
-        )
-        if not symbols or target.target_type not in ("shared_library", "program"):
+        """The import library a DLL declares, and a module-definition file
+        for ``exported_symbols``."""
+        if target.target_type not in ("shared_library", "program"):
             return []
-        text = module_definition(target, symbols)
-        return [self._link_input_token(target, ".def", text, "/DEF:")]
+        flags: list[FlagToken] = []
+        if target.target_type == "shared_library" and declares_import_library(target):
+            # Where get_import_library_name says (the link's second output)
+            flags.append(TargetPath(prefix="/IMPLIB:", index=1))
+        symbols = target.get_option("exported_symbols")
+        if symbols:
+            text = module_definition(target, symbols)
+            flags.append(self._link_input_token(target, ".def", text, "/DEF:"))
+        return flags
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
         """Return handler for .def (module definition) and .manifest files."""

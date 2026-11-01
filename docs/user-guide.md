@@ -2901,6 +2901,23 @@ sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
 or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
 the link then depends on.
 
+### A DLL That Exports Nothing
+
+An MSVC-ABI link writes an import library (`foo.lib`) for a DLL, and whatever
+links the DLL links that. But link.exe writes none for a DLL that exports
+nothing, such as a resource-only DLL of translated strings, so the build would
+wait for it forever and relink the DLL every time. Say there's none:
+
+```python
+strings = project.SharedLibrary("strings_fr", env, sources=["strings_fr.rc"])
+strings.set_option("import_library", False)
+strings.private.link_flags.append("/NOENTRY")  # no code, so no entry point
+```
+
+Nothing can link against such a DLL, and a target that tries gets an error;
+a program loads it at run time instead. On other platforms the option does
+nothing. See `examples/99_resource_dll`.
+
 ### Python Functions as Build Steps: env.PyBuilder()
 
 `env.Command()` runs a program. `env.PyBuilder()` turns a Python function you wrote in the build script into a *builder*, the way `env.Program` is a builder. Calling it makes one build edge, and calling it again makes another:

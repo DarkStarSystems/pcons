@@ -76,6 +76,7 @@ class BuildInfo(TypedDict, total=False):
     rule_name: str | None  # Rule name pinned by the caller; None to derive one
     all_targets: list[Any]  # list[Node]
     restat: bool  # Ninja restat: re-check output timestamp after build
+    link_refusal: str  # Why nothing can link against this output
     # Directory to run the command in, absolute, or None for the build
     # directory. Generators render this edge's paths as seen from there.
     cwd: Path | None

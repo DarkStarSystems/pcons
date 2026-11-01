@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `dll.set_option("import_library", False)` for a Windows DLL that exports
+  nothing, such as a resource-only DLL: link.exe writes no import library
+  for it, so declaring one made the DLL relink on every build. Linking
+  against such a DLL is an error that says why. See
+  `examples/99_resource_dll`.
 - `lib.set_option("whole_archive", True)` links every object of a static
   library into whatever links it, including ones nothing references, such
   as a plugin that registers itself. See `examples/98_whole_archive`.

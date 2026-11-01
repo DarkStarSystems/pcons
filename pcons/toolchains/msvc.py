@@ -621,7 +621,6 @@ class MsvcLinker(BaseTool):
                 "/DLL",
                 "$link.flags",
                 TargetPath(prefix="/OUT:", index=0),
-                TargetPath(prefix="/IMPLIB:", index=1),
                 SourcePath(),
                 NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",

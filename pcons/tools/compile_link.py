@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.errors import OutputCollisionError, PconsError, PconsValueError
 from pcons.core.graph import strongly_connected_components
-from pcons.core.node import BuildInfo, FileNode, Node
+from pcons.core.node import BuildInfo, FileNode, Node, OutputInfo
 from pcons.core.paths import affix_filename
 from pcons.core.subst import PathToken, TargetPath
 from pcons.toolchains.build_context import CompileLinkContext
@@ -25,7 +25,11 @@ from pcons.tools.requirements import (
     compute_effective_requirements,
     tool_language,
 )
-from pcons.tools.toolchain import LinkNeeds, link_language_rank
+from pcons.tools.toolchain import (
+    LinkNeeds,
+    declares_import_library,
+    link_language_rank,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1005,28 +1009,38 @@ class CompileLinkFactory:
             else None
         )
         if import_name is not None:
-            # An import library is an archive, so archive_directory places it,
-            # the way CMake does. Unset, it follows its DLL rather than falling
-            # back to the build-dir root.
-            archive_directory = env.output_directory_for("static_library")
-            import_lib_path = self._output_path(
-                target,
-                env,
-                import_name,
-                "static_library" if archive_directory is not None else "shared_library",
-            )
-            info["outputs"] = {
-                "primary": {"path": lib_path, "suffix": lib_path.suffix},
-                "import_lib": {
+            # The link names its outputs by index (/OUT: and /IMPLIB:), so
+            # the DLL is declared as one even when it's the only one.
+            outputs: dict[str, OutputInfo] = {
+                "primary": {"path": lib_path, "suffix": lib_path.suffix}
+            }
+            info["outputs"] = outputs
+            if declares_import_library(target):
+                # An import library is an archive, so archive_directory places
+                # it, the way CMake does. Unset, it follows its DLL rather
+                # than falling back to the build-dir root.
+                archive_directory = env.output_directory_for("static_library")
+                import_lib_path = self._output_path(
+                    target,
+                    env,
+                    import_name,
+                    "static_library"
+                    if archive_directory is not None
+                    else "shared_library",
+                )
+                outputs["import_lib"] = {
                     "path": import_lib_path,
                     "suffix": import_lib_path.suffix,
-                },
-            }
-            # link.exe leaves an import library alone when the DLL's exports
-            # haven't changed, so it can stay older than the objects for
-            # good; without restat ninja would relink the DLL every build
-            # (and fail while a process has it loaded).
-            info["restat"] = True
+                }
+                # link.exe leaves an import library alone when the DLL's
+                # exports haven't changed, so it can stay older than the
+                # objects for good; without restat ninja would relink the DLL
+                # every build (and fail while a process has it loaded).
+                info["restat"] = True
+            else:
+                info["link_refusal"] = (
+                    "a DLL with no import library (import_library=False)"
+                )
 
         target.output_nodes.append(lib_node)
         env.register_node(lib_node)
@@ -1049,7 +1063,6 @@ class CompileLinkFactory:
 
         # Generic multi-output support for Program builders.
         from pcons.core.builder import MultiOutputBuilder
-        from pcons.core.node import OutputInfo
 
         toolchain = env._toolchain
         if toolchain and "link" in toolchain.tools:
@@ -1396,6 +1409,12 @@ class CompileLinkFactory:
                 if dep.target_type == "shared_library":
                     build_info = getattr(node, "_build_info", {})
                     outputs = build_info.get("outputs", {})
+                    refusal = build_info.get("link_refusal")
+                    if refusal:
+                        raise PconsValueError(
+                            f"{target.name} links {dep.name}, {refusal}, "
+                            f"which nothing can link against."
+                        )
                     import_lib_info = outputs.get("import_lib")
                     if import_lib_info and "path" in import_lib_info:
                         import_lib_path = import_lib_info["path"]
