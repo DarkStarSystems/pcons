@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   searches anyway, such as `/usr/include`, is left out of the system
   includes, so GCC's C++ headers keep working.
 
+### Removed
+
+- `toolchain.configure()`, deprecated in 0.31: it did nothing. Delete the
+  call.
+
 ### Fixed
 
 - MSVC finds headers in system include directories: cl.exe ignores
