@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crashed, or given broken flags) stops configure with the compiler's
   error. It used to answer "no", or `None` from `check_type_size()`, and
   the build was configured on that.
+- `pcons test -V` shows what a failed test printed to stdout, where
+  gtest, Catch2 and doctest report failures; it showed only stderr. A
+  failed test's line in the summary gives its exit code, or the signal
+  that killed it, and each test keeps one number from start to finish.
 - MSVC finds headers in system include directories: cl.exe ignores
   `/external:I` without `/external:W0`, which it never got.
 - A program linking a static library now gets the libraries of packages

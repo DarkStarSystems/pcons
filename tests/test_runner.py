@@ -29,6 +29,7 @@ from pcons.test_runner import (
     _discover_catch2,
     _discover_doctest,
     _discover_gtest,
+    _exit_description,
     _validate_deps,
     expand_discovered_tests,
     expand_filter_with_deps,
@@ -201,6 +202,24 @@ class TestSingleTestExecution:
         )
         assert result.status == FAIL
         assert result.returncode == 1
+        assert result.message == "exit code 1"
+
+    def test_a_test_that_should_fail_and_passes_says_so(self, tmp_path):
+        script = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        test = {"name": "x", "command": [str(script)], "should_fail": True}
+        result = run_one_test(test, tmp_path)
+        assert result.status == FAIL
+        assert result.message == "exit code 0, and the test should fail"
+
+    def test_a_crash_names_the_signal(self, tmp_path):
+        script = _make_exit_script(
+            tmp_path,
+            "crash.py",
+            "import os, signal; os.kill(os.getpid(), signal.SIGABRT)",
+        )
+        result = run_one_test({"name": "crash", "command": [str(script)]}, tmp_path)
+        assert result.status == FAIL
+        assert result.message == "killed by SIGABRT"
 
     def test_should_fail_inverts_result(self, tmp_path):
         script = _make_exit_script(tmp_path, "fail.py", "import sys; sys.exit(1)")
@@ -405,6 +424,37 @@ class TestCLIMain:
         assert rc == 1
         captured = capsys.readouterr()
         assert "FAILED" in captured.out
+        assert "broken [fail] (exit code 1)" in captured.out
+
+    @pytest.mark.parametrize("stream", ["stdout", "stderr"])
+    def test_verbose_shows_a_failed_tests_output(self, tmp_path, capsys, stream):
+        """gtest, Catch2 and doctest report failures on stdout."""
+        bad = _make_exit_script(
+            tmp_path,
+            "bad.py",
+            f"import sys; print('expected 2, got 3', file=sys.{stream}); sys.exit(1)",
+        )
+        _make_manifest(tmp_path, [{"name": "broken", "command": [str(bad)]}])
+        rc = main(["--manifest", str(tmp_path / "tests.json"), "-V", "--no-color"])
+        assert rc == 1
+        assert "      expected 2, got 3" in capsys.readouterr().out
+
+    def test_tests_keep_their_numbers_whatever_order_they_finish(
+        self, tmp_path, capsys
+    ):
+        slow = _make_exit_script(tmp_path, "slow.py", "import time; time.sleep(0.5)")
+        fast = _make_exit_script(tmp_path, "fast.py", "pass")
+        _make_manifest(
+            tmp_path,
+            [
+                {"name": "slow", "command": [str(slow)]},
+                {"name": "fast", "command": [str(fast)]},
+            ],
+        )
+        main(["--manifest", str(tmp_path / "tests.json"), "-j", "2", "--no-color"])
+        out = capsys.readouterr().out
+        assert "1/2 Test #2: fast" in out
+        assert "2/2 Test #1: slow" in out
 
     def test_list_mode_does_not_execute(self, tmp_path, capsys):
         # Pointing at a nonexistent binary would fail if it actually ran.
@@ -1302,3 +1352,16 @@ def test_the_pass_rate_leaves_skipped_tests_out(capsys):
         "100% tests passed, 0 tests failed out of 2 (1 skipped)"
         in capsys.readouterr().out
     )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "description"),
+    [
+        (3, "exit code 3"),
+        (-6, "killed by SIGABRT"),
+        # A real-time signal, which has no name.
+        (-200, "killed by signal 200"),
+    ],
+)
+def test_exit_description(returncode, description):
+    assert _exit_description(returncode) == description

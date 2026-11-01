@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -497,6 +498,9 @@ def run_one_test(test: dict, build_dir: Path) -> TestResult:
         status = PASS
     else:
         status = FAIL
+        message = _exit_description(result.returncode)
+        if should_fail:
+            message += ", and the test should fail"
     return TestResult(
         name=name,
         status=status,
@@ -507,6 +511,17 @@ def run_one_test(test: dict, build_dir: Path) -> TestResult:
         message=message,
         labels=labels,
     )
+
+
+def _exit_description(returncode: int) -> str:
+    """How a test process ended: its exit code, or on POSIX the signal
+    that killed it (subprocess reports that as a negative code)."""
+    if returncode < 0:
+        try:
+            return f"killed by {signal.Signals(-returncode).name}"
+        except ValueError:
+            return f"killed by signal {-returncode}"
+    return f"exit code {returncode}"
 
 
 # ----- Parallel orchestration ----------------------------------------------
@@ -777,10 +792,11 @@ def print_summary(
         for r in failed:
             extra = f" ({r.message})" if r.message else ""
             print(f"  - {r.name} [{r.status}]{extra}")
-            if verbose and r.stderr:
-                # Indent the stderr block so it visually nests under the test.
-                indented = "\n".join("      " + line for line in r.stderr.splitlines())
-                print(indented)
+            if verbose:
+                # Indented, so the output nests under its test.
+                for output in (r.stdout, r.stderr):
+                    for line in output.splitlines():
+                        print(f"      {line}")
     if not failed:
         print(_color(f"Project: {project_name} — all tests passed.", "green", color))
 
@@ -1041,28 +1057,28 @@ def cli_test(
 
     print(f"Test project: {project_name} ({len(filtered)} tests)")
 
-    counter = {"started": 0, "finished": 0}
+    # As CTest numbers them: by place in the list, whatever order they run in.
+    numbers = {t["name"]: i for i, t in enumerate(filtered, 1)}
+    finished = 0
     total = len(filtered)
     pad = len(str(total))
 
     def on_start(test: dict) -> None:
-        counter["started"] += 1
-        print(
-            _color(
-                f"      Start {counter['started']:>{pad}}: {test['name']}",
-                "dim",
-                color,
-            )
-        )
+        number = numbers[test["name"]]
+        print(_color(f"      Start {number:>{pad}}: {test['name']}", "dim", color))
 
     def on_finish(test: dict, result: TestResult) -> None:
-        counter["finished"] += 1
-        idx = counter["finished"]
+        nonlocal finished
+        finished += 1
+        number = numbers[test["name"]]
         # Right-pad name to a sensible width for visual alignment.
         name_field = f"{test['name']:<40s}"
         status = _status_label(result.status, color)
         dur = f"{result.duration:6.2f}s"
-        print(f" {idx:>{pad}}/{total} Test #{idx:>{pad}}: {name_field} {status}  {dur}")
+        print(
+            f" {finished:>{pad}}/{total} Test #{number:>{pad}}: "
+            f"{name_field} {status}  {dur}"
+        )
 
     try:
         results = run_all(
