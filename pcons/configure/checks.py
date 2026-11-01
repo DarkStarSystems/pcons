@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import trace
-from pcons.core.errors import PconsError, PconsValueError
+from pcons.core.errors import ConfigureError, PconsError, PconsValueError
 from pcons.core.paths import _script_dir_path
 from pcons.tools.tool import PROBES, BaseTool, Probe
 
@@ -244,6 +244,9 @@ class ToolChecks:
         self._env = env
         self._tool_name = tool_name
         self._tool_config = getattr(env, tool_name, None)
+        # Signatures of the commands seen compiling the tool's smallest
+        # program, so a run of failed checks pays for that once.
+        self._working: set[str] = set()
 
     @staticmethod
     def _caller_location(depth: int = 2) -> str:
@@ -435,6 +438,23 @@ class ToolChecks:
             return outcome
         compiler = outcome
 
+        result = self._compile_probe(
+            compiler, source, extra_flags=extra_flags, link=link
+        )
+        trace("configure", "  result: %s", "yes" if result.success else "no")
+        self._config.set(cache_key, result.success)
+        return result
+
+    def _compile_probe(
+        self,
+        compiler: str,
+        source: str,
+        *,
+        extra_flags: list[str] | None = None,
+        link: bool = False,
+    ) -> CheckResult:
+        """Compile one check's program, whose failure means "no" only once
+        the compiler is shown to work (see _require_working_compiler)."""
         cdir = self._make_check_dir()
         try:
             result = self._try_compile(
@@ -442,9 +462,36 @@ class ToolChecks:
             )
         finally:
             self._cleanup_check_dir(*cdir)
-        trace("configure", "  result: %s", "yes" if result.success else "no")
-        self._config.set(cache_key, result.success)
+        if not result.success:
+            self._require_working_compiler(compiler)
         return result
+
+    def _require_working_compiler(self, compiler: str) -> None:
+        """Raise unless the tool compiles its smallest program.
+
+        A check fails both when the answer is no and when the compiler can't
+        compile anything: it's missing, crashed, timed out, or the
+        environment's flags are wrong. Only the first is an answer; taking
+        the second for one would configure the build on something untrue.
+
+        The program is compiled, not linked: a bare-metal target compiles
+        but may link nothing without its startup files, and there a failed
+        link check is a true "no".
+
+        Raises:
+            ConfigureError: With the compiler's output, if it fails.
+        """
+        signature = cache_signature(compiler, *self._probe_flags())
+        if signature in self._working:
+            return
+        result = self._try_compile(compiler, self._probe().program)
+        if not result.success:
+            output = "\n".join(result.output.strip().splitlines()[:20])
+            raise ConfigureError(
+                f"Configure checks can't use the '{self._tool_name}' tool: "
+                f"{compiler} can't compile even an empty program.\n{output}"
+            )
+        self._working.add(signature)
 
     def _is_msvc_style(self) -> bool:
         """Whether the compiler takes cl.exe's slash options (/c, /Fo, /Fe,
@@ -516,16 +563,9 @@ class ToolChecks:
 
         probe = self._probe()
 
-        cdir = self._make_check_dir()
-        try:
-            result = self._try_compile(
-                compiler,
-                probe.program,
-                extra_flags=[*probe.strict, flag],
-                check_dir=cdir,
-            )
-        finally:
-            self._cleanup_check_dir(*cdir)
+        result = self._compile_probe(
+            compiler, probe.program, extra_flags=[*probe.strict, flag]
+        )
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -577,13 +617,7 @@ class ToolChecks:
 
         source = f"{define_lines}#include <{header}>\nint main(void) {{ return 0; }}\n"
 
-        cdir = self._make_check_dir()
-        try:
-            result = self._try_compile(
-                compiler, source, extra_flags=extra_flags, check_dir=cdir
-            )
-        finally:
-            self._cleanup_check_dir(*cdir)
+        result = self._compile_probe(compiler, source, extra_flags=extra_flags)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -625,11 +659,7 @@ class ToolChecks:
 
         source = f"{includes}\nint main(void) {{ {type_name} x; (void)x; return 0; }}\n"
 
-        cdir = self._make_check_dir()
-        try:
-            result = self._try_compile(compiler, source, check_dir=cdir)
-        finally:
-            self._cleanup_check_dir(*cdir)
+        result = self._compile_probe(compiler, source)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -689,6 +719,7 @@ int main(void) {{ return 0; }}
         finally:
             self._cleanup_check_dir(*cdir)
 
+        self._require_working_compiler(compiler)
         trace("configure", "  result: unknown size")
         return None
 
@@ -897,6 +928,7 @@ int main(void) {{ return 0; }}
             # generation (project.generated_input()) a header may simply not
             # exist yet on the first configure pass, and a cached "no such
             # header" would stick after the build produced it.
+            self._require_working_compiler(compiler)
             trace("configure", "  probe failed; not caching")
             return answer(results)
 
@@ -966,13 +998,9 @@ int main(void) {{
         if libs:
             extra_flags.extend(self._lib_flag(lib) for lib in libs)
 
-        cdir = self._make_check_dir()
-        try:
-            result = self._try_compile(
-                compiler, source, extra_flags=extra_flags, link=True, check_dir=cdir
-            )
-        finally:
-            self._cleanup_check_dir(*cdir)
+        result = self._compile_probe(
+            compiler, source, extra_flags=extra_flags, link=True
+        )
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result

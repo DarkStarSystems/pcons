@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A configure check whose compiler can't compile anything (missing,
+  crashed, or given broken flags) stops configure with the compiler's
+  error. It used to answer "no", or `None` from `check_type_size()`, and
+  the build was configured on that.
 - MSVC finds headers in system include directories: cl.exe ignores
   `/external:I` without `/external:W0`, which it never got.
 - A program linking a static library now gets the libraries of packages

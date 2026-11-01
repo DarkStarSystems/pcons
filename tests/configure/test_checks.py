@@ -3,6 +3,7 @@
 
 import shutil
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,7 @@ from pcons.configure.checks import (
 )
 from pcons.configure.config import Configure
 from pcons.core.environment import Environment
+from pcons.core.errors import ConfigureError
 
 
 class TestCheckResult:
@@ -357,6 +359,99 @@ class TestToolChecksWithoutCompiler:
         assert checks._cache_key("flag", "-Wall") != key
 
 
+class TestBrokenCompiler:
+    """A check whose compiler can't compile anything raises rather than
+    answering no (#69)."""
+
+    @staticmethod
+    def _checks(tmp_path, cmd: str) -> ToolChecks:
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.cmd = cmd
+        return ToolChecks(Configure(build_dir=tmp_path), env, "cc")
+
+    @pytest.mark.parametrize(
+        "check",
+        [
+            lambda c: c.check_flag("-Wall"),
+            lambda c: c.check_header("stdio.h"),
+            lambda c: c.check_type("int"),
+            lambda c: c.check_type_size("int"),
+            lambda c: c.check_define("__STDC__"),
+            lambda c: c.check_function("printf"),
+            lambda c: c.try_compile("int x;"),
+        ],
+        ids=["flag", "header", "type", "type_size", "define", "function", "try"],
+    )
+    def test_a_missing_compiler_raises(self, tmp_path, test_project, check):  # noqa: F811
+        checks = self._checks(tmp_path, "pcons-no-such-compiler")
+        with pytest.raises(ConfigureError, match="pcons-no-such-compiler can't"):
+            check(checks)
+
+    def test_a_failed_type_size_says_why(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        """The CI flake from #69: every size probe failed, and the answer
+        was None."""
+        checks = self._checks(tmp_path, "cc")
+
+        class _Crashed:
+            returncode = 1
+            stdout = ""
+            stderr = "cc: internal compiler error: Segmentation fault"
+
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run", lambda cmd, **kw: _Crashed()
+        )
+        with pytest.raises(ConfigureError, match="Segmentation fault"):
+            checks.check_type_size("void*")
+        assert checks._config.get(checks._cache_key("sizeof", "void*")) is None
+
+    def test_a_target_that_cant_link_answers_no(
+        self,
+        tmp_path,
+        test_project,
+        monkeypatch,  # noqa: F811
+    ):
+        """A bare-metal compiler compiles but links nothing without its
+        startup files: a link check there is a true no, not an error."""
+        checks = self._checks(tmp_path, "cc")
+
+        class _Ran:
+            def __init__(self, returncode: int) -> None:
+                self.returncode = returncode
+                self.stdout = ""
+                self.stderr = "" if returncode == 0 else "undefined reference to _exit"
+
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run",
+            lambda cmd, **kw: _Ran(0 if "-c" in cmd else 1),
+        )
+        assert not checks.check_function("memcpy", headers=["string.h"]).success
+
+    def test_the_compiler_is_tried_once(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        """Failed checks are answers once the compiler compiles an empty
+        program, and it's compiled once for all of them."""
+        checks = self._checks(tmp_path, "cc")
+        sources: list[str] = []
+
+        class _Ran:
+            def __init__(self, returncode: int) -> None:
+                self.returncode = returncode
+                self.stdout = ""
+                self.stderr = ""
+
+        def run(cmd, **kw):
+            source = Path(cmd[-1]).read_text()
+            sources.append(source)
+            return _Ran(0 if source == checks._probe().program else 1)
+
+        monkeypatch.setattr("pcons.configure.checks.subprocess.run", run)
+
+        assert not checks.check_header("missing1.h").success
+        assert not checks.check_header("missing2.h").success
+        assert not checks.check_type("missing_t").success
+        assert sources.count(checks._probe().program) == 1
+
+
 class TestMsvcStyleDispatch:
     """Toolchain-aware compile/link/preprocess flag rendering (no real MSVC needed).
 
@@ -589,14 +684,19 @@ class TestCheckDefineProbe:
         staged generation the header may simply not exist yet."""
         checks = self._checks(tmp_path, test_project)
 
-        class _Failed:
-            returncode = 1
-            stdout = ""
-            stderr = "fatal error: no such file"
+        class _Ran:
+            def __init__(self, returncode: int, stderr: str = "") -> None:
+                self.returncode = returncode
+                self.stdout = ""
+                self.stderr = stderr
 
-        monkeypatch.setattr(
-            "pcons.configure.checks.subprocess.run", lambda cmd, **kw: _Failed()
-        )
+        def run(cmd, **kw):
+            # The header is missing; the compiler itself works.
+            if "-E" in cmd:
+                return _Ran(1, "fatal error: no such file")
+            return _Ran(0)
+
+        monkeypatch.setattr("pcons.configure.checks.subprocess.run", run)
 
         assert checks.check_define("FOO", headers=["missing.h"]) is None
 

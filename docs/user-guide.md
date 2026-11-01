@@ -3620,6 +3620,8 @@ The cache key includes a signature of the compiler command *and its current flag
 
 Checks compile the same way the build does: the tool's flags, defines, and include directories all apply, and are properly cached. 
 
+A failed check is an answer only if the compiler works. When a check fails, pcons compiles an empty program with the same compiler and flags, once per checker; if that fails too, because the compiler is missing, crashed or rejects the environment's flags, configure stops with the compiler's error instead of answering "no".
+
 `check_flag()` and `try_compile()` work with any compiler tool: `cc`, `cxx`, `cuda`, or `fc` for Fortran. Each tool writes its probe in its own language and rejects an option the way its compiler can (`-Werror`, `/WX`, ifx's `-diag-error=`), so a flag gfortran accepts and ifx only warns about is reported unsupported for ifx. The header, type, function and macro checks write C programs, so they need a C, C++ or CUDA tool, and raise for any other.
 
 ```python
