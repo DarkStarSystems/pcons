@@ -194,7 +194,7 @@ pcons test --list             # show what would run, without running
 pcons test -j 1               # serial mode (default: CPU count)
 pcons test --junit out.xml    # emit JUnit XML for CI
 pcons test --stop-on-fail     # stop after the first failure
-pcons test -V                 # verbose: show stderr from failed tests
+pcons test -V                 # verbose: show output from failed tests
 pcons test --no-color         # plain output, no ANSI color
 pcons -B build-release test   # run the tests in another build directory
 ```
