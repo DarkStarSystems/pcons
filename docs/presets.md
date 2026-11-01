@@ -41,7 +41,8 @@ statically, so raises.
 core stays tool-agnostic and each language brings its own:
 
 ```python
-env.cxx.set_standard("c++20")  # C++ setting, on the cxx namespace
+env.cxx.set_standard("c++20")  # C++ settings, on the cxx namespace
+env.cxx.set_exceptions("none")
 # a Fortran toolchain would offer env.fc.set_standard("f2018"), etc.
 ```
 
@@ -566,6 +567,6 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | MSVC/clang-cl `set_target_arch` selects the cross toolset (cl/lib dirs), not just `/MACHINE:` | implemented |
 | `tool_cmds` binary-retarget (any tool; `env_vars` deprecated alias); wasm presets require the wasm toolchains | implemented |
 | `Toolchain.setup_presets()` — SDK wiring applied as attributable presets (emsdk, wasi-sdk) | implemented |
-| `env.cxx.set_standard` (tool-namespace setting via `tool_setting`) | implemented |
+| `env.cxx.set_standard` / `env.cxx.set_exceptions` (tool-namespace settings via `tool_setting`) | implemented |
 | Registry, `scope/name` namespacing, `register_preset`/`preset`/`list_presets` | implemented |
 | Imperative escape hatch (`register_preset(..., imperative=True)`) | implemented |

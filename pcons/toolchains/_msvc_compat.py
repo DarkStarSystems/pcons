@@ -296,6 +296,21 @@ class MsvcCompatibleToolchain(BaseToolchain):
         "static_dbg": "/MTd",
     }
 
+    def _cxx_exception_flags(self, mode: str) -> tuple[str, ...]:
+        """cl.exe compiles C++ without unwinding unless told: ``/EHsc`` is
+        standard C++ exceptions, as CMake and Visual Studio projects have
+        it, and ``/EHa`` also catches structured exceptions."""
+        return {"standard": ("/EHsc",), "none": (), "async": ("/EHa",)}[mode]
+
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """Standard C++ exceptions, which env.cxx.set_exceptions() replaces."""
+        presets = super().setup_presets(env)
+        if "cxx" in self.tools:
+            preset = self.make_cxx_exceptions_preset("standard")
+            if preset is not None:
+                presets.append(preset)
+        return presets
+
     def _cxx_standard_flag(self, standard: int) -> str:
         # MSVC switches are /std:c++14, c++17, c++20, and c++latest — there is
         # no /std:c++23 or :c++26, so anything above 20 uses c++latest.

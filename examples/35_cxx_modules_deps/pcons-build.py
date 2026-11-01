@@ -14,7 +14,7 @@ env = project.Environment(toolchain=get_var("TOOLCHAIN", "c"))
 
 env.cxx.set_standard("c++20")
 if env.toolchain.name == "msvc":
-    env.cxx.flags.extend(["/EHsc", "/permissive-"])
+    env.cxx.flags.append("/permissive-")
 elif env.toolchain.name == "llvm":
     env.cxx.flags.append("-stdlib=libc++")
     env.link.libs.append("c++")

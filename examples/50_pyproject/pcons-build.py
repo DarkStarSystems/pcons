@@ -30,7 +30,7 @@ toolchain = env.toolchain
 # *released* pcons, so it sticks to released APIs.
 env.cxx.set_standard("c++20")
 if toolchain.name in ("msvc", "clang-cl"):
-    env.cxx.flags.extend(["/EHsc", "/permissive-"])
+    env.cxx.flags.append("/permissive-")
 elif toolchain.name == "llvm":
     env.cxx.flags.append("-stdlib=libc++")
     env.link.libs.append("c++")

@@ -718,6 +718,15 @@ class UnixToolchain(BaseToolchain):
     def _cxx_standard_flag(self, standard: int) -> str:
         return f"-std=c++{standard}"
 
+    def _cxx_exception_flags(self, mode: str) -> tuple[str, ...]:
+        """C++ exceptions are on unless turned off; there's no ``/EHa``."""
+        if mode == "async":
+            raise PconsValueError(
+                f"{self.name} can't catch structured (asynchronous) exceptions; "
+                f"that's MSVC's /EHa. Use 'standard' or 'none'."
+            )
+        return () if mode == "standard" else ("-fno-exceptions",)
+
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """On macOS, add -arch for universal builds; elsewhere unrealizable.
 
