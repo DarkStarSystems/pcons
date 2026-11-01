@@ -497,7 +497,7 @@ explicitly:
 ```python
 env = project.Environment(toolchain="msvc")
 env.cxx.modules = True
-env.cxx.flags.extend(["/std:c++latest", "/EHsc"])
+env.cxx.flags.append("/std:c++latest")
 project.Program("hello", env, sources=["main.cpp"])  # main.cpp does `import std;`
 ```
 
@@ -1761,6 +1761,26 @@ can. The system's own libraries stay shared in every case: this isn't
 the static libstdc++ uses; `-static` in `env.link.flags` links it in too.
 Some Linux distributions package the static runtimes separately: on
 Fedora, install `libstdc++-static`.
+
+### C++ Exceptions
+
+C++ code can throw and catch exceptions in every environment, as it does
+with CMake. GCC and Clang have them on already; MSVC and clang-cl compile
+C++ without unwinding unless told, so pcons gives them `/EHsc`. To change
+that:
+
+```python
+env.cxx.set_exceptions("none")  # or "standard" (the default), or "async"
+```
+
+| Mode | MSVC, clang-cl | GCC, Clang |
+|---|---|---|
+| `"standard"` (the default) | `/EHsc` | (nothing: they're on) |
+| `"none"` | (no `/EH` flag) | `-fno-exceptions` |
+| `"async"` | `/EHa`: also catches structured exceptions | raises: there's no equivalent |
+
+It's a knob: a second call replaces the first. `pcons explain` shows the
+flag coming from `exceptions-standard`, or whichever mode you set.
 
 ### Where Did This Flag Come From? (`pcons explain`)
 

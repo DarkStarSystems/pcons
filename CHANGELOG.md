@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- MSVC and clang-cl compile C++ with standard exceptions (`/EHsc`), as
+  CMake and Visual Studio projects do. They compiled without unwinding, so
+  a thrown exception skipped destructors. `env.cxx.set_exceptions("none")`
+  turns them off on every compiler (`-fno-exceptions` with GCC and Clang),
+  and `"async"` is MSVC's `/EHa`. See [C++ Exceptions](https://pcons.readthedocs.io/en/latest/user-guide/#c-exceptions).
 - A found package's headers are system headers by default
   (`find_package()`, `ImportedTarget.from_package()`, `env.use()`), as
   CMake makes an imported target's, so they don't set off your warnings

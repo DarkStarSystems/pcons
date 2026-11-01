@@ -124,6 +124,25 @@ def _cxx_set_standard(env: Environment, standard: int | str) -> None:
     env._apply_setting("cxx.standard", _parse_cxx_standard(standard))
 
 
+#: How C++ exceptions can be handled: thrown and caught by C++ code (the
+#: default), not at all, or also catching structured exceptions (MSVC's
+#: ``/EHa``).
+CXX_EXCEPTION_MODES = ("standard", "none", "async")
+
+#: The exclusive group of the C++ exception presets: one replaces another.
+CXX_EXCEPTIONS_GROUP = "cxx_exceptions"
+
+
+def _cxx_set_exceptions(env: Environment, mode: str) -> None:
+    """``env.cxx.set_exceptions(...)`` — choose how C++ exceptions are handled."""
+    if mode not in CXX_EXCEPTION_MODES:
+        raise PconsValueError(
+            f"Unknown C++ exception mode {mode!r}; use one of "
+            f"{', '.join(repr(m) for m in CXX_EXCEPTION_MODES)}."
+        )
+    env._apply_setting("cxx.exceptions", mode)
+
+
 # =============================================================================
 # Toolchain Context - provides variables for build statements
 # =============================================================================
@@ -1330,6 +1349,24 @@ class BaseToolchain:
         """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
         return None
 
+    def make_cxx_exceptions_preset(self, mode: str) -> Preset | None:
+        """Build the Preset for C++ exception *mode*, or None if this
+        toolchain has no C++. One mode replaces another."""
+        flags = self._cxx_exception_flags(mode)
+        if flags is None:
+            return None
+        return Preset(
+            name=f"exceptions-{mode}",
+            category="language",
+            contributions=(ToolContribution("cxx", flags=flags),),
+            exclusive_group=CXX_EXCEPTIONS_GROUP,
+        )
+
+    def _cxx_exception_flags(self, mode: str) -> tuple[str, ...] | None:
+        """Compiler flags for C++ exception *mode*, or None if not a C++
+        toolchain. Raises for a mode the compiler can't do."""
+        return None
+
     def link_driver(self, language: str, env: Environment) -> str | None:
         """The command that links a program whose strongest language is
         *language*, when this toolchain compiled those objects in *env*:
@@ -1345,6 +1382,8 @@ class BaseToolchain:
         ``"swiftc.cxx_interop"``)."""
         if name == "cxx.standard":
             return self.make_cxx_standard_preset(*args)
+        if name == "cxx.exceptions":
+            return self.make_cxx_exceptions_preset(*args)
         return None
 
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
@@ -1358,6 +1397,8 @@ class BaseToolchain:
         """
         if tool == "cxx" and name == "set_standard":
             return _cxx_set_standard
+        if tool == "cxx" and name == "set_exceptions":
+            return _cxx_set_exceptions
         return None
 
     # Named feature presets for this toolchain, keyed by preset name. Each value
