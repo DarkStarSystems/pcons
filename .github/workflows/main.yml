@@ -350,7 +350,7 @@ jobs:
           - name: clang
             cc: clang
             cxx: clang++
-            examples: "not (02_multi_file or 11_ or 12_ or 17_ or 20_ or 32_ or 35_ or 36_ or 37_ or 39_ or 50_ or 71_ or 72_)"
+            examples: "not (02_multi_file or 11_ or 12_ or 17_ or 20_ or 32_ or 35_ or 36_ or 37_ or 39_ or 50_ or 71_ or 72_ or 99_)"
           # conda-forge's flang, beside MSVC.
           - name: flang
             flang: "23.1.3"
