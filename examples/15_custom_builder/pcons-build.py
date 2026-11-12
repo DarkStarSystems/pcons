@@ -131,7 +131,7 @@ env = project.Environment(toolchain="c")
 # This works exactly like built-in builders!
 # (type: ignore because user-registered @builder methods are not in the
 # generated _ProjectBuilders stub; runtime dispatch via __getattr__.)
-version_header = project.GenerateVersion(  # ty: ignore[unresolved-attribute]  # type: ignore[attr-defined]
+version_header = project.GenerateVersion(  # ty: ignore[missing-attribute]  # type: ignore[attr-defined]
     "version.h",
     version="2.1.0",
     app_name="CustomBuilderDemo",

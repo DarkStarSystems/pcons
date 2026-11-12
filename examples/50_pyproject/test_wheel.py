@@ -1,7 +1,7 @@
 import importlib.metadata as metadata
 
 # The extension only exists after the example is built and installed.
-import pcons_hello_ext  # ty: ignore[unresolved-import]
+import pcons_hello_ext  # ty: ignore[import-not-found]
 
 print(pcons_hello_ext.say_hello("world"))
 assert "site-packages" in pcons_hello_ext.__file__, (
