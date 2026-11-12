@@ -45,7 +45,15 @@ def _check(tmp_path: Path, source: str) -> tuple[str, int]:
     src = tmp_path / "snippet.py"
     src.write_text(source)
     out, _err, status = mypy_api.run(
-        [str(src), "--no-error-summary", "--no-incremental", "--follow-imports=silent"]
+        [
+            str(src),
+            "--no-error-summary",
+            "--no-incremental",
+            "--follow-imports=silent",
+            # Its own cache: mypy keeps it in SQLite, and tests running
+            # side by side would otherwise wait on one database's lock.
+            f"--cache-dir={tmp_path / '.mypy_cache'}",
+        ]
     )
     return out, status
 
