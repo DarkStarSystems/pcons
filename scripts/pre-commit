@@ -2,7 +2,9 @@
 # Pre-commit hook to run linting checks
 # Install with: make install-hooks
 #
-# This prevents committing code that fails CI lint checks
+# This prevents committing code that fails CI lint checks. Everything that
+# can block a commit runs the locked tool versions, as CI does. A newer ty
+# release only warns.
 
 echo "Running ruff check..."
 uv run ruff check .
@@ -20,12 +22,31 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Running ty typecheck..."
+locked=$(uv run ty --version | cut -d' ' -f2)
+echo "Running ty typecheck (ty $locked, as CI)..."
 uv run ty check pcons/ examples/
 if [ $? -ne 0 ]; then
     echo ""
     echo "Type check failed. Fix the type errors above before committing."
     exit 1
+fi
+
+# Hear about a new ty release the day it ships, without letting it block a
+# commit or ask for changes the locked ty (and CI) would reject. Offline, or
+# with no newer release, this says nothing.
+latest=$(uvx ty@latest --version 2>/dev/null | cut -d' ' -f2)
+if [ -n "$latest" ] && [ "$latest" != "$locked" ]; then
+    report=$(uvx ty@latest check pcons/ examples/ 2>&1)
+    if [ $? -ne 0 ]; then
+        echo "$report"
+        echo ""
+        echo "Warning: ty $latest is out (locked: $locked) and reports the above."
+        echo "To adopt it: uv lock --upgrade-package ty, fix those, and commit"
+        echo "the bump with the fixes. Committing anyway."
+    else
+        echo "ty $latest is out (locked: $locked) and passes too:"
+        echo "uv lock --upgrade-package ty whenever you like."
+    fi
 fi
 
 echo "Lint checks passed."
