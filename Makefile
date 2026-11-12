@@ -17,9 +17,8 @@ install:          ## Install the project in dev mode.
 
 .PHONY: install-hooks
 install-hooks:    ## Install git pre-commit hooks.
-	cp scripts/pre-commit .git/hooks/pre-commit
-	chmod +x .git/hooks/pre-commit
-	@echo "Pre-commit hook installed."
+	ln -sf ../../scripts/pre-commit "$$(git rev-parse --git-path hooks)/pre-commit"
+	@echo "Pre-commit hook installed (a link to scripts/pre-commit, so it stays current)."
 
 .PHONY: fmt
 fmt:              ## Format code using ruff (whole repo, including Python in Markdown).
