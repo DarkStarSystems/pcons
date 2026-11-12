@@ -57,7 +57,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-22.04, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
         exclude:
           # Only test oldest Python on Ubuntu 22.04
           - os: ubuntu-22.04
@@ -66,6 +66,8 @@ jobs:
             python-version: "3.13"
           - os: ubuntu-22.04
             python-version: "3.14"
+          - os: ubuntu-22.04
+            python-version: "3.15"
     runs-on: ${{ matrix.os }}
     env:
       UV_PYTHON: ${{ matrix.python-version }}
@@ -152,7 +154,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     runs-on: windows-latest
     env:
       UV_PYTHON: ${{ matrix.python-version }}
@@ -204,10 +206,6 @@ jobs:
     timeout-minutes: 20
     runs-on: ubuntu-latest
     container: fedora:latest
-    env:
-      # The newest Python pcons is tested on, from uv. Fedora's own python3
-      # is 3.15, which the locked mypy's librt has no wheel for.
-      UV_PYTHON: "3.14"
     steps:
       - name: Install toolchain and build tools
         # git + tar are needed before actions/checkout can run inside the

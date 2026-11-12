@@ -64,7 +64,7 @@ make lint
 
 # Or run individually
 uv run ruff check pcons/ tests/
-uv run mypy pcons/
+uv run ty check pcons/ examples/
 ```
 
 ### Format Code
@@ -103,7 +103,7 @@ Examples:
 
 ```bash
 make help    # Show available targets
-make lint    # Run linters (ruff, mypy)
+make lint    # Run linters (ruff, ty)
 make fmt     # Format code with ruff
 make test    # Run tests with pytest
 ```

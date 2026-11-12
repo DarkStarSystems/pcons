@@ -1464,9 +1464,15 @@ def run_example(
     verify_commands = get_platform_value(verify_config, "commands", [])
 
     # A require_qt example's programs need Qt's DLLs on PATH on Windows.
-    verify_env = None
     if IS_WINDOWS and config.get("skip", {}).get("require_qt"):
         verify_env = qt_runtime_env()
+    else:
+        verify_env = dict(os.environ)
+    # The uv commands an example runs use the Python running these tests, as
+    # CI's UV_PYTHON has them do. Left to choose, each takes the newest one
+    # installed, and a wheel `uv build` made for one won't install into the
+    # venv `uv sync` made with another.
+    verify_env.setdefault("UV_PYTHON", sys.executable)
 
     for cmd_config in verify_commands:
         run_cmd = cmd_config.get("run")
