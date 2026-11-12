@@ -204,6 +204,10 @@ jobs:
     timeout-minutes: 20
     runs-on: ubuntu-latest
     container: fedora:latest
+    env:
+      # The newest Python pcons is tested on, from uv. Fedora's own python3
+      # is 3.15, which the locked mypy's librt has no wheel for.
+      UV_PYTHON: "3.14"
     steps:
       - name: Install toolchain and build tools
         # git + tar are needed before actions/checkout can run inside the
