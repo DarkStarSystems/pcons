@@ -811,6 +811,8 @@ jobs:
     needs: [docs, test, test-examples-windows, test-windows-toolchains, test-fedora, test-swift, test-fortran, test-qt, test-wasm, test-msvcup, test-cxx-modules, test-rez]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # PyPI trusts uploads only from this workflow file and environment.
+    environment: pypi
     permissions:
       contents: write
       id-token: write
@@ -839,8 +841,9 @@ jobs:
             dist/*.tar.gz
             dist/*.whl
             dist/*.sigstore.json
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: uvx twine upload dist/*.tar.gz dist/*.whl
+      # The upload takes everything in dist/, and the Sigstore bundles aren't
+      # distributions; PyPI gets its own attestations instead.
+      - name: Remove the Sigstore bundles from dist
+        run: rm dist/*.sigstore.json
+      - name: Publish to PyPI, with attestations
+        uses: pypa/gh-action-pypi-publish@v1.14.3

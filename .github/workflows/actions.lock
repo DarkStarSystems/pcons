@@ -18,6 +18,7 @@ workflows:
         - 'emscripten-core/setup-emsdk@v16'
         - 'ilammy/msvc-dev-cmd@v1.13.0'
         - 'jcbhmr/setup-wasmtime@v2.0.4'
+        - 'pypa/gh-action-pypi-publish@v1.14.3'
         - 'sigstore/gh-action-sigstore-python@v3.5.0'
         - 'softprops/action-gh-release@v3.0.3'
     '.github/workflows/verify-lockfile.yml':
@@ -38,6 +39,11 @@ dependencies:
         commit: 'sha1-ed597411d8f924073f98dfc5c65a23a2325f34cd'
         owner_id: 44036562
         repo_id: 205262760
+    'actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405':
+        ref: 'v6.2.0'
+        commit: 'sha1-a309ff8b426b58ec0e2a45f0f869d46889d02405'
+        owner_id: 44036562
+        repo_id: 192625525
     'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a':
         ref: 'v7.0.1'
         commit: 'sha1-043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
@@ -75,6 +81,13 @@ dependencies:
         commit: 'sha1-960c367a99921eb0b02f5778fce9ae8f110bf0f0'
         owner_id: 61068799
         repo_id: 747479218
+    'pypa/gh-action-pypi-publish@v1.14.3':
+        ref: 'v1.14.3'
+        commit: 'sha1-7245906fb61fa33a13554f9d5fb856fe61758086'
+        owner_id: 647025
+        repo_id: 178055147
+        uses:
+            - 'actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405'
     'sigstore/gh-action-sigstore-python@v3.5.0':
         ref: 'v3.5.0'
         commit: 'sha1-790bc6befb9d733738f18d8f895854b453640ec9'
