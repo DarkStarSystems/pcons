@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Python 3.15 is supported and tested.
 - pcons ships a `py.typed` marker, so mypy checks build scripts against
   pcons's own types. Without it mypy skipped pcons entirely.
+- Releases on PyPI carry attestations, so PyPI's security tab shows where
+  each file was built and published from.
 
 ## [0.32.0] - 2026-11-01
 
