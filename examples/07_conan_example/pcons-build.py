@@ -12,8 +12,6 @@ Usage:
     ./build/hello_fmt      # Run the program
 """
 
-import os
-
 from pcons import Project, find_c_toolchain, get_variant
 from pcons.configure.config import Configure
 from pcons.packages.finders import ConanFinder
@@ -32,11 +30,6 @@ project = Project("conan_example")
 
 config = Configure(build_dir=project.build_dir)
 toolchain = find_c_toolchain()
-
-if not config.get("configured") or os.environ.get("PCONS_RECONFIGURE"):
-    toolchain.configure(config)
-    config.set("configured", True)
-    config.save()
 
 # =============================================================================
 # Find Conan packages

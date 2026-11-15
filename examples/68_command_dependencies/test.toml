@@ -19,12 +19,14 @@ commands = [
     { run = "${PCONS} run inspect-build", expect_stdout = "report exists: False" },
     # A command that declared a dependency generates the build files, builds
     # it, and runs -- from an empty build directory, in one invocation.
-    { run = "${PCONS} run publish", expect_stdout = "report: 3 findings" },
+    # This one and `release notes` configure and build, so they get the
+    # build budget rather than the 30 s a plain run gets.
+    { run = "${PCONS} run publish", expect_stdout = "report: 3 findings", timeout = 120 },
     { run = "${PCONS} run inspect-build", expect_stdout = "report exists: True" },
     # A group's dependency covers its verbs, and the verb adds its own: the
     # notes file is the verb's, the report is the group's.
     { run = "${PCONS} clean --all" },
-    { run = "${PCONS} run release notes", expect_stdout = "notes say: draft" },
+    { run = "${PCONS} run release notes", expect_stdout = "notes say: draft", timeout = 120 },
     { run = "${PCONS} run inspect-build", expect_stdout = "report exists: True" },
 ]
 

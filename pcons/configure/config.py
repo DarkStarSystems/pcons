@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from pcons.configure.checks import cache_signature
 from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
+from pcons.core.errors import PconsFileNotFoundError
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -56,9 +57,6 @@ class Configure:
         gcc = config.find_program("gcc")
         if gcc:
             print(f"Found gcc at {gcc.path}")
-
-        # Check for a toolchain
-        toolchain = config.find_toolchain("gcc")
 
         # Save configuration for later
         config.save()
@@ -216,7 +214,7 @@ class Configure:
 
         if found_path is None:
             if required:
-                raise FileNotFoundError(f"Required program not found: {name}")
+                raise PconsFileNotFoundError(f"Required program not found: {name}")
             return None
 
         # Try to get version
@@ -259,55 +257,6 @@ class Configure:
             return None
         except (subprocess.TimeoutExpired, OSError):
             return None
-
-    def find_toolchain(
-        self,
-        kind: str,
-        *,
-        candidates: list[str] | None = None,
-    ) -> Toolchain | None:
-        """Find and configure a toolchain.
-
-        Args:
-            kind: Toolchain kind (e.g., 'gcc', 'llvm', 'msvc').
-            candidates: Optional list of toolchain names to try.
-
-        Returns:
-            Configured toolchain if found, None otherwise.
-        """
-        # Check if already configured
-        if kind in self._toolchains:
-            return self._toolchains[kind]
-
-        # Import toolchain classes dynamically to avoid circular imports
-        toolchain = self._create_toolchain(kind)
-        if toolchain is None:
-            return None
-
-        # Try to configure
-        if toolchain.configure(self):
-            self._toolchains[kind] = toolchain
-            return toolchain
-
-        return None
-
-    def _create_toolchain(self, kind: str) -> Toolchain | None:
-        """Create a toolchain instance by kind.
-
-        This is a factory method that will be extended as
-        toolchains are implemented.
-        """
-        # Toolchains will be registered here as they're implemented
-        # For now, return None
-        return None
-
-    def register_toolchain(self, toolchain: Toolchain) -> None:
-        """Register a pre-configured toolchain.
-
-        Args:
-            toolchain: Toolchain to register.
-        """
-        self._toolchains[toolchain.name] = toolchain
 
     # Compile probes (check_header etc.) need an Environment and a tool,
     # which Configure doesn't have — they live in ToolChecks
@@ -500,7 +449,7 @@ def load_config(path: Path | str = "build/pcons_config.json") -> dict[str, Any]:
     """
     path = Path(path)
     if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
+        raise PconsFileNotFoundError(f"Config file not found: {path}")
 
     with open(path) as f:
         data: dict[str, Any] = json.load(f)

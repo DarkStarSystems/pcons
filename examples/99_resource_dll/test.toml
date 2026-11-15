@@ -1,0 +1,24 @@
+# Test configuration for the resource-only DLL example
+
+[test]
+description = "A resource-only DLL of translated strings declares no import library, so it builds once and a program loads it at run time"
+
+expected_outputs = [
+    "build/strings_fr.dll",
+    "build/greet.exe",
+]
+
+[verify]
+commands = [
+    { run = "./build/greet.exe", expect_stdout = "Bonjour de pcons !" },
+]
+
+[[rebuild]]
+description = "Nothing changed: the DLL doesn't relink waiting for an import library"
+expect_no_work = true
+
+[skip]
+# Windows resources and link.exe's /NOENTRY.
+platforms = ["linux", "darwin"]
+requires_any = ["cl.exe", "clang-cl.exe"]
+generators = ["xcode", "make"]

@@ -123,46 +123,6 @@ pcons/
 
 **Fixtures** (conftest.py): `tmp_project`, `sample_c_source`
 
-### Local Windows Testing (Gary's Setup)
-
-For quick Windows testing without CI, use the `tower1` Windows machine via SSH:
-
-```bash
-# Sync code to Windows (excludes .git, build, .venv, caches)
-rsync -avz --exclude='.git' --exclude='build' --exclude='.venv' \
-  --exclude='__pycache__' --exclude='*.pyc' --exclude='.ruff_cache' \
-  --exclude='.mypy_cache' --exclude='.pytest_cache' \
-  --exclude='compile_commands.json' \
-  /Users/garyo/src/pcons/ tower1:/e/src/pcons/
-# (compile_commands.json symlinks dangle when build/ is excluded and make rsync exit 1)
-
-# First time: install dependencies and ninja
-ssh tower1 'cd E:/src/pcons; uv sync --all-extras'
-ssh tower1 'uv tool install ninja'
-
-# Run unit tests (no PATH changes needed)
-ssh tower1 'cd E:/src/pcons; uv run pytest tests/ -x -q --ignore=tests/test_examples.py'
-
-# Run example tests (need ninja in PATH)
-ssh tower1 '$env:PATH = "C:\Users\garyo\.local\bin;$env:PATH"; cd E:/src/pcons; uv run pytest tests/test_examples.py -v -k ninja'
-```
-
-**Results to expect:**
-- Unit tests: ~1100 pass, macOS-specific tests skipped
-- Example tests (ninja): ~26 pass, some fail due to `python3` not existing on Windows (it's `python`), some skipped (conan, xcode, makefile generator not Windows-compatible)
-
-**Requirements:**
-- SSH access to `tower1` configured in `~/.ssh/config`
-- PowerShell profile must not output text for non-interactive sessions (breaks rsync/scp). The profile at `C:\Users\garyo\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1` should wrap any `Write-Host` calls:
-  ```powershell
-  if ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
-      Write-Host "# your message here"
-  }
-  ```
-- Windows SDK installed for MSIX testing (MakeAppx.exe is at `C:\Program Files (x86)\Windows Kits\10\bin\...`)
-- uv installed on Windows
-- clang-cl available (LLVM toolchain) for C/C++ example tests
-
 ## Code Conventions
 
 - **Python 3.11+** required
@@ -181,6 +141,9 @@ ssh tower1 '$env:PATH = "C:\Users\garyo\.local\bin;$env:PATH"; cd E:/src/pcons; 
 5. **Commands as lists**: Keep commands as `["$cc.cmd", "$flags", ...]` not strings, for proper space handling
 
 ## Releasing
+
+Release only when asked for a specific version: pushing a `v*` tag publishes to
+PyPI.
 
 To create a new release (e.g., `v0.3.0`):
 

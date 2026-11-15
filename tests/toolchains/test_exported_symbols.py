@@ -11,7 +11,7 @@ import pytest
 
 from pcons import Project
 from pcons.core.environment import Environment
-from pcons.core.subst import PathToken
+from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
@@ -134,7 +134,8 @@ class TestMsvcRealization:
 
         flags = ClangClToolchain().get_link_flags_for_target(target, "plug.dll", [])
 
-        (token,) = flags
+        implib, token = flags
+        assert isinstance(implib, TargetPath) and implib.prefix == "/IMPLIB:"
         assert isinstance(token, PathToken) and token.prefix == "/DEF:"
         assert (
             _written(test_project, token).read_text()

@@ -449,14 +449,16 @@ mylib.output_suffix = ".plugin"  # override suffix
 
 - `output_name = "fyaml"` produces `libfyaml.so` (Linux), `libfyaml.dylib` (macOS), `fyaml.dll` (Windows)
 - Adding `output_prefix = ""` produces `fyaml.so`, `fyaml.dylib`, `fyaml.dll`
+- `output_name = "plugins/fyaml"` produces `plugins/libfyaml.so`: the prefix and suffix go on the file's own name
 
 When all three say one thing — a plugin whose host dictates the filename —
 `output_filename` says it once: `plugin.output_filename = "myplugin.ofx"`
 writes exactly that, on every platform. It cannot be combined with the three
 above.
 
-`output_prefix` is a **filename** prefix, not a directory. Directories belong to
-the environment:
+`output_prefix` is a **filename** prefix, not a directory. One target's
+directory goes in `output_name`, as above. Directories for everything an
+environment writes belong to the environment:
 
 ```python
 env.build_prefix = "mcu"        # everything this environment writes

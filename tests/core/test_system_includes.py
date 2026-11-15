@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: MIT
 """System include directories (-isystem / /external:I / -imsvc)."""
 
+import os
 from pathlib import Path
+
+import pytest
 
 from pcons.core.project import Project
 from pcons.core.target import UsageRequirements
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains.build_context import (
-    CompileLinkContext,
-    MsvcCompileLinkContext,
-)
+from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
@@ -131,12 +131,41 @@ class TestContextRealization:
 
         assert [p.path for p in overrides["system_includes"]] == ["vendor"]
 
-    def test_msvc_adds_external_w0_only_when_there_are_any(self):
-        with_sdk = MsvcCompileLinkContext(system_includes=["vendor"], mode="compile")
-        without = MsvcCompileLinkContext(flags=["/W4"], mode="compile")
+    @pytest.mark.parametrize("system", [True, False])
+    def test_msvc_gets_external_w0_only_when_there_are_any(self, tmp_path, system):
+        """cl.exe ignores /external:I without an /external:W level (D9007)."""
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+        from pcons.toolchains import msvc
 
-        assert "/external:W0" in with_sdk.get_env_overrides()["flags"]
-        assert "/external:W0" not in (without.get_env_overrides().get("flags") or [])
+        toolchain = msvc.MsvcToolchain()
+        toolchain._tools = {
+            "cc": msvc.MsvcCompiler(),
+            "cxx": msvc.MsvcCxxCompiler(),
+            "lib": msvc.MsvcLibrarian(),
+            "link": msvc.MsvcLinker(),
+        }
+        (tmp_path / "m.cpp").write_text("int main() { return 0; }\n")
+        project = Project("t", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=toolchain)
+        nanobind = ImportedTarget.from_package(
+            PackageDescription(name="nb", include_dirs=["/opt/nb/include"]),
+            system=system,
+        )
+        project.Program("app", env, sources=["m.cpp"]).link(nanobind)
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        compile_rule = next(
+            line
+            for line in (tmp_path / "build" / "build.ninja").read_text().splitlines()
+            if line.strip().startswith("command =")
+            and "cl.exe" in line
+            and "/c " in line
+        )
+
+        assert ("/external:I" in compile_rule) is system
+        assert ("/external:W0" in compile_rule) is system
 
 
 class TestGeneratedCommand:
@@ -156,3 +185,91 @@ class TestGeneratedCommand:
         content = (tmp_path / "build" / "build.ninja").read_text()
         assert "-isystem$topdir/vendor" in content
         assert f"-isystem{tmp_path}" not in content
+
+
+class TestCompilersOwnDirectories:
+    """A package's include dir the compiler already searches stays out of the
+    system includes: -isystem would move it ahead in the search, and GCC's C++
+    headers, which #include_next the C library's, would break."""
+
+    def test_they_are_left_to_the_compiler(self, tmp_path, gcc_toolchain):
+        from unittest.mock import patch
+
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+
+        (tmp_path / "main.c").write_text("int main(void) { return 0; }\n")
+        project = Project("t", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        zlib = ImportedTarget.from_package(
+            PackageDescription(
+                name="z", include_dirs=["/usr/include", "/opt/z/include"]
+            )
+        )
+        app = project.Program("app", env, sources=["main.c"])
+        app.link(zlib)
+
+        with patch(
+            "pcons.toolchains.unix._implicit_include_dirs",
+            return_value=frozenset({os.path.realpath("/usr/include")}),
+        ) as probe:
+            eff = compute_effective_requirements(app, env, tool_name="cc")
+
+        probe.assert_called_once_with(str(env.cc.cmd), "c")
+        assert eff.system_includes == [Path("/opt/z/include")]
+        assert Path("/usr/include") not in eff.includes
+
+    def test_the_probe_reads_the_search_list(self):
+        from unittest.mock import patch
+
+        from pcons.toolchains.unix import _implicit_include_dirs
+
+        stderr = (
+            '#include "..." search starts here:\n'
+            "#include <...> search starts here:\n"
+            " /usr/lib/gcc/x86_64-linux-gnu/14/include\n"
+            " /usr/include\n"
+            " /Library/Frameworks (framework directory)\n"
+            "End of search list.\n"
+        )
+        _implicit_include_dirs.cache_clear()
+        with patch("pcons.toolchains.unix.subprocess.run") as run:
+            run.return_value.stderr = stderr
+            dirs = _implicit_include_dirs("gcc-x", "c")
+        _implicit_include_dirs.cache_clear()
+        assert os.path.realpath("/usr/include") in dirs
+        assert any(Path(d).as_posix().endswith("/Library/Frameworks") for d in dirs)
+
+
+class TestToolsWithoutASystemForm:
+    def test_a_fortran_compile_gets_them_as_ordinary_includes(self, tmp_path):
+        """gfortran finds a package's .mod files on its include path, which
+        has no system form; a system package's directory must stay on it."""
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+        from pcons.toolchains.gcc import GccArchiver
+        from pcons.toolchains.gfortran import (
+            GfortranCompiler,
+            GfortranLinker,
+            GfortranToolchain,
+        )
+
+        toolchain = GfortranToolchain()
+        toolchain._tools = {
+            "fc": GfortranCompiler(),
+            "ar": GccArchiver(),
+            "link": GfortranLinker(),
+        }
+        (tmp_path / "main.f90").write_text("program main\nend program\n")
+        project = Project("t", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=toolchain)
+        netcdf = ImportedTarget.from_package(
+            PackageDescription(name="netcdf-fortran", include_dirs=["/opt/nc/include"])
+        )
+        app = project.Program("app", env, sources=["main.f90"])
+        app.link(netcdf)
+
+        effective = compute_effective_requirements(app, env, tool_name="fc")
+
+        assert Path("/opt/nc/include") in effective.includes
+        assert effective.system_includes == []

@@ -38,8 +38,10 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
+from pcons.core.errors import PconsValueError
 from pcons.core.node import FileNode
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.toolchains.gnu_common import GNU_COMPILE_PATH_FLAGS
 from pcons.toolchains.qt.scan import output_rel_dir
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain, toolchain_registry
@@ -49,7 +51,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import Node
     from pcons.core.project import Project
-    from pcons.core.toolconfig import ToolConfig
     from pcons.toolchains.qt.finder import QtPackage
 
 #: Header suffixes moc treats as "header mode" (output: moc_<stem>.cpp).
@@ -156,7 +157,7 @@ class _QtGenBuilder(CommandBuilder):
             # Catch the classic slip of passing source= (the builder call
             # signature is (target, sources)) — silently building nothing
             # would be far more confusing than this error.
-            raise ValueError(
+            raise PconsValueError(
                 f"env.qt.{self.name}() needs sources, e.g. "
                 f'env.qt.{self.name}(sources="file{self.src_suffixes[0]}").'
             )
@@ -440,29 +441,6 @@ class QtTool(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Locate moc/uic/rcc (pkg-config's libexecdir, then PATH)."""
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        dirs = _locate_tool_dirs()
-        moc = _find_tool("moc", dirs)
-        if moc is None:
-            return None
-        self._moc = str(moc)
-        uic = _find_tool("uic", dirs)
-        if uic is not None:
-            self._uic = str(uic)
-        rcc = _find_tool("rcc", dirs)
-        if rcc is not None:
-            self._rcc = str(rcc)
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("qt", cmd=self._moc)
-
 
 class QtToolchain(BaseToolchain):
     """Qt toolchain, added alongside a C/C++ toolchain.
@@ -474,21 +452,10 @@ class QtToolchain(BaseToolchain):
     """
 
     TOOL_NAMES = ("qt",)
+    COMPILE_PATH_FLAGS = GNU_COMPILE_PATH_FLAGS
 
     def __init__(self) -> None:
         super().__init__("qt")
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        qt = QtTool()
-        if qt.configure(config) is None:
-            return False
-        self._tools = {"qt": qt}
-        return True
 
     def after_resolve(
         self,
@@ -530,7 +497,6 @@ class QtToolchain(BaseToolchain):
                 lupdate=tool("lupdate"),
             )
         }
-        toolchain._configured = True
         return toolchain
 
 
@@ -552,7 +518,6 @@ def find_qt_toolchain() -> QtToolchain | None:
             rcc=str(_find_tool("rcc", dirs) or "rcc"),
         )
     }
-    toolchain._configured = True
     return toolchain
 
 

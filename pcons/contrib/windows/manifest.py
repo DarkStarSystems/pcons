@@ -22,6 +22,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsValueError
+from pcons.core.paths import last_component
+
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
@@ -67,7 +70,7 @@ def _manifest_arch(arch: str) -> str:
     mapped = _PROCESSOR_ARCHITECTURE.get(arch.lower())
     if mapped is None:
         known = ", ".join(sorted(set(_PROCESSOR_ARCHITECTURE)))
-        raise ValueError(
+        raise PconsValueError(
             f"No manifest processorArchitecture for {arch!r}. Known: {known}"
         )
     return mapped
@@ -433,20 +436,19 @@ def create_assembly_manifest(
     if arch is None:
         arch = getattr(env, "target_arch", None) or "x64"
 
-    # Convert Target objects to DLL filenames
+    # Convert Target objects to DLL filenames: the file's own name, since the
+    # manifest sits beside its DLLs
     dll_names: list[str] = []
     for dll in dlls:
         if isinstance(dll, str):
             dll_names.append(dll)
         elif getattr(dll, "output_filename", None):
             # Target naming its file outright
-            dll_names.append(str(dll.output_filename))
-        elif hasattr(dll, "output_name") and dll.output_name:
-            # Target with output_name
-            dll_names.append(str(dll.output_name))
+            dll_names.append(last_component(str(dll.output_filename)))
         elif hasattr(dll, "name"):
-            # Target without output_name - use name + .dll
-            dll_name = str(dll.name)
+            dll_name = last_component(
+                str(getattr(dll, "output_name", None) or dll.name)
+            )
             if not dll_name.lower().endswith(".dll"):
                 dll_name = f"{dll_name}.dll"
             dll_names.append(dll_name)

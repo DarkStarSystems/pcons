@@ -7,13 +7,16 @@ import functools
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.node import FileNode
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.toolchains.gnu_common import (
     gnu_archiver_builders,
@@ -22,16 +25,16 @@ from pcons.toolchains.gnu_common import (
     gnu_compile_vars,
     gnu_link_builders,
     gnu_link_vars,
+    require_cross_binaries,
 )
 from pcons.toolchains.unix import UnixToolchain
-from pcons.tools.tool import BaseTool
+from pcons.tools.tool import BaseTool, resolve_env_cmd_override
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode
     from pcons.core.project import Project
-    from pcons.core.toolconfig import ToolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +164,42 @@ def _find_gcc_std_module_source(
     return Path(line[2:])
 
 
+# A GCC driver's name: optional target prefix, the driver, optional suffix
+# ("x86_64-linux-gnu-g++-14", "gcc-mp-14"). cc and c++ count: the gcc
+# toolchain only accepts GCC-family drivers.
+_GCC_DRIVER = re.compile(r"(?P<prefix>(?:.*-)?)(?:gcc|g\+\+|cc|c\+\+)(?P<suffix>-.+)?")
+
+
+def gcc_archiver_for(driver: str) -> str | None:
+    """The archiver that belongs to GCC driver *driver*, or None.
+
+    ``gcc-ar`` hands ``ar`` its own GCC's LTO plugin, so an archive of
+    ``-flto`` objects gets a symbol index whatever binutils finds in its
+    ``bfd-plugins`` directory. The name keeps the driver's target prefix
+    and suffix (``x86_64-linux-gnu-g++-14`` gives
+    ``x86_64-linux-gnu-gcc-ar-14``); a prefixed driver without one falls
+    back to that target's ``ar``. Each name is looked for next to the
+    driver, then on PATH, where a driver in a ccache directory finds it.
+    """
+    path = Path(driver)
+    exe = path.suffix if path.suffix.lower() == ".exe" else ""
+    match = _GCC_DRIVER.fullmatch(path.name.removesuffix(exe))
+    if match is None:
+        return None
+    prefix, suffix = match["prefix"], match["suffix"] or ""
+    names = [f"{prefix}gcc-ar{suffix}{exe}"]
+    if prefix:
+        names.append(f"{prefix}ar{exe}")
+    for name in names:
+        sibling = path.parent / name
+        if path.parent != Path() and sibling.is_file():
+            return str(sibling)
+        found = shutil.which(name)
+        if found is not None:
+            return found
+    return None
+
+
 class GccCCompiler(BaseTool):
     """GCC C compiler tool (variables come from gnu_compile_vars)."""
 
@@ -174,9 +213,6 @@ class GccCCompiler(BaseTool):
 
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cc")
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "gcc", "cc", with_version=True)
 
 
 class GccCxxCompiler(BaseTool):
@@ -213,12 +249,9 @@ class GccCxxCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cxx")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "g++", "c++", with_version=True)
-
 
 class GccArchiver(BaseTool):
-    """GNU archiver (ar) for creating static libraries."""
+    """GCC's archiver for creating static libraries: gcc-ar, else ar."""
 
     env_var = "AR"
 
@@ -226,13 +259,10 @@ class GccArchiver(BaseTool):
         super().__init__("ar")
 
     def default_vars(self) -> dict[str, object]:
-        return gnu_archiver_vars("ar")
+        return gnu_archiver_vars(gcc_archiver_for("gcc") or "ar")
 
     def builders(self) -> dict[str, Builder]:
         return gnu_archiver_builders()
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "ar")
 
 
 class GccLinker(BaseTool):
@@ -249,9 +279,6 @@ class GccLinker(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_link_builders()
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "gcc", "cc")
-
 
 class GccToolchain(UnixToolchain):
     """GCC toolchain: gcc, g++, ar, and gcc/g++ as linker.
@@ -260,36 +287,65 @@ class GccToolchain(UnixToolchain):
     UnixToolchain.
     """
 
+    STATIC_RUNTIME_LINK_FLAGS = ("-static-libgcc", "-static-libstdc++")
+
     ENV_COMPILER_FAMILY = "gcc"
+    WINDOWS_ABI = "mingw"
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link")
 
     def __init__(self) -> None:
         super().__init__("gcc")
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross preset, requiring cross binaries for foreign triples.
+    def make_target_preset(self, cross: Any) -> Preset:
+        """A cross preset, requiring cross binaries for foreign triples.
 
         GCC rejects --target=; a different-triple build needs different tool
         binaries, so a preset with a triple but no CC/CXX overrides fails
         fast rather than silently building host-arch objects.
         """
-        triple = getattr(preset, "triple", None)
-        resolve = getattr(preset, "resolved_tool_cmds", None)
-        cmds = resolve() if resolve is not None else {}
-        # wasm triples get the more specific "use the dedicated toolchain"
-        # error from UnixToolchain (via super()), not the binary-retarget one.
-        if triple and str(triple).startswith("wasm32"):
-            triple = None
-        if triple and not ("cc" in cmds or "cxx" in cmds):
-            name = getattr(preset, "name", preset)
-            raise ValueError(
-                f"Cross preset '{name}' targets triple '{triple}', but GCC "
-                f"selects targets by binary, not by flag. Provide cross-compiler "
-                f"commands in the preset's tool_cmds (e.g. cc={triple}-gcc), or "
-                f"use a clang-based toolchain, which retargets via --target."
-            )
-        super().apply_cross_preset(env, preset)
+        require_cross_binaries(
+            cross, "GCC", ("cc", "cxx"), "cc={triple}-gcc", "a clang-based toolchain"
+        )
+        return super().make_target_preset(cross)
+
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """The $CC/$CXX presets, with the archiver of the driver they pick.
+
+        ``ar.cmd <- $CXX`` in explain() says why the archiver changed. An
+        explicit $AR is authoritative and keeps its own preset.
+        """
+        presets = super().setup_presets(env)
+        if resolve_env_cmd_override("AR") is not None:
+            return presets
+        for var in ("CXX", "CC"):
+            driver = resolve_env_cmd_override(var)
+            archiver = gcc_archiver_for(driver) if driver else None
+            if archiver is not None:
+                ar = ToolContribution("ar", cmd=archiver)
+                return [
+                    replace(p, contributions=(*p.contributions, ar))
+                    if p.name == f"${var}"
+                    else p
+                    for p in presets
+                ]
+        return presets
+
+    def _target_contributions(self, cross: Any) -> list[ToolContribution]:
+        """A cross preset's contributions, plus the archiver of its driver.
+
+        A preset that names cross drivers but no archiver would otherwise
+        archive with the host's (see gcc_archiver_for). $AR still wins.
+        """
+        contribs = super()._target_contributions(cross)
+        cmds = {c.tool: c.cmd for c in contribs if c.cmd}
+        if "ar" in cmds or resolve_env_cmd_override("AR") is not None:
+            return contribs
+        driver = cmds.get("cxx") or cmds.get("cc") or cmds.get("link")
+        archiver = gcc_archiver_for(driver) if driver else None
+        if archiver is not None:
+            contribs.append(ToolContribution("ar", cmd=archiver))
+        return contribs
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, including C++20 module interfaces."""
@@ -369,7 +425,6 @@ class GccToolchain(UnixToolchain):
                     base_flags,
                     context,
                     extra_flags=("-fmodules",),
-                    root=project.root_dir,
                 )
                 obj_rel = rel(obj_node.path)
                 key = bmi_key_for_flags(flags, flag_spec)
@@ -418,7 +473,7 @@ class GccToolchain(UnixToolchain):
         ) -> dict[str, object]:
             facts = edge_facts[id(governed)]
             return {
-                "SCAN_FLAGS": list(cast("list[str]", facts["flags"])),
+                "SCAN_FLAGS": list(cast("list[object]", facts["flags"])),
                 # -fdeps-target= takes the joined form only, so the whole
                 # flag rides the variable.
                 "SCAN_DEPS_TARGET": f"-fdeps-target={facts['obj_rel']}",
@@ -652,29 +707,6 @@ class GccToolchain(UnixToolchain):
             + "\n",
         )
         return {std_key: exports_rel}, None
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        cc = GccCCompiler()
-        if cc.configure(config) is None:
-            return False
-
-        cxx = GccCxxCompiler()
-        cxx.configure(config)
-
-        ar = GccArchiver()
-        ar.configure(config)
-
-        link = GccLinker()
-        if link.configure(config) is None:
-            return False
-
-        self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
-        return True
 
 
 # =============================================================================

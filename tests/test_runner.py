@@ -29,6 +29,7 @@ from pcons.test_runner import (
     _discover_catch2,
     _discover_doctest,
     _discover_gtest,
+    _exit_description,
     _validate_deps,
     expand_discovered_tests,
     expand_filter_with_deps,
@@ -36,6 +37,7 @@ from pcons.test_runner import (
     find_manifest,
     load_manifest,
     main,
+    print_summary,
     run_all,
     run_one_test,
     write_junit,
@@ -200,6 +202,24 @@ class TestSingleTestExecution:
         )
         assert result.status == FAIL
         assert result.returncode == 1
+        assert result.message == "exit code 1"
+
+    def test_a_test_that_should_fail_and_passes_says_so(self, tmp_path):
+        script = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        test = {"name": "x", "command": [str(script)], "should_fail": True}
+        result = run_one_test(test, tmp_path)
+        assert result.status == FAIL
+        assert result.message == "exit code 0, and the test should fail"
+
+    def test_a_crash_names_the_signal(self, tmp_path):
+        script = _make_exit_script(
+            tmp_path,
+            "crash.py",
+            "import os, signal; os.kill(os.getpid(), signal.SIGABRT)",
+        )
+        result = run_one_test({"name": "crash", "command": [str(script)]}, tmp_path)
+        assert result.status == FAIL
+        assert result.message == "killed by SIGABRT"
 
     def test_should_fail_inverts_result(self, tmp_path):
         script = _make_exit_script(tmp_path, "fail.py", "import sys; sys.exit(1)")
@@ -245,6 +265,58 @@ class TestSingleTestExecution:
             tmp_path,
         )
         assert result.status == SKIP
+
+    @pytest.mark.parametrize(
+        ("exit_code", "should_fail", "expected"),
+        [
+            (77, False, SKIP),
+            (77, True, SKIP),
+            (1, False, FAIL),
+            (0, False, PASS),
+            (1, True, PASS),
+        ],
+    )
+    def test_skip_returncode(self, tmp_path, exit_code, should_fail, expected):
+        # The skip code wins over should_fail; other codes are unaffected.
+        script = _make_exit_script(
+            tmp_path, "maybe.py", f"import sys; sys.exit({exit_code})"
+        )
+        result = run_one_test(
+            {
+                "name": "maybe",
+                "command": [str(script)],
+                "skip_returncode": 77,
+                "should_fail": should_fail,
+                "labels": [],
+            },
+            tmp_path,
+        )
+        assert result.status == expected
+        assert result.returncode == exit_code
+        if expected == SKIP:
+            assert result.message == "exit code 77"
+
+    def test_skip_returncode_unset_means_fail(self, tmp_path):
+        script = _make_exit_script(tmp_path, "skip.py", "import sys; sys.exit(77)")
+        result = run_one_test(
+            {"name": "skip", "command": [str(script)], "labels": []},
+            tmp_path,
+        )
+        assert result.status == FAIL
+
+    def test_timeout_is_not_a_skip(self, tmp_path):
+        script = _make_exit_script(tmp_path, "slow.py", "import time; time.sleep(5)")
+        result = run_one_test(
+            {
+                "name": "slow",
+                "command": [str(script)],
+                "timeout": 0.3,
+                "skip_returncode": 77,
+                "labels": [],
+            },
+            tmp_path,
+        )
+        assert result.status == TIMEOUT
 
     def test_env_vars_passed_to_subprocess(self, tmp_path):
         # The script returns 0 if MY_VAR=hello, else 1.
@@ -352,6 +424,37 @@ class TestCLIMain:
         assert rc == 1
         captured = capsys.readouterr()
         assert "FAILED" in captured.out
+        assert "broken [fail] (exit code 1)" in captured.out
+
+    @pytest.mark.parametrize("stream", ["stdout", "stderr"])
+    def test_verbose_shows_a_failed_tests_output(self, tmp_path, capsys, stream):
+        """gtest, Catch2 and doctest report failures on stdout."""
+        bad = _make_exit_script(
+            tmp_path,
+            "bad.py",
+            f"import sys; print('expected 2, got 3', file=sys.{stream}); sys.exit(1)",
+        )
+        _make_manifest(tmp_path, [{"name": "broken", "command": [str(bad)]}])
+        rc = main(["--manifest", str(tmp_path / "tests.json"), "-V", "--no-color"])
+        assert rc == 1
+        assert "      expected 2, got 3" in capsys.readouterr().out
+
+    def test_tests_keep_their_numbers_whatever_order_they_finish(
+        self, tmp_path, capsys
+    ):
+        slow = _make_exit_script(tmp_path, "slow.py", "import time; time.sleep(0.5)")
+        fast = _make_exit_script(tmp_path, "fast.py", "pass")
+        _make_manifest(
+            tmp_path,
+            [
+                {"name": "slow", "command": [str(slow)]},
+                {"name": "fast", "command": [str(fast)]},
+            ],
+        )
+        main(["--manifest", str(tmp_path / "tests.json"), "-j", "2", "--no-color"])
+        out = capsys.readouterr().out
+        assert "1/2 Test #2: fast" in out
+        assert "2/2 Test #1: slow" in out
 
     def test_list_mode_does_not_execute(self, tmp_path, capsys):
         # Pointing at a nonexistent binary would fail if it actually ran.
@@ -583,6 +686,48 @@ class TestRunAllWithDeps:
         assert by_name["root"].status == FAIL
         assert by_name["child"].status == SKIP
         assert "dep failed" in by_name["child"].message
+
+    def _run(self, tmp_path, tests):
+        results = run_all(
+            tests,
+            tmp_path,
+            jobs=2,
+            stop_on_fail=False,
+            on_start=lambda _t: None,
+            on_finish=lambda _t, _r: None,
+        )
+        return {r.name: r for r in results}
+
+    def test_a_skip_for_a_failed_dep_skips_its_dependents_too(self, tmp_path):
+        """The chain stops at the failure, and each skip names it."""
+        ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        bad = _make_exit_script(tmp_path, "bad.py", "import sys; sys.exit(1)")
+        by_name = self._run(
+            tmp_path,
+            [
+                {"name": "root", "command": [str(bad)], "labels": []},
+                {"name": "child", "command": [str(ok)], "depends_on": ["root"]},
+                {"name": "grandchild", "command": [str(ok)], "depends_on": ["child"]},
+            ],
+        )
+
+        assert by_name["grandchild"].status == SKIP
+        assert by_name["grandchild"].message == "dep failed: root"
+
+    def test_a_disabled_dep_blocks_nothing(self, tmp_path):
+        ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        by_name = self._run(
+            tmp_path,
+            [
+                {"name": "off", "command": [str(ok)], "disabled": True},
+                {"name": "child", "command": [str(ok)], "depends_on": ["off"]},
+                {"name": "grandchild", "command": [str(ok)], "depends_on": ["child"]},
+            ],
+        )
+
+        assert by_name["off"].status == SKIP
+        assert by_name["child"].status == PASS
+        assert by_name["grandchild"].status == PASS
 
     def test_dep_pass_allows_dependent(self, tmp_path):
         ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
@@ -1191,3 +1336,32 @@ if os.name == "nt":
         "test_runner subprocess tests use POSIX exec semantics",
         allow_module_level=True,
     )
+
+
+def test_the_pass_rate_leaves_skipped_tests_out(capsys):
+    """As CTest reports it: the percentage and "out of" count the tests
+    that ran, and the skipped ones are listed apart."""
+    results = [
+        TestResult(name="a", status=PASS, duration=0.0),
+        TestResult(name="b", status=PASS, duration=0.0),
+        TestResult(name="off", status=SKIP, duration=0.0, message="disabled"),
+    ]
+    print_summary("p", results, color=False, verbose=False)
+
+    assert (
+        "100% tests passed, 0 tests failed out of 2 (1 skipped)"
+        in capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "description"),
+    [
+        (3, "exit code 3"),
+        (-6, "killed by SIGABRT"),
+        # A real-time signal, which has no name.
+        (-200, "killed by signal 200"),
+    ],
+)
+def test_exit_description(returncode, description):
+    assert _exit_description(returncode) == description

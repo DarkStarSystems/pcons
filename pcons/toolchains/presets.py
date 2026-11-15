@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 from pcons.configure.platform import Platform
+from pcons.core.errors import PconsValueError
 
 # Deprecated env_vars keys mapped to pcons tool names (see CrossPreset).
 _ENV_VAR_TOOL_MAP: dict[str, str] = {
@@ -57,6 +58,7 @@ def _naming(
 _TARGET_PLATFORMS: dict[str, Platform] = {
     "android": _naming("android"),
     "linux": _naming("linux"),
+    "none": _naming("none"),
     "darwin": _naming("darwin", shared=".dylib"),
     "ios": _naming("ios", shared=".dylib"),
     "windows-gnu": _naming("windows", exe=".exe", shared=".dll", shared_prefix=""),
@@ -80,6 +82,9 @@ _TRIPLE_OS_MARKERS_MOST_SPECIFIC_FIRST: tuple[tuple[str, str], ...] = (
     ("macos", "darwin"),
     ("darwin", "darwin"),
     ("linux", "linux"),
+    # Bare metal: arm-none-eabi, aarch64-none-elf, thumbv7m-none-eabi. After
+    # linux, since Arm's aarch64-none-linux-gnu builds for Linux.
+    ("-none", "none"),
 )
 
 _TRIPLE_ARCHS: dict[str, str] = {
@@ -173,6 +178,9 @@ class CrossPreset:
                   the directory the tools were found in.
         sdk: Root of the Android SDK. Nothing in compiling or linking uses
              it; packaging does, and no other part of pcons knows it.
+        stl: The Android C++ runtime ("c++_shared", "c++_static", "none").
+             Its link flags already say it; this says it to a package
+             manager building the app's dependencies.
     """
 
     name: str
@@ -187,6 +195,7 @@ class CrossPreset:
     ndk: str | None = None
     ndk_host: str | None = None
     sdk: str | None = None
+    stl: str | None = None
 
     @property
     def target_platform(self) -> Platform | None:
@@ -262,7 +271,7 @@ def android(
         CrossPreset configured for Android.
     """
     if stl not in _ANDROID_STL_LINK_FLAGS:
-        raise ValueError(
+        raise PconsValueError(
             f"Unknown Android STL '{stl}'. "
             f"Supported: {', '.join(_ANDROID_STL_LINK_FLAGS)}"
         )
@@ -273,7 +282,7 @@ def android(
         "x86": "i686-linux-android",
     }
     if arch not in triple_map:
-        raise ValueError(
+        raise PconsValueError(
             f"Unknown Android architecture '{arch}'. Supported: {', '.join(triple_map)}"
         )
 
@@ -306,6 +315,7 @@ def android(
         ndk=str(ndk_path),
         ndk_host=host_tag,
         sdk=sdk,
+        stl=stl,
         tool_cmds={
             "cc": str(bin_dir / f"{triple}-clang{wrapper_ext}"),
             "cxx": str(bin_dir / f"{triple}-clang++{wrapper_ext}"),
@@ -424,7 +434,7 @@ def pyodide(
         CrossPreset configured for the PyEmscripten side-module ABI.
     """
     if abi not in PYEMSCRIPTEN_ABIS:
-        raise ValueError(
+        raise PconsValueError(
             f"Unknown PyEmscripten ABI '{abi}'. Supported: "
             f"{', '.join(PYEMSCRIPTEN_ABIS)}"
         )

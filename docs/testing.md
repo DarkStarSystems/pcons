@@ -33,12 +33,13 @@ The full set of fields (all keyword-only):
 
 | Field | Type | Purpose |
 |---|---|---|
-| `args` | `Sequence[str]` | Arguments passed after the program. |
+| `args` | `Sequence[str \| Path \| Target]` | Arguments passed after the program; a `Path` or `Target` is a file (see below). |
 | `cwd` | `Path \| str \| None` | Working directory; defaults to the build dir. |
 | `env` | `dict[str, str] \| None` | Extra environment variables for the test process. |
 | `labels` | `Sequence[str]` | Tags for filtering (`unit`, `integration`, `slow`, `fuzz`, ...). |
 | `timeout` | `float \| None` | Seconds before the runner kills the test. |
 | `should_fail` | `bool` | If True, a non-zero exit code is a pass. |
+| `skip_returncode` | `int \| None` | Exit code that means "skipped", not "failed". |
 | `serial` | `bool` | Don't run in parallel with other tests. |
 | `disabled` | `bool` | Record the test but always skip. |
 | `data` | `Sequence[Path \| str]` | Runtime data files (informational in v1). |
@@ -48,6 +49,36 @@ The full set of fields (all keyword-only):
 `program` can be a `Target` (the typical case — depending on it ensures
 `ninja test-build` compiles it first), or a `Path` / `str` to an
 existing script or external binary.
+
+An argument can be a file too. A `Target` is the file it builds, and the
+test depends on it like its program. A `Path` is a file in the source
+tree, read from the script's directory like `sources=`. Both are written as
+the test sees them from where it runs (its `cwd`, or the build directory),
+so a test can run a script that drives a built program:
+
+```python
+project.Test(
+    "math.cases",
+    sys.executable,
+    args=[Path("check_cases.py"), test_prog, Path("cases.txt")],
+)
+```
+
+## Skipping at Run Time: `skip_returncode`
+
+A test can find out only when it runs that it can't: a tool or module
+is missing, or the hardware isn't there. Give it a `skip_returncode`
+and the runner reports that exit code as skipped instead of failed,
+like CTest's `SKIP_RETURN_CODE`. Automake and Meson use 77:
+
+```python
+project.Test("app.cli", "python", args=["tester.py"], skip_returncode=77)
+```
+
+The skip code is checked first, so it's a skip even with
+`should_fail=True`. A test killed by its `timeout` is still a timeout.
+A test that depends on one that skips itself still runs, as it does
+when its dependency is `disabled`.
 
 ## Fixtures and Test Ordering: `depends_on`
 
@@ -146,8 +177,9 @@ set_test_properties(*slow_tests, timeout=600, labels=["slow"])
 ```
 
 Valid property names are the same kwargs accepted by `project.Test()`:
-`args`, `cwd`, `env`, `labels`, `timeout`, `should_fail`, `serial`,
-`disabled`, `data`, `depends_on`, `discover`, `program`.
+`args`, `cwd`, `env`, `labels`, `timeout`, `should_fail`,
+`skip_returncode`, `serial`, `disabled`, `data`, `depends_on`,
+`discover`, `program`.
 
 ## Running Tests
 
@@ -162,7 +194,7 @@ pcons test --list             # show what would run, without running
 pcons test -j 1               # serial mode (default: CPU count)
 pcons test --junit out.xml    # emit JUnit XML for CI
 pcons test --stop-on-fail     # stop after the first failure
-pcons test -V                 # verbose: show stderr from failed tests
+pcons test -V                 # verbose: show output from failed tests
 pcons test --no-color         # plain output, no ANSI color
 pcons -B build-release test   # run the tests in another build directory
 ```

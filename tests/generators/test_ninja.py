@@ -911,10 +911,10 @@ class TestNinjaSrcDir:
         gen = NinjaGenerator()
         gen.generate(project)
         BaseGenerator._generate_pending(project)
-        gen._path_flags = frozenset({"-I"})
-
         # Plain-string flag (pattern-based rewrite)
-        tokens = gen._relativize_command_tokens(["-Ibuild/assets"])
+        tokens = gen._relativize_command_tokens(
+            ["-Ibuild/assets"], path_flags=frozenset({"-I"})
+        )
         assert tokens == ["-Iassets"]
         # PathToken route (usage requirements wrap includes in ProjectPath)
         from pcons.core.subst import PathToken

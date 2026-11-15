@@ -15,8 +15,7 @@ commands = [
 ]
 
 [skip]
-platforms = ["windows"]
-requires = ["gfortran"]
+requires_toolchains = ["fortran"]
 # Xcode generator does not support Fortran
 # Make generator doesn't support Ninja dyndep for Fortran module ordering
 generators = ["xcode", "make"]

@@ -328,22 +328,6 @@ class TestWasiHints:
         assert wasi._wasi_hints() == [tmp_path / "bin"]
 
 
-class TestWasiConfigureMissing:
-    """configure() returns None when the program is not found."""
-
-    @pytest.mark.parametrize(
-        "cls", [WasiCCompiler, WasiCxxCompiler, WasiArchiver, WasiLinker]
-    )
-    def test_configure_returns_none(self, cls, monkeypatch, tmp_path):
-        from pcons.configure.config import Configure
-        from pcons.toolchains import wasi
-
-        monkeypatch.setattr(wasi, "_wasi_hints", lambda: None)
-        config = Configure(build_dir=tmp_path)
-        config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
-        assert cls().configure(config) is None
-
-
 class TestWasiSdkSetupPreset:
     """SDK wiring is declared via setup_presets, attributable in explain()."""
 

@@ -8,15 +8,18 @@ all dependencies' public requirements (transitive).
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.errors import PconsValueError
 from pcons.core.flags import (
     get_passthrough_flags_from_toolchains,
     get_separated_arg_flags_from_toolchains,
     merge_flags,
 )
+from pcons.core.paths import _script_dir_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -196,12 +199,34 @@ class EffectiveRequirements:
         )
 
 
+#: The languages a package's compile flags are for, unless it declares its
+#: own (PackageDescription.languages): pkg-config's and Conan's describe C
+#: and C++ compiles, and -std=c++17 or -pthread would break gfortran's.
+C_FAMILY: frozenset[str] = frozenset({"c", "cxx", "objc", "objcxx"})
+
+
+def tool_language(env: Environment, tool_name: str) -> str | None:
+    """The language *env*'s tool *tool_name* compiles (``fc`` → fortran)."""
+    for toolchain in env.toolchains:
+        tool = toolchain.tools.get(tool_name)
+        if tool is not None:
+            builder = tool.builders().get("Object")
+            if builder is not None:
+                return builder.language
+    return None
+
+
 def apply_requirements_to_env(
-    env: Environment, reqs: UsageRequirements, origin: str | None = None
+    env: Environment,
+    reqs: UsageRequirements,
+    origin: str | None = None,
+    languages: Iterable[str] = (),
 ) -> None:
     """Apply usage requirements env-wide onto tool variables (``env.use()``).
 
-    Compile requirements land on cc/cxx; link requirements on link, with
+    Includes and defines land on cc, cxx and fc; compile flags on cc and
+    cxx, or on the compilers of *languages* when given; link requirements
+    on link, with
     the same merge semantics as :meth:`EffectiveRequirements.merge`. A
     ``Target`` in ``link_libs`` is an error here: linking a build target
     is per-target dependency information — use ``target.link(...)``.
@@ -209,6 +234,8 @@ def apply_requirements_to_env(
     Args:
         env: The environment to apply to.
         reqs: The requirements to apply.
+        languages: The languages its compile flags are for; the C family
+            when empty.
         origin: The contributing package's name. Recorded on the environment
             so `compute_effective_requirements` (and thus ``pcons explain``)
             attributes these values to the package, not to the tool variable
@@ -223,7 +250,7 @@ def apply_requirements_to_env(
 
     for lib in eff.link_libs:
         if isinstance(lib, _Target):
-            raise ValueError(
+            raise PconsValueError(
                 f"env.use() got a Target ('{lib.name}') in link_libs; "
                 f"linking a build target is per-target information — use "
                 f"target.link({lib.name!r}) instead."
@@ -232,11 +259,19 @@ def apply_requirements_to_env(
     if origin is not None:
         # Only the compile-side fields: they are what the base layer of
         # compute_effective_requirements reads back off the tool variables.
-        # Keys are spelled the way that layer looks them up (via Path).
+        # Keys are written the way that layer looks them up (via Path), and a
+        # relative directory both as written and as a tool's include list
+        # anchors it.
         use_origins = env._use_origins
+
+        def dirs(paths: Iterable[Any]) -> Iterable[str]:
+            for path in paths:
+                yield str(Path(path))
+                yield str(Path(_script_dir_path(path)))
+
         for field_name, values in (
-            ("include_dirs", (str(Path(i)) for i in eff.includes)),
-            ("system_include_dirs", (str(Path(i)) for i in eff.system_includes)),
+            ("include_dirs", dirs(eff.includes)),
+            ("system_include_dirs", dirs(eff.system_includes)),
             ("defines", eff.defines),
         ):
             for value in values:
@@ -267,8 +302,28 @@ def apply_requirements_to_env(
             tool, "system_includes", (str(inc) for inc in eff.system_includes)
         )
         extend_unique(tool, "defines", eff.defines)
-        if eff.compile_flags:
-            merge_flags(var(tool, "flags"), eff.compile_flags, sep, through)
+
+    # A Fortran compile finds a package's .mod files on its include path,
+    # which has no system form.
+    if env.has_tool("fc"):
+        fc = env.fc
+        includes = [*eff.includes, *eff.system_includes]
+        extend_unique(fc, "includes", (str(inc) for inc in includes))
+        extend_unique(fc, "defines", eff.defines)
+
+    # Compile flags go to the compilers of the languages they're for: C and
+    # C++ unless the package says otherwise.
+    if eff.compile_flags:
+        scope = set(languages)
+        tools = (
+            [t for t in env.tool_names() if tool_language(env, t) in scope]
+            if scope
+            else [t for t in ("cc", "cxx") if env.has_tool(t)]
+        )
+        for tool_name in tools:
+            merge_flags(
+                var(getattr(env, tool_name), "flags"), eff.compile_flags, sep, through
+            )
 
     if env.has_tool("link"):
         link = env.link
@@ -319,6 +374,7 @@ def compute_effective_requirements(
     target: Target,
     env: Environment,
     for_compilation: bool = True,
+    tool_name: str | None = None,
 ) -> EffectiveRequirements:
     """Compute complete requirements for a target.
 
@@ -331,6 +387,9 @@ def compute_effective_requirements(
         env: The environment providing base configuration.
         for_compilation: If True, compute for compilation phase.
                         If False, compute for linking phase.
+        tool_name: The tool whose environment includes and defines form
+                   the base layer, e.g. "cc" for a C source. Defaults to
+                   the target's primary tool, for target-wide views.
 
     Returns:
         EffectiveRequirements containing the merged requirements.
@@ -341,8 +400,9 @@ def compute_effective_requirements(
         passthrough_flags=get_passthrough_flags_from_toolchains(env.toolchains),
     )
 
-    # Layer 1: Base environment (primary tool's includes and defines).
-    tool_name = _get_primary_tool(target, env)
+    # Layer 1: Base environment (the tool's includes and defines).
+    if tool_name is None:
+        tool_name = _get_primary_tool(target, env)
     if tool_name and env.has_tool(tool_name):
         tool_config = getattr(env, tool_name)
 
@@ -352,26 +412,20 @@ def compute_effective_requirements(
         def base_origin(field_name: str, value: str) -> tuple[str, str]:
             return use_origins.get((field_name, value), (f"env.{tool_name}", "base"))
 
-        includes = getattr(tool_config, "includes", None)
-        if includes:
-            for inc in includes:
-                path = Path(inc) if isinstance(inc, str) else inc
-                if path not in result.includes:
-                    result.includes.append(path)
+        # Anchored where a script wrote them (see PathList), and canonical
+        # here, so a directory a target lists as well is the same entry.
+        canonicalize = target.project.top_path_resolver.canonicalize
+        for var_name, field_name, dest in (
+            ("includes", "include_dirs", result.includes),
+            ("system_includes", "system_include_dirs", result.system_includes),
+        ):
+            for inc in getattr(tool_config, var_name, None) or ():
+                written = Path(inc) if isinstance(inc, str) else inc
+                path = canonicalize(written) if isinstance(written, Path) else written
+                if path not in dest:
+                    dest.append(path)
                     result._record(
-                        "include_dirs", path, base_origin("include_dirs", str(path))
-                    )
-
-        system_includes = getattr(tool_config, "system_includes", None)
-        if system_includes:
-            for inc in system_includes:
-                path = Path(inc) if isinstance(inc, str) else inc
-                if path not in result.system_includes:
-                    result.system_includes.append(path)
-                    result._record(
-                        "system_include_dirs",
-                        path,
-                        base_origin("system_include_dirs", str(path)),
+                        field_name, path, base_origin(field_name, str(written))
                     )
 
         defines = getattr(tool_config, "defines", None)
@@ -399,11 +453,57 @@ def compute_effective_requirements(
     )
 
     # Layer 3: All dependencies' public requirements (transitive): linked
-    # libraries and depends() targets alike.
+    # libraries and depends() targets alike. An imported package's compile
+    # flags reach only the compilers of the languages they're for.
+    language = tool_language(env, tool_name) if tool_name else None
     for dep in target.transitive_dependencies():
-        result.merge(
-            _anchor_dir_lists_for(dep.public, dep), origin=(dep.name, "public")
-        )
+        reqs = dep.public_for_dependents()
+        if getattr(dep, "is_imported", False) and language is not None:
+            if language not in (dep.required_languages or C_FAMILY):
+                reqs = reqs.clone()
+                reqs.compile_flags.clear()
+        result.merge(_anchor_dir_lists_for(reqs, dep), origin=(dep.name, "public"))
+
+    # Layer 4, for a link: an archive doesn't contain what its library links
+    # privately, so the link line reaches those libraries through it (see
+    # transitive_link_dependencies), and with them what they need to link,
+    # though not their headers or defines.
+    if not for_compilation:
+        reached = {dep.qualified_name for dep in target.transitive_dependencies()}
+        for dep in target.transitive_link_dependencies():
+            if dep.qualified_name not in reached:
+                result.merge(
+                    _anchor_dir_lists_for(dep.public.for_link(), dep),
+                    origin=(dep.name, "public"),
+                )
+
+    # A tool with no system form of an include directory (a Fortran
+    # compiler, which finds a package's .mod files on its include path)
+    # takes those directories as ordinary ones.
+    if (
+        for_compilation
+        and tool_name
+        and result.system_includes
+        and env.has_tool(tool_name)
+        and getattr(env, tool_name).get("system_includes") is None
+    ):
+        for directory in result.system_includes:
+            if directory not in result.includes:
+                result.includes.append(directory)
+        result.system_includes = []
+
+    # A compiler's own include directories stay where it searches them.
+    # Named as system includes they'd move ahead in that search, and GCC's
+    # C++ headers, which #include_next the C library's, would break.
+    if for_compilation and tool_name and result.system_includes:
+        toolchain = env.toolchain_for(tool_name)
+        if toolchain is not None:
+            implicit = toolchain.implicit_include_dirs(
+                str(getattr(env, tool_name).cmd), tool_name
+            )
+            result.system_includes = [
+                d for d in result.system_includes if os.path.realpath(d) not in implicit
+            ]
 
     return result
 

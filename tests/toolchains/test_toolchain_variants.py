@@ -16,6 +16,7 @@ import pytest
 from pcons.core.environment import Environment
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
+from tests.support import apply_variant
 
 
 class TestGccVariants:
@@ -42,7 +43,7 @@ class TestGccVariants:
 
         # Create toolchain and apply variant
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         # Check flags were applied
         assert "-O0" in cc.flags
@@ -67,7 +68,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "release")
+        apply_variant(toolchain, env, "release")
 
         assert "-O2" in cc.flags
         assert "-g" not in cc.flags
@@ -85,7 +86,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "release-fastest")
+        apply_variant(toolchain, env, "release-fastest")
 
         assert "-O3" in cc.flags
         assert not any(f.startswith("-ffast-math") for f in cc.flags)
@@ -102,7 +103,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "relwithdebinfo")
+        apply_variant(toolchain, env, "relwithdebinfo")
 
         assert "-O2" in cc.flags
         assert "-g" in cc.flags
@@ -118,7 +119,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "minsizerel")
+        apply_variant(toolchain, env, "minsizerel")
 
         assert "-Os" in cc.flags
         assert "NDEBUG" in cc.defines
@@ -133,7 +134,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "debug", extra_flags=["-Wall", "-Wextra"])
+        apply_variant(toolchain, env, "debug", extra_flags=["-Wall", "-Wextra"])
 
         assert "-Wall" in cc.flags
         assert "-Wextra" in cc.flags
@@ -149,7 +150,7 @@ class TestGccVariants:
 
         toolchain = GccToolchain()
         # Extra defines stored without prefix
-        toolchain.apply_variant(env, "release", extra_defines=["MY_FEATURE"])
+        apply_variant(toolchain, env, "release", extra_defines=["MY_FEATURE"])
 
         assert "MY_FEATURE" in cc.defines
 
@@ -165,7 +166,7 @@ class TestGccVariants:
         toolchain = GccToolchain()
         # Unknown variants now raise ValueError with supported variant list
         with pytest.raises(ValueError, match="Unknown variant.*custom"):
-            toolchain.apply_variant(env, "custom")
+            apply_variant(toolchain, env, "custom")
 
     def test_case_insensitive(self, test_project):  # noqa: F811
         """Test variant names are case-insensitive."""
@@ -177,7 +178,7 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "DEBUG")
+        apply_variant(toolchain, env, "DEBUG")
 
         assert "-O0" in cc.flags
         assert "-g" in cc.flags
@@ -196,7 +197,7 @@ class TestLlvmVariants:
         cc.set("defines", [])
 
         toolchain = LlvmToolchain()
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         assert "-O0" in cc.flags
         assert "-g" in cc.flags
@@ -214,7 +215,7 @@ class TestLlvmVariants:
         cc.set("defines", [])
 
         toolchain = LlvmToolchain()
-        toolchain.apply_variant(env, "release")
+        apply_variant(toolchain, env, "release")
 
         assert "-O2" in cc.flags
         assert "NDEBUG" in cc.defines
@@ -289,7 +290,7 @@ class TestBaseToolchainVariant:
         env.add_tool("cc").set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         assert env.variant == "debug"
 
@@ -299,7 +300,7 @@ class TestBaseToolchainVariant:
 
         toolchain = GccToolchain()
         with pytest.raises(ValueError, match="Unknown variant.*custom"):
-            toolchain.apply_variant(env, "custom")
+            apply_variant(toolchain, env, "custom")
 
 
 class TestClangClVariants:
@@ -315,61 +316,74 @@ class TestClangClVariants:
             cfg.set("flags", [])
             cfg.set("defines", [])
 
-        ClangClToolchain().apply_variant(env, "release-fastest")
+        apply_variant(ClangClToolchain(), env, "release-fastest")
 
         assert "/O2" in env.cc.flags
         # clang reads /Ob3 as /Ob2, and a clang-cl before 19 warns about it.
         assert "/Ob3" not in env.cc.flags
-        assert "/MD" in env.cc.flags
         assert "NDEBUG" in env.cxx.defines
 
     @pytest.mark.parametrize(
-        ("variant", "crt"),
-        [("debug", "/MDd"), ("release", "/MD"), ("relwithdebinfo", "/MD")],
+        ("linkage", "variant", "crt"),
+        [
+            ("shared", "debug", "/MDd"),
+            ("shared", "release", "/MD"),
+            ("shared", "relwithdebinfo", "/MD"),
+            ("static", "debug", "/MTd"),
+            ("static", "release", "/MT"),
+        ],
     )
-    def test_variant_selects_matching_dynamic_crt(
-        self, test_project, variant: str, crt: str
-    ):  # noqa: F811
-        """A variant names its CRT: cl.exe's default static release CRT
-        with the debug variant's _DEBUG pairs with the debug STL and fails
-        to link, and Conan packages are built against the dynamic one."""
+    def test_the_runtime_linkage_selects_the_c_runtime(
+        self, linkage: str, variant: str, crt: str
+    ):
+        """The DLL C runtime unless the runtime linkage is static, in its
+        debug build under debug: cl.exe's default static release CRT with
+        the debug variant's _DEBUG pairs with the debug STL and fails to
+        link, and Conan packages are built against the DLL one."""
+        from pcons.configure.platform import get_platform
+        from pcons.core.preset import RUNTIME_LINKAGE_GROUP
         from pcons.toolchains.msvc import MsvcToolchain
 
-        env = Environment()
-        for tool in ("cc", "cxx"):
-            cfg = env.add_tool(tool)
-            cfg.set("cmd", "cl.exe")
-            cfg.set("flags", [])
-            cfg.set("defines", [])
+        preset = MsvcToolchain().make_runtime_preset(linkage, variant, get_platform())
+        assert preset is not None
+        assert preset.exclusive_group == RUNTIME_LINKAGE_GROUP
+        assert {c.tool: c.flags for c in preset.contributions} == {
+            "cc": (crt,),
+            "cxx": (crt,),
+        }
 
-        MsvcToolchain().apply_variant(env, variant)
+    def test_the_variant_and_linkage_keep_one_c_runtime(self, tmp_path):
+        """The compilers start with /MD; a variant or the runtime linkage
+        replaces it, in either order, and there's always exactly one."""
+        from pcons import Project
+        from pcons.toolchains.msvc import (
+            MsvcCompiler,
+            MsvcCxxCompiler,
+            MsvcLinker,
+            MsvcToolchain,
+        )
 
-        assert crt in env.cc.flags
-        assert crt in env.cxx.flags
-        assert len([f for f in env.cxx.flags if f.startswith("/M")]) == 1
-
-    def test_a_variant_replaces_the_default_crt(self, test_project):  # noqa: F811
-        """The compilers start with /MD; a variant's CRT flag takes its place
-        rather than joining it, and switching variants keeps exactly one."""
-        from pcons.toolchains.msvc import MsvcCompiler, MsvcToolchain
-
-        env = Environment()
-        for tool in ("cc", "cxx"):
-            cfg = env.add_tool(tool)
-            cfg.set("cmd", "cl.exe")
-            cfg.set("flags", list(MsvcCompiler().default_vars()["flags"]))
-            cfg.set("defines", [])
         toolchain = MsvcToolchain()
-        for preset in toolchain.setup_presets(env):
-            env.apply(preset)
-        assert [f for f in env.cxx.flags if f.startswith("/M")] == ["/MD"]
-        assert env.variant == "default"
+        toolchain._tools = {
+            t.name: t for t in (MsvcCompiler(), MsvcCxxCompiler(), MsvcLinker())
+        }
+        env = Project("crt", root_dir=tmp_path).Environment(toolchain=toolchain)
 
-        toolchain.apply_variant(env, "debug")
-        assert [f for f in env.cxx.flags if f.startswith("/M")] == ["/MDd"]
+        def crt() -> list[str]:
+            assert [f for f in env.cc.flags if f.startswith("/M")] == [
+                f for f in env.cxx.flags if f.startswith("/M")
+            ]
+            return [f for f in env.cxx.flags if f.startswith("/M")]
 
-        toolchain.apply_variant(env, "release")
-        assert [f for f in env.cxx.flags if f.startswith("/M")] == ["/MD"]
+        assert crt() == ["/MD"]
+        env.set_variant("debug")
+        assert crt() == ["/MDd"]
+        env.set_runtime_linkage("static")
+        assert crt() == ["/MTd"]
+        env.set_variant("release")
+        assert crt() == ["/MT"]
+        env.set_runtime_linkage("shared")
+        assert crt() == ["/MD"]
 
     @pytest.mark.parametrize("toolchain_name", ["msvc", "clang-cl"])
     @pytest.mark.parametrize(
@@ -393,7 +407,7 @@ class TestClangClVariants:
             cfg.set("defines", [])
         toolchain = MsvcToolchain() if toolchain_name == "msvc" else ClangClToolchain()
 
-        toolchain.apply_variant(env, variant)
+        apply_variant(toolchain, env, variant)
 
         assert ("/Z7" in env.cxx.flags) is has_debug_info
         assert ("/DEBUG" in env.link.flags) is has_debug_info

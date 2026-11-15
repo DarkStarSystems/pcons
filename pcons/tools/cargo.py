@@ -26,7 +26,6 @@ Example:
 
 from __future__ import annotations
 
-import json
 import sys
 import tomllib
 from collections.abc import Sequence
@@ -34,6 +33,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsFileNotFoundError, PconsValueError
+from pcons.core.subst import PathToken
 from pcons.packages.description import PackageDescription
 from pcons.packages.imported import ImportedTarget
 
@@ -59,7 +60,7 @@ def _read_crate_name(manifest: Path) -> str:
     pkg_table = data.get("package", {})
     pkg_name = pkg_table.get("name")
     if not pkg_name:
-        raise ValueError(f"Cargo.toml at {manifest} has no [package] name")
+        raise PconsValueError(f"Cargo.toml at {manifest} has no [package] name")
     return str(pkg_name).replace("-", "_")
 
 
@@ -116,7 +117,7 @@ def _artifact_filename(
         if platform == "wasm":
             return f"{crate_name}.wasm"
         return crate_name
-    raise ValueError(
+    raise PconsValueError(
         f"Unsupported crate_type {crate_type!r}; expected one of {sorted(_CRATE_TYPES)}"
     )
 
@@ -189,18 +190,18 @@ class CargoBuildBuilder:
             changes.
         """
         if crate_type not in _CRATE_TYPES:
-            raise ValueError(
+            raise PconsValueError(
                 f"crate_type {crate_type!r} not supported; expected one of {sorted(_CRATE_TYPES)}"
             )
         is_bin = crate_type == "bin"
         if is_bin and generate_header is not None:
-            raise ValueError(
+            raise PconsValueError(
                 "generate_header only applies to library crates, not crate_type='bin'"
             )
 
         manifest_path = project.current_dir / manifest
         if not manifest_path.is_file():
-            raise FileNotFoundError(f"Cargo.toml not found: {manifest_path}")
+            raise PconsFileNotFoundError(f"Cargo.toml not found: {manifest_path}")
 
         manifest_dir = manifest_path.parent
         crate_name = _read_crate_name(manifest_path)
@@ -223,14 +224,17 @@ class CargoBuildBuilder:
         # Build the cargo command line. The dep-info base directory makes
         # cargo name the artifact in its dep-info file as the build tool
         # does, relative to the directory it runs in, which make needs to
-        # match the file to its rule. Sources stay absolute.
+        # match the file to its rule. Sources stay absolute. Every path is
+        # a PathToken, written as seen from where cargo runs.
         execution_dir = project.top_path_resolver.execution_dir
-        cargo_cmd: list[str] = [
+        cargo_cmd: list[str | PathToken] = [
             cargo,
             "build",
-            f"--manifest-path={manifest_path}",
-            f"--target-dir={target_root}",
-            f"--config=build.dep-info-basedir={json.dumps(str(execution_dir))}",
+            PathToken("--manifest-path=", str(manifest_path), "project"),
+            PathToken("--target-dir=", str(target_root), "project"),
+            PathToken(
+                '--config=build.dep-info-basedir="', str(execution_dir), "project", '"'
+            ),
         ]
         if profile == "release":
             cargo_cmd.append("--release")

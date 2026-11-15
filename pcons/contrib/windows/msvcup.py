@@ -28,6 +28,7 @@ import zipfile
 from pathlib import Path
 
 from pcons.configure.platform import get_platform
+from pcons.core.errors import PconsFileNotFoundError, PconsRuntimeError, PconsValueError
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ class MsvcUp:
                 f"manifest_update must be one of {self._MANIFEST_UPDATE_VALUES}, "
                 f"got {manifest_update!r}"
             )
-            raise ValueError(msg)
+            raise PconsValueError(msg)
         self._msvc_version = msvc_version
         self._sdk_version = sdk_version
         self._target_cpu = target_cpu
@@ -146,7 +147,7 @@ class MsvcUp:
         cpu = self._TARGET_CPU_MAP.get(arch)
         if cpu is None:
             msg = f"Unsupported host architecture for msvcup: {arch}"
-            raise RuntimeError(msg)
+            raise PconsRuntimeError(msg)
         return cpu
 
     def _resolve_host_arch(self) -> str:
@@ -155,7 +156,7 @@ class MsvcUp:
         host_arch = self._HOST_ARCH_MAP.get(arch)
         if host_arch is None:
             msg = f"No msvcup binary available for architecture: {arch}"
-            raise RuntimeError(msg)
+            raise PconsRuntimeError(msg)
         return host_arch
 
     # -- Bootstrap ------------------------------------------------------------
@@ -199,7 +200,7 @@ class MsvcUp:
                     break
             else:
                 msg = f"msvcup.exe not found in {zip_path}"
-                raise FileNotFoundError(msg)
+                raise PconsFileNotFoundError(msg)
 
         logger.info("Installed msvcup to %s", msvcup_exe)
         return msvcup_exe
@@ -221,7 +222,7 @@ class MsvcUp:
                 "Add an entry to _RELEASE_SHA256 in msvcup.py -- see the "
                 "comment above that dict for how to get the hash."
             )
-            raise RuntimeError(msg)
+            raise PconsRuntimeError(msg)
 
         digest = hashlib.sha256()
         with open(zip_path, "rb") as f:
@@ -238,7 +239,7 @@ class MsvcUp:
                 "corrupted download or a tampered/compromised source -- "
                 "refusing to execute it."
             )
-            raise RuntimeError(msg)
+            raise PconsRuntimeError(msg)
 
     # -- Install + autoenv ----------------------------------------------------
 

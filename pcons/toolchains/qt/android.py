@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.builder import anchor_target_paths
+from pcons.core.errors import PconsValueError
 from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.android import newest_build_tools
 from pcons.toolchains.presets import CrossPreset
@@ -180,18 +181,18 @@ def _android_preset(env: Environment, *, what: str = "androiddeployqt") -> Cross
     """
     cross = env.cross
     if cross is None or getattr(cross, "ndk", None) is None:
-        raise ValueError(
+        raise PconsValueError(
             f"{what} needs an environment retargeted with an Android "
             f"preset: env.apply_cross_preset(android(ndk=..., api=...))."
         )
     if cross.sdk is None:
-        raise ValueError(
+        raise PconsValueError(
             f"{what} needs the Android SDK and preset "
             f"'{cross.name}' has none. Pass it where the NDK is passed: "
             f"android(ndk=..., api=..., sdk=...)."
         )
     if cross.arch not in _SYSROOT_DIR:
-        raise ValueError(
+        raise PconsValueError(
             f"No NDK sysroot directory known for Android ABI "
             f"'{cross.arch}'. Supported: {', '.join(_SYSROOT_DIR)}."
         )
@@ -319,7 +320,9 @@ def _build_tools_revision(env: Environment, given: str | None) -> str:
     try:
         return newest_build_tools(sdk).name
     except ValueError as exc:
-        raise ValueError(f"{exc} Or name one with build_tools=<revision>.") from exc
+        raise PconsValueError(
+            f"{exc} Or name one with build_tools=<revision>."
+        ) from exc
 
 
 class _SettingsFile(BaseGenerator):

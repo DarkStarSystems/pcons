@@ -100,6 +100,10 @@ class PackageDescription:
         components: Named components of this package.
         prefix: Installation prefix (root directory of the package).
         found_by: How the package was found (e.g., "pkg-config", "system").
+        languages: The languages its libraries are built from and its
+            compile flags are for (``["cxx"]``, ``["fortran"]``). Empty, the
+            default, means the C family. A link that pulls in a C++ library
+            then needs the C++ runtime, as for a C++ library built here.
 
     Example:
         # Create a package description
@@ -138,6 +142,7 @@ class PackageDescription:
     components: dict[str, ComponentDescription] = field(default_factory=dict)
     prefix: str = ""
     found_by: str = ""
+    languages: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for TOML serialization."""
@@ -156,6 +161,8 @@ class PackageDescription:
             pkg["found_by"] = self.found_by
         if self.dependencies:
             pkg["dependencies"] = self.dependencies
+        if self.languages:
+            pkg["languages"] = self.languages
 
         # Paths section
         paths: dict[str, Any] = {}
@@ -236,6 +243,7 @@ class PackageDescription:
             prefix=package.get("prefix", ""),
             found_by=package.get("found_by", ""),
             dependencies=package.get("dependencies", []),
+            languages=package.get("languages", []),
             include_dirs=paths.get("include_dirs", []),
             system_include_dirs=paths.get("system_include_dirs", []),
             library_dirs=paths.get("library_dirs", []),
@@ -362,4 +370,5 @@ class PackageDescription:
             frameworks=self.frameworks,  # Components don't have frameworks
             framework_dirs=self.framework_dirs,  # Components don't have framework dirs
             components=self.components,
+            languages=self.languages,
         )

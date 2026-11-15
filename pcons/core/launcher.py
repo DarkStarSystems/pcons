@@ -18,6 +18,8 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsValueError
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -57,7 +59,7 @@ def env_vars_launcher(variables: Mapping[str, str]) -> list[str]:
     assignments: list[str] = []
     for name, value in variables.items():
         if not name or "=" in name:
-            raise ValueError(f"Invalid environment variable name: {name!r}")
+            raise PconsValueError(f"Invalid environment variable name: {name!r}")
         assignments.append(f"{name}={value}")
     if os.name == "nt":
         python = sys.executable.replace("\\", "/")

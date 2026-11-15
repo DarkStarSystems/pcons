@@ -10,14 +10,53 @@ command name and any extra keys).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import Platform, get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
-from pcons.core.subst import NodeVar, SourcePath, TargetPath
+from pcons.core.errors import PconsValueError
+from pcons.core.subst import ColorFlag, NodeVar, SourcePath, TargetPath
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pcons.core.builder import Builder
+
+
+# Flags whose argument is a directory path, in either form ("-Ifoo" or
+# "-I foo"), on a GNU-style compiler's and linker's command lines.
+# Generators rewrite these so generated build files stay relocatable.
+# Deliberately excludes -include/-imacros: their argument is a header *name*
+# resolved through the include path (Qt's mkspecs pass "-include
+# arm_acle.h"), and rewriting it as a path breaks the build.
+GNU_COMPILE_PATH_FLAGS: frozenset[str] = frozenset(
+    [
+        "-I",
+        "-F",
+        "-isystem",
+        "-iquote",
+        "-idirafter",
+        "-iframework",
+        "-isysroot",
+        "--sysroot",
+    ]
+)
+GNU_LINK_PATH_FLAGS: frozenset[str] = frozenset(["-L", "-F", "-isysroot", "--sysroot"])
+
+# Colored diagnostics, as GCC, gfortran and flang take them. They go before
+# the flags, so a -fdiagnostics-color=never there wins.
+GNU_COLOR_FLAGS: tuple[str, ...] = ("-fdiagnostics-color=always",)
+
+
+def clang_color_flags() -> tuple[str, ...]:
+    """Colored diagnostics for clang, in the form clang-cl also takes.
+
+    On Windows clang colors through the console API, which a pipe ignores,
+    unless told to write ANSI escapes instead.
+    """
+    if get_platform().is_windows:
+        return ("-fcolor-diagnostics", "-fansi-escape-codes")
+    return ("-fcolor-diagnostics",)
 
 
 def gnu_compile_vars(
@@ -25,6 +64,7 @@ def gnu_compile_vars(
     ns: str,
     *,
     target_tokens: list[str] | None = None,
+    color_flags: Sequence[str] = GNU_COLOR_FLAGS,
     extra_vars: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Default vars for a GNU-style compile tool (gcc/g++/clang/clang++).
@@ -34,6 +74,7 @@ def gnu_compile_vars(
         ns: Tool namespace ("cc" or "cxx"), used to build the $ns.* references.
         target_tokens: Extra tokens inserted right after the command, before
             flags (e.g. ["--target=wasm32-wasi", "$cc.sysroot_flag"] for WASI).
+        color_flags: What makes the compiler color its diagnostics.
         extra_vars: Additional default vars merged into the result (e.g. WASI's
             "sysroot_flag" placeholder).
     """
@@ -42,6 +83,7 @@ def gnu_compile_vars(
         objcmd.extend(target_tokens)
     objcmd.extend(
         [
+            f"${ns}.colorflags",
             f"${ns}.flags",
             f"${{prefix({ns}.iprefix, {ns}.includes)}}",
             f"${{prefix({ns}.isysprefix, {ns}.system_includes)}}",
@@ -55,6 +97,7 @@ def gnu_compile_vars(
     )
     result: dict[str, object] = {
         "cmd": cmd,
+        "colorflags": [ColorFlag(flag) for flag in color_flags],
         "flags": [],
         "iprefix": "-I",
         "includes": [],
@@ -78,26 +121,64 @@ def _link_tail() -> list[object]:
         "-o",
         TargetPath(),
         SourcePath(),
-        # Archives that link each other in a cycle, grouped; see
-        # UnixToolchain.link_group_tokens. Empty on every other edge.
-        NodeVar("LINK_GROUPS"),
+        # Archives the linker wants other than as plain inputs: grouped for a
+        # cycle, or linked whole; see CompileLinkFactory._arranged_archives.
+        # Empty on every other edge.
+        NodeVar("LINK_ARCHIVES"),
         "${prefix(link.Lprefix, link.libdirs)}",
         "${prefix(link.lprefix, link.libs)}",
         "${prefix(link.Fprefix, link.frameworkdirs)}",
-        "${pairwise(link.fprefix, link.frameworks)}",
+        "${prefix(link.fprefix, link.frameworks)}",
     ]
 
 
-def shared_library_flag(platform: Platform) -> str:
-    """The driver flag that links a shared library for *platform*."""
-    return "-dynamiclib" if platform.is_apple else "-shared"
+#: Systems whose shared libraries need position-independent code.
+_PIC_SYSTEMS = frozenset({"linux", "android", "freebsd", "openbsd", "netbsd"})
+
+
+def needs_pic(target_type: str, platform: Platform, pic: bool | None = None) -> bool:
+    """Whether *target_type* compiles as position-independent code for
+    *platform*. On Linux, Android and the BSDs a shared library must, and a
+    static or object library does too unless *pic* is False, so it can go
+    into one, as Meson builds them. 64-bit macOS code is PIC already,
+    Windows DLLs don't use it, and bare-metal targets have no loader."""
+    if platform.os not in _PIC_SYSTEMS:
+        return False
+    if target_type == "shared_library":
+        return True
+    return target_type in ("static_library", "object") and pic is not False
+
+
+def require_cross_binaries(
+    preset: Any, compiler: str, tools: Sequence[str], example: str, instead: str
+) -> None:
+    """Raise if *preset* targets a triple but repoints none of *tools*.
+
+    GCC-family compilers (*compiler*) reject --target= and select targets
+    by binary, so without cross-compiler commands the build would silently
+    target the host. *example* is a tool_cmds entry, with ``{triple}`` in
+    it; *instead* the toolchain that retargets by flag. A wasm triple is
+    let through, for UnixToolchain's "use the dedicated toolchain" error.
+    """
+    triple = str(getattr(preset, "triple", None) or "")
+    if not triple or triple.startswith("wasm32"):
+        return
+    resolve = getattr(preset, "resolved_tool_cmds", None)
+    cmds = resolve() if resolve is not None else {}
+    if any(tool in cmds for tool in tools):
+        return
+    name = getattr(preset, "name", preset)
+    raise PconsValueError(
+        f"Cross preset '{name}' targets triple '{triple}', but {compiler} "
+        f"selects targets by binary, not by flag. Provide cross-compiler "
+        f"commands in the preset's tool_cmds (e.g. "
+        f"{example.format(triple=triple)}), or use {instead}, which "
+        f"retargets via --target."
+    )
 
 
 def gnu_link_vars(cmd: str) -> dict[str, object]:
     """Default vars for a GNU-style link tool (gcc/clang/gfortran).
-
-    ``sharedflag`` is the host's; a cross preset that names its target
-    platform sets it for that platform (UnixToolchain.apply_cross_preset).
 
     Args:
         cmd: Default linker command (e.g. "gcc", "clang", "gfortran").
@@ -105,15 +186,19 @@ def gnu_link_vars(cmd: str) -> dict[str, object]:
     return {
         "cmd": cmd,
         "flags": [],
-        "sharedflag": shared_library_flag(get_platform()),
+        # Every GNU-style driver takes -shared, for Mach-O too (flang
+        # takes nothing else).
+        "sharedflag": "-shared",
         "lprefix": "-l",
         "libs": [],
         "Lprefix": "-L",
         "libdirs": [],
-        # Framework support (macOS only, but always defined for portability)
-        "Fprefix": "-F",
+        # Framework support (macOS only, but always defined for portability).
+        # Passed to the linker with -Wl, which every GNU-style driver
+        # takes: flang's takes neither -framework nor -F itself.
+        "Fprefix": "-Wl,-F",
         "frameworkdirs": [],
-        "fprefix": "-framework",
+        "fprefix": "-Wl,-framework,",
         "frameworks": [],
         "progcmd": ["$link.cmd", "$link.flags", *_link_tail()],
         "sharedcmd": ["$link.cmd", "$link.sharedflag", "$link.flags", *_link_tail()],
@@ -162,11 +247,14 @@ def gnu_archiver_vars(cmd: str) -> dict[str, object]:
     Args:
         cmd: Default archiver command.
     """
-    return {
-        "cmd": cmd,
-        "flags": ["rcs"],
-        "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
-    }
+    libcmd: list[object] = ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()]
+    if not get_platform().is_windows:
+        # Written afresh from all its objects: ar would update the old archive
+        # in place, keeping members whose sources are gone, and fails
+        # outright on a macOS universal (fat) archive. Windows has no rm, and
+        # no fat archives.
+        libcmd = ["rm", "-f", TargetPath(), "&&", *libcmd]
+    return {"cmd": cmd, "flags": ["rcs"], "libcmd": libcmd}
 
 
 def gnu_archiver_builders(

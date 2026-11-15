@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
+from pcons.core.errors import PconsValueError
 from pcons.core.preset import Preset, ToolContribution
-from pcons.tools.toolchain import BaseToolchain
+from pcons.core.subst import TargetPath
+from pcons.tools.toolchain import BaseToolchain, LinkNeeds, declares_import_library
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -15,9 +18,25 @@ if TYPE_CHECKING:
     from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
     from pcons.core.flags import FlagToken
+    from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.toolchains.build_context import CompileLinkContext
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
+
+
+def msvc_crt(linkage: str, variant: str) -> str:
+    """The C runtime every compiler in an MSVC-ABI program links, as
+    clang's ``-fms-runtime-lib`` names it: the DLL one ("dll"), or with
+    static runtime linkage the static one ("static"), in its debug build
+    ("dll_dbg", "static_dbg") under the debug variant.
+
+    The DLL one is the default because it's what CMake and Conan
+    (``compiler.runtime=dynamic``) build with, so packages match; the
+    compilers' own default is the static one. Every compiler realizes this
+    one choice, since objects built for different runtimes don't link.
+    """
+    crt = "static" if linkage == "static" else "dll"
+    return f"{crt}_dbg" if variant.lower() == "debug" else crt
 
 
 class MsvcCompatibleToolchain(BaseToolchain):
@@ -50,8 +69,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
             "compile_flags": ["/GS", "/guard:cf"],
             "link_flags": ["/DYNAMICBASE", "/NXCOMPAT", "/guard:cf"],
         },
-        # The compiled objects carry the OpenMP runtime as a /DEFAULTLIB
-        # directive (vcomp for MSVC, libomp for clang-cl), so no link flags.
+        # MSVC's objects carry the OpenMP runtime as a /DEFAULTLIB directive
+        # (vcomp), so no link flags; clang-cl's link needs add its libomp.
         "openmp": {
             "compile_flags": ["/openmp"],
         },
@@ -84,6 +103,11 @@ class MsvcCompatibleToolchain(BaseToolchain):
             "/link",
         ]
     )
+
+    @property
+    def abi(self) -> str | None:
+        """MSVC's, which clang-cl, flang and ifx share on Windows."""
+        return "msvc"
 
     def compile_link_context_class(self) -> type[CompileLinkContext]:
         """MSVC and clang-cl both use MSVC-style command formatting.
@@ -129,33 +153,68 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """
         return str(PurePosixPath(shared_library_name).with_suffix(".lib"))
 
+    def whole_archive_tokens(
+        self, archive: PathToken, env: Environment | None = None
+    ) -> list[FlagToken] | None:
+        """link.exe names the archive as an input and again in its option."""
+        return [archive, replace(archive, prefix="/WHOLEARCHIVE:")]
+
+    def realize_link_needs(
+        self,
+        needs: LinkNeeds,
+        target: Target,
+        existing_flags: Sequence[FlagToken],
+        driver: str | None = None,
+    ) -> list[FlagToken]:
+        """Objects as they are, and ``/SUBSYSTEM:CONSOLE`` for a console
+        entry point the objects don't define (ifx's ``main`` is in its
+        runtime, so link.exe can't infer one), unless the project chose a
+        subsystem: a C++ ``WinMain`` program sets ``/SUBSYSTEM:WINDOWS``.
+        Windows has no rpaths or frameworks. Default libraries the objects
+        mustn't bring are ``/NODEFAULTLIB:``."""
+        if needs.rpaths or needs.frameworks:
+            raise PconsValueError(
+                f"Target '{target.name}': {self.name} links for Windows, which "
+                f"has no rpaths or frameworks, but its objects need {needs}."
+            )
+        flags: list[FlagToken] = [
+            *needs.objects,
+            *self._sanitizer_link_args(needs.sanitizers, target),
+        ]
+        if needs.console and not any(
+            isinstance(f, str) and f.upper().startswith("/SUBSYSTEM:")
+            for f in existing_flags
+        ):
+            flags.append("/SUBSYSTEM:CONSOLE")
+        flags += [f"/NODEFAULTLIB:{lib}" for lib in needs.excluded_default_libs]
+        return flags
+
+    def _sanitizer_link_args(
+        self, sanitizers: Sequence[str], target: Target
+    ) -> list[FlagToken]:
+        """link.exe's own AddressSanitizer runtime, for objects that don't
+        name it (ifx's). cl's name it themselves."""
+        return ["/INFERASANLIBS"] if "address" in sanitizers else []
+
     def get_link_flags_for_target(
         self,
         target: Target,
         output_name: str,
         existing_flags: Sequence[FlagToken],
     ) -> list[FlagToken]:
-        """A module-definition file for ``exported_symbols``.
-
-        MSVC exports by exact name, so a ``*`` pattern can't be honored and
-        is refused rather than silently exporting nothing.
-        """
-        symbols = (
-            target.get_option("exported_symbols")
-            if hasattr(target, "get_option")
-            else None
-        )
-        if not symbols or target.target_type not in ("shared_library", "program"):
+        """The import library a DLL declares, and a module-definition file
+        for ``exported_symbols``."""
+        if target.target_type not in ("shared_library", "program"):
             return []
-        patterns = [s for s in symbols if "*" in s or "?" in s]
-        if patterns:
-            raise ValueError(
-                f"Target '{target.name}': MSVC exports symbols by exact name, "
-                f"so the pattern {patterns[0]!r} in exported_symbols can't be "
-                f"honored. List the names."
-            )
-        text = "EXPORTS\n" + "".join(f"    {s}\n" for s in symbols)
-        return [self._link_input_token(target, ".def", text, "/DEF:")]
+        flags: list[FlagToken] = []
+        if target.target_type == "shared_library" and declares_import_library(target):
+            # Where get_import_library_name says (the link's second output)
+            flags.append(TargetPath(prefix="/IMPLIB:", index=1))
+        symbols = target.get_option("exported_symbols")
+        if symbols:
+            text = module_definition(target, symbols)
+            flags.append(self._link_input_token(target, ".def", text, "/DEF:"))
+        return flags
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
         """Return handler for .def (module definition) and .manifest files."""
@@ -182,7 +241,11 @@ class MsvcCompatibleToolchain(BaseToolchain):
         return "lib"
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """Return additional compile flags for target type.
 
@@ -191,48 +254,62 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """
         return []
 
-    # Flags whose argument is a path. MSVC spells them joined ("/Ifoo"), but
+    # Flags whose argument is a path. MSVC writes them joined ("/Ifoo"), but
     # the separate form is accepted too, so generators handle both.
-    PATH_FLAGS: frozenset[str] = frozenset(
+    COMPILE_PATH_FLAGS: ClassVar[frozenset[str]] = frozenset(
         [
             "/I",
-            "/LIBPATH:",
             "/external:I",
-            "-imsvc",  # clang-cl's spelling of /external:I
-            # Auxiliary linker inputs (get_auxiliary_input_handler): their
-            # $file is a node path, which for a source-tree .manifest or
-            # .def needs the same execution-relative rewrite as any other
-            # path-carrying flag.
-            "/MANIFESTINPUT:",
-            "/DEF:",
+            "-imsvc",  # clang-cl's form of /external:I
         ]
+    )
+    # Auxiliary linker inputs (get_auxiliary_input_handler) are node paths,
+    # which for a source-tree .manifest or .def need the same rewrite.
+    LINK_PATH_FLAGS: ClassVar[frozenset[str]] = frozenset(
+        ["/LIBPATH:", "/MANIFESTINPUT:", "/DEF:"]
     )
 
     def get_separated_arg_flags(self) -> frozenset[str]:
         """Return flags that take their argument as a separate token."""
         return self.SEPARATED_ARG_FLAGS
 
-    def get_path_flags(self) -> frozenset[str]:
-        """Return flags whose argument is a path."""
-        return self.PATH_FLAGS
-
-    # Variant flags per build type (compile_flags, defines). Every variant
-    # picks the dynamic CRT, debug or release to match its defines: cl.exe's
-    # default is the static release CRT, which with _DEBUG defined pairs
-    # with the debug STL and fails to link. Dynamic is also what CMake and
-    # Conan (compiler.runtime=dynamic) build with, so packages match.
+    # Variant flags per build type (compile_flags, defines). The C runtime
+    # is the runtime linkage's (msvc_crt), in its debug build under debug.
     # Debug info is /Z7, in the object itself: /Zi has every parallel
     # cl.exe write one shared PDB, which fails (C1041) without /FS or a
     # per-target /Fd. The linker's /DEBUG still produces the final PDB.
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
-        "debug": (["/Od", "/Z7", "/MDd"], ["DEBUG", "_DEBUG"]),
-        "release": (["/O2", "/MD"], ["NDEBUG"]),
+        "debug": (["/Od", "/Z7"], ["DEBUG", "_DEBUG"]),
+        "release": (["/O2"], ["NDEBUG"]),
         # /O2 is already "maximize speed"; /Ob3 (VS 2019+) adds the more
         # aggressive inlining it leaves out. Nothing that changes results.
-        "release-fastest": (["/O2", "/Ob3", "/MD"], ["NDEBUG"]),
-        "relwithdebinfo": (["/O2", "/Z7", "/MD"], ["NDEBUG"]),
-        "minsizerel": (["/O1", "/MD"], ["NDEBUG"]),
+        "release-fastest": (["/O2", "/Ob3"], ["NDEBUG"]),
+        "relwithdebinfo": (["/O2", "/Z7"], ["NDEBUG"]),
+        "minsizerel": (["/O1"], ["NDEBUG"]),
     }
+
+    # The flag selecting each C runtime (msvc_crt).
+    MSVC_CRT_FLAGS: ClassVar[dict[str, str]] = {
+        "dll": "/MD",
+        "dll_dbg": "/MDd",
+        "static": "/MT",
+        "static_dbg": "/MTd",
+    }
+
+    def _cxx_exception_flags(self, mode: str) -> tuple[str, ...]:
+        """cl.exe compiles C++ without unwinding unless told: ``/EHsc`` is
+        standard C++ exceptions, as CMake and Visual Studio projects have
+        it, and ``/EHa`` also catches structured exceptions."""
+        return {"standard": ("/EHsc",), "none": (), "async": ("/EHa",)}[mode]
+
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """Standard C++ exceptions, which env.cxx.set_exceptions() replaces."""
+        presets = super().setup_presets(env)
+        if "cxx" in self.tools:
+            preset = self.make_cxx_exceptions_preset("standard")
+            if preset is not None:
+                presets.append(preset)
+        return presets
 
     def _cxx_standard_flag(self, standard: int) -> str:
         # MSVC switches are /std:c++14, c++17, c++20, and c++latest — there is
@@ -243,11 +320,11 @@ class MsvcCompatibleToolchain(BaseToolchain):
             return "/std:c++14"
         return f"/std:c++{standard}"
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+    def make_target_preset(self, cross: Any) -> Preset:
         """Raise: these toolchains target only Windows; CPU selection is
         set_target_arch's job."""
-        name = getattr(preset, "name", preset)
-        raise ValueError(
+        name = getattr(cross, "name", cross)
+        raise PconsValueError(
             f"Cross preset '{name}' does not apply to the {self.name} toolchain: "
             f"it targets only Windows. To select the CPU, use "
             f'env.set_target_arch(...) (e.g. "arm64") instead.'
@@ -262,43 +339,50 @@ class MsvcCompatibleToolchain(BaseToolchain):
             ToolContribution("lib", flags=(flag,)),
         ]
 
-    def setup_presets(self, env: Environment) -> list[Preset]:
-        """The dynamic CRT (/MD) from the start, as the ``default`` variant.
-
-        cl.exe's own default is the static release CRT, which the debug STL
-        cannot link and Conan packages are not built against. It sits in
-        the variant's exclusive group, so ``set_variant()`` replaces it with
-        the variant's own CRT flag the way any knob does, and ``explain()``
-        attributes it by name.
-        """
-        crt = Preset(
-            name="default",
-            category="variant",
-            exclusive_group="build_variant",
-            contributions=tuple(
-                ToolContribution(tool, flags=("/MD",))
-                for tool in ("cc", "cxx")
-                if env.has_tool(tool)
-            ),
-        )
-        return [*super().setup_presets(env), crt]
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """The C runtime's flag on each compile tool. Each object names its
+        runtime, so the link needs nothing."""
+        flag = self.MSVC_CRT_FLAGS[msvc_crt(linkage, variant)]
+        return [
+            ToolContribution(tool, flags=(flag,))
+            for tool in self._feature_preset_tools()
+        ]
 
     def _variant_contributions(
         self, variant: str, **kwargs: Any
     ) -> list[ToolContribution]:
         spec = self.MSVC_VARIANTS.get(variant.lower())
         if spec is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"Unknown variant '{variant}'. "
-                f"Supported variants: debug, release, release-fastest, "
-                f"relwithdebinfo, minsizerel."
+                f"Supported variants: {', '.join(self.MSVC_VARIANTS)}."
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
+        # Realized on the same compile tools as feature presets, so an
+        # MSVC-style Fortran compiler (ifx's fc) gets working variants too.
         contribs = [
-            ToolContribution("cc", flags=tuple(flags), defines=tuple(defines)),
-            ToolContribution("cxx", flags=tuple(flags), defines=tuple(defines)),
+            ToolContribution(tool, flags=tuple(flags), defines=tuple(defines))
+            for tool in self._feature_preset_tools()
         ]
         if "/Z7" in flags:
             contribs.append(ToolContribution("link", flags=("/DEBUG",)))
         return contribs
+
+
+def module_definition(target: Target, symbols: Sequence[str]) -> str:
+    """The ``.def`` file text exporting *symbols*, for an MSVC-ABI link.
+
+    MSVC exports by exact name, so a ``*`` pattern can't be honored and
+    is refused rather than silently exporting nothing.
+    """
+    patterns = [s for s in symbols if "*" in s or "?" in s]
+    if patterns:
+        raise PconsValueError(
+            f"Target '{target.name}': MSVC exports symbols by exact name, "
+            f"so the pattern {patterns[0]!r} in exported_symbols can't be "
+            f"honored. List the names."
+        )
+    return "EXPORTS\n" + "".join(f"    {s}\n" for s in symbols)

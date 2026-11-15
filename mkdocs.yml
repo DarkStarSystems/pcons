@@ -32,6 +32,7 @@ nav:
   - Guides:
       - All Pcons Examples: examples.md
       - Testing: testing.md
+      - Fortran: fortran.md
       - Qt: qt.md
       - Presets: presets.md
       - Discovered dependencies (scanners): scanners.md

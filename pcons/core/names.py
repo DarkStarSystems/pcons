@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from pcons.core.errors import PconsValueError
+
 _INVALID_NAME_RE = re.compile(r"[^\w./+-]")
 
 
@@ -22,11 +24,11 @@ def validate_name(kind: str, name: str) -> None:
         name: The candidate name.
     """
     if not name:
-        raise ValueError(f"{kind} name must not be empty.")
+        raise PconsValueError(f"{kind} name must not be empty.")
     bad = _INVALID_NAME_RE.findall(name)
     if bad:
         chars = "".join(sorted(set(bad)))
-        raise ValueError(
+        raise PconsValueError(
             f"{kind} name {name!r} contains invalid characters: {chars!r}. "
             f"{kind} names may contain letters, digits, underscores, dots, "
             f"plus signs, hyphens, and forward slashes."

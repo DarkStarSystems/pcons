@@ -14,6 +14,7 @@ import pytest
 
 from pcons.core.environment import Environment
 from pcons.toolchains.presets import (
+    AndroidStl,
     CrossPreset,
     android,
     emscripten,
@@ -22,10 +23,11 @@ from pcons.toolchains.presets import (
     pyodide,
     target_platform_for_triple,
 )
+from tests.support import apply_cross_preset, apply_target_arch, apply_variant
 
 
 def _make_unix_env() -> Environment:
-    """Create an environment with cc, cxx, and link tools."""
+    """Create an environment with cc, cxx, ar, and link tools."""
     env = Environment()
     cc = env.add_tool("cc")
     cc.set("cmd", "clang")
@@ -36,6 +38,8 @@ def _make_unix_env() -> Environment:
     cxx.set("cmd", "clang++")
     cxx.set("flags", [])
     cxx.set("defines", [])
+
+    env.add_tool("ar").set("cmd", "ar")
 
     link = env.add_tool("link")
     link.set("cmd", "clang")
@@ -288,7 +292,7 @@ class TestPyodidePreset:
 
         env = _make_unix_env()
         toolchain = EmscriptenToolchain()
-        toolchain.apply_cross_preset(env, pyodide())
+        apply_cross_preset(toolchain, env, pyodide())
 
         assert "-fPIC" in env.cc.flags
         assert "-fPIC" in env.cxx.flags
@@ -328,7 +332,7 @@ class TestCrossPresetApplication:
             arch="arm64",
             triple="aarch64-linux-gnu",
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "--target=aarch64-linux-gnu" in env.cc.flags
         assert "--target=aarch64-linux-gnu" in env.cxx.flags
@@ -346,7 +350,7 @@ class TestCrossPresetApplication:
             triple="aarch64-linux-gnu",
         )
         with pytest.raises(ValueError, match="selects targets by binary"):
-            toolchain.apply_cross_preset(env, preset)
+            apply_cross_preset(toolchain, env, preset)
 
     def test_gcc_accepts_triple_with_cross_binaries(self, test_project):  # noqa: F811
         """A triple plus CC/CXX overrides is binary-retargeted; no --target."""
@@ -361,11 +365,43 @@ class TestCrossPresetApplication:
             triple="aarch64-linux-gnu",
             env_vars={"CC": "aarch64-linux-gnu-gcc", "CXX": "aarch64-linux-gnu-g++"},
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert env.cc.cmd == "aarch64-linux-gnu-gcc"
         assert not any("--target=" in str(f) for f in env.cc.flags)
         assert not any("--target=" in str(f) for f in env.cxx.flags)
+
+    @pytest.mark.parametrize("given_ar", [None, "my-ar"])
+    def test_gcc_cross_preset_archives_with_its_gcc_ar(
+        self,
+        test_project,  # noqa: F811
+        monkeypatch,
+        tmp_path,
+        given_ar,
+    ):
+        """A preset naming cross drivers but no ar gets the drivers' gcc-ar."""
+        from pcons.toolchains.gcc import GccToolchain
+
+        monkeypatch.delenv("AR", raising=False)
+        gcc_ar = tmp_path / "aarch64-linux-gnu-gcc-ar-13"
+        gcc_ar.write_text("")
+        env = _make_unix_env()
+        tool_cmds = {"cc": str(tmp_path / "aarch64-linux-gnu-gcc-13")}
+        if given_ar:
+            tool_cmds["ar"] = given_ar
+
+        apply_cross_preset(
+            GccToolchain(),
+            env,
+            CrossPreset(
+                name="test",
+                arch="arm64",
+                triple="aarch64-linux-gnu",
+                tool_cmds=tool_cmds,
+            ),
+        )
+
+        assert env.ar.cmd == (given_ar or str(gcc_ar))
 
     def test_cross_preset_arch_is_metadata_only(self, test_project):  # noqa: F811
         """CrossPreset.arch never becomes a flag on any host; the triple
@@ -377,7 +413,7 @@ class TestCrossPresetApplication:
         preset = CrossPreset(
             name="test", arch="arm64-v8a", triple="aarch64-linux-android21"
         )
-        LlvmToolchain().apply_cross_preset(env, preset)
+        apply_cross_preset(LlvmToolchain(), env, preset)
 
         for tool in (env.cc, env.cxx, env.link):
             assert "-arch" not in tool.flags
@@ -395,7 +431,7 @@ class TestCrossPresetApplication:
             arch="arm64",
             triple="aarch64-linux-gnu",
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "--target=aarch64-linux-gnu" in env.link.flags
 
@@ -414,7 +450,7 @@ class TestCrossPresetApplication:
         env = _make_unix_env()
         toolchain = LlvmToolchain()
 
-        toolchain.apply_cross_preset(env, ios(arch="arm64"))
+        apply_cross_preset(toolchain, env, ios(arch="arm64"))
 
         for tool in (env.cc, env.cxx, env.link):
             flags = list(tool.flags)
@@ -438,7 +474,7 @@ class TestCrossPresetApplication:
         env = _make_unix_env()
         toolchain = LlvmToolchain()
 
-        toolchain.apply_cross_preset(env, ios(arch="arm64", sdk="/opt/ios-sdk"))
+        apply_cross_preset(toolchain, env, ios(arch="arm64", sdk="/opt/ios-sdk"))
 
         assert "--sysroot=/opt/ios-sdk" in env.cc.flags
         assert "-isysroot" not in env.cc.flags
@@ -451,7 +487,7 @@ class TestCrossPresetApplication:
         toolchain = LlvmToolchain()
 
         preset = CrossPreset(name="test", arch="arm64", triple="aarch64-linux-gnu")
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "-isysroot" not in env.cc.flags
 
@@ -467,7 +503,7 @@ class TestCrossPresetApplication:
             arch="arm64",
             sysroot="/opt/sysroot",
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "--sysroot=/opt/sysroot" in env.cc.flags
         assert "--sysroot=/opt/sysroot" in env.link.flags
@@ -485,7 +521,7 @@ class TestCrossPresetApplication:
             extra_compile_flags=("-DCUSTOM",),
             extra_link_flags=("-lcustom",),
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "-DCUSTOM" in env.cc.flags
         assert "-lcustom" in env.link.flags
@@ -502,7 +538,7 @@ class TestCrossPresetApplication:
             arch="arm64",
             env_vars={"CC": "/usr/bin/custom-gcc", "CXX": "/usr/bin/custom-g++"},
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert env.cc.cmd == "/usr/bin/custom-gcc"
         assert env.cxx.cmd == "/usr/bin/custom-g++"
@@ -514,7 +550,7 @@ class TestCrossPresetApplication:
 
         preset = CrossPreset(name="test", arch="arm64")
         with pytest.raises(ValueError, match="set_target_arch"):
-            toolchain.apply_cross_preset(env, preset)
+            apply_cross_preset(toolchain, env, preset)
 
     def _make_msvc_env(self) -> Environment:
         env = Environment()
@@ -529,8 +565,7 @@ class TestCrossPresetApplication:
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         return ConcreteMsvc("test-msvc")
 
@@ -539,7 +574,7 @@ class TestCrossPresetApplication:
         env = self._make_msvc_env()
         toolchain = self._concrete_msvc()
 
-        toolchain.apply_variant(env, "debug")
+        apply_variant(toolchain, env, "debug")
 
         assert "/Od" in env.cc.flags
         assert "/Z7" in env.cxx.flags
@@ -559,7 +594,7 @@ class TestCrossPresetApplication:
             extra_compile_flags=("-DWASM",),
             extra_link_flags=("-sUSE_PTHREADS",),
         )
-        toolchain.apply_cross_preset(env, preset)
+        apply_cross_preset(toolchain, env, preset)
 
         assert "-DWASM" in env.cc.flags
         assert "-DWASM" in env.cxx.flags
@@ -573,11 +608,11 @@ class TestCrossPresetApplication:
         env = _make_unix_env()
         toolchain = EmscriptenToolchain()
 
-        assert toolchain.apply_target_arch(env, "wasm32") is True
+        assert apply_target_arch(toolchain, env, "wasm32") is True
         assert env.target_arch == "wasm32"
 
         with pytest.raises(ValueError, match="wasm32 only"):
-            toolchain.apply_target_arch(env, "x86_64")
+            apply_target_arch(toolchain, env, "x86_64")
 
     def test_env_apply_cross_preset_delegates(self, test_project):  # noqa: F811
         """Environment.apply_cross_preset() should delegate to toolchains."""
@@ -619,7 +654,7 @@ class TestBinaryRetarget:
                 "ar": "/x/ar",
             },
         )
-        LlvmToolchain().apply_cross_preset(env, preset)
+        apply_cross_preset(LlvmToolchain(), env, preset)
 
         assert env.cc.cmd == "/x/cc"
         assert env.cxx.cmd == "/x/cxx"
@@ -636,7 +671,7 @@ class TestBinaryRetarget:
             triple="aarch64-linux-gnu",
             env_vars={"CC": "aarch64-linux-gnu-gcc", "CXX": "aarch64-linux-gnu-g++"},
         )
-        GccToolchain().apply_cross_preset(env, preset)
+        apply_cross_preset(GccToolchain(), env, preset)
 
         assert env.cc.cmd == "aarch64-linux-gnu-gcc"
         assert env.cxx.cmd == "aarch64-linux-gnu-g++"
@@ -662,7 +697,7 @@ class TestWasmPresetsNeedWasmToolchain:
 
         env = _make_unix_env()
         with pytest.raises(ValueError, match="dedicated toolchain"):
-            LlvmToolchain().apply_cross_preset(env, emscripten())
+            apply_cross_preset(LlvmToolchain(), env, emscripten())
 
     def test_wasi_preset_on_gcc_raises(self, test_project):  # noqa: F811
         from pcons.toolchains.gcc import GccToolchain
@@ -670,7 +705,7 @@ class TestWasmPresetsNeedWasmToolchain:
 
         env = _make_unix_env()
         with pytest.raises(ValueError, match="dedicated toolchain"):
-            GccToolchain().apply_cross_preset(env, wasi_sdk())
+            apply_cross_preset(GccToolchain(), env, wasi_sdk())
 
     def test_pyodide_on_emscripten_toolchain_ok(self, test_project):  # noqa: F811
         """Already covered above, but assert the positive path explicitly:
@@ -678,7 +713,7 @@ class TestWasmPresetsNeedWasmToolchain:
         from pcons.toolchains.emscripten import EmscriptenToolchain
 
         env = _make_unix_env()
-        EmscriptenToolchain().apply_cross_preset(env, pyodide())
+        apply_cross_preset(EmscriptenToolchain(), env, pyodide())
         assert "-sSIDE_MODULE=1" in env.link.flags
 
 
@@ -832,6 +867,19 @@ class TestTriplesNameAPlatform:
         assert plat is not None
         assert plat.os == "linux"
         assert plat.shared_lib_suffix == ".so"
+
+    @pytest.mark.parametrize(
+        "triple", ["arm-none-eabi", "aarch64-none-elf", "riscv64-unknown-none-elf"]
+    )
+    def test_a_bare_metal_triple(self, triple: str) -> None:
+        plat = target_platform_for_triple(triple)
+        assert plat is not None
+        assert plat.os == "none"
+
+    def test_arms_linux_toolchain_is_linux(self) -> None:
+        plat = target_platform_for_triple("aarch64-none-linux-gnu")
+        assert plat is not None
+        assert plat.os == "linux"
 
     @pytest.mark.parametrize(
         "triple", ["wasm32-wasi", "wasm32-unknown-emscripten", "nonsense"]
@@ -1006,44 +1054,59 @@ class TestAndroidPresetAgainstARealNdk:
 
         assert Path(preset.resolved_tool_cmds()["cxx"]).is_file()
 
-    @pytest.mark.parametrize(
-        "stl,shared_runtime",
-        [("c++_shared", True), ("c++_static", False), ("none", False)],
-    )
     def test_the_stl_flags_produce_the_runtime_they_claim(
-        self, stl: str, shared_runtime: bool, android_ndk, tmp_path: Path
+        self, android_ndk, tmp_path: Path
     ) -> None:
-        """Link a shared library and read back what it depends on.
+        """Link a shared library with each STL and read back what it depends on.
 
-        The unit tests above pin the flag; this pins what the flag does,
-        so a future NDK changing its default fails here rather than in a
-        user's APK.
+        The unit tests above pin the flags; this pins what they do, so a
+        future NDK changing its default fails here rather than in a user's
+        APK. The STL changes only the link, so one object serves all three.
         """
-        preset = android(ndk=str(android_ndk), arch="arm64-v8a", api=21, stl=stl)  # type: ignore[arg-type]
+        expected: dict[AndroidStl, bool] = {
+            "c++_shared": True,
+            "c++_static": False,
+            "none": False,
+        }
+        tools = android(
+            ndk=str(android_ndk), arch="arm64-v8a", api=21
+        ).resolved_tool_cmds()
         source = tmp_path / "s.cpp"
         source.write_text("#include <string>\nstd::string f() { return {}; }\n")
-        out = tmp_path / "libs.so"
-
+        obj = tmp_path / "s.o"
         subprocess.run(
-            [
-                preset.resolved_tool_cmds()["cxx"],
-                "-shared",
-                "-fPIC",
-                str(source),
-                *preset.extra_link_flags,
-                "-o",
-                str(out),
-            ],
+            [tools["cxx"], "-c", "-fPIC", str(source), "-o", str(obj)],
             check=True,
             capture_output=True,
         )
-        ar = Path(preset.resolved_tool_cmds()["ar"])
+        ar = Path(tools["ar"])
         readelf = ar.with_name(f"llvm-readelf{ar.suffix}")
-        needed = subprocess.run(
-            [str(readelf), "-d", str(out)], capture_output=True, text=True, check=True
-        ).stdout
 
-        assert ("libc++_shared.so" in needed) is shared_runtime
+        links_shared_runtime: dict[AndroidStl, bool] = {}
+        for n, stl in enumerate(expected):
+            preset = android(ndk=str(android_ndk), arch="arm64-v8a", api=21, stl=stl)
+            out = tmp_path / f"lib{n}.so"
+            subprocess.run(
+                [
+                    tools["cxx"],
+                    "-shared",
+                    str(obj),
+                    *preset.extra_link_flags,
+                    "-o",
+                    str(out),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            needed = subprocess.run(
+                [str(readelf), "-d", str(out)],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            links_shared_runtime[stl] = "libc++_shared.so" in needed
+
+        assert links_shared_runtime == expected
 
 
 _MINGW = CrossPreset(

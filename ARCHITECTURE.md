@@ -34,7 +34,7 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | LLVM/Clang toolchain | Implemented | Auto-detection, C/C++ |
 | MSVC toolchain | Implemented | Auto-detection, C/C++ |
 | Clang-cl toolchain | Implemented | Clang with MSVC compatibility |
-| GFortran toolchain | Implemented | GNU Fortran; Ninja dyndep for module deps |
+| Fortran toolchains | Implemented | gfortran, flang, ifx (Linux, macOS, Windows); Ninja dyndep for module deps |
 | **Generators** | | |
 | Ninja generator | Implemented | Primary, full support |
 | compile_commands.json | Implemented | For IDE integration |
@@ -111,21 +111,19 @@ pcons configure [options]
 This is slow and shouldn't run on every build description parse.
 
 ```python
-# pcons-configure.py - runs during configure phase
-from pcons import Configure
+from pcons import Project
+from pcons.configure.checks import ToolChecks
+from pcons.configure.config import Configure
 
-config = Configure()
+project = Project("demo")
+# Find a C++ toolchain: the registry's finders try each candidate
+env = project.Environment(toolchain=["gcc", "llvm", "msvc"])
 
-# Find a C++ toolchain
-cxx = config.find_toolchain("cxx", candidates=["gcc", "clang", "msvc"])
-
-# Probe features
-cxx.check_flag("-std=c++20")
-cxx.check_header("optional")
-cxx.check_define("__cpp_concepts")
-
-# Save configuration
-config.save()
+# Probe features; results are cached in the Configure
+checks = ToolChecks(Configure(build_dir=project.build_dir), env, "cxx")
+checks.check_flag("-std=c++20")
+checks.check_header("optional")
+checks.check_define("__cpp_concepts")
 ```
 
 ### Phase 2: Build Description
@@ -255,7 +253,6 @@ A directory source represents **the directory and all files within it** that are
 
 ```python
 # asset_dir as source - depends on all declared assets within
-assets = env.Glob("assets/*.png")  # Explicitly declared files
 packed = env.PackAssets("game.pak", asset_dir)
 # Rebuilds if any declared asset changes, not if random files appear
 ```
@@ -309,7 +306,7 @@ env.{tool_name}.{variable}
 # Examples:
 env.cc.flags        # C compiler flags
 env.cxx.flags       # C++ compiler flags
-env.fortran.flags   # Fortran compiler flags
+env.fc.flags        # Fortran compiler flags
 env.link.flags      # Linker flags
 env.ar.flags        # Archiver flags
 env.protoc.flags    # Protobuf compiler flags
@@ -376,10 +373,6 @@ A Tool knows how to perform a specific type of transformation. Tools are **names
 class Tool(Protocol):
     name: str  # e.g., 'cc', 'cxx', 'fortran', 'ar', 'link'
 
-    def configure(self, config: Configure) -> ToolConfig:
-        """Detect and configure this tool. Called during configure phase."""
-        ...
-
     def setup(self, env: Environment) -> None:
         """Initialize tool namespace in environment. Called when tool is added."""
         ...
@@ -399,7 +392,7 @@ The "Object builder" problem in SCons: multiple tools produce `.o` files (C, C++
 # Explicit tool selection
 c_obj = env.cc.Object("foo.o", "foo.c")  # C compiler
 cxx_obj = env.cxx.Object("bar.o", "bar.cpp")  # C++ compiler
-f_obj = env.fortran.Object("baz.o", "baz.f90")  # Fortran compiler
+f_obj = env.fc.Object("baz.o", "baz.f90")  # Fortran compiler
 cuda_obj = env.cuda.Object("qux.o", "qux.cu")  # CUDA compiler
 ```
 
@@ -412,7 +405,7 @@ env.object_builders = {
     ".c": env.cc,
     ".cpp": env.cxx,
     ".cxx": env.cxx,
-    ".f90": env.fortran,
+    ".f90": env.fc,
     ".cu": env.cuda,
 }
 
@@ -428,10 +421,6 @@ A Toolchain is a coordinated set of Tools that work together.
 class Toolchain:
     name: str
     tools: dict[str, Tool]  # name -> tool
-
-    def configure(self, config: Configure) -> bool:
-        """Configure all tools in this toolchain."""
-        ...
 
     def setup(self, env: Environment) -> None:
         """Add all tools to environment."""
@@ -450,13 +439,8 @@ class Toolchain:
 - No mixing GCC compiler with MSVC linker
 
 ```python
-# configure.py
-gcc = config.find_toolchain("gcc")
-llvm = config.find_toolchain("llvm")
-
-# pcons-build.py
-env_gcc = project.Environment(toolchain=gcc)
-env_llvm = project.Environment(toolchain=llvm)
+env_gcc = project.Environment(toolchain="gcc")
+env_llvm = project.Environment(toolchain="llvm")
 ```
 
 ### Builder Registry and Extensible Builders
@@ -599,21 +583,26 @@ exe = env.Program("myapp", [c_obj, cxx_obj])
 # Automatically: uses g++ to link, adds -lstdc++ if needed
 ```
 
-**Language strength ordering** (configurable per toolchain):
-```python
-# Higher = stronger, wins link-time tool selection
-# Default (BaseToolchain.DEFAULT_LANGUAGE_PRIORITY):
-language_strength = {
-    "c": 1,
-    "cxx": 2,
-    "cuda": 4,  # CUDA requires nvcc link step
-}
-# GfortranToolchain adds: 'fortran': 3
-# Keeping fortran out of the default prevents C/C++ toolchains from
-# accidentally claiming linker authority over Fortran objects.
-```
+**Language strength ordering** is one fixed order, whichever toolchain is
+primary (`LINK_LANGUAGES` in `pcons/tools/toolchain.py`): Swift, CUDA,
+Objective-C++, C++, Objective-C, C, Fortran, strongest first, as in Meson:
+a C or C++ driver takes the Fortran runtime as libraries, where a Fortran
+driver can't take a C compiler's sanitizer or coverage runtimes.
+`target.link_language` overrides it for one target.
 
-**Implementation:** `_setup_link_node()` collects actual object languages from `target.intermediate_nodes`, then uses the primary toolchain's `language_priority` to select the link language. Each toolchain's `get_runtime_libs()` / `get_runtime_libdirs()` methods inject any required runtime libraries for mixed-language builds.
+**Implementation:** the link edge collects the objects the link pulls in:
+the target's own and those of the static and object libraries it links,
+from any environment, plus the languages imported packages declare. The
+driver is the compiling toolchain's for the strongest language, when that
+toolchain's driver takes the link tool's command line (same `progcmd` and
+`sharedcmd` templates: every GNU-style driver does), else the link tool's
+own (`Toolchain.link_driver`). A driver that takes over gets its own flags
+for the variant and presets, computed from the environment's recorded
+intents (`Environment.flags_realized_by`). Each compiling toolchain then
+states what its objects need from that link as neutral `LinkNeeds`
+(runtime libraries and directories, rpaths, objects, a console entry
+point), and the linking toolchain writes them its own way
+(`realize_link_needs`).
 
 ### Target (Build Specification with Usage Requirements)
 > **Status: Implemented**
@@ -759,7 +748,7 @@ This makes build scripts declarative - the order of declarations doesn't matter.
 │  compute_effective_requirements()  ──► EffectiveRequirements            │
 │         │                              (includes, defines, flags, etc.)  │
 │         ▼                                                                │
-│  toolchain.create_build_context()  ──► ToolchainContext                 │
+│  linker.compile_link_context_class()  ──► ToolchainContext              │
 │         │                              (CompileLinkContext for C/C++)   │
 │         ▼                                                                │
 │  node._build_info["context"] = context                                  │
@@ -980,10 +969,14 @@ interchangeable:
 - **`PathToken`** — the flag says outright that it carries a path, and of what
   kind (`"project"`, `"build"`, `"absolute"`). Use this when constructing a
   flag in a toolchain: it is the only one that cannot be fooled.
-- **A recognized flag prefix** — `-I`, `-L`, `-isystem` and the rest of a
-  toolchain's `get_path_flags()`. The generator splits the prefix off and
+- **A recognized flag prefix** — `-I`, `-L`, `-isystem` and the rest of
+  `get_path_flags(tool)`, from the toolchain that owns the tool the command
+  runs (`env.toolchain_for(tool)`). The generator splits the prefix off and
   rewrites the remainder. This is what catches flags a *user* wrote as plain
-  strings.
+  strings. Each tool has its own: a link line is checked for `/LIBPATH:`,
+  never cl's `/I`, so link.exe's `/INCREMENTAL` reaches it as written. A
+  tool no toolchain has, a `Command`'s, has none: its strings are as
+  written, and its paths are `Path`s or nodes.
 - **The two-token spelling** — `-isystem` followed by its argument. Here the
   generator rewrites the next token only when it is *absolute*, because a
   relative one may not be a path at all and rewriting it would change its
@@ -1317,6 +1310,18 @@ def _variant_contributions(self, variant, **kwargs):
     ...
 ```
 
+**Several toolchains in one environment** (`add_toolchain()`). Each
+`set_*`/`apply_*` call is recorded as an `Intent` and realized by every
+toolchain through one path (`Environment._realize`); a toolchain added
+later realizes the recorded intents too, so call order doesn't matter.
+Each tool takes presets only from the toolchain that brought it
+(`apply_from`, `_tool_owners`), so no toolchain writes another's flags,
+and an exclusive group is replaced per toolchain (`Preset.realized_by`).
+A toolchain *takes part* in an intent when it owns one of its
+`_feature_preset_tools()`; one that takes part and has no realization is
+an error. The design
+and the decisions behind it are in `plans/plan-mixed-toolchain-intents.md`.
+
 **Provenance is derived, not recorded.** Because presets are data and `Environment.apply()` keeps the ordered list of applied presets, `env.explain()` / `env.cc.explain()` can replay that list and attribute every flag to its source — no per-flag bookkeeping. Tokens not produced by a preset (toolchain defaults or `env.cc.flags.append(...)`) are labelled `(manual)`:
 ```
 cxx.flags:
@@ -1425,8 +1430,12 @@ class MyBuilder:
 
 **Toolchains are plugins:**
 ```python
-@register_toolchain("my_toolchain")
-class MyToolchain(Toolchain): ...
+class MyToolchain(BaseToolchain): ...
+
+toolchain_registry.register(
+    MyToolchain, aliases=["my_toolchain"], check_command="mycc",
+    tool_classes=[MyCompiler, MyLinker], category="c",
+)
 ```
 
 **Scanners are declared, by toolchains or by build scripts alike:**
@@ -1489,13 +1498,12 @@ ofx.setup_env(env)
 
 **Contrib modules:** Generic helpers ship with pcons in `pcons.contrib`:
 - `pcons.contrib.bundle` - macOS bundle and flat bundle creation helpers
-- `pcons.contrib.platform` - Platform detection utilities
 
 ```python
-from pcons.contrib import bundle, platform
+from pcons.contrib import bundle
 
 plist = bundle.generate_info_plist("MyPlugin", "1.0.0")
-if platform.is_macos():
+if env.target.is_macos:
     bundle.create_macos_bundle(project, env, plugin, bundle_dir="...")
 ```
 
@@ -1641,7 +1649,10 @@ pcons/
 │   ├── llvm.py              # LLVM/Clang toolchain ............... [Implemented]
 │   ├── msvc.py              # MSVC toolchain ..................... [Implemented]
 │   ├── clang_cl.py          # Clang-cl toolchain ................. [Implemented]
+│   ├── fortran.py           # Shared Fortran toolchain base ...... [Implemented]
 │   ├── gfortran.py          # GNU Fortran toolchain .............. [Implemented]
+│   ├── flang.py             # LLVM Flang toolchain ............... [Implemented]
+│   ├── ifx.py               # Intel Fortran (Linux, Windows) ..... [Implemented]
 │   ├── fortran_scanner.py   # Fortran module dyndep scanner ...... [Implemented]
 │   └── unix.py              # Base Unix toolchain ................ [Implemented]
 ├── generators/
@@ -1716,7 +1727,7 @@ project.Default(app)
 
 1. **Configuration caching**: What format? JSON for readability, or pickle for speed? When to invalidate? (Probably: hash of configure.py + tool versions)
 
-2. **Variant builds**: Handled via `env.set_variant("debug")` which delegates to the toolchain's `apply_variant()` method. Each toolchain defines what variants mean for its tools. Environment cloning allows multiple variant builds in the same project.
+2. **Variant builds**: Handled via `env.set_variant("debug")` which asks each toolchain for its realization (`make_variant_preset()`). Each toolchain defines what variants mean for its tools. Environment cloning allows multiple variant builds in the same project.
 
 3. **Distributed builds**: distcc/icecream/sccache should "just work" by wrapping compiler commands. Do we need explicit support?
 

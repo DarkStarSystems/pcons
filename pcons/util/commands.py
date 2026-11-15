@@ -23,6 +23,8 @@ import sys
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from pcons.core.errors import PconsValueError
+
 
 def copy(src: str, dest: str, mode: int | None = None) -> None:
     """Copy a file or directory, creating parent directories as needed.
@@ -160,7 +162,7 @@ def copytree(
     dest_path = Path(dest)
 
     if not src_path.is_dir():
-        raise ValueError(f"Source is not a directory: {src}")
+        raise PconsValueError(f"Source is not a directory: {src}")
 
     entries = sorted(src_path.rglob("*"))
     current = {
@@ -354,7 +356,7 @@ def overlay(
     for source in sources:
         root = Path(source)
         if not root.is_dir():
-            raise ValueError(f"Overlay source is not a directory: {source}")
+            raise PconsValueError(f"Overlay source is not a directory: {source}")
         for directory, filenames in _overlay_walk(root, exclude):
             walked.append(directory)
             for name in filenames:

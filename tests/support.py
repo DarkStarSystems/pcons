@@ -6,9 +6,11 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from pcons.core.project import Project
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +18,14 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
 """What a Program's output is called, for a test asserting a build tool name."""
+
+TOOL_ENV_VARS = ("CC", "CXX", "FC", "AR", "SWIFTC", "CUDACXX", "RC")
+"""The conventional tool-selection variables, which pcons honors."""
+
+USER_TOOL_ENV = {var: os.environ[var] for var in TOOL_ENV_VARS if os.environ.get(var)}
+"""The tool choices pytest was started with (``FC=flang pytest ...``),
+captured at import, before conftest hides them from in-process tests.
+Example tests run pcons as a user would, so they hand these back."""
 
 
 def qt_runtime_env() -> dict[str, str]:
@@ -165,3 +175,49 @@ def object_of(project: Project, target: str, source: str) -> str:
     ]
     assert len(nodes) == 1, [node.path.name for node in nodes]
     return nodes[0].path.name
+
+
+def building_for(triple: str) -> AbstractContextManager[object]:
+    """Pin what every environment builds for, leaving the host alone.
+
+    Naming, import libraries and link groups read ``env.target``, and only
+    that, so this is a cross build as far as they can tell.
+    """
+    from unittest.mock import PropertyMock, patch
+
+    from pcons.core.environment import Environment
+    from pcons.toolchains.presets import target_platform_for_triple
+
+    return patch.object(
+        Environment,
+        "target",
+        new_callable=PropertyMock,
+        return_value=target_platform_for_triple(triple),
+    )
+
+
+def apply_variant(toolchain: Any, env: Any, variant: str, **kwargs: Any) -> None:
+    """Apply *toolchain*'s realization of *variant* to a hand-built *env*,
+    as the environment does for its own toolchains."""
+    env.apply_from(toolchain, toolchain.make_variant_preset(variant, **kwargs))
+
+
+def apply_target_arch(toolchain: Any, env: Any, arch: str) -> bool:
+    """Apply *toolchain*'s realization of *arch*; whether it had one."""
+    preset = toolchain.make_arch_preset(arch)
+    if preset is None:
+        return False
+    env.apply_from(toolchain, preset)
+    return True
+
+
+def apply_cross_preset(toolchain: Any, env: Any, cross: Any) -> None:
+    """Apply *toolchain*'s realization of cross target *cross*."""
+    env.apply_from(toolchain, toolchain.make_target_preset(cross))
+
+
+def apply_feature(toolchain: Any, env: Any, name: str) -> None:
+    """Apply *toolchain*'s realization of feature preset *name*."""
+    preset = toolchain.make_feature_preset(name, env.target)
+    assert preset is not None, name
+    env.apply_from(toolchain, preset)

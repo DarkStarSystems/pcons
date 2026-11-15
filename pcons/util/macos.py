@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsValueError
+
 if TYPE_CHECKING:
     from typing import Any
 
@@ -89,7 +91,7 @@ def get_dylib_install_name(path: Path | str) -> str:
     # /install/path/lib.dylib
     lines = output.split("\n")
     if len(lines) < 2:
-        raise ValueError(f"No install name found for {path}")
+        raise PconsValueError(f"No install name found for {path}")
 
     install_path = lines[-1].strip()
     return Path(install_path).name
@@ -217,7 +219,7 @@ def create_universal_binary(
             sources.append(inp.path)
 
     if not sources:
-        raise ValueError("create_universal_binary requires at least one input")
+        raise PconsValueError("create_universal_binary requires at least one input")
 
     # Command() needs an environment; lipo needs no toolchain settings,
     # so any (or a minimal) one will do.

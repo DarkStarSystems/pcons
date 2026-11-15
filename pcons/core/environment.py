@@ -7,16 +7,18 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import re
 from collections import UserList
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from difflib import get_close_matches
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias, cast
 
 from pcons.core.debug import trace, trace_value
+from pcons.core.errors import PconsRuntimeError, PconsTypeError, PconsValueError
 from pcons.core.names import validate_name
 from pcons.core.subst import Namespace, subst, to_shell_command
 from pcons.core.toolconfig import ToolConfig
@@ -30,7 +32,8 @@ if TYPE_CHECKING:
     from pcons.core._toolchain_names import KnownToolchain
     from pcons.core.explain import Explanation
     from pcons.core.node import FileNode
-    from pcons.core.preset import Preset, ToolContribution
+    from pcons.core.preset import Intent, Preset, ToolContribution
+    from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.tools import pybuilder
     from pcons.tools.toolchain import Toolchain
@@ -59,7 +62,7 @@ _SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
 
 
 #: One token of a list-form command, as written.
-CommandToken: TypeAlias = "str | Path | Target | FileNode"
+CommandToken: TypeAlias = "str | Path | PathToken | Target | FileNode"
 
 #: What ``env.Command(target=...)`` takes, one file or several.
 CommandTargets: TypeAlias = "str | Path | Sequence[str | Path]"
@@ -119,6 +122,37 @@ def _warn_if_source_reads_as_singular(
     )
 
 
+def _names(toolchains: Sequence[Any]) -> str:
+    """Toolchain names for a message: "gfortran", "flang and ifx"."""
+    names = [t.name for t in toolchains]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _unrealized(intent: Intent, missing: Sequence[Any]) -> ValueError:
+    """The error for *missing* toolchains, which take part in *intent* but
+    can't realize it."""
+    who, name = _names(missing), intent.name
+    if intent.kind == "arch":
+        return ValueError(
+            f"{who} can't build for target arch '{name}', so its sources would "
+            f"be built for the host. Build them in an environment of their "
+            f"own, or use a cross preset (see docs/presets.md)."
+        )
+    if intent.kind == "runtime":
+        return ValueError(
+            f"{who} can't link its runtime {name}, and "
+            f"set_runtime_linkage({name!r}) applies to every compiler in the "
+            f"environment."
+        )
+    return ValueError(
+        f"Preset '{name}' isn't available with {who}, so it can't apply to the "
+        f"whole environment. Compile the sources it can't take in a clone of "
+        f"the environment made before the preset "
+        f"(target.add_sources(sources, env=clone)), or check first with "
+        f"env.has_preset({name!r})."
+    )
+
+
 def _first_repr(value: Any) -> str:
     """repr of a sequence's first element, for use in an example line."""
     items = list(value)
@@ -173,7 +207,9 @@ class Environment(_EnvironmentStubs):
         "_applied_presets",
         "_applied_imperative",
         "_use_origins",
-        "_fanout_seen",
+        "_intents",
+        "_replaying",
+        "_tool_owners",
         "_name",
         "_cross_preset",
         "_target",
@@ -238,8 +274,19 @@ class Environment(_EnvironmentStubs):
         # compute_effective_requirements so `pcons explain` names the package
         # rather than the tool variable the value landed on.
         self._use_origins: dict[tuple[str, str], tuple[str, str]] = {}
-        # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
-        self._fanout_seen: set[Any] | None = None
+        # What the script asked for, in order, for toolchains added later.
+        # A program links its language runtimes one way or another: the
+        # shared ones until set_runtime_linkage() says otherwise.
+        from pcons.core.preset import RUNTIME_LINKAGE_GROUP, Intent
+
+        self._intents: list[Intent] = [
+            Intent("runtime", "shared", group=RUNTIME_LINKAGE_GROUP)
+        ]
+        # Set while add_toolchain() configures the toolchain it adds
+        self._replaying = False
+        # Tool name -> the toolchain that brought it, the only one that
+        # realizes presets for it (see apply_from)
+        self._tool_owners: dict[str, Toolchain] = {}
         self._cross_preset: Any = None
         self._target: Platform | None = None
         if name is not None:
@@ -250,7 +297,7 @@ class Environment(_EnvironmentStubs):
         # Validate toolchain type early, before any access (strings and
         # sequences were already resolved via the registry above)
         if toolchain is not None and not hasattr(toolchain, "setup"):
-            raise TypeError(
+            raise PconsTypeError(
                 f"toolchain must be a Toolchain object or a registered toolchain "
                 f'name like "c" or "gcc", got {type(toolchain).__name__}'
             )
@@ -264,9 +311,11 @@ class Environment(_EnvironmentStubs):
         if toolchain is not None:
             toolchain.setup(self)
             self._record_toolchain_baseline(toolchain, list(self._get_tools().keys()))
+            self._tool_owners = dict.fromkeys(self._get_tools(), toolchain)
             # After the baseline, so explain() attributes these by name.
             for preset in toolchain.setup_presets(self):
-                self.apply(preset)
+                self.apply_from(toolchain, preset)
+            self._realize(self._runtime_intent(), [toolchain])
 
         # Always add standalone tools (install, archive)
         # These are tool-agnostic and always available
@@ -350,9 +399,7 @@ class Environment(_EnvironmentStubs):
         elif name in PLACEMENT_VARS:
             self._set_placement(name, value)
         elif name == "build_dir":
-            self._build_dir_base = Path(value)
-            self._build_dir_offset = Path()
-            self._get_vars()["build_dir"] = self._effective_build_dir()
+            object.__setattr__(self, name, value)
         else:
             vars_dict = self._get_vars()
             vars_dict[name] = value
@@ -433,6 +480,12 @@ class Environment(_EnvironmentStubs):
         )
         path = self.build_dir_for(offset)
         return self._project.top.root_dir / path if self._project else path
+
+    @build_dir.setter
+    def build_dir(self, value: str | Path) -> None:
+        self._build_dir_base = Path(value)
+        self._build_dir_offset = Path()
+        self._get_vars()["build_dir"] = self._effective_build_dir()
 
     def _effective_build_dir(self) -> Path:
         """This environment's own build directory.
@@ -519,6 +572,13 @@ class Environment(_EnvironmentStubs):
             raise AttributeError("this Environment was created without a toolchain")
         return toolchain
 
+    def toolchain_for(self, tool: str) -> Toolchain | None:
+        """The toolchain that owns *tool*: the one that added it, whose
+        realizations reach it. A tool no toolchain added belongs to the
+        primary toolchain. None in an environment without a toolchain."""
+        primary: Toolchain | None = object.__getattribute__(self, "_toolchain")
+        return self._tool_owners.get(tool, primary)
+
     def add_toolchain(self, toolchain: Toolchain | KnownToolchain | str) -> None:
         """Add an additional toolchain to this environment.
 
@@ -530,14 +590,41 @@ class Environment(_EnvironmentStubs):
             toolchain: Toolchain to add. A string is looked up in the
                 toolchain registry, like the Environment constructor.
 
+        Whatever the script already asked for (``set_variant``,
+        ``apply_preset``, ``apply_cross_preset``, ``env.cxx.set_standard``,
+        ...) is realized for the tools it brings, in order, as if it had
+        been there from the start.
+
+        Its objects are linked with the primary toolchain's, so it must
+        follow a compatible ABI (Toolchain.abi). A name picks among the
+        compatible toolchains ("fortran" beside MSVC finds flang or ifx,
+        not MinGW gfortran); an incompatible one is an error. Only this
+        environment's primary toolchain counts: other environments in the
+        project may follow other ABIs.
+
         Example:
             env = project.Environment(toolchain="c")
             env.add_toolchain("cuda")  # Adds CUDA support
         """
-        if isinstance(toolchain, str):
-            from pcons.tools.toolchain import toolchain_registry
+        from pcons.tools.toolchain import abi_compatible, toolchain_registry
 
-            toolchain = toolchain_registry.resolve(toolchain)
+        primary = object.__getattribute__(self, "_toolchain")
+        abi = getattr(primary, "abi", None) if primary is not None else None
+        if isinstance(toolchain, str):
+            try:
+                toolchain = toolchain_registry.resolve(toolchain, abi=abi)
+            except RuntimeError as e:
+                if abi is None:
+                    raise
+                raise PconsRuntimeError(
+                    f"Can't add '{toolchain}' beside {primary.name}: {e}"
+                ) from e
+        elif not abi_compatible(getattr(toolchain, "abi", None), abi):
+            raise PconsValueError(
+                f"Can't add {toolchain.name} beside {primary.name}: "
+                + toolchain_registry.abi_mismatch(toolchain.name, toolchain, abi)
+            )
+        self._check_replay(toolchain)
         additional: list[Toolchain] = object.__getattribute__(
             self, "_additional_toolchains"
         )
@@ -546,8 +633,23 @@ class Environment(_EnvironmentStubs):
         toolchain.setup(self)
         new_tools = [n for n in self._get_tools() if n not in before]
         self._record_toolchain_baseline(toolchain, new_tools)
-        for preset in toolchain.setup_presets(self):
-            self.apply(preset)
+        self._tool_owners.update(dict.fromkeys(new_tools, toolchain))
+        # It configures only the tools it brought: $FC from an added Fortran
+        # toolchain must not retarget the primary toolchain's linker. Then it
+        # realizes everything the script already asked for, for those tools,
+        # as if it had been there from the start (an added ifx gets /MDd
+        # under debug, as cl does), and the environment keeps its variant
+        # name.
+        current_variant = self.variant
+        self._replaying = True
+        try:
+            for preset in toolchain.setup_presets(self):
+                self.apply_from(toolchain, preset)
+            for intent in self._intents:
+                self._realize(intent, [toolchain], replaying=True)
+        finally:
+            self._replaying = False
+        self.variant = current_variant
 
     @property
     def toolchains(self) -> list[Toolchain]:
@@ -730,6 +832,8 @@ class Environment(_EnvironmentStubs):
         # Copy applied presets (frozen dataclasses → shallow copy is safe)
         new_env._applied_presets = list(self._applied_presets)
         new_env._applied_imperative = list(self._applied_imperative)
+        new_env._intents = list(self._intents)
+        new_env._tool_owners = dict(self._tool_owners)
         new_env._use_origins = dict(self._use_origins)
 
         new_env._build_dir_base = self._build_dir_base
@@ -762,7 +866,7 @@ class Environment(_EnvironmentStubs):
         return new_env
 
     @contextmanager
-    def override(self, **kwargs: Any) -> Iterator[Environment]:
+    def override(self, **kwargs: Any) -> Generator[Environment]:
         """Build with a temporarily modified copy of this environment.
 
         This is :meth:`clone` plus a scope: it yields a full clone, leaving
@@ -818,7 +922,7 @@ class Environment(_EnvironmentStubs):
         # leaves no half-applied environment behind.
         for key, value in kwargs.items():
             if isinstance(value, (list, tuple, UserList)):
-                raise TypeError(self._list_override_message(key, value))
+                raise PconsTypeError(self._list_override_message(key, value))
 
         temp_env = self.clone()
 
@@ -897,26 +1001,35 @@ class Environment(_EnvironmentStubs):
         Extends each contribution's tool flag/define lists; a ``cmd``
         contribution replaces the tool's command. Presets sharing an
         ``exclusive_group`` act as a knob: applying one first un-applies
-        any group member already applied. A preset applies fully or
-        raises (docs/presets.md, "Preset application").
+        the group's earlier ones. Each toolchain sets the knob for its own
+        tools, so a toolchain's preset replaces its own earlier ones
+        (``Preset.realized_by``) and any applied directly, and one applied
+        directly replaces them all. While add_toolchain() configures the
+        toolchain it adds, that toolchain's presets replace only its own:
+        the knob the script set stays.
+        A preset applies fully or raises (docs/presets.md, "Preset
+        application").
         """
-        if self._fanout_seen is not None:
-            # Identical presets resolved by several toolchains apply once
-            # (shared tools like cc would double flags otherwise).
-            key = (preset.name, preset.category, preset.contributions)
-            if key in self._fanout_seen:
-                return
-            self._fanout_seen.add(key)
-
         # Validate before any mutation, including the un-apply below.
         self._validate_preset(preset)
 
         if preset.exclusive_group is not None:
-            for i, applied in enumerate(self._applied_presets):
-                if applied.exclusive_group == preset.exclusive_group:
+
+            def replaces(applied: Preset) -> bool:
+                if applied.exclusive_group != preset.exclusive_group:
+                    return False
+                if preset.realized_by is None:
+                    return True
+                if applied.realized_by is None:
+                    return not self._replaying
+                return applied.realized_by == preset.realized_by
+
+            for applied in self._applied_presets:
+                if replaces(applied):
                     self._unapply_contributions(applied)
-                    del self._applied_presets[i]
-                    break
+            self._applied_presets[:] = [
+                p for p in self._applied_presets if not replaces(p)
+            ]
 
         for contribution in preset.contributions:
             self._apply_contribution(contribution)
@@ -929,6 +1042,38 @@ class Environment(_EnvironmentStubs):
         # presets, arch is metadata.
         if preset.category == "arch" and preset.arch is not None:
             self.target_arch = preset.arch
+
+    def apply_from(self, toolchain: Toolchain, preset: Preset) -> bool:
+        """Apply *toolchain*'s *preset* to the tools it owns, and only those.
+
+        Each tool is realized by the toolchain that brought it: gfortran's
+        ``-O0 -g`` lands on ``fc``, gcc's on ``cc`` and ``cxx``, and
+        neither touches the other's, so nothing is applied twice and no
+        toolchain's flag style reaches a tool that can't read it. A tool no
+        toolchain brought (the script's own ``env.add_tool``) belongs to the
+        primary toolchain, as does a tool the environment lacks, so a
+        command swap to a missing tool still raises; with no primary, to
+        *toolchain* itself. Whether any of it landed.
+        """
+        taken = self._owned_contributions(toolchain, preset)
+        if not taken and preset.contributions:
+            return False
+        self.apply(
+            dataclasses.replace(preset, contributions=taken, realized_by=toolchain.name)
+        )
+        return True
+
+    def _owned_contributions(
+        self, toolchain: Toolchain, preset: Preset
+    ) -> tuple[ToolContribution, ...]:
+        """*preset*'s contributions to the tools *toolchain* realizes (see
+        apply_from)."""
+        default = object.__getattribute__(self, "_toolchain") or toolchain
+        return tuple(
+            c
+            for c in preset.contributions
+            if self._tool_owners.get(c.tool, default) is toolchain
+        )
 
     @property
     def applied_presets(self) -> tuple[Preset, ...]:
@@ -1008,7 +1153,7 @@ class Environment(_EnvironmentStubs):
                 {c.tool for c in preset.contributions if c.cmd is not None}
             )
             if cmd_tools:
-                raise ValueError(
+                raise PconsValueError(
                     f"Preset '{preset.name}' is in exclusive group "
                     f"'{preset.exclusive_group}' but replaces the command of "
                     f"tool(s) {', '.join(cmd_tools)}. Group presets switch by "
@@ -1030,7 +1175,7 @@ class Environment(_EnvironmentStubs):
             }
         )
         if missing_cmd:
-            raise ValueError(
+            raise PconsValueError(
                 f"Preset '{preset.name}' replaces the command of "
                 f"tool(s) {', '.join(missing_cmd)}, which this "
                 f"environment does not have (available: "
@@ -1039,7 +1184,7 @@ class Environment(_EnvironmentStubs):
             )
         if not any(c.tool in tools for c in preset.contributions):
             targets = sorted({c.tool for c in preset.contributions})
-            raise ValueError(
+            raise PconsValueError(
                 f"Preset '{preset.name}' would have no effect: none of "
                 f"its target tools ({', '.join(targets)}) exist in this "
                 f"environment (available: {', '.join(sorted(tools))})."
@@ -1063,15 +1208,6 @@ class Environment(_EnvironmentStubs):
                     if d in defines:
                         defines.remove(d)
 
-    @contextmanager
-    def _dedup_fanout(self) -> Iterator[None]:
-        """Scope a per-toolchain fan-out so identical presets apply once."""
-        self._fanout_seen = set()
-        try:
-            yield
-        finally:
-            self._fanout_seen = None
-
     def _apply_contribution(self, c: ToolContribution) -> None:
         """Apply a single tool contribution (extend flags/defines, set cmd)."""
         if not self.has_tool(c.tool):
@@ -1088,31 +1224,206 @@ class Environment(_EnvironmentStubs):
         if c.cmd is not None:
             tool.cmd = c.cmd
 
+    def _record_intent(self, intent: Intent) -> None:
+        """Keep *intent* for toolchains added later; one in a group
+        replaces the group's earlier one."""
+        if intent.group is not None:
+            self._intents = [i for i in self._intents if i.group != intent.group]
+        self._intents.append(intent)
+
+    def _check_replay(self, toolchain: Toolchain) -> None:
+        """Raise now, before *toolchain* changes anything, if it can't
+        realize what the script already asked for: an unknown variant, a
+        cross target it refuses, or an arch or feature it lacks for the
+        compilers it would bring."""
+        tools = getattr(toolchain, "_feature_preset_tools", tuple)()
+
+        def takes_part(t: Toolchain) -> bool:
+            return any(x in t.tools and not self.has_tool(x) for x in tools)
+
+        for intent in self._intents:
+            _, missing = self._realizations(intent, [toolchain], takes_part)
+            if missing:
+                raise _unrealized(intent, missing)
+
+    def _takes_part(self, toolchain: Toolchain) -> bool:
+        """Whether *toolchain* owns a tool its features and knobs are
+        realized on (gfortran's ``fc``), so must realize each one."""
+        tools = getattr(toolchain, "_feature_preset_tools", tuple)()
+        return any(
+            self.has_tool(t) and self.toolchain_for(t) is toolchain for t in tools
+        )
+
+    def _realizations(
+        self,
+        intent: Intent,
+        toolchains: Sequence[Toolchain],
+        takes_part: Callable[[Toolchain], bool],
+    ) -> tuple[list[tuple[Toolchain, Preset]], list[Toolchain]]:
+        """Each of *toolchains*' realization of *intent*, and the ones that
+        take part but have none and must. A toolchain refusing outright (an
+        unknown variant, a cross target it can't build for) raises here,
+        before anything has changed."""
+        from pcons.core.preset import is_registered_preset
+
+        # Who may have nothing to say: the shared runtimes are every
+        # driver's default, a contributed preset's resolver decides for
+        # itself, and a tool setting concerns only the tools that have it.
+        optional = (
+            intent.kind == "setting"
+            or (intent.kind == "runtime" and intent.name == "shared")
+            or (intent.kind == "feature" and is_registered_preset(intent.name))
+        )
+        realized: list[tuple[Toolchain, Preset]] = []
+        missing: list[Toolchain] = []
+        for toolchain in toolchains:
+            preset = self._preset_for(toolchain, intent)
+            if preset is not None:
+                realized.append((toolchain, preset))
+            elif not optional and takes_part(toolchain):
+                missing.append(toolchain)
+        return realized, missing
+
+    def _realize(
+        self,
+        intent: Intent,
+        toolchains: Sequence[Toolchain],
+        *,
+        replaying: bool = False,
+    ) -> bool:
+        """Have each of *toolchains* realize *intent* for its own tools.
+
+        Whether any had a realization. A toolchain that takes part
+        (``_takes_part``) and has none is an error: the intent applies
+        fully or raises. When none has one, the caller says so better (an
+        unknown preset or arch), except for a runtime linkage, whose name is
+        always known. *replaying* is a toolchain added later, which must
+        realize what the rest of the environment already does.
+        """
+        realized, missing = self._realizations(intent, toolchains, self._takes_part)
+        if missing and (realized or replaying or intent.kind == "runtime"):
+            raise _unrealized(intent, missing)
+        landed = []
+        for toolchain, preset in realized:
+            if intent.kind == "runtime":
+                # Realized whether or not the script asked, so for the tools
+                # the environment has.
+                preset = dataclasses.replace(
+                    preset,
+                    contributions=tuple(
+                        c for c in preset.contributions if self.has_tool(c.tool)
+                    ),
+                )
+            landed.append(self.apply_from(toolchain, preset))
+        if intent.kind == "feature" and realized and not any(landed) and not replaying:
+            owners = sorted({c.tool for _, p in realized for c in p.contributions})
+            raise PconsValueError(
+                f"Preset '{intent.name}' would have no effect: its flags are for "
+                f"{', '.join(owners)}, which other toolchains in this "
+                f"environment own."
+            )
+        if intent.kind in ("variant", "target"):
+            # The runtime's debug build goes with the debug variant, and
+            # which runtimes there are depends on the platform built for.
+            self._realize(self._runtime_intent(), toolchains, replaying=replaying)
+        return bool(realized)
+
+    def _preset_for(self, toolchain: Toolchain, intent: Intent) -> Preset | None:
+        """*toolchain*'s realization of *intent*, without applying it."""
+        from pcons.core.preset import resolve_registered_feature
+
+        kind = intent.kind
+        if kind == "variant":
+            return toolchain.make_variant_preset(intent.name, **intent.kwargs)
+        if kind == "arch":
+            return toolchain.make_arch_preset(intent.name)
+        if kind == "target":
+            return toolchain.make_target_preset(intent.args[0])
+        if kind == "feature":
+            preset = toolchain.make_feature_preset(intent.name, self.target)
+            if preset is None:
+                preset = resolve_registered_feature(intent.name, toolchain)
+            return preset
+        if kind == "setting":
+            return toolchain.make_setting_preset(intent.name, *intent.args)
+        if kind == "runtime":
+            return toolchain.make_runtime_preset(intent.name, self.variant, self.target)
+        # A pcons bug, not a user error.
+        raise ValueError(f"Unknown intent kind '{kind}'")
+
+    def flags_realized_by(self, tool: str, toolchain: Toolchain) -> list[Any]:
+        """*tool*'s flags as they'd be were *toolchain* its realizer.
+
+        A target whose link another toolchain's driver runs (gfortran's,
+        beside gcc) takes that toolchain's realization of the variant,
+        features and cross target: the flags the owner realized come out,
+        and *toolchain*'s for the same intents go in. Flags the script or a
+        package put there stay.
+        """
+        primary = object.__getattribute__(self, "_toolchain")
+        flags: list[Any] = list(getattr(self, tool).flags or ())
+        if self._tool_owners.get(tool, primary) is toolchain:
+            return flags
+        owner = self._tool_owners.get(tool, primary)
+        for preset in self._applied_presets:
+            if owner is not None and preset.realized_by == owner.name:
+                for c in preset.contributions:
+                    if c.tool == tool:
+                        for flag in c.flags:
+                            if flag in flags:
+                                flags.remove(flag)
+        presets = [
+            *toolchain.setup_presets(self),
+            *(self._preset_for(toolchain, intent) for intent in self._intents),
+        ]
+        for preset in presets:
+            for c in preset.contributions if preset is not None else ():
+                if c.tool == tool:
+                    flags.extend(c.flags)
+        return flags
+
+    def feature_realized(self, name: str, toolchain: Toolchain) -> bool:
+        """Whether feature preset *name* was applied here, so *toolchain*'s
+        objects carry it and may need its runtime from a link."""
+        return any(i.kind == "feature" and i.name == name for i in self._intents)
+
+    def _apply_setting(self, name: str, *args: Any) -> None:
+        """Apply a tool setting (``env.cxx.set_standard``), realized by
+        each toolchain that has one by that name."""
+        from pcons.core.preset import Intent
+
+        intent = Intent("setting", name, args)
+        self._realize(intent, self.toolchains)
+        self._record_intent(intent)
+
     def set_variant(self, name: str, **kwargs: Any) -> None:
         """Set the build variant; each toolchain translates the name to flags.
 
         Args:
             name: Variant name (e.g., "debug", "release").
-            **kwargs: Toolchain-specific options passed to apply_variant().
+            **kwargs: Toolchain-specific options passed to each toolchain's
+                make_variant_preset().
 
         Example:
             env.set_variant("debug")
             env.set_variant("release", extra_flags=["-march=native"])
         """
+        from pcons.core.preset import VARIANT_GROUP, Intent
+
         trace("env", "Setting variant: %s", name)
         # Recorded whether or not a toolchain realizes it, because this is the
         # only point at which a variant name is observable: `get_variant` takes
         # a string and returns one. The CLI persists the names for completion.
         _record_variant(name)
+        intent = Intent("variant", name, kwargs=dict(kwargs), group=VARIANT_GROUP)
         if self.toolchains:
-            with self._dedup_fanout():
-                for toolchain in self.toolchains:
-                    toolchain.apply_variant(self, name, **kwargs)
+            self._realize(intent, self.toolchains)
         else:
             # No toolchains - just set the variant name
             self.variant = name
+        self._record_intent(intent)
 
-    def set_target_arch(self, arch: str, **kwargs: Any) -> None:
+    def set_target_arch(self, arch: str) -> None:
         """Set the target CPU arch; each toolchain translates the name to flags.
 
         Raises if no configured toolchain can retarget to *arch* (e.g. on
@@ -1120,27 +1431,61 @@ class Environment(_EnvironmentStubs):
 
         Args:
             arch: Architecture name (e.g., "arm64", "x86_64", "x64").
-            **kwargs: Toolchain-specific options passed to apply_target_arch().
 
         Example:
             env.set_target_arch("arm64")  # -arch on macOS, /MACHINE: on MSVC
         """
+        from pcons.core.preset import Intent
+
         if self.toolchains:
-            with self._dedup_fanout():
-                realized = [
-                    toolchain.apply_target_arch(self, arch, **kwargs)
-                    for toolchain in self.toolchains
-                ]
-            if not any(realized):
+            intent = Intent("arch", arch)
+            if not self._realize(intent, self.toolchains):
                 names = ", ".join(t.name for t in self.toolchains)
-                raise ValueError(
+                raise PconsValueError(
                     f"No configured toolchain ({names}) realizes target "
                     f"arch '{arch}'. Retargeting the CPU on this platform "
                     f"may need a cross toolchain or cross preset instead "
                     f"(see docs/presets.md)."
                 )
+            self._record_intent(intent)
         else:
             self.target_arch = arch
+
+    def set_runtime_linkage(self, linkage: str) -> None:
+        """Link the language runtimes (the C and C++ runtimes, Fortran's)
+        shared, the default, or static.
+
+        Each toolchain links its own runtime that way: ``/MT`` in place of
+        ``/MD`` for an MSVC-ABI compiler (``/MTd`` under ``debug``),
+        ``-static-libgcc -static-libstdc++`` for GCC. A toolchain that
+        can't link its runtime that way is an error: clang on Apple's
+        platforms can't link it statically.
+
+        Args:
+            linkage: "shared" or "static".
+
+        Example:
+            env.set_runtime_linkage("static")
+        """
+        from pcons.core.preset import RUNTIME_LINKAGE_GROUP, RUNTIME_LINKAGES, Intent
+
+        if linkage not in RUNTIME_LINKAGES:
+            raise PconsValueError(
+                f"Unknown runtime linkage '{linkage}': it is "
+                f"{' or '.join(repr(k) for k in RUNTIME_LINKAGES)}."
+            )
+        intent = Intent("runtime", linkage, group=RUNTIME_LINKAGE_GROUP)
+        self._realize(intent, self.toolchains)
+        self._record_intent(intent)
+
+    @property
+    def runtime_linkage(self) -> str:
+        """How the language runtimes are linked: "shared" or "static"
+        (see :meth:`set_runtime_linkage`)."""
+        return self._runtime_intent().name
+
+    def _runtime_intent(self) -> Intent:
+        return next(i for i in reversed(self._intents) if i.kind == "runtime")
 
     def use_compiler_cache(self, tool: str | None = None) -> None:
         """Run the compile commands behind a compiler cache.
@@ -1181,6 +1526,36 @@ class Environment(_EnvironmentStubs):
 
         apply_clang_tidy(self, tool, args)
 
+    def use_include_what_you_use(
+        self, tool: str | None = None, args: Sequence[str] = ()
+    ) -> None:
+        """Check every C and C++ source's #includes as it compiles.
+
+        include-what-you-use (IWYU, https://include-what-you-use.org) reads
+        each source with that compile's own flags and reports the
+        ``#include`` lines it doesn't need and the headers it uses without
+        including them, so headers stay minimal and a source doesn't build
+        only by accident of what another header pulls in. CMake's
+        ``CXX_INCLUDE_WHAT_YOU_USE`` property does the same.
+
+        Each compile first runs IWYU on its source, then compiles; the
+        compile runs either way. IWYU only reports, unless *args* hold its
+        own ``--error`` option, which makes its findings fail the build.
+        Composes with ``use_clang_tidy()`` and ``use_compiler_cache()`` in
+        any order. The driver is :mod:`pcons.tools.co_compile`.
+
+        Args:
+            tool: The include-what-you-use program, by name or path. None
+                  looks for "include-what-you-use" in PATH; a missing one is a
+                  warning and the compiles are left alone.
+            args: Extra IWYU arguments, e.g.
+                  ``["-Xiwyu", "--mapping_file=qt.imp"]`` or
+                  ``["-Xiwyu", "--error"]``.
+        """
+        from pcons.tools.co_compile import apply_include_what_you_use
+
+        apply_include_what_you_use(self, tool, args)
+
     def apply_preset(self, name: KnownFeaturePreset | str) -> None:
         """Apply a named feature preset to this environment.
 
@@ -1191,6 +1566,12 @@ class Environment(_EnvironmentStubs):
         contributed presets are namespaced (``scope/name``). ``explain()``
         attributes each flag to the preset that added it.
 
+        Every toolchain whose compilers the preset covers must realize it,
+        or this raises: with gcc and gfortran, ``sanitize`` sanitizes both
+        the C and the Fortran sources or neither. To leave some sources out,
+        compile them in a clone of the environment made before the preset
+        (``target.add_sources(sources, env=clone)``).
+
         Args:
             name: Preset name (``"warnings"`` or ``"scope/name"``).
 
@@ -1199,24 +1580,17 @@ class Environment(_EnvironmentStubs):
             env.apply_preset("mycorp/strict")
         """
         from pcons.core.preset import (
+            Intent,
             apply_imperative_preset,
             is_registered_preset,
-            resolve_registered_feature,
         )
 
         if not self.toolchains:
             logger.warning("No toolchains configured; cannot apply preset '%s'", name)
             return
 
-        applied = False
-        with self._dedup_fanout():
-            for toolchain in self.toolchains:
-                preset = toolchain.make_feature_preset(name)  # built-in
-                if preset is None:
-                    preset = resolve_registered_feature(name, toolchain)  # registry
-                if preset is not None:
-                    self.apply(preset)
-                    applied = True
+        intent = Intent("feature", name)
+        applied = self._realize(intent, self.toolchains)
         # Imperative escape-hatch preset: runs once against the whole env.
         description = apply_imperative_preset(name, self)
         if description is not None:
@@ -1235,25 +1609,28 @@ class Environment(_EnvironmentStubs):
             if name in available:
                 # The name is declared but its realization came back empty:
                 # an optional feature (e.g. openmp) this system can't provide.
-                raise ValueError(
+                raise PconsValueError(
                     f"Preset '{name}' is not available with this toolchain on "
                     f"this system. Optional features can be guarded with "
                     f"env.has_preset({name!r})."
                 )
-            raise ValueError(
+            raise PconsValueError(
                 f"Unknown preset '{name}'. Toolchain built-ins here: "
                 f"{', '.join(available) or '(none)'}; contributed presets "
                 f"are listed by pcons.list_presets()."
             )
+        self._record_intent(intent)
 
     def has_preset(self, name: KnownFeaturePreset | str) -> bool:
-        """Whether ``apply_preset(name)`` would land contributions here.
+        """Whether ``apply_preset(name)`` would apply here, not raise.
 
-        True if any configured toolchain realizes *name* (built-in or
-        contributed declarative), or *name* is a registered imperative
-        preset. False for unknown names and for optional features this
-        system can't provide (e.g. ``openmp`` when no OpenMP runtime is
-        available) — checking never raises.
+        True if the toolchains realize *name* (built-in or contributed
+        declarative): every one whose compilers it covers, or *name* is a
+        registered imperative preset. False for unknown names, for
+        optional features this system can't provide (e.g. ``openmp`` when
+        no OpenMP runtime is available), and for a feature one of the
+        environment's compilers lacks (``sanitize`` with flang beside
+        clang) — checking never raises.
 
         Use it to guard optional features, mirroring CMake's optional
         ``find_package``::
@@ -1267,15 +1644,26 @@ class Environment(_EnvironmentStubs):
         """
         from pcons.core.preset import (
             is_imperative_preset,
+            is_registered_preset,
             resolve_registered_feature,
         )
 
+        if is_imperative_preset(name):
+            return True
+        found = lands = False
         for toolchain in self.toolchains:
-            if toolchain.make_feature_preset(name) is not None:
-                return True
-            if resolve_registered_feature(name, toolchain) is not None:
-                return True
-        return is_imperative_preset(name)
+            preset = toolchain.make_feature_preset(name, self.target)
+            if preset is None:
+                preset = resolve_registered_feature(name, toolchain)
+            if preset is not None:
+                found = True
+                lands = lands or (
+                    not preset.contributions
+                    or bool(self._owned_contributions(toolchain, preset))
+                )
+            elif not is_registered_preset(name) and self._takes_part(toolchain):
+                return False
+        return found and lands
 
     def apply_cross_preset(self, preset: Any) -> None:
         """Apply a cross-compilation preset to this environment.
@@ -1293,17 +1681,47 @@ class Environment(_EnvironmentStubs):
             env.apply_cross_preset(android(ndk="~/android-ndk", api=35))
             env.apply_cross_preset(ios(arch="arm64"))
         """
+        from pcons.core.preset import Intent
+
         if self.toolchains:
-            with self._dedup_fanout():
-                for toolchain in self.toolchains:
-                    toolchain.apply_cross_preset(self, preset)
+            target = getattr(preset, "target_platform", None)
+            self._check_retarget(target)
+            intent = Intent("target", getattr(preset, "name", "target"), (preset,))
+            # Set first: the runtime linkage, realized again with it, depends
+            # on the platform built for.
+            previous = (self._cross_preset, self._target)
             self._cross_preset = preset
-            self._target = getattr(preset, "target_platform", None)
+            self._target = target
+            try:
+                self._realize(intent, self.toolchains)
+            except Exception:
+                self._cross_preset, self._target = previous
+                raise
+            self._record_intent(intent)
         else:
             logger.warning(
                 "No toolchains configured; cannot apply cross-preset '%s'",
                 preset.name if hasattr(preset, "name") else preset,
             )
+
+    def _check_retarget(self, target: Platform | None) -> None:
+        """Raise if a feature already applied has other flags for *target*
+        (None: the build machine): they were realized for this one."""
+        from pcons.configure.platform import get_platform
+
+        new = target or get_platform()
+        if new == self.target:
+            return
+        for intent in self._intents:
+            if intent.kind != "feature":
+                continue
+            for toolchain in self.toolchains:
+                old = toolchain.make_feature_preset(intent.name, self.target)
+                if old != toolchain.make_feature_preset(intent.name, new):
+                    raise PconsValueError(
+                        f"Apply the cross preset before preset '{intent.name}', "
+                        f"whose flags depend on the platform built for."
+                    )
 
     @property
     def cross(self) -> Any:
@@ -1336,26 +1754,6 @@ class Environment(_EnvironmentStubs):
         from pcons.configure.platform import get_platform
 
         return self._target or get_platform()
-
-    def Glob(self, pattern: str) -> list[FileNode]:
-        """Find files matching a glob pattern.
-
-        This is a placeholder - actual implementation will use
-        the project's file tracking.
-
-        Args:
-            pattern: Glob pattern (e.g., 'src/*.cpp').
-
-        Returns:
-            List of FileNodes matching the pattern.
-        """
-        from pcons.core.node import FileNode
-
-        # Use project._node() for deduplication when available
-        matches = list(Path(".").glob(pattern))
-        if self._project is not None:
-            return [self._project._node(p) for p in matches]
-        return [FileNode(p, defined_at=get_caller_location()) for p in matches]
 
     def Framework(self, *names: str, dirs: list[str] | None = None) -> None:
         """Add macOS frameworks to link against.
@@ -1399,16 +1797,19 @@ class Environment(_EnvironmentStubs):
                 if d not in link.frameworkdirs:
                     link.frameworkdirs.append(d)
 
-    def use(self, package: Any, *, system: bool = False) -> None:
+    def use(self, package: Any, *, system: bool | None = None) -> None:
         """Apply a package's settings to this environment.
 
         This is the preferred way to use external packages. It applies all
         compile and link settings from a PackageDescription or ImportedTarget.
 
         The package's settings are applied to the appropriate tools:
-        - include_dirs → cxx.includes (and cc.includes if present)
-        - defines → cxx.defines (and cc.defines if present)
-        - compile_flags → cxx.flags
+        - include_dirs → cxx.includes (and cc.includes, fc.includes if
+          present)
+        - defines → cxx.defines (and cc.defines, fc.defines if present)
+        - compile_flags → the compilers of the package's languages: C and
+          C++ (cc, cxx), unless it declares others
+          (``PackageDescription.languages``)
         - library_dirs → link.libdirs
         - libraries → link.libs
         - link_flags → link.flags
@@ -1418,17 +1819,20 @@ class Environment(_EnvironmentStubs):
         Args:
             package: A PackageDescription, ImportedTarget, or any object with
                     include_dirs, defines, libraries, etc. attributes.
-            system: If True, the package's include directories are applied as
+            system: Whether the package's include directories are applied as
                    system includes (-isystem, /external:I), so warnings from
-                   its headers are suppressed. The package is left unchanged.
+                   its headers are suppressed. Left out: an ImportedTarget's
+                   own choice, yes for a package description, and no for a
+                   target this build makes. The package itself is left
+                   unchanged.
 
         Example:
             # Find and use a package
             pkg = finder.find("fmt")
             env.use(pkg)
 
-            # Third-party headers, held to no warning set of ours
-            env.use(finder.find("doctest"), system=True)
+            # Headers held to our own warning set too
+            env.use(finder.find("mylib"), system=False)
 
             # Or with ImportedTarget
             target = ImportedTarget.from_package(pkg)
@@ -1443,18 +1847,29 @@ class Environment(_EnvironmentStubs):
         if hasattr(package, "public"):
             # A Target's public requirements are already UsageRequirements.
             reqs = package.public
+            imported = getattr(package, "is_imported", False)
+            languages = set(package.required_languages) if imported else set()
         else:
             from pcons.packages.imported import requirements_from_package
 
             reqs = requirements_from_package(package)
+            languages = set(getattr(package, "languages", ()) or ())
 
+        if system is None:
+            system = (
+                bool(getattr(package, "system", False))
+                if getattr(package, "is_imported", False)
+                else not hasattr(package, "public")
+            )
         if system:
             # Clone first: system= describes this use, not the package, which
             # may be used unsystem'd elsewhere.
             reqs = reqs.clone()
             reqs.make_includes_system()
 
-        apply_requirements_to_env(self, reqs, origin=getattr(package, "name", None))
+        apply_requirements_to_env(
+            self, reqs, origin=getattr(package, "name", None), languages=languages
+        )
 
     def _resolve_cwd(self, cwd: str | Path | None) -> Path | None:
         """Anchor a ``cwd=`` argument, which is relative to the declaring

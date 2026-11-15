@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.builder import anchor_target_path, anchor_target_paths
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsValueError
 from pcons.core.node import BuildInfo, FileNode, PathRole
 from pcons.core.resolver import PendingSourceFactory
 from pcons.core.subst import PathToken, SourcePath, TargetPath
@@ -64,8 +65,6 @@ class InstallContext:
     ) -> InstallContext:
         """Create an InstallContext from a target and optional environment.
 
-        Target settings take precedence over environment settings.
-
         Args:
             target: The install target being built.
             env: Optional environment with install defaults.
@@ -82,10 +81,6 @@ class InstallContext:
                 env_destdir = getattr(install_config, "destdir", None)
                 if env_destdir is not None and not effective_destdir:
                     effective_destdir = str(env_destdir)
-
-        target_destdir = getattr(target, "_install_destdir", None)
-        if target_destdir is not None:
-            effective_destdir = target_destdir
 
         return cls(
             destdir=effective_destdir,
@@ -260,7 +255,7 @@ def install_dir(env: Environment, target_type: str) -> str:
     """
     toolchains = env.toolchains
     if not toolchains:
-        raise ValueError(
+        raise PconsValueError(
             "install_dir() requires an environment with a toolchain; "
             "pass an explicit directory string to Install() instead."
         )

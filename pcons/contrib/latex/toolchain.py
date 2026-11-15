@@ -18,7 +18,6 @@ The latex tool variables can be customized per-environment::
 
 from __future__ import annotations
 
-import shutil
 import sys
 from typing import TYPE_CHECKING
 
@@ -29,7 +28,6 @@ from pcons.tools.toolchain import BaseToolchain, toolchain_registry
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
-    from pcons.core.toolconfig import ToolConfig
 
 
 class LatexTool(BaseTool):
@@ -83,10 +81,6 @@ class LatexTool(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """No per-tool configuration needed; latexmk handles detection."""
-        return None
-
 
 class LatexToolchain(BaseToolchain):
     """LaTeX toolchain for building PDF documents.
@@ -107,15 +101,6 @@ class LatexToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("latex")
-
-    def _configure_tools(self, config: object) -> bool:
-        """Configure tools if latexmk is available."""
-        # Check for latexmk
-        if not shutil.which("latexmk"):
-            return False
-
-        self._tools = {"latex": LatexTool()}
-        return True
 
 
 toolchain_registry.register(

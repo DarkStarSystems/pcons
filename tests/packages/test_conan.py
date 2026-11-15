@@ -5,12 +5,21 @@ from __future__ import annotations
 
 import re
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pcons.configure.platform import Platform, get_platform
+from pcons.core.errors import PconsValueError
+from pcons.core.project import Project
 from pcons.packages.finders.conan import ConanFinder
+
+
+def _platform(os_name: str, arch: str) -> Platform:
+    """This machine's platform, claiming to be *os_name* on *arch*."""
+    return replace(get_platform(), os=os_name, arch=arch)
 
 
 class TestConanFinderBasic:
@@ -35,6 +44,14 @@ class TestConanFinderBasic:
         """Test pkgconfig directory path."""
         finder = ConanFinder(output_folder=tmp_path / "deps")
         assert finder.pkgconfig_dir == tmp_path / "deps"
+
+    def test_pkgconfig_dir_follows_cmake_layout(self, tmp_path: Path) -> None:
+        """A recipe with cmake_layout writes its .pc files a few levels down."""
+        finder = ConanFinder(output_folder=tmp_path / "deps")
+        generators = tmp_path / "deps" / "build" / "Release" / "generators"
+        generators.mkdir(parents=True)
+        (generators / "zlib.pc").write_text("Name: zlib\n")
+        assert finder.pkgconfig_dir == generators
 
     def test_repr(self) -> None:
         """Test string representation."""
@@ -111,7 +128,11 @@ class TestConanFinderProfile:
         """Test cppstd inferred from env.cxx.flags."""
         from types import SimpleNamespace
 
-        env = SimpleNamespace(cxx=SimpleNamespace(flags=["-std=c++23"]))
+        env = SimpleNamespace(
+            cxx=SimpleNamespace(flags=["-std=c++23"]),
+            has_tool=lambda tool: False,
+            runtime_linkage="shared",
+        )
         finder = ConanFinder(output_folder=tmp_path)
         finder.sync_profile(env=env)
 
@@ -122,7 +143,11 @@ class TestConanFinderProfile:
         """Explicit cppstd takes precedence over env inference."""
         from types import SimpleNamespace
 
-        env = SimpleNamespace(cxx=SimpleNamespace(flags=["-std=c++17"]))
+        env = SimpleNamespace(
+            cxx=SimpleNamespace(flags=["-std=c++17"]),
+            has_tool=lambda tool: False,
+            runtime_linkage="shared",
+        )
         finder = ConanFinder(output_folder=tmp_path)
         finder.sync_profile(env=env, cppstd="20")
 
@@ -232,12 +257,10 @@ Cflags: -I${includedir}
         ):
             finder.install()
 
-            # Find the conan install call (not pkg-config calls)
-            # Note: conan may be invoked via "uvx conan" so check entire command
-            conan_calls = [c for c in captured_calls if "conan" in str(c)]
-            assert len(conan_calls) > 0, f"Expected conan call, got: {captured_calls}"
+            # conan may be invoked via "uvx conan" so check entire command
+            conan_calls = [c for c in captured_calls if "install" in c]
+            assert len(conan_calls) == 1, f"Expected conan call, got: {captured_calls}"
             call_args = conan_calls[0]
-            assert "install" in call_args
             assert "-g" in call_args
             assert "PkgConfigDeps" in call_args
             assert "--build=missing" in call_args
@@ -407,6 +430,74 @@ Cflags: -I${includedir}
             packages = finder.install()
 
         assert "zlib" in packages
+
+    def test_build_tools_get_this_machines_profile(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Tools the dependencies build with (flex, protoc, ...) are built for
+        the machine the build runs on, with its usual compiler: Conan detects
+        that profile once, without $CC and $CXX, which choose the compiler
+        of the build itself and reach Conan through the host profile.
+        """
+        monkeypatch.setenv("CC", "gcc-16")
+        monkeypatch.setenv("CXX", "g++-16")
+        conanfile = tmp_path / "conanfile.txt"
+        conanfile.write_text("[requires]\nzlib/1.3\n")
+        output_folder = tmp_path / "deps"
+        finder = ConanFinder(conanfile=conanfile, output_folder=output_folder)
+        finder.sync_profile()
+        calls: list[tuple[list[str], dict[str, str]]] = []
+
+        def mock_run(cmd, **kwargs):
+            calls.append((cmd, kwargs["env"]))
+            if "detect" in cmd:
+                finder.build_profile_path.write_text("[settings]\nos=Macos\n")
+            if "install" in cmd:
+                (output_folder / "zlib.pc").write_text("Name: zlib\nVersion: 1.3\n")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(finder, "is_available", return_value=True),
+            patch("subprocess.run", side_effect=mock_run),
+        ):
+            finder.install()
+            finder.install(force=True)
+
+        commands = [cmd for cmd, _ in calls]
+        assert [c for c in commands if "detect" in c] == [
+            [
+                *finder.conan_cmd,
+                "profile",
+                "detect",
+                f"--name={finder.build_profile_path}",
+            ]
+        ]
+        install = next(c for c in commands if "install" in c)
+        assert f"--profile:host={finder.profile_path}" in install
+        assert f"--profile:build={finder.build_profile_path}" in install
+        for _, env in calls:
+            assert "CC" not in env and "CXX" not in env
+
+    def test_a_new_build_profile_invalidates_the_cache(self, tmp_path: Path) -> None:
+        """The build profile is part of what was installed."""
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.sync_profile()
+        finder._save_cache_key()
+        finder.build_profile_path.write_text("[settings]\nos=Linux\n")
+        assert not finder._is_cache_valid()
+
+    def test_a_failed_detection_says_so(self, tmp_path: Path) -> None:
+        finder = ConanFinder(output_folder=tmp_path)
+        failed = MagicMock(returncode=1, stdout="", stderr="no compiler found")
+
+        with (
+            patch.object(finder, "is_available", return_value=True),
+            patch("subprocess.run", return_value=failed),
+            pytest.raises(RuntimeError, match="no compiler found"),
+        ):
+            finder.install()
+        # The host profile is written first, when the script hasn't.
+        assert finder.profile_path.exists()
 
 
 class TestConanFinderCaching:
@@ -796,31 +887,19 @@ Cflags: -I/opt/pcons_test/include
         assert result is None
 
 
-class _FakeCompilerTool:
-    """Stand-in for a Tool: only ``default_vars()['cmd']`` is read by
-    ``ConanFinder._get_toolchain_compiler_cmd``.
-    """
-
-    def __init__(self, cmd: str) -> None:
-        self._cmd = cmd
-
-    def default_vars(self) -> dict[str, str]:
-        return {"cmd": self._cmd}
-
-
 class _FakeToolchain:
-    """Stand-in for a Toolchain exposing only ``.name`` and ``.tools`` —
-    the attributes ConanFinder's compiler detection reads. Real toolchains
+    """Stand-in for a Toolchain exposing only ``.name`` and ``tool_command()``
+    — what ConanFinder's compiler detection reads. Real toolchains
     never expose a ``.version`` attribute, so tests must go through the
     same cc/cxx command path the real code uses, not a shortcut.
     """
 
     def __init__(self, name: str, cc_cmd: str, cxx_cmd: str | None = None) -> None:
         self.name = name
-        self.tools = {
-            "cc": _FakeCompilerTool(cc_cmd),
-            "cxx": _FakeCompilerTool(cxx_cmd or cc_cmd),
-        }
+        self._cmds = {"cc": cc_cmd, "cxx": cxx_cmd or cc_cmd}
+
+    def tool_command(self, name: str) -> str | None:
+        return self._cmds.get(name)
 
 
 class TestConanFinderWithToolchain:
@@ -855,8 +934,7 @@ class TestConanFinderWithToolchain:
         claiming gcc gets "Invalid setting '21'" and no package at all.
         """
         finder = ConanFinder(output_folder=tmp_path)
-        finder._platform = MagicMock(is_macos=True, is_linux=False, is_windows=False)
-        finder._platform.arch = "arm64"
+        finder._platform = _platform("darwin", "arm64")
         toolchain = _FakeToolchain("gcc", cc_cmd="/usr/bin/gcc")
 
         def mock_run(cmd, **kwargs):
@@ -877,8 +955,7 @@ class TestConanFinderWithToolchain:
         """A Homebrew gcc-14 on macOS is the genuine article, so asking the
         compiler is what separates it from the shim -- not the platform."""
         finder = ConanFinder(output_folder=tmp_path)
-        finder._platform = MagicMock(is_macos=True, is_linux=False, is_windows=False)
-        finder._platform.arch = "arm64"
+        finder._platform = _platform("darwin", "arm64")
         toolchain = _FakeToolchain("gcc", cc_cmd="/opt/homebrew/bin/gcc-14")
 
         def mock_run(cmd, **kwargs):
@@ -894,6 +971,27 @@ class TestConanFinderWithToolchain:
         assert settings["compiler"] == "gcc"
         assert settings["compiler.version"] == "14"
         assert settings["compiler.libcxx"] == "libstdc++11"
+
+    def test_macos_homebrew_llvm_is_clang(self, tmp_path: Path) -> None:
+        """Only Apple's clang is apple-clang: Conan numbers the two
+        differently, so a Homebrew LLVM is clang, with libc++."""
+        finder = ConanFinder(output_folder=tmp_path)
+        finder._platform = _platform("darwin", "arm64")
+        toolchain = _FakeToolchain("llvm", cc_cmd="/opt/homebrew/opt/llvm/bin/clang")
+
+        def mock_run(cmd, **kwargs):
+            return MagicMock(
+                returncode=0,
+                stdout="Homebrew clang version 21.1.2\nTarget: arm64-apple-darwin25\n",
+                stderr="",
+            )
+
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(toolchain)
+
+        assert settings["compiler"] == "clang"
+        assert settings["compiler.version"] == "21"
+        assert settings["compiler.libcxx"] == "libc++"
 
     def test_detect_compiler_version_uses_toolchain_cmd_not_path(
         self, tmp_path: Path
@@ -942,21 +1040,31 @@ class TestConanFinderWithToolchain:
         assert version == "15"
         assert invoked == ["clang"]  # not the non-existent "apple-clang"
 
+    @pytest.mark.parametrize(
+        ("os_name", "compiler", "libcxx"),
+        [("darwin", "apple-clang", "libc++"), ("linux", "gcc", "libstdc++11")],
+    )
+    def test_detect_compiler_settings_no_toolchain_follows_target(
+        self, tmp_path: Path, os_name: str, compiler: str, libcxx: str
+    ) -> None:
+        """With no toolchain, the default compiler is the target's, whatever
+        machine pcons runs on."""
+        finder = ConanFinder(output_folder=tmp_path)
+        with patch.object(finder, "_detect_compiler_version", return_value=None):
+            settings = finder._detect_compiler_settings(
+                target=_platform(os_name, "x86_64")
+            )
+
+        assert settings["compiler"] == compiler
+        assert settings["compiler.libcxx"] == libcxx
+
     def test_detect_compiler_settings_with_clang_toolchain(
         self, tmp_path: Path
     ) -> None:
         """Test compiler detection with Clang toolchain."""
-        from pcons.configure.platform import Platform
-
         finder = ConanFinder(output_folder=tmp_path)
+        finder._platform = _platform("linux", "x86_64")
         toolchain = _FakeToolchain("clang", cc_cmd="/usr/lib/llvm-15/bin/clang")
-
-        # Create a mock platform that's not macOS
-        mock_platform = MagicMock(spec=Platform)
-        mock_platform.is_macos = False
-        mock_platform.is_linux = True
-        mock_platform.is_windows = False
-        mock_platform.arch = "x86_64"
 
         def mock_run(cmd, **kwargs):
             assert cmd[0] == "/usr/lib/llvm-15/bin/clang"
@@ -966,13 +1074,8 @@ class TestConanFinderWithToolchain:
             result.stderr = ""
             return result
 
-        original_platform = finder._platform
-        finder._platform = mock_platform
-        try:
-            with patch("subprocess.run", side_effect=mock_run):
-                settings = finder._detect_compiler_settings(toolchain)
-        finally:
-            finder._platform = original_platform
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(toolchain)
 
         assert settings["compiler"] == "clang"
         assert settings["compiler.version"] == "15"
@@ -1005,11 +1108,17 @@ class TestConanFinderWithToolchain:
         assert settings["compiler.runtime"] == "dynamic"
         assert settings["compiler.runtime_type"] == "Debug"
 
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(
+                toolchain, build_type="Release", runtime_linkage="static"
+            )
+        assert settings["compiler.runtime"] == "static"
+        assert settings["compiler.runtime_type"] == "Release"
+
     @staticmethod
     def _windows_finder(tmp_path: Path) -> ConanFinder:
         finder = ConanFinder(output_folder=tmp_path)
-        finder._platform = MagicMock(is_macos=False, is_linux=False, is_windows=True)
-        finder._platform.arch = "x86_64"
+        finder._platform = _platform("windows", "x86_64")
         return finder
 
     @staticmethod
@@ -1125,8 +1234,7 @@ class TestConanFinderWithToolchain:
     def test_sync_profile_unix_clang_has_no_conf(self, tmp_path: Path) -> None:
         """The clang-cl conf is Windows-only; a Linux clang profile is as before."""
         finder = ConanFinder(output_folder=tmp_path)
-        finder._platform = MagicMock(is_macos=False, is_linux=True, is_windows=False)
-        finder._platform.arch = "x86_64"
+        finder._platform = _platform("linux", "x86_64")
         toolchain = _FakeToolchain("llvm", cc_cmd="clang")
 
         with patch(
@@ -1176,6 +1284,50 @@ class TestConanFinderWithToolchain:
 
         content = finder.profile_path.read_text()
         assert "compiler=gcc" in content
+
+    @staticmethod
+    def _gcc16(cmd, **kwargs):
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "gcc-16 (Homebrew GCC 16.2.0) 16.2.0\n"
+        result.stderr = ""
+        return result
+
+    def test_sync_profile_uses_the_environments_compilers(
+        self, tmp_path: Path, gcc_toolchain
+    ) -> None:
+        """The compilers the build uses, not the toolchain's defaults: what
+        $CC/$CXX or the script chose."""
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.cc.cmd = "/opt/gcc/bin/gcc-16"
+        env.cxx.cmd = "/opt/gcc/bin/g++-16"
+        finder = ConanFinder(output_folder=tmp_path)
+
+        with patch("subprocess.run", side_effect=self._gcc16) as run:
+            finder.sync_profile(env=env)
+
+        assert run.call_args.args[0][0] == "/opt/gcc/bin/gcc-16"
+        content = finder.profile_path.read_text()
+        assert "compiler=gcc\n" in content
+        assert "compiler.version=16\n" in content
+        assert "CC=/opt/gcc/bin/gcc-16\n" in content
+        assert "CXX=/opt/gcc/bin/g++-16\n" in content
+
+    def test_sync_profile_toolchain_follows_cc(
+        self, tmp_path: Path, gcc_toolchain, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With only a toolchain, its tools' $CC/$CXX still decide."""
+        cc = tmp_path / "gcc-16"
+        cc.write_text("")
+        monkeypatch.setenv("CC", str(cc))
+        monkeypatch.delenv("CXX", raising=False)
+        finder = ConanFinder(output_folder=tmp_path / "out")
+
+        with patch("subprocess.run", side_effect=self._gcc16):
+            finder.sync_profile(toolchain=gcc_toolchain)
+
+        assert f"CC={cc}\n" in finder.profile_path.read_text()
 
 
 class TestConanFinderCommandResolution:
@@ -1340,3 +1492,198 @@ class TestBuildTypeFollowsTheVariant:
         finder = ConanFinder(output_folder=tmp_path)
         finder.sync_profile(env=env, build_type="Release")
         assert "build_type=Release" in finder.profile_path.read_text()
+
+
+class TestProfileFromAMixedEnvironment:
+    """In a mixed environment the profile is the C/C++ toolchain's, and the
+    C++ standard is the one the script asked for."""
+
+    def _fortran_primary(self, test_project):  # noqa: F811
+        from pcons.tools.toolchain import toolchain_registry
+
+        env = test_project.Environment(
+            toolchain=toolchain_registry.get("gfortran").create_toolchain()
+        )
+        env.add_toolchain(toolchain_registry.get("gcc").create_toolchain())
+        return env
+
+    def test_the_cxx_toolchain_not_the_primary(self, tmp_path: Path, test_project):  # noqa: F811
+        env = self._fortran_primary(test_project)
+        finder = ConanFinder(output_folder=tmp_path)
+        with patch.object(finder, "_detect_compiler_version", return_value="16"):
+            finder.sync_profile(env=env)
+        profile = finder.profile_path.read_text()
+        cxx = re.search(r"^CXX=(.*)$", profile, re.M)
+        assert cxx is not None and Path(cxx.group(1)).name.startswith("g++")
+
+    def test_the_standard_the_script_set(self, tmp_path: Path, test_project):  # noqa: F811
+        env = self._fortran_primary(test_project)
+        env.cxx.set_standard("c++23")
+        # A hand-written one ahead of it: the compiler takes the last.
+        env.cxx.flags.insert(0, "-std=c++17")
+        finder = ConanFinder(output_folder=tmp_path)
+        with patch.object(finder, "_detect_compiler_version", return_value="16"):
+            finder.sync_profile(env=env)
+        assert "compiler.cppstd=23" in finder.profile_path.read_text()
+
+
+@pytest.fixture
+def llvm_toolchain():
+    """An LLVM toolchain, configured the way the gcc fixture is."""
+    from pcons.toolchains.llvm import (
+        ClangCCompiler,
+        ClangCxxCompiler,
+        LlvmArchiver,
+        LlvmLinker,
+        LlvmToolchain,
+    )
+
+    toolchain = LlvmToolchain()
+    toolchain._tools = {
+        "cc": ClangCCompiler(),
+        "cxx": ClangCxxCompiler(),
+        "ar": LlvmArchiver(),
+        "link": LlvmLinker(),
+    }
+    return toolchain
+
+
+class TestConanCrossProfiles:
+    """The host profile describes the platform a cross environment builds
+    for, so Conan builds its dependencies for that platform too."""
+
+    @staticmethod
+    def _profile(tmp_path: Path, toolchain, preset, version: str) -> str:
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=toolchain)
+        env.apply_cross_preset(preset)
+        finder = ConanFinder(output_folder=tmp_path / "deps")
+
+        def mock_run(cmd, **kwargs):
+            return MagicMock(returncode=0, stdout=version, stderr="")
+
+        with patch("subprocess.run", side_effect=mock_run):
+            return finder.sync_profile(env=env).read_text()
+
+    def test_a_linux_cross_build(self, tmp_path: Path, llvm_toolchain) -> None:
+        """Clang builds the dependencies for the target with the same
+        --target and --sysroot the environment compiles with."""
+        from pcons.toolchains.presets import linux_cross
+
+        content = self._profile(
+            tmp_path,
+            llvm_toolchain,
+            linux_cross("aarch64-linux-gnu", sysroot="/sysroots/arm64"),
+            "clang version 18.1.8\nTarget: x86_64-pc-linux-gnu\n",
+        )
+
+        assert "os=Linux\n" in content
+        assert "arch=armv8\n" in content
+        assert "compiler=clang\n" in content
+        assert "compiler.libcxx=libstdc++11\n" in content
+        flags = '["--sysroot=/sysroots/arm64", "--target=aarch64-linux-gnu"]'
+        assert f"tools.build:cflags={flags}\n" in content
+        assert f"tools.build:cxxflags={flags}\n" in content
+        assert f"tools.build:exelinkflags={flags}\n" in content
+        assert f"tools.build:sharedlinkflags={flags}\n" in content
+
+    def test_a_gcc_cross_build(self, tmp_path: Path, gcc_toolchain) -> None:
+        """A cross GCC knows its target; Conan gets it and the target."""
+        from pcons.toolchains.presets import CrossPreset
+
+        preset = CrossPreset(
+            name="armhf",
+            arch="armhf",
+            triple="arm-linux-gnueabihf",
+            tool_cmds={
+                "cc": "arm-linux-gnueabihf-gcc",
+                "cxx": "arm-linux-gnueabihf-g++",
+            },
+        )
+        content = self._profile(
+            tmp_path, gcc_toolchain, preset, "arm-linux-gnueabihf-gcc (GCC) 13.2.0\n"
+        )
+
+        assert "os=Linux\n" in content
+        assert "arch=armv7hf\n" in content
+        assert "compiler=gcc\n" in content
+        assert "compiler.version=13\n" in content
+        assert "CC=arm-linux-gnueabihf-gcc\n" in content
+        assert "tools.build:cflags" not in content
+
+    def test_an_android_build(self, tmp_path: Path, llvm_toolchain) -> None:
+        from pcons.toolchains.presets import android
+
+        content = self._profile(
+            tmp_path,
+            llvm_toolchain,
+            android(ndk="/ndk", arch="armeabi-v7a", api=35, stl="c++_static"),
+            "clang version 19.0.1\nTarget: armv7a-unknown-linux-android35\n",
+        )
+
+        assert "os=Android\n" in content
+        assert "os.api_level=35\n" in content
+        assert "arch=armv7\n" in content
+        assert "compiler=clang\n" in content
+        assert "compiler.libcxx=c++_static\n" in content
+        assert f"tools.android:ndk_path={Path('/ndk')}\n" in content
+
+    def test_an_ios_simulator_build(self, tmp_path: Path, llvm_toolchain) -> None:
+        from pcons.toolchains.presets import ios
+
+        content = self._profile(
+            tmp_path,
+            llvm_toolchain,
+            ios(arch="x86_64", min_version="17.0"),
+            "Apple clang version 17.0.0 (clang-1700.0.13.5)\n",
+        )
+
+        assert "os=iOS\n" in content
+        assert "os.version=17.0\n" in content
+        assert "os.sdk=iphonesimulator\n" in content
+        assert "arch=x86_64\n" in content
+        assert "compiler=apple-clang\n" in content
+        assert "compiler.libcxx=libc++\n" in content
+
+    def test_a_target_pcons_cant_name_needs_the_script_to(
+        self, tmp_path: Path, llvm_toolchain
+    ) -> None:
+        """Rather than a profile for the build machine, which would hand the
+        build dependencies for the wrong platform."""
+        from pcons.toolchains.presets import CrossPreset
+
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=llvm_toolchain)
+        env.apply_cross_preset(
+            CrossPreset(name="vxworks", arch="ppc", triple="powerpc-wrs-vxworks")
+        )
+        finder = ConanFinder(output_folder=tmp_path / "deps")
+        version = MagicMock(returncode=0, stdout="clang version 18.1.8\n", stderr="")
+
+        with (
+            patch("subprocess.run", return_value=version),
+            pytest.raises(PconsValueError, match="set_profile_setting"),
+        ):
+            finder.sync_profile(env=env)
+
+        finder.set_profile_setting("os", "VxWorks")
+        finder.set_profile_setting("arch", "ppc32be")
+        with patch("subprocess.run", return_value=version):
+            content = finder.sync_profile(env=env).read_text()
+        assert "os=VxWorks\n" in content
+
+    @pytest.mark.parametrize(
+        ("arch", "triple", "expected"),
+        [
+            ("arm64", "aarch64-linux-gnu", "armv8"),
+            ("i686", "i686-linux-android35", "x86"),
+            ("arm", "armv7a-linux-androideabi35", "armv7"),
+            ("arm", "arm-linux-gnueabihf", "armv7hf"),
+            ("arm", "thumbv6m-none-eabi", "armv6"),
+            ("arm", "arm-none-eabi", None),
+            ("arm", None, None),
+            ("sparc", "sparc-sun-solaris", None),
+        ],
+    )
+    def test_conan_arch(self, arch: str, triple: str | None, expected) -> None:
+        assert ConanFinder._conan_arch(arch, triple) == expected

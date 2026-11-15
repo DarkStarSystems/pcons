@@ -165,7 +165,7 @@ palette = env.Command(
     ],
 )
 
-bundle = project.AssetBundle(  # ty: ignore[unresolved-attribute]
+bundle = project.AssetBundle(  # ty: ignore[missing-attribute]
     "level",
     env,
     sources=["scenes/forest.scene", "scenes/cave.scene"],

@@ -14,6 +14,7 @@ import pytest
 from pcons.core.environment import Environment as Env
 from pcons.core.errors import PackageNotFoundError
 from pcons.core.project import Project
+from pcons.core.target import Target
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.base import BaseFinder
 
@@ -215,28 +216,37 @@ class TestFindPackage:
 
 
 class TestFindPackageSystem:
-    """find_package(system=True): the package's headers arrive as -isystem."""
+    """A found package's headers reach its dependents' compiles as -isystem,
+    unless system=False."""
 
-    def test_it_moves_the_include_dirs(self) -> None:
+    @staticmethod
+    def _consumer_sees(target) -> tuple[list[Path], list[Path]]:
+        app = Target("app")
+        app.link_private(target)
+        reqs = app.collect_usage_requirements()
+        return list(reqs.include_dirs), list(reqs.system_include_dirs)
+
+    def test_its_headers_are_system_ones_by_default(self) -> None:
         project = Project("test")
         doctest = _make_pkg("doctest", include_dirs=["/opt/doctest/include"])
         project.add_package_finder(MockFinder({"doctest": doctest}))
 
-        target = project.find_package("doctest", system=True)
+        target = project.find_package("doctest")
 
         assert target is not None
-        assert list(target.public.include_dirs) == []
-        assert list(target.public.system_include_dirs) == [Path("/opt/doctest/include")]
+        # Recorded as the package gave them, for whatever reads the target.
+        assert list(target.public.include_dirs) == [Path("/opt/doctest/include")]
+        assert self._consumer_sees(target) == ([], [Path("/opt/doctest/include")])
 
-    def test_it_is_off_by_default(self) -> None:
+    def test_system_false_keeps_them_ordinary(self) -> None:
         project = Project("test")
-        zlib = _make_pkg("zlib", include_dirs=["/usr/include"])
-        project.add_package_finder(MockFinder({"zlib": zlib}))
+        mylib = _make_pkg("mylib", include_dirs=["/opt/mylib/include"])
+        project.add_package_finder(MockFinder({"mylib": mylib}))
 
-        target = project.find_package("zlib")
+        target = project.find_package("mylib", system=False)
 
         assert target is not None
-        assert list(target.public.include_dirs) == [Path("/usr/include")]
+        assert self._consumer_sees(target) == ([Path("/opt/mylib/include")], [])
 
     def test_the_same_package_cannot_be_had_both_ways(self) -> None:
         project = Project("test")
@@ -245,8 +255,8 @@ class TestFindPackageSystem:
 
         project.find_package("doctest")
 
-        with pytest.raises(ValueError, match="already found with system=False"):
-            project.find_package("doctest", system=True)
+        with pytest.raises(ValueError, match="already found with system=True"):
+            project.find_package("doctest", system=False)
 
     def test_a_package_that_was_never_found_conflicts_with_nothing(self) -> None:
         """A cached None owns no target, so it cannot collide with one."""
@@ -422,10 +432,10 @@ class TestFindPackagePerEnvironment:
         )
 
         project.find_package("doctest", env=mcu)
-        project.find_package("doctest", env=host, system=True)
+        project.find_package("doctest", env=host, system=False)
 
         with pytest.raises(ValueError, match="in environment 'mcu'"):
-            project.find_package("doctest", env=mcu, system=True)
+            project.find_package("doctest", env=mcu, system=False)
 
 
 def _cross_env(project: Project, name: str, sysroot: Path | None) -> Env:

@@ -7,26 +7,59 @@ A Toolchain is a coordinated set of Tools that work together
 
 from __future__ import annotations
 
-import logging
 import shutil
-from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
-from pcons.core.preset import Preset, ToolContribution
+from pcons.core.errors import PconsRuntimeError, PconsTypeError, PconsValueError
+from pcons.core.paths import affix_filename
+from pcons.core.preset import (
+    RUNTIME_LINKAGE_GROUP,
+    VARIANT_GROUP,
+    Preset,
+    ToolContribution,
+)
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import register_target_option
 
-logger = logging.getLogger(__name__)
-
+register_target_option(
+    "build_rpath",
+    "False keeps a program or shared library from finding the build's own "
+    "shared libraries through an rpath relative to it",
+)
+register_target_option(
+    "pic",
+    "False compiles a static or object library without position-independent "
+    "code, which Linux, Android and the BSDs otherwise give it so it can go "
+    "into a shared library",
+)
+register_target_option(
+    "whole_archive",
+    "True links every object of this static library into whatever links it, "
+    "including those nothing references: objects that register themselves "
+    "from a static constructor (plugins, factories, test cases)",
+)
 register_target_option(
     "exported_symbols",
     "symbols a shared library or executable exports, as C names (patterns "
     "allowed on macOS and Linux); everything else is hidden, except that on "
     "MSVC a .def file adds to __declspec(dllexport) rather than replacing it",
 )
+register_target_option(
+    "import_library",
+    "False declares no import library for a Windows DLL that exports nothing, "
+    "such as a resource-only DLL, for which link.exe writes none; nothing can "
+    "link against it",
+)
+
+
+def declares_import_library(target: Target) -> bool:
+    """Whether *target*, a shared library, declares an import library where
+    its toolchain's link writes one (see the ``import_library`` option)."""
+    return target.get_option("import_library") is not False
+
 
 if TYPE_CHECKING:
     from pcons.configure.platform import Platform
@@ -42,6 +75,30 @@ if TYPE_CHECKING:
 # Realization stays per-toolchain (make_cxx_standard_preset).
 # =============================================================================
 
+# The languages a link can be led by, strongest first (Meson's order): a
+# program with C or C++ objects links with their driver, which takes the
+# Fortran runtime as libraries, as a Fortran driver can't take a C
+# compiler's sanitizer or profile runtimes. A Fortran-only program links
+# with the Fortran driver. Swift's driver handles the Swift runtime, and
+# CUDA links through the host C++ driver.
+LINK_LANGUAGES: tuple[str, ...] = (
+    "swift",
+    "cuda",
+    "objcxx",
+    "cxx",
+    "objc",
+    "c",
+    "fortran",
+)
+
+
+def link_language_rank(language: str) -> int:
+    """How strongly *language* leads a link: higher wins, unknown is 0."""
+    if language not in LINK_LANGUAGES:
+        return 0
+    return len(LINK_LANGUAGES) - LINK_LANGUAGES.index(language)
+
+
 _CXX_STANDARDS: frozenset[int] = frozenset({11, 14, 17, 20, 23, 26})
 
 
@@ -51,26 +108,39 @@ def _parse_cxx_standard(standard: int | str) -> int:
     try:
         n = int(text)
     except ValueError:
-        raise ValueError(
+        raise PconsValueError(
             f"Invalid C++ standard {standard!r}; use e.g. 'c++20' or 20"
         ) from None
     if n not in _CXX_STANDARDS:
         allowed = ", ".join(str(s) for s in sorted(_CXX_STANDARDS))
-        raise ValueError(f"Unsupported C++ standard 'c++{n}'; supported: {allowed}")
+        raise PconsValueError(
+            f"Unsupported C++ standard 'c++{n}'; supported: {allowed}"
+        )
     return n
 
 
 def _cxx_set_standard(env: Environment, standard: int | str) -> None:
     """``env.cxx.set_standard(...)`` — select the C++ language standard."""
-    n = _parse_cxx_standard(standard)
-    # Deduped like every set_*/apply_* fan-out: toolchains sharing the cxx
-    # tool (swift + llvm in C++-interop envs) realize identical presets, and
-    # without the guard both would apply, doubling -std=c++NN.
-    with env._dedup_fanout():
-        for toolchain in env.toolchains:
-            preset = toolchain.make_cxx_standard_preset(n)
-            if preset is not None:
-                env.apply(preset)
+    env._apply_setting("cxx.standard", _parse_cxx_standard(standard))
+
+
+#: How C++ exceptions can be handled: thrown and caught by C++ code (the
+#: default), not at all, or also catching structured exceptions (MSVC's
+#: ``/EHa``).
+CXX_EXCEPTION_MODES = ("standard", "none", "async")
+
+#: The exclusive group of the C++ exception presets: one replaces another.
+CXX_EXCEPTIONS_GROUP = "cxx_exceptions"
+
+
+def _cxx_set_exceptions(env: Environment, mode: str) -> None:
+    """``env.cxx.set_exceptions(...)`` — choose how C++ exceptions are handled."""
+    if mode not in CXX_EXCEPTION_MODES:
+        raise PconsValueError(
+            f"Unknown C++ exception mode {mode!r}; use one of "
+            f"{', '.join(repr(m) for m in CXX_EXCEPTION_MODES)}."
+        )
+    env._apply_setting("cxx.exceptions", mode)
 
 
 # =============================================================================
@@ -197,17 +267,92 @@ class AuxiliaryInputHandler:
     extra_flags: list[str] | None = None
 
 
+@dataclass(frozen=True)
+class LinkNeeds:
+    """What a toolchain's objects need from whichever driver links them.
+
+    Neutral facts, not flags: the linking toolchain writes each its own way
+    (``-lgfortran`` or ``libifcoremd.lib``, ``-Wl,-rpath,`` or nothing,
+    ``/SUBSYSTEM:CONSOLE`` or ``-Wl,/SUBSYSTEM:CONSOLE``), so no toolchain
+    ever writes another one's link flags.
+
+    Attributes:
+        libs: Runtime libraries, by name (``gfortran``, ``stdc++``).
+        libdirs: Where they are, when the driver wouldn't look there.
+        frameworks: macOS frameworks.
+        framework_dirs: Where those are.
+        rpaths: Where the runtime is found when the program runs.
+        relative_rpaths: Where shared libraries this build makes are found
+            when the program runs, relative to the linked file's own
+            directory (``.`` for beside it), so a build tree that moves
+            still runs.
+        objects: Files linked as they are (Swift's ``swiftrt.o``).
+        sanitizers: Sanitizer runtimes the objects need and don't name
+            (``address``). A program has only one of each, so the linking
+            toolchain chooses it: link.exe's own, or clang's for clang-cl's
+            lld-link.
+        console: The entry point is a console ``main`` the objects don't
+            define (ifx's is in its runtime), so the linker can't infer
+            the subsystem.
+        excluded_default_libs: Libraries the objects name as defaults
+            (MSVC's ``/DEFAULTLIB``) that the link must leave out: clang-cl's
+            OpenMP objects name MSVC's vcomp, which libomp replaces, and
+            cudart_static.lib the static C runtime, which a ``/MD`` program
+            doesn't link.
+    """
+
+    libs: tuple[str, ...] = ()
+    libdirs: tuple[str, ...] = ()
+    frameworks: tuple[str, ...] = ()
+    framework_dirs: tuple[str, ...] = ()
+    rpaths: tuple[str, ...] = ()
+    relative_rpaths: tuple[str, ...] = ()
+    objects: tuple[str, ...] = ()
+    sanitizers: tuple[str, ...] = ()
+    console: bool = False
+    excluded_default_libs: tuple[str, ...] = ()
+
+    def __or__(self, other: LinkNeeds) -> LinkNeeds:
+        """Both sets of needs, each value once, in first-seen order."""
+
+        def both(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
+            return tuple(dict.fromkeys((*a, *b)))
+
+        return LinkNeeds(
+            libs=both(self.libs, other.libs),
+            libdirs=both(self.libdirs, other.libdirs),
+            frameworks=both(self.frameworks, other.frameworks),
+            framework_dirs=both(self.framework_dirs, other.framework_dirs),
+            rpaths=both(self.rpaths, other.rpaths),
+            relative_rpaths=both(self.relative_rpaths, other.relative_rpaths),
+            objects=both(self.objects, other.objects),
+            sanitizers=both(self.sanitizers, other.sanitizers),
+            console=self.console or other.console,
+            excluded_default_libs=both(
+                self.excluded_default_libs, other.excluded_default_libs
+            ),
+        )
+
+
 # =============================================================================
 # Toolchain Registry
 # =============================================================================
+
+
+def abi_compatible(abi: str | None, required: str | None) -> bool:
+    """Whether a toolchain with *abi* can join one requiring *required*:
+    equal tags, or either one undeclared (see BaseToolchain.abi)."""
+    return abi is None or required is None or abi == required
 
 
 @dataclass
 class _FinderEntry:
     """A registered auto-detection finder (see ToolchainRegistry.register_finder)."""
 
-    finder: Callable[[], BaseToolchain | None]
+    finder: Callable[..., BaseToolchain | None]
     description: str = ""
+    # Whether the finder takes ``abi=`` to choose among compatible toolchains.
+    takes_abi: bool = False
 
 
 @dataclass(frozen=True)
@@ -223,8 +368,8 @@ class ToolchainRegistry:
     """Registry for toolchains that support auto-discovery.
 
     Toolchains register themselves with metadata needed for automatic
-    detection and instantiation. This allows find_toolchain() to work
-    without hardcoding toolchain-specific information.
+    detection and instantiation. This lets the finders (find_c_toolchain()
+    and the rest) work without hardcoding toolchain-specific information.
 
     Example:
         # In gcc.py, after class definition:
@@ -289,9 +434,10 @@ class ToolchainRegistry:
     def register_finder(
         self,
         names: Sequence[str],
-        finder: Callable[[], BaseToolchain | None],
+        finder: Callable[..., BaseToolchain | None],
         *,
         description: str = "",
+        takes_abi: bool = False,
     ) -> None:
         """Register an auto-detection finder under one or more names.
 
@@ -306,8 +452,13 @@ class ToolchainRegistry:
                 nothing suitable is available (resolve() turns that into an
                 error). May also raise with a descriptive message.
             description: Short human-readable description for listings.
+            takes_abi: The finder takes ``abi=``, to choose among the
+                toolchains compatible with an environment's (see
+                BaseToolchain.abi).
         """
-        entry = _FinderEntry(finder=finder, description=description)
+        entry = _FinderEntry(
+            finder=finder, description=description, takes_abi=takes_abi
+        )
         for name in names:
             self._finders[name.lower()] = entry
 
@@ -327,65 +478,78 @@ class ToolchainRegistry:
             names[name] = f_entry.description
         return dict(sorted(names.items()))
 
-    def resolve(self, spec: str | Sequence[str]) -> BaseToolchain:
+    def resolve(
+        self, spec: str | Sequence[str], *, abi: str | None = None
+    ) -> BaseToolchain:
         """Resolve a toolchain name (or preference list) to a toolchain.
 
         A single string is either a finder name ("c", "fortran", ...) for
         auto-detection, or a specific toolchain alias ("gcc", "msvc", ...)
         which must be available. A sequence is a preference list: the first
-        name that resolves to an available toolchain wins.
+        name that resolves to an available toolchain wins, passing over any
+        that the user's ``$CC``, ``$CXX`` or ``$FC`` contradicts.
 
         Args:
             spec: Toolchain name, or a preference-ordered list of names.
+            abi: The ABI the toolchain must be compatible with (see
+                BaseToolchain.abi). A finder picks among the compatible
+                toolchains; a name that resolves to an incompatible one
+                is an error.
 
         Returns:
             A configured toolchain ready for use.
 
         Raises:
             ValueError: If a name is unknown (lists all known names).
-            RuntimeError: If the named toolchain(s) are not available.
+            RuntimeError: If the named toolchain(s) are not available, or
+                not compatible with *abi*.
         """
         if isinstance(spec, str):
-            return self._resolve_one(spec)
+            return self._resolve_one(spec, abi)
 
         errors: list[str] = []
         for name in spec:
             try:
-                return self._resolve_one(name)
+                return self._resolve_one(name, abi)
             except (RuntimeError, ValueError) as e:
                 errors.append(f"{name}: {e}")
-        raise RuntimeError(
+        raise PconsRuntimeError(
             "No toolchain available from preference list "
             f"{list(spec)}:\n  " + "\n  ".join(errors)
         )
 
-    def _resolve_one(self, name: str) -> BaseToolchain:
+    def _resolve_one(self, name: str, abi: str | None = None) -> BaseToolchain:
+        toolchain = self._find_one(name, abi)
+        if not abi_compatible(toolchain.abi, abi):
+            subject = name if name == toolchain.name else f"{name} ({toolchain.name})"
+            raise PconsRuntimeError(self.abi_mismatch(subject, toolchain, abi))
+        return toolchain
+
+    def _find_one(self, name: str, abi: str | None) -> BaseToolchain:
         key = name.lower()
         if key not in self._finders and key not in self._toolchains:
             self._materialize(key)
 
         finder = self._finders.get(key)
         if finder is not None:
-            toolchain = finder.finder()
+            toolchain = (
+                finder.finder(abi=abi)
+                if finder.takes_abi and abi is not None
+                else finder.finder()
+            )
             if toolchain is None:
-                raise RuntimeError(f"No '{name}' toolchain found on this system")
+                raise PconsRuntimeError(f"No '{name}' toolchain found on this system")
             return toolchain
 
         entry = self._toolchains.get(key)
         if entry is not None:
-            if entry.is_available is not None:
-                available = entry.is_available()
-            else:
-                available = shutil.which(entry.check_command) is not None
-            if not available:
-                raise RuntimeError(
-                    f"Toolchain '{name}' is not available "
-                    f"('{entry.check_command}' not found in PATH)"
-                )
+            problem = entry.unavailable_reason(name)
+            if problem is not None:
+                raise PconsRuntimeError(problem)
             return entry.create_toolchain()
 
         known = ", ".join(sorted({*self._finders, *self._toolchains, *self._lazy}))
-        raise ValueError(f"Unknown toolchain '{name}'. Known names: {known}")
+        raise PconsValueError(f"Unknown toolchain '{name}'. Known names: {known}")
 
     def register(
         self,
@@ -442,12 +606,15 @@ class ToolchainRegistry:
         self,
         category: str,
         prefer: list[str] | None = None,
+        abi: str | None = None,
     ) -> BaseToolchain | None:
         """Find the first available toolchain in a category.
 
         Args:
             category: Category to search (e.g., "c").
             prefer: Ordered list of toolchain names to try first.
+            abi: Only toolchains compatible with this ABI qualify (see
+                BaseToolchain.abi).
 
         Returns:
             A configured toolchain, or None if none available.
@@ -476,12 +643,60 @@ class ToolchainRegistry:
 
         # Try each entry
         for entry in entries_to_try:
-            if entry.is_available is not None:
-                if entry.is_available():
-                    return entry.create_toolchain()
-            elif shutil.which(entry.check_command) is not None:
-                return entry.create_toolchain()
+            if entry.unavailable_reason(entry.aliases[0]) is None:
+                toolchain = entry.create_toolchain()
+                if abi_compatible(toolchain.abi, abi):
+                    return toolchain
 
+        return None
+
+    def no_compatible_toolchain(
+        self, category: str, label: str, abi: str, tried: list[str]
+    ) -> RuntimeError:
+        """The error for finding no *category* toolchain compatible with
+        *abi*, naming the ones that would be."""
+        compatible = self.names_with_abi(category, abi)
+        return RuntimeError(
+            f"No {label} toolchain compatible with the '{abi}' ABI found. "
+            f"Tried: {', '.join(tried)}. Install one that is"
+            + (f" ({', '.join(compatible)})" if compatible else "")
+            + ", and put it on PATH."
+        )
+
+    def abi_mismatch(self, subject: str, toolchain: Toolchain, abi: str | None) -> str:
+        """Why *toolchain*, which *subject* chose, can't join one requiring
+        *abi*, and which toolchains could."""
+        category = self._category_of(toolchain)
+        compatible = self.names_with_abi(category, abi) if category else []
+        return (
+            f"{subject} follows the '{toolchain.abi}' ABI, not the '{abi}' one "
+            f"required here, so their objects can't be linked together."
+            + (
+                f" Compatible {category} toolchains: {', '.join(compatible)}."
+                if compatible
+                else ""
+            )
+        )
+
+    def names_with_abi(self, category: str, abi: str | None) -> list[str]:
+        """The registered *category* toolchains compatible with *abi*, by
+        their first alias: what to suggest when one doesn't match."""
+        self._materialize_category(category)
+        names: list[str] = []
+        seen: set[type] = set()
+        for entry in self._toolchains.values():
+            if entry.category != category or entry.toolchain_class in seen:
+                continue
+            seen.add(entry.toolchain_class)
+            if abi_compatible(entry.create_toolchain().abi, abi):
+                names.append(entry.aliases[0])
+        return names
+
+    def _category_of(self, toolchain: Toolchain) -> str | None:
+        """The registered category of *toolchain*'s class, if any."""
+        for entry in self._toolchains.values():
+            if entry.toolchain_class is type(toolchain):
+                return entry.category
         return None
 
     def get_tried_names(
@@ -537,15 +752,43 @@ class ToolchainEntry:
         self.finder = finder
         self.is_available = is_available
 
+    def unavailable_reason(self, name: str) -> str | None:
+        """Why this toolchain, asked for as *name*, can't be used here, or
+        None if it can.
+
+        A compiler the user chose with its variable (``$CC``, ``$FC``,
+        ``$CUDACXX``, ...) proves the toolchain is there, as long as it
+        belongs to the toolchain's family; auto-detection follows the same
+        rule. Otherwise the toolchain's own check decides, or its command
+        on PATH.
+        """
+        from pcons.tools.tool import resolve_env_cmd_override
+
+        tools = [tool_class() for tool_class in self.tool_classes]
+        if any(
+            resolve_env_cmd_override(tool.env_var)
+            for tool in tools
+            if tool.env_var and tool.language
+        ):
+            return self.create_toolchain().compiler_override_conflict()
+        if self.is_available is not None:
+            available = self.is_available()
+        else:
+            available = shutil.which(self.check_command) is not None
+        if available:
+            return None
+        return (
+            f"Toolchain '{name}' is not available "
+            f"(no usable '{self.check_command}' on PATH)"
+        )
+
     def create_toolchain(self) -> BaseToolchain:
-        """Create and configure a toolchain instance."""
+        """A toolchain instance with its tools."""
         toolchain = self.toolchain_class()
-        # Set up tools without requiring full configure()
         toolchain._tools = {}
         for tool_class in self.tool_classes:
             tool = tool_class()
             toolchain._tools[tool.name] = tool
-        toolchain._configured = True
         return toolchain
 
 
@@ -571,25 +814,22 @@ class Toolchain(Protocol):
         """Tools in this toolchain, keyed by tool name."""
         ...
 
-    @property
-    def language_priority(self) -> dict[str, int]:
-        """Language priority for linker selection.
-
-        Higher values = stronger language. When linking objects from
-        multiple languages, use the linker for the highest-priority
-        language.
-        """
+    def tool_command(self, name: str) -> str | None:
+        """The program tool *name* runs (see BaseToolchain.tool_command)."""
         ...
 
-    def configure(self, config: object) -> bool:
-        """Configure all tools in this toolchain.
+    def implicit_include_dirs(self, compiler: str, tool: str) -> frozenset[str]:
+        """Where *compiler* finds headers unasked (see BaseToolchain)."""
+        ...
 
-        Args:
-            config: Configure context.
+    def system_include_flags(self) -> list[str]:
+        """Flags a compile with system includes also needs (see BaseToolchain)."""
+        ...
 
-        Returns:
-            True if the toolchain is available and configured.
-        """
+    @property
+    def abi(self) -> str | None:
+        """Which binary interface this toolchain's objects follow, as an
+        opaque tag (see BaseToolchain.abi)."""
         ...
 
     def setup(self, env: Environment) -> None:
@@ -604,35 +844,47 @@ class Toolchain(Protocol):
         """Presets to apply right after setup (attributed by explain())."""
         ...
 
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant (e.g. "debug", "release"); each toolchain
-        defines its own semantics."""
+    def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
+        """Build the Preset for build variant *variant* ("debug",
+        "release"); each toolchain defines its own semantics."""
         ...
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
-        """Apply target-arch flags (e.g. -arch on macOS, /MACHINE: on MSVC).
-
-        Returns True if this toolchain realized the arch; the environment
-        raises when no configured toolchain did (docs/presets.md).
-        """
-        ...
-
-    def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named flag preset (warnings, sanitize, lto, ...);
-        each toolchain defines its own flags."""
-        ...
-
-    def make_feature_preset(self, name: str) -> Preset | None:
-        """Build a built-in feature Preset by name, or None if not known."""
-        ...
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation preset (sysroot, triple, SDK paths)."""
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
+        """Build a built-in feature Preset by name, for the *target*
+        platform (None: the build machine), or None if not known."""
         ...
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
         """Build a Preset selecting the C++ *standard* (e.g. 20), or None
         if not C++."""
+        ...
+
+    def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
+        """Realize tool setting *name* (``"cxx.standard"``), or None."""
+        ...
+
+    def make_arch_preset(self, arch: str) -> Preset | None:
+        """The target-arch Preset for *arch* (``-arch`` on macOS,
+        ``/MACHINE:`` on MSVC), or None if it has none."""
+        ...
+
+    def make_runtime_preset(
+        self, linkage: str, variant: str, target: Platform
+    ) -> Preset | None:
+        """The Preset linking this toolchain's runtimes as *linkage*
+        ("shared" or "static") under *variant*, building for *target*, or
+        None if it has none."""
+        ...
+
+    def make_target_preset(self, cross: Any) -> Preset:
+        """The Preset realizing cross target *cross* (a CrossPreset)."""
+        ...
+
+    def link_driver(self, language: str, env: Environment) -> str | None:
+        """The command that links a program whose strongest language is
+        *language*, compiled by this toolchain in *env*, or None."""
         ...
 
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
@@ -725,14 +977,28 @@ class Toolchain(Protocol):
         ...
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """Return additional compile flags needed for the target type, for
-        the platform *env* builds for."""
+        the platform *env* builds for. *pic* is the target's ``pic``
+        option: False keeps a static or object library from compiling as
+        position-independent code."""
+        ...
+
+    def whole_archive_tokens(
+        self, archive: PathToken, env: Environment | None = None
+    ) -> list[FlagToken] | None:
+        """How this linker takes an archive whose every object is linked in
+        (the ``whole_archive`` option), in the archive's place on the link
+        line; None if it can't."""
         ...
 
     def link_group_tokens(
-        self, archives: Sequence[PathToken], env: Environment | None = None
+        self, archives: Sequence[FlagToken], env: Environment | None = None
     ) -> list[FlagToken] | None:
         """How this linker takes archives that need each other's symbols.
 
@@ -761,12 +1027,13 @@ class Toolchain(Protocol):
         token, for flag deduplication."""
         ...
 
-    def get_path_flags(self) -> frozenset[str]:
-        """Return flags (like -I, -isystem) whose argument is a path.
+    def get_path_flags(self, tool: str) -> frozenset[str]:
+        """Return flags (like -I, -isystem) whose argument is a path, on
+        *tool*'s command line.
 
         Generators use this to rewrite the paths in flags relative to where
         the build tool runs, in both the joined (``-Ifoo``) and separate
-        (``-I foo``) spellings.
+        (``-I foo``) forms, with the flags of the tool a command runs.
         """
         ...
 
@@ -774,27 +1041,26 @@ class Toolchain(Protocol):
         """Return the archiver tool name ("ar" for GCC, "lib" for MSVC)."""
         ...
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return runtime library names (no -l prefix) needed for
-        mixed-language builds."""
-        ...
-
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return library search dirs for mixed-language runtime libs."""
-        ...
-
-    def create_build_context(
+    def link_needs(
         self,
         target: Target,
+        languages: set[str],
+        link_language: str,
         env: Environment,
-        for_compilation: bool = True,
-    ) -> ToolchainContext | None:
-        """Create a toolchain-specific build context for a target, or None
-        if this toolchain doesn't use the context mechanism."""
+    ) -> LinkNeeds:
+        """What this toolchain's objects of *languages* need from a link
+        led by *link_language*."""
+        ...
+
+    def realize_link_needs(
+        self,
+        needs: LinkNeeds,
+        target: Target,
+        existing_flags: Sequence[FlagToken],
+        driver: str | None = None,
+    ) -> list[FlagToken]:
+        """Link flags for the needs that aren't libraries, as this
+        toolchain's linker takes them. *driver* is the command that links."""
         ...
 
     def after_resolve(
@@ -812,11 +1078,22 @@ class Toolchain(Protocol):
         ...
 
 
-class BaseToolchain(ABC):
-    """Abstract base class for toolchains.
+# Methods a toolchain once overrode to realize a setting, and what the
+# environment asks instead (see BaseToolchain.__init_subclass__).
+_REPLACED_METHODS = {
+    "apply_variant": "make_variant_preset",
+    "apply_target_arch": "make_arch_preset",
+    "apply_cross_preset": "make_target_preset",
+    "apply_preset": "make_feature_preset",
+}
 
-    Provides common functionality for toolchains. Subclasses must
-    provide the list of tools and configure logic.
+
+class BaseToolchain:
+    """Base class for toolchains.
+
+    Provides common functionality for toolchains. Its tools are set by
+    whatever makes it: the registry (ToolchainEntry.create_toolchain) or a
+    finder.
     """
 
     # Tool namespaces this toolchain installs into env._tools at setup.
@@ -824,17 +1101,17 @@ class BaseToolchain(ABC):
     # the Environment typing stub.
     TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
 
-    # Default language priorities (higher = stronger).
-    # Fortran is NOT listed here so that C/C++ toolchains don't claim
-    # priority over Fortran objects. GfortranToolchain overrides this
-    # to add "fortran": 3 when it is the primary toolchain.
-    DEFAULT_LANGUAGE_PRIORITY: dict[str, int] = {
-        "c": 1,
-        "cxx": 2,
-        "objc": 2,
-        "objcxx": 3,
-        "cuda": 4,
-    }
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Refuse an override of a method the environment no longer calls,
+        which would otherwise be skipped without a word."""
+        super().__init_subclass__(**kwargs)
+        for old, new in _REPLACED_METHODS.items():
+            if old in cls.__dict__:
+                raise PconsTypeError(
+                    f"{cls.__name__} overrides {old}(), which pcons no longer "
+                    f"calls: the environment applies what {new}() returns. "
+                    f"Override {new}() instead."
+                )
 
     def __init__(self, name: str = "") -> None:
         """Initialize a toolchain.
@@ -844,7 +1121,6 @@ class BaseToolchain(ABC):
         """
         self._name = name
         self._tools: dict[str, Tool] = {}
-        self._configured = False
 
     @property
     def name(self) -> str:
@@ -855,36 +1131,17 @@ class BaseToolchain(ABC):
         return self._tools
 
     @property
-    def language_priority(self) -> dict[str, int]:
-        """Override in subclasses if needed."""
-        return self.DEFAULT_LANGUAGE_PRIORITY
+    def abi(self) -> str | None:
+        """Which binary interface this toolchain's objects follow.
 
-    def configure(self, config: object) -> bool:
-        """Configure all tools.
-
-        Subclasses should override _configure_tools() to set up
-        the _tools dict.
+        An opaque tag: toolchains whose objects link together share one
+        (on Windows, "msvc" for MSVC, clang-cl, flang and ifx; "mingw" for
+        gcc and gfortran). Only equality matters, and None — the default —
+        means "links with anything", so a toolchain that never meets an
+        incompatible one needs no tag. A toolchain added to an environment
+        must match the environment's primary one (Environment.add_toolchain).
         """
-        if self._configured:
-            return True
-
-        result = self._configure_tools(config)
-        self._configured = result
-        return result
-
-    @abstractmethod
-    def _configure_tools(self, config: object) -> bool:
-        """Configure the toolchain's tools.
-
-        Subclasses implement this to detect and configure tools.
-
-        Args:
-            config: Configure context.
-
-        Returns:
-            True if configuration succeeded.
-        """
-        ...
+        return None
 
     def setup(self, env: Environment) -> None:
         """Set up all tools in the environment."""
@@ -898,12 +1155,11 @@ class BaseToolchain(ABC):
     # declarative Preset (a bundle of ToolContributions). Toolchains build them
     # via the make_*_preset() / *_contributions() hooks below; Environment.apply()
     # applies the opaque tokens and records the preset so it can be explained.
-    # The apply_*() methods are thin wrappers kept for call-site readability.
     # =========================================================================
 
-    # Compiler family this toolchain's cc/cxx belong to ("gcc", "llvm",
-    # "msvc", "clang-cl"), used to validate $CC/$CXX overrides. None skips
-    # validation.
+    # Compiler family this toolchain's compilers belong to ("gcc", "llvm",
+    # "msvc", "clang-cl", "gfortran", ...), used to validate $CC/$CXX/$FC
+    # overrides. None skips validation.
     ENV_COMPILER_FAMILY: str | None = None
 
     def setup_presets(self, env: Environment) -> list[Preset]:
@@ -923,19 +1179,20 @@ class BaseToolchain(ABC):
         wasi) override this without calling super(), deliberately ignoring
         the env vars — the CMake/Visual-Studio-generator precedent.
         """
-        presets: list[Preset] = []
+        from pcons.tools.tool import resolve_env_cmd_override
+
+        conflict = self.compiler_override_conflict()
+        if conflict is not None:
+            raise PconsValueError(conflict)
         by_var: dict[str, list[str]] = {}  # env var -> tool names (AR is shared)
         for tool in self._tools.values():
             if tool.env_var:
                 by_var.setdefault(tool.env_var, []).append(tool.name)
+        presets: list[Preset] = []
         for var, tool_names in by_var.items():
-            from pcons.tools.tool import resolve_env_cmd_override
-
             path = resolve_env_cmd_override(var)
             if path is None:
                 continue
-            if var in ("CC", "CXX"):
-                self._validate_compiler_override(var, path)
             presets.append(
                 Preset(
                     name=f"${var}",
@@ -947,8 +1204,41 @@ class BaseToolchain(ABC):
             )
         return presets
 
-    def _validate_compiler_override(self, var: str, path: str) -> None:
-        """Reject a $CC/$CXX override from a different compiler family.
+    def tool_command(self, name: str) -> str | None:
+        """The program this toolchain's tool *name* runs: what its variable
+        (``$CXX``) chooses, else its default command, found on PATH. Every
+        question about the compiler that will build asks this. None if this
+        toolchain has no such tool."""
+        import shutil
+
+        from pcons.tools.tool import resolve_env_cmd_override
+
+        tool = self._tools.get(name)
+        if tool is None:
+            return None
+        chosen = resolve_env_cmd_override(tool.env_var) if tool.env_var else None
+        if chosen is not None:
+            return chosen
+        cmd = tool.default_vars().get("cmd")
+        return (shutil.which(cmd) or cmd) if isinstance(cmd, str) else None
+
+    def implicit_include_dirs(self, compiler: str, tool: str) -> frozenset[str]:
+        """The directories *compiler*, run as this toolchain's *tool*,
+        searches for headers without being told, resolved. A package's
+        system include directory among them is left to the compiler: named
+        as a system include it would move ahead in the search. Base: none
+        known."""
+        return frozenset()
+
+    def system_include_flags(self) -> list[str]:
+        """Flags a compile needs whenever it has system include directories,
+        beyond the directories themselves. Base: none."""
+        return []
+
+    def compiler_override_conflict(self) -> str | None:
+        """The error to give when the user's ``$CC``, ``$CXX`` or ``$FC``
+        chooses a compiler from another family than this toolchain's, else
+        None.
 
         The user asked for two contradictory things (e.g. ``CXX=g++-15``
         with ``toolchain="msvc"``); applying one silently would misbuild.
@@ -956,29 +1246,32 @@ class BaseToolchain(ABC):
         """
         expected = self.ENV_COMPILER_FAMILY
         if expected is None:
-            return
+            return None
         from pcons.configure.compiler_id import compiler_family
+        from pcons.tools.tool import resolve_env_cmd_override
 
-        family = compiler_family(path)
-        if family is not None and family != expected:
-            raise ValueError(
-                f"${var} is set to '{path}', which is a {family}-family "
-                f"compiler, but the requested toolchain is '{self.name}' "
-                f"({expected} family). Unset ${var} or use the matching "
-                f"toolchain (e.g. toolchain=\"{family}\" or the 'c' "
-                f"auto-detector, which follows ${var})."
-            )
-
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant (e.g. "debug", "release") to the environment."""
-        env.apply(self.make_variant_preset(variant, **kwargs))
+        declared = {tool.env_var for tool in self._tools.values()}
+        for var in ("CC", "CXX", "FC"):
+            path = resolve_env_cmd_override(var) if var in declared else None
+            if path is None:
+                continue
+            family = compiler_family(path)
+            if family is not None and family != expected:
+                return (
+                    f"${var} is set to '{path}', which is a {family}-family "
+                    f"compiler, but the requested toolchain is '{self.name}' "
+                    f"({expected} family). Unset ${var} or use the matching "
+                    f'toolchain (e.g. toolchain="{family}", or auto-detection, '
+                    f"which follows ${var})."
+                )
+        return None
 
     def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
         """Build a variant Preset. Base contributes no flags."""
         return Preset(
             name=variant,
             category="variant",
-            exclusive_group="build_variant",
+            exclusive_group=VARIANT_GROUP,
             contributions=tuple(self._variant_contributions(variant, **kwargs)),
         )
 
@@ -988,34 +1281,54 @@ class BaseToolchain(ABC):
         """Tool contributions for a variant. Base knows no variants."""
         return []
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
-        """Apply target architecture flags to the environment.
+    def make_arch_preset(self, arch: str) -> Preset | None:
+        """The target-arch Preset for *arch*, or None if this toolchain
+        realizes none.
 
-        Returns True if this toolchain realized the arch (produced
-        contributions). An empty realization returns False and applies
-        nothing; the environment raises if *no* configured toolchain
-        realized the arch (docs/presets.md, "Preset application"), so a
-        custom toolchain that simply doesn't handle an arch is fail-fast
-        by default. A toolchain for which an arch is legitimately a no-op
-        declares that by overriding this method (see WasmToolchain).
+        The environment asks every toolchain before it applies any.
+        Override this to realize an arch, refuse one (raise), or declare a
+        no-op (a preset with no contributions, as WasmToolchain does for
+        wasm32). None for a toolchain whose compilers take part is an
+        error, so a custom toolchain that doesn't handle an arch is
+        fail-fast by default (docs/presets.md, "Preset application").
         """
         contribs = tuple(self._arch_contributions(arch))
         if not contribs:
-            return False
-        env.apply(Preset(name=arch, category="arch", arch=arch, contributions=contribs))
-        return True
+            return None
+        return Preset(name=arch, category="arch", arch=arch, contributions=contribs)
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Tool contributions for a target arch. Base realizes none."""
         return []
 
-    def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named feature preset (e.g. "warnings", "sanitize")."""
-        preset = self.make_feature_preset(name)
-        if preset is None:
-            logger.warning("Unknown preset '%s' for toolchain '%s'", name, self.name)
-            return
-        env.apply(preset)
+    def make_runtime_preset(
+        self, linkage: str, variant: str, target: Platform
+    ) -> Preset | None:
+        """The Preset linking this toolchain's language runtimes as
+        *linkage* ("shared" or "static"), or None if it realizes none.
+
+        The environment realizes it again whenever the variant or the
+        platform built for changes, since either can change it: an
+        MSVC-ABI runtime has a debug build. A toolchain may raise for a
+        linkage it can't, or return a preset with no contributions for
+        one its runtimes already are (WebAssembly's, always static).
+        """
+        contribs = self._runtime_contributions(linkage, variant, target)
+        if contribs is None:
+            return None
+        return Preset(
+            name=linkage,
+            category="runtime",
+            exclusive_group=RUNTIME_LINKAGE_GROUP,
+            contributions=tuple(contribs),
+        )
+
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """Tool contributions for a runtime linkage, or None. Base
+        realizes none."""
+        return None
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
         """Build a C++-standard Preset, or None if this toolchain has no C++.
@@ -1036,6 +1349,43 @@ class BaseToolchain(ABC):
         """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
         return None
 
+    def make_cxx_exceptions_preset(self, mode: str) -> Preset | None:
+        """Build the Preset for C++ exception *mode*, or None if this
+        toolchain has no C++. One mode replaces another."""
+        flags = self._cxx_exception_flags(mode)
+        if flags is None:
+            return None
+        return Preset(
+            name=f"exceptions-{mode}",
+            category="language",
+            contributions=(ToolContribution("cxx", flags=flags),),
+            exclusive_group=CXX_EXCEPTIONS_GROUP,
+        )
+
+    def _cxx_exception_flags(self, mode: str) -> tuple[str, ...] | None:
+        """Compiler flags for C++ exception *mode*, or None if not a C++
+        toolchain. Raises for a mode the compiler can't do."""
+        return None
+
+    def link_driver(self, language: str, env: Environment) -> str | None:
+        """The command that links a program whose strongest language is
+        *language*, when this toolchain compiled those objects in *env*:
+        ``g++`` for C++, ``gfortran`` for Fortran. None when its objects
+        need no driver of their own, as an MSVC-ABI compiler's, whose
+        objects name their runtimes. Base: None."""
+        return None
+
+    def make_setting_preset(self, name: str, *args: Any) -> Preset | None:
+        """Realize the tool setting *name* with *args*, or None if this
+        toolchain has no such setting. ``"cxx.standard"`` is
+        ``env.cxx.set_standard``; toolchains add their own (Swift's
+        ``"swiftc.cxx_interop"``)."""
+        if name == "cxx.standard":
+            return self.make_cxx_standard_preset(*args)
+        if name == "cxx.exceptions":
+            return self.make_cxx_exceptions_preset(*args)
+        return None
+
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
         """Return a setting method ``(env, *args) -> None`` for ``env.<tool>.<name>``.
 
@@ -1047,6 +1397,8 @@ class BaseToolchain(ABC):
         """
         if tool == "cxx" and name == "set_standard":
             return _cxx_set_standard
+        if tool == "cxx" and name == "set_exceptions":
+            return _cxx_set_exceptions
         return None
 
     # Named feature presets for this toolchain, keyed by preset name. Each value
@@ -1063,13 +1415,18 @@ class BaseToolchain(ABC):
         """
         return ("cc", "cxx")
 
-    def make_feature_preset(self, name: str) -> Preset | None:
+    def make_feature_preset(
+        self, name: str, target: Platform | None = None
+    ) -> Preset | None:
         """Build a feature Preset by name, or None if this toolchain lacks it.
 
         Realizes the named entry's compile flags on the toolchain's compile
-        tools and link flags on ``link``. See docs/presets.md.
+        tools and link flags on ``link``, as :meth:`_feature_spec` gives
+        them for *target* (None: the build machine). See docs/presets.md.
         """
-        spec = self.FEATURE_PRESETS.get(name)
+        from pcons.configure.platform import get_platform
+
+        spec = self._feature_spec(name, target or get_platform())
         if spec is None:
             return None
         contribs: list[ToolContribution] = []
@@ -1082,9 +1439,9 @@ class BaseToolchain(ABC):
             contribs.append(ToolContribution("link", flags=tuple(link_flags)))
         return Preset(name=name, category="feature", contributions=tuple(contribs))
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation target preset (a CrossPreset)."""
-        env.apply(self.make_target_preset(preset))
+    def _feature_spec(self, name: str, target: Platform) -> dict[str, list[str]] | None:
+        """The FEATURE_PRESETS entry *name* for building for *target*."""
+        return self.FEATURE_PRESETS.get(name)
 
     def make_target_preset(self, cross: Any) -> Preset:
         """Convert a CrossPreset descriptor into a Preset."""
@@ -1138,27 +1495,52 @@ class BaseToolchain(ABC):
             cmds = dict(getattr(cross, "tool_cmds", None) or {})
         return [ToolContribution(tool, cmd=cmd) for tool, cmd in sorted(cmds.items())]
 
-    @staticmethod
-    def _sysroot_contributions(cross: Any) -> list[ToolContribution]:
-        """--sysroot flag on cc/cxx/link from a CrossPreset."""
+    def _sysroot_contributions(self, cross: Any) -> list[ToolContribution]:
+        """--sysroot flag from a CrossPreset, on this toolchain's compile
+        tools and link."""
         sysroot = getattr(cross, "sysroot", None)
         if not sysroot:
             return []
         flag = f"--sysroot={sysroot}"
-        return [ToolContribution(t, flags=(flag,)) for t in ("cc", "cxx", "link")]
+        tools = (*self._feature_preset_tools(), "link")
+        return [ToolContribution(t, flags=(flag,)) for t in tools]
 
-    def get_runtime_libs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return runtime library names (no -l prefix) needed for
-        mixed-language builds. Base: none."""
-        return []
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """What this toolchain's objects need from the link, when they're
+        objects of *languages* and *link_language*'s driver links: the
+        Fortran runtime when a C++ driver links gfortran's objects, say.
+        Base: nothing."""
+        return LinkNeeds()
 
-    def get_runtime_libdirs(
-        self, linker_language: str, object_languages: set[str]
-    ) -> list[str]:
-        """Return search dirs for get_runtime_libs() libraries installed in
-        non-standard locations (e.g. Homebrew gfortran). Base: none."""
+    def realize_link_needs(
+        self,
+        needs: LinkNeeds,
+        target: Target,
+        existing_flags: Sequence[FlagToken],
+        driver: str | None = None,
+    ) -> list[FlagToken]:
+        """Link flags realizing *needs*' rpaths, objects and console entry
+        point, for a link this toolchain's driver runs (libraries and
+        their directories reach the link as ordinary requirements).
+        *existing_flags* are the link's flags so far. Base: none can be
+        realized, so any is an error."""
+        if (
+            needs.rpaths
+            or needs.objects
+            or needs.sanitizers
+            or needs.console
+            or needs.excluded_default_libs
+        ):
+            raise PconsValueError(
+                f"Target '{target.name}': {self.name} can't link in what its "
+                f"objects need ({needs})."
+            )
         return []
 
     # =========================================================================
@@ -1319,30 +1701,46 @@ class BaseToolchain(ABC):
         # static_library and anything else (archives, data) default to lib.
         return "lib"
 
+    def _affixed_name(self, name: str, target_type: str) -> str:
+        return affix_filename(
+            name,
+            self.get_output_prefix(target_type),
+            self.get_output_suffix(target_type),
+        )
+
     def get_static_library_name(self, name: str) -> str:
         """Return filename for a static library."""
-        return f"{self.get_output_prefix('static_library')}{name}{self.get_output_suffix('static_library')}"
+        return self._affixed_name(name, "static_library")
 
     def get_shared_library_name(self, name: str) -> str:
         """Return filename for a shared library."""
-        return f"{self.get_output_prefix('shared_library')}{name}{self.get_output_suffix('shared_library')}"
+        return self._affixed_name(name, "shared_library")
 
     def get_program_name(self, name: str) -> str:
         """Return filename for a program."""
-        return f"{self.get_output_prefix('program')}{name}{self.get_output_suffix('program')}"
+        return self._affixed_name(name, "program")
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         """Return additional compile flags for a target type (e.g. -fPIC for
-        shared libraries on Linux), for the platform *env* builds for.
-        Base: none."""
+        libraries on Linux), for the platform *env* builds for. Base: none."""
         return []
 
     def link_group_tokens(
-        self, archives: Sequence[PathToken], env: Environment | None = None
+        self, archives: Sequence[FlagToken], env: Environment | None = None
     ) -> list[FlagToken] | None:
         """Archives in a link cycle stay plain link inputs. Base: None."""
+        return None
+
+    def whole_archive_tokens(
+        self, archive: PathToken, env: Environment | None = None
+    ) -> list[FlagToken] | None:
+        """No known way to link a whole archive. Base: None."""
         return None
 
     def _write_link_input(self, target: Target, suffix: str, text: str) -> Path:
@@ -1389,9 +1787,21 @@ class BaseToolchain(ABC):
         """Return flags whose argument is a separate token. Base: none."""
         return frozenset()
 
-    def get_path_flags(self) -> frozenset[str]:
-        """Return flags whose argument is a path. Base: none."""
-        return frozenset()
+    # Flags whose argument is a path: those this toolchain's compilers
+    # read, and those its linkers (LINK_TOOLS) read.
+    COMPILE_PATH_FLAGS: ClassVar[frozenset[str]] = frozenset()
+    LINK_PATH_FLAGS: ClassVar[frozenset[str]] = frozenset()
+    LINK_TOOLS: ClassVar[frozenset[str]] = frozenset({"link"})
+
+    def get_path_flags(self, tool: str) -> frozenset[str]:
+        """Return flags whose argument is a path, on *tool*'s command line:
+        none for the archiver or a tool this toolchain doesn't have, the
+        linker's for a link tool, and the compilers' for the rest."""
+        if tool not in self._tools or tool == self.get_archiver_tool_name():
+            return frozenset()
+        if tool in self.LINK_TOOLS:
+            return self.LINK_PATH_FLAGS
+        return self.COMPILE_PATH_FLAGS
 
     def compile_link_context_class(self) -> type[CompileLinkContext]:
         """Return the CompileLinkContext subclass used for compile/link commands.
@@ -1404,31 +1814,6 @@ class BaseToolchain(ABC):
         from pcons.toolchains.build_context import CompileLinkContext
 
         return CompileLinkContext
-
-    def create_build_context(
-        self,
-        target: Target,
-        env: Environment,
-        for_compilation: bool = True,
-    ) -> ToolchainContext | None:
-        """Create a toolchain-specific build context for a target.
-
-        Args:
-            target: The target being built.
-            env: The build environment.
-            for_compilation: If True, create context for compilation;
-                             if False, for linking.
-        """
-        from pcons.toolchains.build_context import CompileLinkContext
-        from pcons.tools.requirements import compute_effective_requirements
-
-        effective = compute_effective_requirements(target, env, for_compilation)
-
-        mode = "compile" if for_compilation else "link"
-        return CompileLinkContext.from_effective_requirements(
-            effective,
-            mode=mode,
-        )
 
     def __repr__(self) -> str:
         tools = ", ".join(self._tools.keys())

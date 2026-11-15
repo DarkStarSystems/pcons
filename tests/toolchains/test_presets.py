@@ -8,16 +8,22 @@ from __future__ import annotations
 
 import pytest
 
+from pcons.configure.platform import get_platform
 from pcons.core.environment import Environment
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
+from pcons.toolchains.presets import (
+    CrossPreset,
+    linux_cross,
+    target_platform_for_triple,
+)
+from tests.support import apply_feature, apply_variant
 
 
 def _concrete_msvc() -> MsvcCompatibleToolchain:
     class ConcreteMsvc(MsvcCompatibleToolchain):
-        def _configure_tools(self, config: object) -> bool:
-            return True
+        pass
 
     return ConcreteMsvc("test-msvc")
 
@@ -66,7 +72,7 @@ class TestUnixPresets:
     def test_warnings_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "warnings")
+        apply_feature(toolchain, env, "warnings")
 
         assert "-Wall" in env.cc.flags
         assert "-Wextra" in env.cc.flags
@@ -78,7 +84,7 @@ class TestUnixPresets:
     def test_werror_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "werror")
+        apply_feature(toolchain, env, "werror")
 
         assert "-Werror" in env.cc.flags
         assert "-Werror" in env.cxx.flags
@@ -88,7 +94,7 @@ class TestUnixPresets:
     def test_sanitize_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = LlvmToolchain()
-        toolchain.apply_preset(env, "sanitize")
+        apply_feature(toolchain, env, "sanitize")
 
         assert "-fsanitize=address,undefined" in env.cc.flags
         assert "-fno-omit-frame-pointer" in env.cc.flags
@@ -99,7 +105,7 @@ class TestUnixPresets:
     def test_profile_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "profile")
+        apply_feature(toolchain, env, "profile")
 
         assert "-pg" in env.cc.flags
         assert "-g" in env.cc.flags
@@ -108,26 +114,68 @@ class TestUnixPresets:
     def test_lto_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "lto")
+        apply_feature(toolchain, env, "lto")
 
         assert "-flto" in env.cc.flags
         assert "-flto" in env.cxx.flags
         assert "-flto" in env.link.flags
 
-    def test_hardened_preset(self, test_project):  # noqa: F811
-        env = _make_unix_env()
-        toolchain = GccToolchain()
-        toolchain.apply_preset(env, "hardened")
+    @pytest.mark.parametrize(
+        ("triple", "link_flags"),
+        [
+            ("x86_64-linux-gnu", ("-pie", "-Wl,-z,relro,-z,now")),
+            ("aarch64-apple-darwin", None),
+            ("x86_64-w64-mingw32", ("-Wl,--dynamicbase,--nxcompat",)),
+        ],
+    )
+    def test_hardened_preset(self, triple, link_flags):
+        """-fPIE, -pie and RELRO are ELF's: ld64 and MinGW's ld reject -z."""
+        target = target_platform_for_triple(triple)
+        preset = GccToolchain().make_feature_preset("hardened", target)
+        assert preset is not None
+        flags = {c.tool: c.flags for c in preset.contributions}
+        elf = link_flags is not None and "-pie" in link_flags
+        assert flags["cc"] == (
+            "-fstack-protector-strong",
+            "-D_FORTIFY_SOURCE=2",
+            *(("-fPIE",) if elf else ()),
+        )
+        assert flags.get("link") == link_flags
 
-        assert "-fstack-protector-strong" in env.cc.flags
-        assert "-D_FORTIFY_SOURCE=2" in env.cc.flags
-        assert "-fPIE" in env.cc.flags
-        assert "-pie" in env.link.flags
+    def test_hardened_preset_for_the_msvc_abi(self, monkeypatch):
+        """clang for the MSVC ABI rejects -fPIE; Control Flow Guard stands
+        in for RELRO, as in MSVC's preset."""
+        monkeypatch.setattr(LlvmToolchain, "abi", property(lambda _: "msvc"))
+        target = target_platform_for_triple("x86_64-pc-windows-msvc")
+        preset = LlvmToolchain().make_feature_preset("hardened", target)
+        assert preset is not None
+        flags = {c.tool: c.flags for c in preset.contributions}
+        assert flags["cxx"] == ("-fstack-protector-strong", "-Xclang", "-cfguard")
+        assert flags["link"] == ("-Wl,/guard:cf",)
+
+    def test_hardened_follows_the_cross_target(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = LlvmToolchain()
+        env.apply_cross_preset(linux_cross("aarch64-linux-gnu"))
+        env.apply_preset("hardened")
+
         assert "-Wl,-z,relro,-z,now" in env.link.flags
+
+    def test_a_cross_target_after_hardened_raises(self, test_project):  # noqa: F811
+        """Its flags were chosen for the build machine."""
+        env = _make_unix_env()
+        env._toolchain = LlvmToolchain()
+        env.apply_preset("hardened")
+        triple = "x86_64-w64-mingw32" if get_platform().is_linux else "x86_64-linux-gnu"
+
+        with pytest.raises(ValueError, match="before preset 'hardened'"):
+            env.apply_cross_preset(
+                CrossPreset(name="other", arch="x86_64", triple=triple)
+            )
 
     def test_pthread_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
-        GccToolchain().apply_preset(env, "pthread")
+        apply_feature(GccToolchain(), env, "pthread")
 
         assert "-pthread" in env.cc.flags
         assert "-pthread" in env.cxx.flags
@@ -135,33 +183,27 @@ class TestUnixPresets:
 
     def test_coverage_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
-        LlvmToolchain().apply_preset(env, "coverage")
+        apply_feature(LlvmToolchain(), env, "coverage")
 
         assert "--coverage" in env.cc.flags
         assert "--coverage" in env.link.flags
 
     def test_fast_math_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
-        GccToolchain().apply_preset(env, "fast-math")
+        apply_feature(GccToolchain(), env, "fast-math")
 
         assert "-ffast-math" in env.cc.flags
         assert "-ffast-math" in env.link.flags
 
-    def test_unknown_preset_warns(self, test_project):  # noqa: F811
-        """Unknown preset should log a warning but not raise."""
-        env = _make_unix_env()
-        toolchain = GccToolchain()
-        # Should not raise
-        toolchain.apply_preset(env, "nonexistent")
-        # No flags should be added
-        assert len(env.cc.flags) == 0
+    def test_unknown_preset_has_no_realization(self):
+        assert GccToolchain().make_feature_preset("nonexistent") is None
 
     def test_multiple_presets_combine(self, test_project):  # noqa: F811
         """Applying multiple presets should combine flags."""
         env = _make_unix_env()
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "warnings")
-        toolchain.apply_preset(env, "sanitize")
+        apply_feature(toolchain, env, "warnings")
+        apply_feature(toolchain, env, "sanitize")
 
         assert "-Wall" in env.cc.flags
         assert "-fsanitize=address,undefined" in env.cc.flags
@@ -174,7 +216,7 @@ class TestUnixPresets:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_preset(env, "sanitize")
+        apply_feature(toolchain, env, "sanitize")
 
         assert "-fsanitize=address,undefined" in env.cc.flags
 
@@ -200,11 +242,10 @@ class TestMsvcPresets:
         # MsvcCompatibleToolchain is abstract, so use a concrete subclass
         # or just call apply_preset directly on an instance
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "warnings")
+        apply_feature(toolchain, env, "warnings")
 
         assert "/W4" in env.cc.flags
         assert "/W4" in env.cxx.flags
@@ -214,7 +255,7 @@ class TestMsvcPresets:
     def test_werror_preset(self, test_project):  # noqa: F811
         env = _make_msvc_env()
         toolchain = _concrete_msvc()
-        toolchain.apply_preset(env, "werror")
+        apply_feature(toolchain, env, "werror")
 
         assert "/WX" in env.cc.flags
         assert "/WX" in env.cxx.flags
@@ -226,11 +267,10 @@ class TestMsvcPresets:
         env = _make_msvc_env()
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "sanitize")
+        apply_feature(toolchain, env, "sanitize")
 
         assert "/fsanitize=address" in env.cc.flags
 
@@ -240,11 +280,10 @@ class TestMsvcPresets:
         env = _make_msvc_env()
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "lto")
+        apply_feature(toolchain, env, "lto")
 
         assert "/GL" in env.cc.flags
         assert "/LTCG" in env.link.flags
@@ -255,11 +294,10 @@ class TestMsvcPresets:
         env = _make_msvc_env()
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "hardened")
+        apply_feature(toolchain, env, "hardened")
 
         assert "/GS" in env.cc.flags
         assert "/guard:cf" in env.cc.flags
@@ -272,11 +310,10 @@ class TestMsvcPresets:
         env = _make_msvc_env()
 
         class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "profile")
+        apply_feature(toolchain, env, "profile")
 
         # MSVC profile is linker-only
         assert "/PROFILE" in env.link.flags
@@ -284,7 +321,7 @@ class TestMsvcPresets:
     def test_openmp_preset(self, test_project):  # noqa: F811
         env = _make_msvc_env()
         toolchain = _concrete_msvc()
-        toolchain.apply_preset(env, "openmp")
+        apply_feature(toolchain, env, "openmp")
 
         assert "/openmp" in env.cc.flags
         assert "/openmp" in env.cxx.flags
@@ -294,23 +331,12 @@ class TestMsvcPresets:
     def test_fast_math_preset(self, test_project):  # noqa: F811
         env = _make_msvc_env()
         toolchain = _concrete_msvc()
-        toolchain.apply_preset(env, "fast-math")
+        apply_feature(toolchain, env, "fast-math")
 
         assert "/fp:fast" in env.cc.flags
 
-    def test_unknown_preset_warns(self, test_project):  # noqa: F811
-        from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
-
-        env = _make_msvc_env()
-
-        class ConcreteMsvc(MsvcCompatibleToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
-
-        toolchain = ConcreteMsvc("test-msvc")
-        toolchain.apply_preset(env, "nonexistent")
-
-        assert len(env.cc.flags) == 0
+    def test_unknown_preset_has_no_realization(self):
+        assert _concrete_msvc().make_feature_preset("nonexistent") is None
 
 
 class TestCxxStandard:
@@ -391,7 +417,7 @@ class TestFortranPresets:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_preset(env, "warnings")
+        apply_feature(GfortranToolchain(), env, "warnings")
 
         assert "-Wall" in env.fc.flags
         assert "-Wextra" in env.fc.flags
@@ -401,7 +427,7 @@ class TestFortranPresets:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_preset(env, "werror")
+        apply_feature(GfortranToolchain(), env, "werror")
 
         assert "-Werror" in env.fc.flags
 
@@ -413,7 +439,7 @@ class TestWasmPresets:
         from pcons.toolchains.emscripten import EmscriptenToolchain
 
         env = _make_unix_env()
-        EmscriptenToolchain().apply_preset(env, "warnings")
+        apply_feature(EmscriptenToolchain(), env, "warnings")
 
         assert "-Wall" in env.cc.flags
         assert "-Werror" not in env.cc.flags
@@ -422,7 +448,7 @@ class TestWasmPresets:
         from pcons.toolchains.emscripten import EmscriptenToolchain
 
         env = _make_unix_env()
-        EmscriptenToolchain().apply_preset(env, "werror")
+        apply_feature(EmscriptenToolchain(), env, "werror")
 
         assert "-Werror" in env.cc.flags
 
@@ -572,8 +598,10 @@ class TestOpenmpPreset:
     def test_non_apple_compiler_uses_fopenmp(self, test_project, monkeypatch):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
-        monkeypatch.setattr(GccToolchain, "_compiler_is_apple_clang", lambda _: False)
-        toolchain.apply_preset(env, "openmp")
+        monkeypatch.setattr(
+            GccToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": False
+        )
+        apply_feature(toolchain, env, "openmp")
 
         assert "-fopenmp" in env.cc.flags
         assert "-fopenmp" in env.cxx.flags
@@ -585,11 +613,13 @@ class TestOpenmpPreset:
         libomp = tmp_path / "libomp"
         (libomp / "include").mkdir(parents=True)
         (libomp / "include" / "omp.h").write_text("")
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": True
+        )
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", (str(libomp),))
 
         env = _make_unix_env()
-        LlvmToolchain().apply_preset(env, "openmp")
+        apply_feature(LlvmToolchain(), env, "openmp")
 
         assert "-Xclang" in env.cxx.flags
         assert "-fopenmp" in env.cxx.flags
@@ -597,14 +627,45 @@ class TestOpenmpPreset:
         assert f"-L{libomp}/lib" in env.link.flags
         assert "-lomp" in env.link.flags
 
+    def test_each_tool_gets_its_own_compilers_flags(
+        self, test_project, monkeypatch, tmp_path
+    ):  # noqa: F811
+        """$CC naming Homebrew's clang while C++ stays Apple's: the C
+        compiler takes -fopenmp, and the C++ compiler and the link (which
+        the C++ driver runs for a program with C++ in it) Apple clang's
+        flags."""
+        libomp = tmp_path / "libomp"
+        (libomp / "include").mkdir(parents=True)
+        (libomp / "include" / "omp.h").write_text("")
+        monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", (str(libomp),))
+        monkeypatch.setattr(
+            LlvmToolchain,
+            "_compiler_is_apple_clang",
+            lambda _, tool="cxx": tool == "cxx",
+        )
+
+        toolchain = LlvmToolchain()
+        toolchain._tools = {name: object() for name in ("cc", "cxx", "link")}
+        preset = toolchain.make_feature_preset("openmp")
+
+        assert preset is not None
+        flags = {c.tool: c.flags for c in preset.contributions}
+        assert flags["cc"] == ("-fopenmp",)
+        assert flags["cxx"][:2] == ("-Xclang", "-fopenmp")
+        assert "-lomp" in flags["link"]
+
     def test_apple_clang_without_libomp_is_unavailable(self, test_project, monkeypatch):  # noqa: F811
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": True
+        )
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
 
         assert LlvmToolchain().make_feature_preset("openmp") is None
 
     def test_unavailable_openmp_raises_clear_error(self, test_project, monkeypatch):  # noqa: F811
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": True
+        )
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
 
         env = _make_unix_env()
@@ -616,7 +677,7 @@ class TestOpenmpPreset:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_preset(env, "openmp")
+        apply_feature(GfortranToolchain(), env, "openmp")
 
         assert "-fopenmp" in env.fc.flags
         assert "-fopenmp" in env.link.flags
@@ -656,10 +717,14 @@ class TestHasPreset:
     def test_openmp_mirrors_availability(self, test_project, monkeypatch):  # noqa: F811
         env = _make_unix_env()
         env._toolchain = LlvmToolchain()
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": True
+        )
         monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
         assert not env.has_preset("openmp")
-        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: False)
+        monkeypatch.setattr(
+            LlvmToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": False
+        )
         assert env.has_preset("openmp")
 
     def test_contributed_preset(self, test_project, clean_registry):  # noqa: F811
@@ -682,7 +747,9 @@ class TestHasPreset:
         assert env.has_preset("acme/o3")
 
     def test_guard_then_apply_idiom(self, test_project, monkeypatch):  # noqa: F811
-        monkeypatch.setattr(GccToolchain, "_compiler_is_apple_clang", lambda _: False)
+        monkeypatch.setattr(
+            GccToolchain, "_compiler_is_apple_clang", lambda _, tool="cxx": False
+        )
         env = _make_unix_env()
         env._toolchain = GccToolchain()
         if env.has_preset("openmp"):
@@ -702,7 +769,7 @@ class TestFortranVariants:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_variant(env, "debug")
+        apply_variant(GfortranToolchain(), env, "debug")
 
         assert "-O0" in env.fc.flags
         assert "-g" in env.fc.flags
@@ -711,7 +778,29 @@ class TestFortranVariants:
         from pcons.toolchains.gfortran import GfortranToolchain
 
         env = _make_fortran_env()
-        GfortranToolchain().apply_variant(env, "release")
+        apply_variant(GfortranToolchain(), env, "release")
 
         assert "-O2" in env.fc.flags
         assert "NDEBUG" in env.fc.defines
+
+
+def test_hardened_follows_a_cross_targets_abi(tmp_path, monkeypatch) -> None:
+    """clang cross-building for the MSVC ABI gets Control Flow Guard, as on
+    Windows, not MinGW's linker flags: the target decides, not the host."""
+    from pcons.core.project import Project
+    from pcons.toolchains import unix as unix_mod
+    from pcons.toolchains.presets import CrossPreset
+    from pcons.tools.toolchain import toolchain_registry
+
+    monkeypatch.setattr(unix_mod, "target_triple", lambda compiler: None)
+    entry = toolchain_registry.get("llvm")
+    assert entry is not None
+    env = Project("h", root_dir=tmp_path).Environment(
+        toolchain=entry.create_toolchain()
+    )
+    env.apply_cross_preset(
+        CrossPreset(name="win", arch="x86_64", triple="x86_64-pc-windows-msvc")
+    )
+    env.apply_preset("hardened")
+    assert "-cfguard" in env.cc.flags
+    assert "-Wl,/guard:cf" in env.link.flags

@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -26,6 +27,7 @@ from pathlib import Path
 import click
 
 from pcons._cli_click import run_cli
+from pcons.core.errors import PconsRuntimeError, PconsValueError
 
 logger = logging.getLogger("pcons.test")
 
@@ -118,10 +120,10 @@ def load_manifest(path: Path) -> tuple[dict, list[dict]]:
     """
     data = json.loads(path.read_text())
     if not isinstance(data, dict):
-        raise ValueError(f"{path}: manifest root must be a JSON object")
+        raise PconsValueError(f"{path}: manifest root must be a JSON object")
     tests = data.get("tests", [])
     if not isinstance(tests, list):
-        raise ValueError(f"{path}: 'tests' must be a list")
+        raise PconsValueError(f"{path}: 'tests' must be a list")
     return data, tests
 
 
@@ -204,7 +206,7 @@ def _discover_gtest(
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"--gtest_list_tests failed (exit {result.returncode}): "
             f"{result.stderr.strip()}"
         )
@@ -247,7 +249,7 @@ def _discover_doctest(
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"--list-test-cases failed (exit {result.returncode}): "
             f"{result.stderr.strip()}"
         )
@@ -287,7 +289,7 @@ def _discover_catch2(
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"--list-test-names-only failed (exit {result.returncode}): "
             f"{result.stderr.strip()}"
         )
@@ -487,16 +489,39 @@ def run_one_test(test: dict, build_dir: Path) -> TestResult:
         )
 
     duration = time.monotonic() - start
-    passed = (result.returncode == 0) != should_fail
+    message = ""
+    if result.returncode == test.get("skip_returncode"):
+        # Checked before should_fail: a test that skips itself didn't run.
+        status = SKIP
+        message = f"exit code {result.returncode}"
+    elif (result.returncode == 0) != should_fail:
+        status = PASS
+    else:
+        status = FAIL
+        message = _exit_description(result.returncode)
+        if should_fail:
+            message += ", and the test should fail"
     return TestResult(
         name=name,
-        status=PASS if passed else FAIL,
+        status=status,
         duration=duration,
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
+        message=message,
         labels=labels,
     )
+
+
+def _exit_description(returncode: int) -> str:
+    """How a test process ended: its exit code, or on POSIX the signal
+    that killed it (subprocess reports that as a negative code)."""
+    if returncode < 0:
+        try:
+            return f"killed by {signal.Signals(-returncode).name}"
+        except ValueError:
+            return f"killed by signal {-returncode}"
+    return f"exit code {returncode}"
 
 
 # ----- Parallel orchestration ----------------------------------------------
@@ -519,7 +544,7 @@ def _validate_deps(tests: list[dict]) -> None:
     for name, deps in deps_of.items():
         for d in deps:
             if d not in known:
-                raise ValueError(
+                raise PconsValueError(
                     f"Test {name!r} depends_on {d!r} which is not a defined test."
                 )
 
@@ -532,7 +557,7 @@ def _validate_deps(tests: list[dict]) -> None:
         for d in deps_of[node]:
             if color[d] == GRAY:
                 cycle = " -> ".join([*stack[stack.index(d) :], d])
-                raise ValueError(f"Cycle in depends_on graph: {cycle}")
+                raise PconsValueError(f"Cycle in depends_on graph: {cycle}")
             if color[d] == WHITE:
                 visit(d, [*stack, d])
         color[node] = BLACK
@@ -582,8 +607,10 @@ def run_all(
     Scheduler:
       - A test becomes *ready* when every entry in its ``depends_on`` has
         a final result.
-      - A ready test whose dependency failed is reported as ``SKIP`` with
-        ``message="dep failed: ..."``; the runner does not invoke it.
+      - A ready test whose dependency failed, or was skipped because one
+        of its own failed, is reported as ``SKIP`` with
+        ``message="dep failed: ..."`` naming the failures; the runner does
+        not invoke it. A disabled dependency blocks nothing.
       - A ready test marked ``serial`` runs alone (no other tests in
         flight). Non-serial tests share a pool of ``jobs`` workers.
       - With ``stop_on_fail``, after the first failure no new tests are
@@ -605,6 +632,8 @@ def run_all(
     effective_jobs = jobs if jobs > 0 else max(len(tests), 1)
 
     results: dict[str, TestResult] = {}
+    # A test skipped for failed dependencies -> the failed tests behind it.
+    blocked_by: dict[str, list[str]] = {}
     pending: set[str] = set(by_name)
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=effective_jobs)
     running: dict[concurrent.futures.Future, str] = {}
@@ -638,9 +667,18 @@ def run_all(
             unmet = [d for d in deps if d not in results]
             if unmet:
                 continue
-            failed = [d for d in deps if _is_failed(results[d])]
+            failed = list(
+                dict.fromkeys(
+                    cause
+                    for d in deps
+                    for cause in (
+                        [d] if _is_failed(results[d]) else blocked_by.get(d, [])
+                    )
+                )
+            )
             if failed:
                 pending.discard(name)
+                blocked_by[name] = failed
                 r = TestResult(
                     name=name,
                     status=SKIP,
@@ -740,8 +778,10 @@ def print_summary(
     skipped = [r for r in results if r.status == SKIP]
 
     print()
-    pct = (100 * passed // total) if total else 0
-    summary = f"{pct}% tests passed, {len(failed)} tests failed out of {total}"
+    # As CTest counts: out of the tests that ran, skips listed apart.
+    ran = total - len(skipped)
+    pct = (100 * passed // ran) if ran else 0
+    summary = f"{pct}% tests passed, {len(failed)} tests failed out of {ran}"
     if skipped:
         summary += f" ({len(skipped)} skipped)"
     print(summary)
@@ -752,10 +792,11 @@ def print_summary(
         for r in failed:
             extra = f" ({r.message})" if r.message else ""
             print(f"  - {r.name} [{r.status}]{extra}")
-            if verbose and r.stderr:
-                # Indent the stderr block so it visually nests under the test.
-                indented = "\n".join("      " + line for line in r.stderr.splitlines())
-                print(indented)
+            if verbose:
+                # Indented, so the output nests under its test.
+                for output in (r.stdout, r.stderr):
+                    for line in output.splitlines():
+                        print(f"      {line}")
     if not failed:
         print(_color(f"Project: {project_name} — all tests passed.", "green", color))
 
@@ -1016,28 +1057,28 @@ def cli_test(
 
     print(f"Test project: {project_name} ({len(filtered)} tests)")
 
-    counter = {"started": 0, "finished": 0}
+    # As CTest numbers them: by place in the list, whatever order they run in.
+    numbers = {t["name"]: i for i, t in enumerate(filtered, 1)}
+    finished = 0
     total = len(filtered)
     pad = len(str(total))
 
     def on_start(test: dict) -> None:
-        counter["started"] += 1
-        print(
-            _color(
-                f"      Start {counter['started']:>{pad}}: {test['name']}",
-                "dim",
-                color,
-            )
-        )
+        number = numbers[test["name"]]
+        print(_color(f"      Start {number:>{pad}}: {test['name']}", "dim", color))
 
     def on_finish(test: dict, result: TestResult) -> None:
-        counter["finished"] += 1
-        idx = counter["finished"]
+        nonlocal finished
+        finished += 1
+        number = numbers[test["name"]]
         # Right-pad name to a sensible width for visual alignment.
         name_field = f"{test['name']:<40s}"
         status = _status_label(result.status, color)
         dur = f"{result.duration:6.2f}s"
-        print(f" {idx:>{pad}}/{total} Test #{idx:>{pad}}: {name_field} {status}  {dur}")
+        print(
+            f" {finished:>{pad}}/{total} Test #{number:>{pad}}: "
+            f"{name_field} {status}  {dur}"
+        )
 
     try:
         results = run_all(

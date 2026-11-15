@@ -6,6 +6,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -14,9 +15,13 @@ from typing import TYPE_CHECKING, Any, cast
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsRuntimeError
+from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.core.target import Target
+from pcons.toolchains._msvc_compat import msvc_crt
 from pcons.toolchains.gnu_common import (
+    clang_color_flags,
     gnu_archiver_builders,
     gnu_archiver_vars,
     gnu_compile_builders,
@@ -38,7 +43,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode, Node
     from pcons.core.project import Project
-    from pcons.core.toolconfig import ToolConfig
     from pcons.tools.toolchain import SourceHandler
 
 logger = logging.getLogger(__name__)
@@ -97,9 +101,32 @@ def _find_libcxx_modules_manifest(
         if not out or out == candidate:
             continue
         p = Path(out)
-        if p.is_file():
+        if not p.is_file():
+            continue
+        if _std_module_source_exists(p):
             return p.resolve()
+        # Debian and Ubuntu: clang reports the multiarch copy, whose relative
+        # paths only work from the llvm-N/lib symlink to it
+        # (llvm/llvm-project#172497). Don't resolve that symlink.
+        beside = _compiler_lib_dir(compiler_cmd)
+        if beside and _std_module_source_exists(beside / candidate):
+            return beside / candidate
+        return p.resolve()
     return None
+
+
+def _compiler_lib_dir(compiler_cmd: str) -> Path | None:
+    """The lib directory of the LLVM install the compiler belongs to."""
+    found = shutil.which(compiler_cmd)
+    return Path(found).resolve().parent.parent / "lib" if found else None
+
+
+def _std_module_source_exists(manifest: Path) -> bool:
+    """Whether the manifest's `std` module source is where it says."""
+    if not manifest.is_file():
+        return False
+    std = _parse_libcxx_manifest(manifest).get("std")
+    return std is not None and std["source-path"].is_file()
 
 
 def _parse_libcxx_manifest(manifest: Path) -> dict[str, dict[str, Any]]:
@@ -117,7 +144,7 @@ def _parse_libcxx_manifest(manifest: Path) -> dict[str, dict[str, Any]]:
     data = json.loads(manifest.read_text(encoding="utf-8"))
     version = data.get("version")
     if version is not None and version != 1:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"libc++ modules manifest at {manifest} declares version "
             f"{version!r}, but pcons only knows version 1. The format may "
             "have changed in your libc++; please update pcons or file an "
@@ -208,13 +235,10 @@ class ClangCCompiler(BaseTool):
         super().__init__("cc", language="c")
 
     def default_vars(self) -> dict[str, object]:
-        return gnu_compile_vars("clang", "cc")
+        return gnu_compile_vars("clang", "cc", color_flags=clang_color_flags())
 
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cc")
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "clang", with_version=True)
 
 
 class ClangCxxCompiler(BaseTool):
@@ -226,7 +250,7 @@ class ClangCxxCompiler(BaseTool):
         super().__init__("cxx", language="cxx")
 
     def default_vars(self) -> dict[str, object]:
-        base = gnu_compile_vars("clang++", "cxx")
+        base = gnu_compile_vars("clang++", "cxx", color_flags=clang_color_flags())
         # A scanned TU compiles with `modobjcmd`: `objcmd` plus a reference
         # to its collate-written modmap response file, placed *before* the
         # source because clang's -x (inside the modmap) applies only to
@@ -247,9 +271,6 @@ class ClangCxxCompiler(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_compile_builders("cxx")
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "clang++", with_version=True)
-
 
 class LlvmArchiver(BaseTool):
     """LLVM archiver tool."""
@@ -269,9 +290,6 @@ class LlvmArchiver(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return gnu_archiver_builders()
 
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "llvm-ar", "ar")
-
 
 class LlvmLinker(BaseTool):
     """LLVM linker tool (variables come from gnu_link_vars)."""
@@ -286,9 +304,6 @@ class LlvmLinker(BaseTool):
 
     def builders(self) -> dict[str, Builder]:
         return gnu_link_builders()
-
-    def configure(self, config: object) -> ToolConfig | None:
-        return self._find_tool_config(config, "clang")
 
 
 #: Target type for a linked .metallib. Not one of the four the shared
@@ -359,24 +374,6 @@ class MetalCompiler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        platform = get_platform()
-        if not platform.is_macos:
-            return None
-
-        xcrun = config.find_program("xcrun", version_flag="")
-        if xcrun is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("metal", cmd=str(xcrun.path))
-
 
 class LlvmToolchain(UnixToolchain):
     """LLVM/Clang toolchain for C and C++ development.
@@ -386,14 +383,54 @@ class LlvmToolchain(UnixToolchain):
     """
 
     ENV_COMPILER_FAMILY = "llvm"
+    # Clang's default target on Windows, unless its triple says otherwise
+    # (MSYS2's clang64 targets MinGW).
+    WINDOWS_ABI = "msvc"
+
+    def _abi_probe_compiler(self) -> str | None:
+        """The C++ (else C) compiler that will build: $CXX or $CC when set,
+        else clang on PATH. It's asked before this toolchain has its tools,
+        so by the variables."""
+        import shutil
+
+        from pcons.tools.tool import resolve_env_cmd_override
+
+        for var in ("CXX", "CC"):
+            override = resolve_env_cmd_override(var)
+            if override is not None:
+                return override
+        return shutil.which("clang")
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
 
     # Clang understands --target=<triple> for cross-compilation.
     IS_CLANG_DRIVER = True
 
+    # libstdc++ or libc++, whichever clang links.
+    STATIC_RUNTIME_LINK_FLAGS = ("-static-libgcc", "-static-libstdc++")
+
     def __init__(self) -> None:
         super().__init__("llvm")
+
+    def _runtime_contributions(
+        self, linkage: str, variant: str, target: Platform
+    ) -> list[ToolContribution] | None:
+        """Targeting MSVC, clang's driver links as if for the static C
+        runtime whatever its objects use: it puts ``-defaultlib:libcmt`` on
+        every link, which a link for any other runtime leaves out, and
+        picks the static sanitizer runtimes unless told ``-shared-libsan``,
+        which the DLL runtime needs."""
+        contribs = super()._runtime_contributions(linkage, variant, target)
+        if contribs is not None and self._targets_msvc_abi(target):
+            crt = msvc_crt(linkage, variant)
+            flags = ()
+            if crt != "static":
+                flags += ("-Wl,/NODEFAULTLIB:libcmt",)
+            if crt.startswith("dll"):
+                flags += ("-shared-libsan",)
+            if flags:
+                contribs.append(ToolContribution("link", flags=flags))
+        return contribs
 
     def get_output_prefix(
         self, target_type: str, target: Platform | None = None
@@ -446,37 +483,6 @@ class LlvmToolchain(UnixToolchain):
             return SourceHandler("metal", "metal", ".air", None, None, "metalcmd")
 
         return None
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-
-        cc = ClangCCompiler()
-        if cc.configure(config) is None:
-            return False
-
-        cxx = ClangCxxCompiler()
-        cxx.configure(config)
-
-        ar = LlvmArchiver()
-        ar.configure(config)
-
-        link = LlvmLinker()
-        if link.configure(config) is None:
-            return False
-
-        self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
-
-        # Metal compiler is optional (macOS only)
-        platform = get_platform()
-        if platform.is_macos:
-            metal = MetalCompiler()
-            if metal.configure(config) is not None:
-                self._tools["metal"] = metal
-
-        return True
 
     def after_resolve(
         self,
@@ -541,9 +547,7 @@ class LlvmToolchain(UnixToolchain):
                     and "-x" not in context.flags
                 ):
                     context.flags.extend(["-x", "c++-module"])
-                flags = merge_scan_compile_flags(
-                    base_flags, context, root=project.root_dir
-                )
+                flags = merge_scan_compile_flags(base_flags, context)
                 obj_rel = rel(obj_node.path)
                 key = bmi_key_for_flags(flags, flag_spec)
                 edge_facts[id(obj_node)] = {
@@ -583,7 +587,7 @@ class LlvmToolchain(UnixToolchain):
             # file, so flags with spaces survive; a pre-joined string would
             # be quoted whole, into one argument.
             return {
-                "SCAN_FLAGS": list(cast("list[str]", facts["flags"])),
+                "SCAN_FLAGS": list(cast("list[object]", facts["flags"])),
                 "SCAN_OBJ": str(facts["obj_rel"]),
             }
 

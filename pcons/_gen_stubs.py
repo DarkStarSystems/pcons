@@ -300,7 +300,6 @@ def generate_project_builder_stubs() -> str:
 # Well-known Environment instance variables (initialized in Environment.__init__).
 # Unlike tool namespaces, these are real attribute reads, not `_tools` lookups.
 _ENVIRONMENT_VAR_TYPES: tuple[tuple[str, str], ...] = (
-    ("build_dir", "Path"),
     ("variant", "str"),
     # Assignable from either spelling; stored as a Path.
     ("build_prefix", "str | Path | None"),
@@ -587,11 +586,14 @@ def write_or_check(mode: str) -> int:
                 rc = 1
         elif mode == "write":
             if current != new_content:
+                # LF on every host, as checked in: text mode would write
+                # CRLF on Windows.
                 path.write_text(new_content, encoding="utf-8", newline="\n")
                 print(f"Updated {path}")
             else:
                 print(f"{path} is up to date.")
         else:
+            # A pcons bug, not a user error.
             raise ValueError(f"unknown mode: {mode}")
     return rc
 

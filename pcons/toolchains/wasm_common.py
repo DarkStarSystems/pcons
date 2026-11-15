@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.preset import ToolContribution
+from pcons.core.errors import PconsValueError
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.toolchains.unix import UnixToolchain
 
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
 
     from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
-    from pcons.core.subst import FlagToken, PathToken
+    from pcons.core.subst import FlagToken
     from pcons.tools.toolchain import SourceHandler
 
 
@@ -32,13 +33,16 @@ class WasmToolchain(UnixToolchain):
 
     Subclasses set `TOOL_NAMES`, `program_suffix` (".js"/".wasm"), and
     `platform_label` (used in the "no shared libraries" error messages), and
-    provide SDK discovery via __init__/_configure_tools/setup.
+    provide SDK discovery via __init__/setup.
 
     `TOOL_NAMES` stays on the concrete subclasses: the stub generator treats any
     class carrying it as a real toolchain, so the abstract base must not.
     """
 
     TARGETS_WASM = True
+
+    # Linked statically however the runtime linkage is set.
+    STATIC_RUNTIME_LINK_FLAGS = ()
 
     # Inherit the clang-flag presets, minus openmp: neither Emscripten nor
     # the WASI SDK ships an OpenMP runtime.
@@ -75,14 +79,18 @@ class WasmToolchain(UnixToolchain):
         return ".a"  # static library
 
     def link_group_tokens(
-        self, archives: Sequence[PathToken], env: Environment | None = None
+        self, archives: Sequence[FlagToken], env: Environment | None = None
     ) -> list[FlagToken] | None:
         """None: wasm-ld resolves archives in any order and takes the GNU
         group flags only for compatibility, so a cycle needs nothing."""
         return None
 
     def get_compile_flags_for_target_type(
-        self, target_type: str, env: Environment | None = None
+        self,
+        target_type: str,
+        env: Environment | None = None,
+        *,
+        pic: bool | None = None,
     ) -> list[str]:
         # No -fPIC needed for WebAssembly
         if target_type == "shared_library":
@@ -110,21 +118,18 @@ class WasmToolchain(UnixToolchain):
 
     # -- Variant / arch overrides -------------------------------------------
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
+    def make_arch_preset(self, arch: str) -> Preset | None:
         """wasm32 is the only architecture; anything else is an error.
 
         wasm32 needs no flags (the tools imply it), so this is a declared
-        no-op realization: it records the arch and returns True rather than
-        letting the empty realization read as "unrealized" (docs/presets.md).
+        no-op realization, an arch preset with no contributions, rather than
+        an empty realization that reads as "unrealized" (docs/presets.md).
         """
-        from pcons.core.preset import Preset
-
         if arch.lower() != "wasm32":
-            raise ValueError(
+            raise PconsValueError(
                 f"{self.name} targets wasm32 only; cannot set target arch '{arch}'."
             )
-        env.apply(Preset(name="wasm32", category="arch", arch="wasm32"))
-        return True
+        return Preset(name="wasm32", category="arch", arch="wasm32")
 
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
         # Sysroot/triple are handled by setup(); only extra flags apply here.

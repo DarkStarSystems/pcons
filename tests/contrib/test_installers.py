@@ -1000,7 +1000,8 @@ class TestInstallerDepends:
 
 class TestFileNamesFromTargets:
     """A source Target's file name, where an installer derives one, is its
-    output_filename when it has one: the whole name, nothing added."""
+    output_filename when it has one: the whole name, nothing added. It is
+    staged by that name alone, so a directory in either is dropped."""
 
     @staticmethod
     def _commands(project: Project) -> list[list]:
@@ -1012,12 +1013,18 @@ class TestFileNamesFromTargets:
         ]
 
     @staticmethod
-    def _named(name: str, filename: str) -> Target:
+    def _named(name: str, attribute: str, value: str) -> Target:
         target = Target(name, target_type="program")
-        target.output_filename = filename
+        setattr(target, attribute, value)
         return target
 
-    def test_a_pkg_bundle(self, tmp_path: Path, monkeypatch) -> None:
+    @pytest.mark.parametrize(
+        ("attribute", "value"),
+        [("output_filename", "Demo.app"), ("output_name", "apps/Demo.app")],
+    )
+    def test_a_pkg_bundle(
+        self, tmp_path: Path, monkeypatch, attribute: str, value: str
+    ) -> None:
         from pcons.contrib.installers import macos
 
         monkeypatch.setattr(macos, "_check_tool", lambda *a, **k: None)
@@ -1029,7 +1036,7 @@ class TestFileNamesFromTargets:
             name="App",
             version="1.0",
             identifier="com.example.app",
-            sources=[self._named("demo", "Demo.app")],
+            sources=[self._named("demo", attribute, value)],
             install_location="/Applications",
         )
         assert any(
@@ -1038,7 +1045,13 @@ class TestFileNamesFromTargets:
             for i in range(len(cmd))
         )
 
-    def test_an_msix_executable(self, tmp_path: Path, monkeypatch) -> None:
+    @pytest.mark.parametrize(
+        ("attribute", "value"),
+        [("output_filename", "Viewer.exe"), ("output_name", "bin/Viewer")],
+    )
+    def test_an_msix_executable(
+        self, tmp_path: Path, monkeypatch, attribute: str, value: str
+    ) -> None:
         from pcons.contrib.installers import windows
 
         monkeypatch.setattr(windows, "_find_sdk_tool", lambda tool: f"C:/sdk/{tool}")
@@ -1050,7 +1063,7 @@ class TestFileNamesFromTargets:
             name="App",
             version="1.0.0",
             publisher="CN=Test",
-            sources=[self._named("viewer", "Viewer.exe")],
+            sources=[self._named("viewer", attribute, value)],
         )
         assert any(
             cmd[i : i + 2] == ["--executable", "Viewer.exe"]

@@ -136,7 +136,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.flags = ["-fsanitize=address"]
@@ -170,7 +169,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.libs = ["dl", "pthread"]
@@ -199,7 +197,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.libdirs = ["/env/lib"]
@@ -248,7 +245,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.flags = ["-fsanitize=address"]
@@ -282,7 +278,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.flags = ["-isystem", "/usr/local/include", "-framework", "Cocoa"]
@@ -318,13 +313,15 @@ class TestCompileLinkContext:
                 return ["-Wl,-soname,libfoo.so", "-Wl,-z"]
 
         class _StubEnv:
-            _toolchain = _StubToolchain()
+            def toolchain_for(self, tool: str) -> object:
+                return _StubToolchain()
 
             def has_tool(self, name: str) -> bool:
                 return False
 
         class _StubTarget:
             name = "foo"
+            intermediate_nodes: list[object] = []
 
         effective = EffectiveRequirements(link_flags=["-Wl,-soname,libfoo.so"])
         ctx = CompileLinkContext.from_effective_requirements(
@@ -338,60 +335,25 @@ class TestCompileLinkContext:
         assert ctx.link_flags.count("-Wl,-soname,libfoo.so") == 1
         assert "-Wl,-z" in ctx.link_flags
 
-    def test_from_effective_requirements_objcxx_uses_cxx_linker(
-        self, gcc_toolchain, tmp_project
+    @pytest.mark.parametrize("language", ["objcxx", "cuda", "cxx"])
+    def test_cxx_family_links_with_the_cxx_driver(
+        self, gcc_toolchain, tmp_project, language
     ) -> None:
-        """.mm sources (link_language "objcxx") must link with the C++ driver.
-
-        Regression test: objcxx has priority 3 (higher than cxx's 2, see
-        BaseToolchain.DEFAULT_LANGUAGE_PRIORITY), so a target that mixes
-        .mm and .cpp sources picks "objcxx" as its link_language. Before
-        this fix, only "cxx" (and "fortran") triggered the C++ linker-driver
-        override, so objcxx fell through to the default C linker (gcc) and
-        libstdc++/libc++ was never linked in, breaking STL usage in .mm
-        files.
+        """Objective-C++ compiles with the cxx tool, and CUDA links through
+        the host C++ toolchain, so all three link with g++ for its runtime.
+        (Before, objcxx fell through to gcc and libstdc++ was never linked.)
         """
         from pcons.core.project import Project
-        from pcons.tools.requirements import EffectiveRequirements
+        from pcons.core.target import Target
+        from pcons.tools.compile_link import _link_driver
 
         project = Project("test", root_dir=tmp_project, build_dir=tmp_project / "build")
         env = project.Environment(toolchain=gcc_toolchain)
 
-        ctx = CompileLinkContext.from_effective_requirements(
-            EffectiveRequirements(),
-            mode="link",
-            language="objcxx",
-            env=env,
-        )
+        found, linker, cmd, _ = _link_driver(Target("app"), env, {"c", language}, {})
 
-        assert ctx.linker_cmd == env.cxx.cmd
-        assert ctx.linker_cmd != env.cc.cmd
-
-    def test_from_effective_requirements_cuda_uses_cxx_linker(
-        self, gcc_toolchain, tmp_project
-    ) -> None:
-        """CUDA-linked targets (link_language "cuda") use the host C++ linker.
-
-        CudaToolchain is designed to be used alongside a C/C++ toolchain for
-        linking (nvcc only compiles .cu files); when cuda is the
-        highest-priority language in a mixed build, the C++ driver must
-        still be selected, just as for plain C++.
-        """
-        from pcons.core.project import Project
-        from pcons.tools.requirements import EffectiveRequirements
-
-        project = Project("test", root_dir=tmp_project, build_dir=tmp_project / "build")
-        env = project.Environment(toolchain=gcc_toolchain)
-
-        ctx = CompileLinkContext.from_effective_requirements(
-            EffectiveRequirements(),
-            mode="link",
-            language="cuda",
-            env=env,
-        )
-
-        assert ctx.linker_cmd == env.cxx.cmd
-        assert ctx.linker_cmd != env.cc.cmd
+        assert (found, linker) == (language, gcc_toolchain)
+        assert cmd == env.cxx.cmd
 
     def test_compile_overrides_merge_with_env_flags(self) -> None:
         """Verify compile flags are merged with env.{tool}.flags.
@@ -409,7 +371,6 @@ class TestCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = GccToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("cc")
             env.cc.flags = ["-std=c11"]
@@ -578,7 +539,6 @@ class TestMsvcCompileLinkContext:
             tmp_path = Path(tmp)
             project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
             toolchain = MsvcToolchain()
-            toolchain._configured = True
             env = project.Environment(toolchain=toolchain)
             env.add_tool("link")
             env.link.flags = ["/DEBUG"]
@@ -650,7 +610,6 @@ class TestNinjaQuoting:
         # Create project with path containing spaces
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         toolchain = GccToolchain()
-        toolchain._configured = True
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
@@ -783,7 +742,6 @@ class TestCompileCommandsQuoting:
         # Create project with path containing spaces
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         toolchain = GccToolchain()
-        toolchain._configured = True
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
@@ -855,7 +813,6 @@ class TestEndToEndSpacesInPaths:
         # Create project
         project = Project("My Project", root_dir=tmp_path, build_dir=tmp_path / "build")
         toolchain = GccToolchain()
-        toolchain._configured = True
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")

@@ -19,6 +19,7 @@ from pcons.toolchains.clang_cl import ClangClToolchain
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
 from pcons.toolchains.msvc import MsvcToolchain
+from tests.support import apply_target_arch, apply_variant
 
 
 @pytest.fixture
@@ -31,7 +32,6 @@ def flags_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     not_windows = lambda: SimpleNamespace(is_windows=False)  # noqa: E731
     monkeypatch.setattr("pcons.toolchains.msvc.get_platform", not_windows)
-    monkeypatch.setattr("pcons.toolchains.clang_cl.get_platform", not_windows)
 
 
 class TestGccTargetArch:
@@ -63,7 +63,7 @@ class TestGccTargetArch:
             mock_platform.return_value.is_windows = False
             mock_platform.return_value.is_posix = True
 
-            toolchain.apply_target_arch(env, "arm64")
+            apply_target_arch(toolchain, env, "arm64")
 
         # Check -arch flags were applied to compiler and linker
         assert "-arch" in cc.flags
@@ -94,7 +94,7 @@ class TestGccTargetArch:
             mock_platform.return_value.is_windows = False
             mock_platform.return_value.is_posix = True
 
-            toolchain.apply_target_arch(env, "x86_64")
+            apply_target_arch(toolchain, env, "x86_64")
 
         assert "-arch" in cc.flags
         assert "x86_64" in cc.flags
@@ -124,7 +124,7 @@ class TestGccTargetArch:
             mock_platform.return_value.is_posix = True
 
             with pytest.raises(ValueError, match="cross preset"):
-                toolchain.apply_target_arch(env, "arm64")
+                apply_target_arch(toolchain, env, "arm64")
 
         assert "-arch" not in cc.flags
         assert "-arch" not in link.flags
@@ -158,7 +158,7 @@ class TestLlvmTargetArch:
             mock_platform.return_value.is_windows = False
             mock_platform.return_value.is_posix = True
 
-            toolchain.apply_target_arch(env, "arm64")
+            apply_target_arch(toolchain, env, "arm64")
 
         # Check -arch flags were applied
         assert "-arch" in cc.flags
@@ -167,6 +167,19 @@ class TestLlvmTargetArch:
         assert "arm64" in cxx.flags
         assert "-arch" in link.flags
         assert "arm64" in link.flags
+
+    def test_macos_arch_goes_on_the_toolchains_own_compile_tools(self) -> None:
+        class ObjcOnly(LlvmToolchain):
+            def _feature_preset_tools(self) -> tuple[str, ...]:
+                return ("objc",)
+
+        with patch("pcons.toolchains.unix.get_platform") as mock_platform:
+            mock_platform.return_value.is_macos = True
+            contribs = ObjcOnly()._arch_contributions("arm64")
+        assert [(c.tool, c.flags) for c in contribs] == [
+            ("objc", ("-arch", "arm64")),
+            ("link", ("-arch", "arm64")),
+        ]
 
 
 @pytest.mark.usefixtures("flags_only")
@@ -186,7 +199,7 @@ class TestMsvcTargetArch:
         lib.set("flags", [])
 
         toolchain = MsvcToolchain()
-        toolchain.apply_target_arch(env, "x64")
+        apply_target_arch(toolchain, env, "x64")
 
         assert "/MACHINE:X64" in link.flags
         assert "/MACHINE:X64" in lib.flags
@@ -204,7 +217,7 @@ class TestMsvcTargetArch:
         lib.set("flags", [])
 
         toolchain = MsvcToolchain()
-        toolchain.apply_target_arch(env, "arm64")
+        apply_target_arch(toolchain, env, "arm64")
 
         assert "/MACHINE:ARM64" in link.flags
         assert "/MACHINE:ARM64" in lib.flags
@@ -218,7 +231,7 @@ class TestMsvcTargetArch:
         link.set("flags", [])
 
         toolchain = MsvcToolchain()
-        toolchain.apply_target_arch(env, "x86")
+        apply_target_arch(toolchain, env, "x86")
 
         assert "/MACHINE:X86" in link.flags
 
@@ -231,7 +244,7 @@ class TestMsvcTargetArch:
         link.set("flags", [])
 
         toolchain = MsvcToolchain()
-        toolchain.apply_target_arch(env, "arm64ec")
+        apply_target_arch(toolchain, env, "arm64ec")
 
         assert "/MACHINE:ARM64EC" in link.flags
 
@@ -247,15 +260,15 @@ class TestMsvcTargetArch:
 
         # Test various aliases
         env.link.flags = []
-        toolchain.apply_target_arch(env, "amd64")
+        apply_target_arch(toolchain, env, "amd64")
         assert "/MACHINE:X64" in link.flags
 
         env.link.flags = []
-        toolchain.apply_target_arch(env, "x86_64")
+        apply_target_arch(toolchain, env, "x86_64")
         assert "/MACHINE:X64" in link.flags
 
         env.link.flags = []
-        toolchain.apply_target_arch(env, "aarch64")
+        apply_target_arch(toolchain, env, "aarch64")
         assert "/MACHINE:ARM64" in link.flags
 
 
@@ -280,7 +293,7 @@ class TestClangClTargetArch:
         lib.set("flags", [])
 
         toolchain = ClangClToolchain()
-        toolchain.apply_target_arch(env, "x64")
+        apply_target_arch(toolchain, env, "x64")
 
         # Compiler gets --target
         assert "--target=x86_64-pc-windows-msvc" in cc.flags
@@ -305,7 +318,7 @@ class TestClangClTargetArch:
         link.set("flags", [])
 
         toolchain = ClangClToolchain()
-        toolchain.apply_target_arch(env, "arm64")
+        apply_target_arch(toolchain, env, "arm64")
 
         assert "--target=aarch64-pc-windows-msvc" in cc.flags
         assert "--target=aarch64-pc-windows-msvc" in cxx.flags
@@ -324,7 +337,7 @@ class TestClangClTargetArch:
         link.set("flags", [])
 
         toolchain = ClangClToolchain()
-        toolchain.apply_target_arch(env, "x86")
+        apply_target_arch(toolchain, env, "x86")
 
         assert "--target=i686-pc-windows-msvc" in cc.flags
         assert "/MACHINE:X86" in link.flags
@@ -388,7 +401,7 @@ class TestEnvironmentSetTargetArch:
         env._toolchain = toolchain
 
         # Apply variant first
-        toolchain.apply_variant(env, "release")
+        apply_variant(toolchain, env, "release")
 
         # Then apply target arch
         with patch("pcons.toolchains.unix.get_platform") as mock_platform:
@@ -418,8 +431,7 @@ class TestBaseToolchainTargetArch:
 
         # Create a minimal concrete subclass for testing
         class MinimalToolchain(BaseToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         env = Environment()
 
@@ -428,7 +440,7 @@ class TestBaseToolchainTargetArch:
         cc.set("flags", [])
 
         toolchain = MinimalToolchain("minimal")
-        toolchain.apply_target_arch(env, "arm64")
+        apply_target_arch(toolchain, env, "arm64")
 
         # Base implementation should not add any flags
         assert len(cc.flags) == 0
@@ -443,7 +455,6 @@ class TestMsvcCrossToolset:
     def _fake_windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
         is_windows = lambda: SimpleNamespace(is_windows=True)  # noqa: E731
         monkeypatch.setattr("pcons.toolchains.msvc.get_platform", is_windows)
-        monkeypatch.setattr("pcons.toolchains.clang_cl.get_platform", is_windows)
         monkeypatch.setattr("platform.machine", lambda: "AMD64")
         monkeypatch.delenv("VCToolsInstallDir", raising=False)
         monkeypatch.delenv("WindowsSDKLibVersion", raising=False)
@@ -488,7 +499,7 @@ class TestMsvcCrossToolset:
             {"cc": "cl.exe", "cxx": "cl.exe", "link": "link.exe", "lib": "lib.exe"}
         )
 
-        MsvcToolchain().apply_target_arch(env, "arm64")
+        apply_target_arch(MsvcToolchain(), env, "arm64")
 
         assert env.cc.cmd == str(bin_dir / "cl.exe")
         assert env.cxx.cmd == str(bin_dir / "cl.exe")
@@ -510,7 +521,7 @@ class TestMsvcCrossToolset:
         self._fake_vc_tree(tmp_path, monkeypatch)
         env = self._make_env({"link": "link.exe", "lib": "lib.exe"})
 
-        MsvcToolchain().apply_target_arch(env, "x64")
+        apply_target_arch(MsvcToolchain(), env, "x64")
 
         assert env.link.cmd == "link.exe"
         assert "/MACHINE:X64" in env.link.flags
@@ -530,7 +541,7 @@ class TestMsvcCrossToolset:
         env = self._make_env({"link": "link.exe", "lib": "lib.exe"})
 
         with pytest.raises(ValueError, match="cross toolset not found"):
-            MsvcToolchain().apply_target_arch(env, "arm64")
+            apply_target_arch(MsvcToolchain(), env, "arm64")
 
     def test_clang_cl_arm64_adds_cross_libs_keeps_cmd(
         self,
@@ -545,7 +556,7 @@ class TestMsvcCrossToolset:
             {"cc": "clang-cl", "cxx": "clang-cl", "link": "lld-link", "lib": "llvm-lib"}
         )
 
-        ClangClToolchain().apply_target_arch(env, "arm64")
+        apply_target_arch(ClangClToolchain(), env, "arm64")
 
         assert env.cc.cmd == "clang-cl"
         assert "--target=aarch64-pc-windows-msvc" in env.cc.flags
@@ -563,8 +574,7 @@ class TestArchRealizationContract:
         from pcons.tools.toolchain import BaseToolchain
 
         class MinimalToolchain(BaseToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         env = Environment()
         cc = env.add_tool("cc")
@@ -587,8 +597,7 @@ class TestArchRealizationContract:
         )
 
         class MinimalToolchain(BaseToolchain):
-            def _configure_tools(self, config: object) -> bool:
-                return True
+            pass
 
         env = Environment()
         for name in ("cc", "cxx", "link"):

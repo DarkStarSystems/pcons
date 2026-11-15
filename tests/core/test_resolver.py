@@ -789,7 +789,6 @@ class TestResolverSharedLibraryCompileFlags:
 
         # Create environment with GCC toolchain
         gcc_toolchain = GccToolchain()
-        gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -833,7 +832,6 @@ class TestResolverSharedLibraryCompileFlags:
 
         # Create environment with GCC toolchain
         gcc_toolchain = GccToolchain()
-        gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -849,8 +847,9 @@ class TestResolverSharedLibraryCompileFlags:
         context = obj_node._build_info["context"]
         assert "-fPIC" not in context.flags
 
-    def test_static_library_no_fpic(self, tmp_path, monkeypatch):
-        """Test that static library objects don't get -fPIC."""
+    def test_static_library_fpic_unless_opted_out(self, tmp_path, monkeypatch):
+        """Static library objects get -fPIC, so the library can go into a
+        shared one, unless its pic option says not to."""
         from pcons.configure.platform import Platform
         from pcons.toolchains.gcc import GccToolchain
 
@@ -877,21 +876,23 @@ class TestResolverSharedLibraryCompileFlags:
 
         # Create environment with GCC toolchain
         gcc_toolchain = GccToolchain()
-        gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
+        nopic = project.StaticLibrary("nopic", env, sources=[str(src_file)])
+        nopic.set_option("pic", False)
         project.resolve()
 
         assert target._resolved
         assert len(target.intermediate_nodes) == 1
 
-        # Check that -fPIC is NOT in the compile flags via context
-        obj_node = target.intermediate_nodes[0]
-        context = obj_node._build_info["context"]
-        assert "-fPIC" not in context.flags
+        def flags(lib):
+            return lib.intermediate_nodes[0]._build_info["context"].flags
+
+        assert "-fPIC" in flags(target)
+        assert "-fPIC" not in flags(nopic)
 
     def test_program_no_fpic(self, tmp_path, monkeypatch):
         """Test that program objects don't get -fPIC."""
@@ -921,7 +922,6 @@ class TestResolverSharedLibraryCompileFlags:
 
         # Create environment with GCC toolchain
         gcc_toolchain = GccToolchain()
-        gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -951,9 +951,6 @@ class TestResolverToolAgnostic:
             def __init__(self):
                 super().__init__("tex")
 
-            def _configure_tools(self, config):
-                return True
-
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
                 if suffix.lower() == ".tex":
                     return SourceHandler(
@@ -981,7 +978,6 @@ class TestResolverToolAgnostic:
 
         # Create environment with our custom toolchain
         tex_toolchain = TexToolchain()
-        tex_toolchain._configured = True
         env = project.Environment(toolchain=tex_toolchain)
 
         # Add a fake latex tool
@@ -1016,9 +1012,6 @@ class TestResolverToolAgnostic:
             def __init__(self):
                 super().__init__("custom")
 
-            def _configure_tools(self, config):
-                return True
-
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
                 from pcons.core.subst import TargetPath
 
@@ -1047,7 +1040,6 @@ class TestResolverToolAgnostic:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
 
         toolchain = CustomToolchain()
-        toolchain._configured = True
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -1067,9 +1059,6 @@ class TestResolverToolAgnostic:
         class CustomToolchain(BaseToolchain):
             def __init__(self):
                 super().__init__("custom")
-
-            def _configure_tools(self, config):
-                return True
 
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
                 from pcons.core.subst import TargetPath
@@ -1091,7 +1080,6 @@ class TestResolverToolAgnostic:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
 
         toolchain = CustomToolchain()
-        toolchain._configured = True
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
@@ -1460,6 +1448,42 @@ class TestLinkInputOrder:
         project.resolve()
 
         self._assert_links_in_order(exe, lib_a, lib_b)
+
+    @staticmethod
+    def _zlib():
+        from pcons import ImportedTarget, PackageDescription
+
+        return ImportedTarget.from_package(
+            PackageDescription(
+                name="z",
+                libraries=["z"],
+                library_dirs=["/opt/zlib/lib"],
+                include_dirs=["/opt/zlib/include"],
+            )
+        )
+
+    @pytest.mark.parametrize("kind", ["StaticLibrary", "SharedLibrary"])
+    def test_package_a_library_links_privately(self, tmp_path, gcc_toolchain, kind):
+        """An archive doesn't contain what its library links privately, so a
+        program linking it needs the package's library too; a shared library
+        has linked it already. Its headers stay private either way."""
+        self._make_sources(tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        lib_a = getattr(project, kind)("a", env, sources=["a.c"])
+        lib_a.link_private(self._zlib())
+        exe = project.Program("exe", env, sources=["main.c"])
+        exe.link(lib_a)
+        project.resolve()
+
+        link = exe.output_nodes[0]._build_info["context"]
+        static = kind == "StaticLibrary"
+        assert ("z" in link.libs) is static
+        libdirs = [Path(str(d)).as_posix() for d in link.libdirs]
+        assert any(d.endswith("/opt/zlib/lib") for d in libdirs) is static
+        compile_ctx = exe.intermediate_nodes[0]._build_info["context"]
+        assert not any("zlib" in str(i) for i in compile_ctx.includes)
 
 
 class TestSourceTargetsResolveFirst:

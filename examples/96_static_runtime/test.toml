@@ -1,0 +1,24 @@
+# Test configuration for the static_runtime example
+
+[test]
+description = "Build a C++ program with the shared and with static language runtimes"
+
+expected_outputs = [
+    "build/app_shared",
+    "build/app_static",
+]
+expected_outputs_windows = [
+    "build/app_shared.exe",
+    "build/app_static.exe",
+]
+
+[verify]
+commands = [
+    { run = "./build/app_static", expect_stdout = "Hello from C++" },
+    { run = "uv run python check_runtime.py", expect_stdout = "app_static: no shared C++ runtime" },
+]
+
+[skip]
+# Apple's clang links only the system's shared libc++.
+platforms = ["darwin"]
+generators = ["xcode"]

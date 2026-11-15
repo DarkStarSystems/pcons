@@ -33,7 +33,6 @@ env = project.Environment(toolchain=toolchain_override or ["gcc", "llvm", "msvc"
 
 # Pick a shared dialect and a BMI-incompatible "breaker" dialect per toolchain.
 if env.toolchain.name == "msvc":
-    env.cxx.flags.append("/EHsc")
     shared_dialect = ["/std:c++20"]
     breaker_dialect = ["/std:c++latest"]
 else:

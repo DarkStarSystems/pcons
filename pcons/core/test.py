@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from pcons.core.errors import PconsKeyError, PconsRuntimeError, PconsTypeError
 
 if TYPE_CHECKING:
     from pcons.core.project import Project
@@ -52,6 +55,7 @@ class TestSpec:
         labels: Tags for filtering (e.g., "unit", "fuzz", "slow").
         timeout: Seconds before the runner kills the test, or None.
         should_fail: If True, a non-zero exit code is a pass.
+        skip_returncode: Exit code reported as skipped, or None.
         serial: If True, runner won't parallelize this test with others.
         disabled: If True, runner reports the test as skipped.
         data: Extra files the test reads at runtime (informational only).
@@ -69,6 +73,7 @@ class TestSpec:
     labels: tuple[str, ...] = ()
     timeout: float | None = None
     should_fail: bool = False
+    skip_returncode: int | None = None
     serial: bool = False
     disabled: bool = False
     data: tuple[Path, ...] = ()
@@ -101,6 +106,7 @@ _MUTABLE_TEST_KEYS = frozenset(
         "labels",
         "timeout",
         "should_fail",
+        "skip_returncode",
         "serial",
         "disabled",
         "data",
@@ -122,8 +128,9 @@ def set_test_property(target: Target, key: str, value: Any) -> None:
     Args:
         target: The Test target to update (returned by ``project.Test()``).
         key: Property name. One of: ``args``, ``cwd``, ``env``, ``labels``,
-            ``timeout``, ``should_fail``, ``serial``, ``disabled``,
-            ``data``, ``program``.
+            ``timeout``, ``should_fail``, ``skip_returncode``, ``serial``,
+            ``disabled``, ``data``, ``depends_on``, ``discover``,
+            ``program``.
         value: New value. Coerced the same way ``project.Test()`` does at
             creation time (lists for ``args``, tuples for ``labels`` and
             ``data``, dict for ``env``).
@@ -135,17 +142,17 @@ def set_test_property(target: Target, key: str, value: Any) -> None:
         KeyError: ``key`` is not a valid test property name.
     """
     if target.target_type != "test":
-        raise TypeError(
+        raise PconsTypeError(
             f"set_test_property: {target.name!r} is not a Test target "
             f"(target_type={target.target_type!r})."
         )
     if target._resolved:
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"Cannot modify test {target.name!r} after resolve(). "
             "Call set_test_property() before project.generate()."
         )
     if key not in _MUTABLE_TEST_KEYS:
-        raise KeyError(
+        raise PconsKeyError(
             f"Unknown test property {key!r}. "
             f"Valid properties: {sorted(_MUTABLE_TEST_KEYS)}."
         )
@@ -154,7 +161,7 @@ def set_test_property(target: Target, key: str, value: Any) -> None:
         # Defensive: the factory drops spec_partial after resolution, but
         # we already guarded with _resolved above. This catches the rare
         # case of a hand-built test target missing the partial dict.
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"Test {target.name!r} has no partial spec to update — "
             "is this really a target created by project.Test()?"
         )
@@ -163,12 +170,35 @@ def set_test_property(target: Target, key: str, value: Any) -> None:
     elif key == "env":
         value = dict(value)
     elif key == "args":
-        value = [str(a) for a in value]
+        value = test_args(target, value)
     elif key == "data":
         value = tuple(value)
     elif key == "depends_on":
         value = tuple(str(d) for d in value)
     partial[key] = value
+
+
+def test_args(target: Target, args: Iterable[object]) -> list[str | Path | Target]:
+    """A test's arguments as its spec keeps them until resolve.
+
+    Text stays as given. A ``Path`` is a file, read like ``sources=``: a
+    relative one from the declaring script's directory. A ``Target`` is
+    the file it builds, which the test then depends on, so ``test-build``
+    builds it. Resolve writes both as the test sees them from where it
+    runs.
+    """
+    from pcons.core.target import Target
+
+    result: list[str | Path | Target] = []
+    for arg in args:
+        if isinstance(arg, Target):
+            target.depends(arg)
+            result.append(arg)
+        elif isinstance(arg, Path):
+            result.append(target.project._script_path(arg))
+        else:
+            result.append(str(arg))
+    return result
 
 
 def set_test_properties(*targets: Target, **properties: Any) -> None:

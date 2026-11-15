@@ -20,7 +20,7 @@ API:
 | `project.resolve()` | Resolve all dependencies |
 | `project.node(path)` | Get/create a file node; a relative path is read like `sources=` |
 | `project.find_package(name, ...)` | Find external package (returns ImportedTarget) |
-| `project.find_package(name, system=True)` | Same, with the package's headers as system headers (`-isystem`) |
+| `project.find_package(name, system=False)` | Same, with the package's headers as ordinary includes, not system headers (`-isystem`) |
 | `project.find_package(name, env=env)` | Same, searching and caching for that environment only |
 | `project.add_package_finder(finder)` | Prepend a custom package finder |
 | `project.add_package_finder(finder, env=env)` | Same, used in that environment only |
@@ -72,6 +72,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 |--------|-------------|
 | `env.set_variant(name)` | Set debug/release variant |
 | `env.set_target_arch(arch)` | Set target CPU architecture |
+| `env.set_runtime_linkage(linkage)` | Link the language runtimes `"shared"` (default) or `"static"` |
 | `env.apply_preset(name)` | Apply flag preset (warnings, werror, sanitize, profile, lto, hardened) |
 | `env.apply_cross_preset(preset)` | Apply cross-compilation preset |
 | `env.explain(tool=None)` | Attribute each flag/define/command to the preset that set it |
@@ -87,7 +88,6 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.PyBuilder(python=, worker=, cwd=, launcher=, env_vars=, restat=, write_if_different=, depends=, emitter=, discovers=)` | Decorator: turn a Python function of the build script into a builder. Says how the function runs; `emitter=` names each edge's files at resolve, `discovers=True` lets the function report the files it read |
 | `builder(target, source, depends, name=, **kwargs)` | Call the builder: one build edge, with the function's own arguments as plain keywords. A `Target` or node keyword arrives as its paths, a `Subst` as its expansion |
 | `env.Framework(*names)` | Link macOS frameworks (macOS only) |
-| `env.Glob(pattern)` | Find files matching a glob pattern |
 | `env.cc` | C compiler settings |
 | `env.cxx` | C++ compiler settings |
 | `env.link` | Linker settings |

@@ -500,6 +500,31 @@ class TestClangTidy:
 
         assert env.cxx.launcher.count("pcons.tools.co_compile") == 1
 
+    @pytest.mark.parametrize("tidy_first", [True, False])
+    def test_include_what_you_use_shares_the_launcher(
+        self, test_project, monkeypatch, tidy_first
+    ) -> None:  # noqa: F811
+        """Both analyzers run from one co_compile launcher, before one compile."""
+        monkeypatch.setattr(
+            co_compile.shutil,
+            "which",
+            self._installed("clang-tidy", "include-what-you-use"),
+        )
+        env = self._env_with_compilers()
+        env.cxx.launcher = ["ccache"]
+
+        calls = [env.use_clang_tidy, env.use_include_what_you_use]
+        for use in calls if tidy_first else reversed(calls):
+            use()
+        env.use_include_what_you_use()
+
+        launcher = env.cxx.launcher
+        assert launcher.count("pcons.tools.co_compile") == 1
+        assert launcher.count("--iwyu") == 1
+        assert "/usr/bin/include-what-you-use" in launcher
+        assert "/usr/bin/clang-tidy" in launcher
+        assert launcher[-2:] == ["--", "ccache"]
+
     @pytest.mark.parametrize("cache_first", [True, False])
     def test_runs_outside_a_compiler_cache(
         self, test_project, monkeypatch, cache_first
@@ -561,7 +586,7 @@ class TestUseUnifiedWithRequirements:
 
     def test_use_applies_package(self, test_project):  # noqa: F811
         env = self._env()
-        env.use(self._pkg())
+        env.use(self._pkg(), system=False)
 
         inc = str(Path("/opt/fancy/include"))
         assert inc in env.cc.includes
@@ -571,6 +596,22 @@ class TestUseUnifiedWithRequirements:
         assert str(Path("/opt/fancy/lib")) in env.link.libdirs
         assert "-Wl,-rpath,/opt/fancy/lib" in env.link.flags
 
+    @pytest.mark.parametrize("system", [False, True])
+    def test_use_reaches_a_fortran_compiler(self, test_project, system):  # noqa: F811
+        """Fortran finds a package's .mod files on its include path, which
+        has no system form; its compile flags are C-family, so not those."""
+        env = self._env()
+        fc = env.add_tool("fc")
+        for name in ("flags", "includes", "defines"):
+            fc.set(name, [])
+        pkg = self._pkg()
+        pkg.compile_flags = ["-std=c++17"]
+        env.use(pkg, system=system)
+
+        assert str(Path("/opt/fancy/include")) in env.fc.includes
+        assert "USING_FANCY" in env.fc.defines
+        assert env.fc.flags == []
+
     def test_repeated_use_dedups(self, test_project):  # noqa: F811
         """Same merge semantics as target resolution: no duplicate -I/-l on
         repeat application (the old ad-hoc path duplicated them)."""
@@ -579,7 +620,7 @@ class TestUseUnifiedWithRequirements:
         env.use(pkg)
         env.use(pkg)
 
-        assert env.cc.includes.count(str(Path("/opt/fancy/include"))) == 1
+        assert env.cc.system_includes.count(str(Path("/opt/fancy/include"))) == 1
         assert env.link.libs.count("fancy") == 1
         assert env.link.flags.count("-Wl,-rpath,/opt/fancy/lib") == 1
 
@@ -589,15 +630,15 @@ class TestUseUnifiedWithRequirements:
         from pcons.packages.imported import ImportedTarget
 
         env = self._env()
-        env.use(ImportedTarget.from_package(self._pkg()))
+        env.use(ImportedTarget.from_package(self._pkg(), system=False))
 
         assert str(Path("/opt/fancy/include")) in env.cc.includes
         assert "fancy" in env.link.libs
 
-    def test_use_system_applies_isystem_includes(self, test_project):  # noqa: F811
-        """system=True puts the package's include dirs on the system list."""
+    def test_use_applies_isystem_includes_by_default(self, test_project):  # noqa: F811
+        """A package's include dirs go on the system list unless system=False."""
         env = self._env()
-        env.use(self._pkg(), system=True)
+        env.use(self._pkg())
 
         inc = str(Path("/opt/fancy/include"))
         assert inc in env.cc.system_includes

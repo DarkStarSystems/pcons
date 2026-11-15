@@ -11,7 +11,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.errors import PconsAttributeError, PconsRuntimeError, PconsTypeError
 from pcons.core.flags import FlagList
+from pcons.core.paths import PathList
 
 if TYPE_CHECKING:
     from pcons.core._toolconfig_stubs import _ToolConfigStubs
@@ -85,7 +87,7 @@ class ToolConfig(_ToolConfigStubs):
                 if setting is not None:
                     return lambda *args, **kwargs: setting(env, *args, **kwargs)
 
-        raise AttributeError(
+        raise PconsAttributeError(
             f"Tool '{self.name}' has no variable '{name}'. "
             f"Available: {', '.join(vars_dict.keys()) or '(none)'}"
         )
@@ -124,7 +126,7 @@ class ToolConfig(_ToolConfigStubs):
             vars_dict = object.__getattribute__(self, "_vars")
             if name not in vars_dict:
                 if object.__getattribute__(self, "_declared"):
-                    raise AttributeError(self._unknown_variable_message(name))
+                    raise PconsAttributeError(self._unknown_variable_message(name))
                 vars_dict[name] = value
                 return
             # Catch common mistake: assigning string to a list-only variable
@@ -133,7 +135,7 @@ class ToolConfig(_ToolConfigStubs):
                 and name in self._LIST_ONLY_VARS
                 and isinstance(vars_dict[name], list)
             ):
-                raise TypeError(
+                raise PconsTypeError(
                     f"Cannot assign a string to '{self.name}.{name}' "
                     f"(must be a list). "
                     f'Use {self.name}.{name} = ["{value}"] or '
@@ -142,6 +144,8 @@ class ToolConfig(_ToolConfigStubs):
             # A flag list keeps its grouping rules across an assignment:
             # ``env.cc.flags = ["-Wall"]`` must not turn the FlagList into
             # a plain list, or the next FlagPair appended lands as one token.
+            # A path list likewise keeps reading its relative entries from
+            # the script writing them.
             current = vars_dict[name]
             if isinstance(current, FlagList) and not isinstance(value, FlagList):
                 if isinstance(value, list):
@@ -150,6 +154,8 @@ class ToolConfig(_ToolConfigStubs):
                         separated=current.separated,
                         passthrough=current.passthrough,
                     )
+            elif isinstance(current, PathList) and isinstance(value, list):
+                value = PathList(value)
             vars_dict[name] = value
 
     def _unknown_variable_message(self, name: str) -> str:
@@ -177,7 +183,7 @@ class ToolConfig(_ToolConfigStubs):
         if name in vars_dict:
             del vars_dict[name]
         else:
-            raise AttributeError(f"Tool '{self.name}' has no variable '{name}'")
+            raise PconsAttributeError(f"Tool '{self.name}' has no variable '{name}'")
 
     def __contains__(self, name: str) -> bool:
         """Check if a variable exists."""
@@ -221,7 +227,7 @@ class ToolConfig(_ToolConfigStubs):
         """
         env = object.__getattribute__(self, "_env")
         if env is None:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Tool '{self.name}' is not attached to an environment; "
                 f"use env.explain('{self.name}') instead."
             )

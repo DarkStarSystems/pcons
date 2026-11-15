@@ -1,0 +1,7 @@
+// The French strings: resources only, no code.
+#define IDS_GREETING 1
+
+STRINGTABLE
+BEGIN
+    IDS_GREETING "Bonjour de pcons !"
+END

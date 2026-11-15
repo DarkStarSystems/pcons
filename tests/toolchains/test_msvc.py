@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from pcons.configure.platform import get_platform
 from pcons.core.builder import MultiOutputBuilder, OutputGroup
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
@@ -23,6 +22,7 @@ from pcons.toolchains.msvc import (
     _sorted_version_dirs,
     _version_sort_key,
     find_msvc_toolset_version,
+    use_msvc_tool_paths,
 )
 
 
@@ -36,21 +36,6 @@ class TestMsvcCompiler:
         cxx = MsvcCompiler(name="cxx", language="cxx")
         assert cxx.name == "cxx"
         assert cxx.language == "cxx"
-
-    def test_the_dynamic_crt_is_the_default(self, test_project):  # noqa: F811
-        """cl.exe's own default is the static release CRT, which the debug
-        STL cannot link and Conan packages are not built against. The
-        toolchain applies /MD on setup, as the "default" variant."""
-        env = Environment()
-        for tool in ("cc", "cxx"):
-            cfg = env.add_tool(tool)
-            cfg.set("flags", [])
-        (preset,) = MsvcToolchain().setup_presets(env)
-        assert preset.exclusive_group == "build_variant"
-        assert {c.tool: c.flags for c in preset.contributions} == {
-            "cc": ("/MD",),
-            "cxx": ("/MD",),
-        }
 
     def test_cxx_reports_cplusplus_correctly(self):
         """cl.exe reports __cplusplus as 199711L unless /Zc:__cplusplus is
@@ -225,12 +210,11 @@ class TestMsvcLinker:
         assert result.import_lib.path == Path("build/mylib.lib")
         assert result.export_file.path == Path("build/mylib.exp")
 
-    def test_sharedcmd_includes_implib(self):
-        link = MsvcLinker()
-        vars = link.default_vars()
-        sharedcmd = vars["sharedcmd"]
-        # Check that IMPLIB flag is in the command
-        assert any("/IMPLIB:" in str(item) for item in sharedcmd)
+    def test_sharedcmd_leaves_the_import_library_to_the_target(self):
+        """A DLL may declare none (import_library=False), so /IMPLIB: comes
+        from the target's link flags."""
+        sharedcmd = MsvcLinker().default_vars()["sharedcmd"]
+        assert not any("/IMPLIB:" in str(item) for item in sharedcmd)
 
 
 class TestMsvcToolchain:
@@ -238,23 +222,8 @@ class TestMsvcToolchain:
         tc = MsvcToolchain()
         assert tc.name == "msvc"
 
-    def test_tools_empty_before_configure(self):
-        tc = MsvcToolchain()
-        # Tools should be empty before configure
-        assert tc.tools == {}
-
-    def test_configure_returns_false_on_non_windows(self):
-        platform = get_platform()
-        if not platform.is_windows:
-            tc = MsvcToolchain()
-
-            # Create a mock config object
-            class MockConfig:
-                pass
-
-            # Should return False on non-Windows
-            result = tc._configure_tools(MockConfig())
-            assert result is False
+    def test_no_tools_until_given_them(self):
+        assert MsvcToolchain().tools == {}
 
 
 class TestMsvcCompileFlagsForTargetType:
@@ -628,9 +597,7 @@ class TestMsvcAuxiliaryInputHandler:
     def test_auxiliary_input_paths_are_path_flags(self):
         """/MANIFESTINPUT: and /DEF: take node paths, so generators
         must make them execution-relative, not source-relative."""
-        tc = MsvcToolchain()
-        assert "/MANIFESTINPUT:" in tc.get_path_flags()
-        assert "/DEF:" in tc.get_path_flags()
+        assert {"/MANIFESTINPUT:", "/DEF:"} <= MsvcToolchain.LINK_PATH_FLAGS
 
     def test_auxiliary_input_handler_manifest_case_insensitive(self):
         """Test that .MANIFEST files are also recognized (case insensitive)."""
@@ -787,3 +754,54 @@ class TestFindMsvcToolsetVersion:
         monkeypatch.delenv("VCToolsVersion", raising=False)
         monkeypatch.setattr("pcons.toolchains.msvc._find_msvc_install", lambda: None)
         assert find_msvc_toolset_version() is None
+
+
+@pytest.mark.usefixtures("test_project")
+class TestUseMsvcToolPaths:
+    """use_msvc_tool_paths points tools at MSVC's own binaries when PATH
+    would find the wrong ones, or none."""
+
+    TOOLS = {"link": "link.exe", "lib": "lib.exe"}
+
+    @staticmethod
+    def _msvc_bin(tmp_path: Path) -> Path:
+        bin_dir = tmp_path / "msvc" / "bin"
+        bin_dir.mkdir(parents=True)
+        for exe in ("cl.exe", "link.exe", "lib.exe"):
+            (bin_dir / exe).touch()
+        return bin_dir
+
+    def test_a_shadowed_tool_gets_the_one_beside_cl(self, tmp_path, monkeypatch):
+        bin_dir = self._msvc_bin(tmp_path)
+        on_path = {"cl.exe": bin_dir / "cl.exe", "lib.exe": bin_dir / "lib.exe"}
+        # Git's link.exe (a coreutils one) ahead of MSVC's on PATH.
+        on_path["link.exe"] = tmp_path / "git" / "usr" / "bin" / "link.exe"
+        monkeypatch.setattr("shutil.which", lambda name: str(on_path[name]))
+        env = Environment()
+
+        use_msvc_tool_paths(env, self.TOOLS)
+
+        assert env.link.cmd == str(bin_dir / "link.exe")
+        assert not env.has_tool("lib")
+
+    def test_without_cl_on_path_the_tools_come_from_vswhere(
+        self, tmp_path, monkeypatch
+    ):
+        bin_dir = self._msvc_bin(tmp_path)
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setattr("pcons.toolchains.msvc._find_msvc_bin_dir", lambda: bin_dir)
+        env = Environment()
+
+        use_msvc_tool_paths(env, self.TOOLS)
+
+        assert env.link.cmd == str(bin_dir / "link.exe")
+        assert env.lib.cmd == str(bin_dir / "lib.exe")
+
+    def test_without_msvc_nothing_changes(self, monkeypatch):
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.setattr("pcons.toolchains.msvc._find_msvc_bin_dir", lambda: None)
+        env = Environment()
+
+        use_msvc_tool_paths(env, self.TOOLS)
+
+        assert not env.has_tool("link") and not env.has_tool("lib")

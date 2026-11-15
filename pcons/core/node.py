@@ -58,6 +58,9 @@ class BuildInfo(TypedDict, total=False):
     deps_style: str | None  # Ninja dependency style ("gcc" or "msvc")
     command: str | list[Any]  # Direct command (generic/custom builders)
     description: str  # Human-readable build description
+    # Why the builder made this node as it did, for explain: a summary line
+    # and (value, who asked for it) rows
+    explanation: tuple[str, list[tuple[str, str]]]
 
     # Toolchain-provided context; the resolver uses
     # context.get_env_overrides() when expanding command templates
@@ -73,6 +76,7 @@ class BuildInfo(TypedDict, total=False):
     rule_name: str | None  # Rule name pinned by the caller; None to derive one
     all_targets: list[Any]  # list[Node]
     restat: bool  # Ninja restat: re-check output timestamp after build
+    link_refusal: str  # Why nothing can link against this output
     # Directory to run the command in, absolute, or None for the build
     # directory. Generators render this edge's paths as seen from there.
     cwd: Path | None
@@ -109,6 +113,9 @@ class BuildInfo(TypedDict, total=False):
     # The target whose resolution declared this edge, where a second one
     # declaring it would be a collision rather than a merge.
     producer: Any  # Target, but avoid circular import
+    # The toolchain whose handler compiled this object, beside the
+    # environment's own: it has a say in how its objects link.
+    toolchain: Any  # Toolchain, but avoid circular import
 
 
 class Node(ABC):

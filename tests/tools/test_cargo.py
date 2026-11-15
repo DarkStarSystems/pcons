@@ -9,13 +9,13 @@ available).
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 import pytest
 
 from pcons import Project
+from pcons.core.subst import PathToken
 from pcons.tools.cargo import (
     _artifact_filename,
     _profile_subdir,
@@ -334,8 +334,13 @@ def test_cargo_build_under_add_subdirectory(tmp_path, monkeypatch, preamble):
     target_dir = Path("build/child/cargo/rust_core")
     assert edge.path == target_dir / "release" / staticlib
     command = edge._build_info["command"]
-    assert f"--target-dir={tmp_path.resolve() / target_dir}" in command
-    assert f"--manifest-path={child / 'rust' / 'Cargo.toml'}" in command
+    target_root = str(tmp_path.resolve() / target_dir)
+    assert PathToken("--target-dir=", target_root, "project") in command
+    manifest = str(child / "rust" / "Cargo.toml")
+    assert PathToken("--manifest-path=", manifest, "project") in command
     # Cargo names the artifact in its dep-info as the build tool does.
-    basedir = json.dumps(str(tmp_path.resolve() / "build"))
-    assert f"--config=build.dep-info-basedir={basedir}" in command
+    basedir = str(tmp_path.resolve() / "build")
+    assert (
+        PathToken('--config=build.dep-info-basedir="', basedir, "project", '"')
+        in command
+    )

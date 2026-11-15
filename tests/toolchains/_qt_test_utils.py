@@ -46,7 +46,6 @@ def fake_qt_toolchain(**tool_paths: str) -> QtToolchain:
     """A configured qt toolchain with fake (or given) tool paths."""
     toolchain = QtToolchain()
     toolchain._tools = {"qt": QtTool(**{**FAKE_TOOLS, **tool_paths})}
-    toolchain._configured = True
     return toolchain
 
 

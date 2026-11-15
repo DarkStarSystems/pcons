@@ -25,7 +25,7 @@ first run.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -68,7 +68,7 @@ _this_scope: set[tuple[str, str]] = set()
 
 
 @contextmanager
-def script_scope() -> Iterator[None]:
+def script_scope() -> Generator[None]:
     """Attribute declarations to the build script, and drop the previous run's.
 
     Only what a script **body** declared is dropped, because that is all a

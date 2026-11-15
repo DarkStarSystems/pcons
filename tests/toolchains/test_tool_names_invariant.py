@@ -20,6 +20,8 @@ match TOOL_NAMES exactly.
 
 from __future__ import annotations
 
+import sys
+
 # Force-import every shipped toolchain so each one self-registers with
 # `toolchain_registry`. The list MUST stay in sync with
 # `_collect_tool_names()` in `pcons/_gen_stubs.py` — the test will fail
@@ -30,8 +32,10 @@ import pcons.toolchains.clang_cl  # noqa: F401
 import pcons.toolchains.cuda  # noqa: F401
 import pcons.toolchains.cython  # noqa: F401
 import pcons.toolchains.emscripten  # noqa: F401
+import pcons.toolchains.flang  # noqa: F401
 import pcons.toolchains.gcc  # noqa: F401
 import pcons.toolchains.gfortran  # noqa: F401
+import pcons.toolchains.ifx  # noqa: F401
 import pcons.toolchains.llvm  # noqa: F401
 import pcons.toolchains.msvc  # noqa: F401
 import pcons.toolchains.qt.toolchain  # noqa: F401
@@ -79,8 +83,11 @@ def test_every_builtin_toolchain_tool_names_matches_installed_tools() -> None:
         "CudaToolchain",
         "CythonToolchain",
         "EmscriptenToolchain",
+        "FlangToolchain",
         "GccToolchain",
         "GfortranToolchain",
+        # "ifx" names the host's: MSVC-style on Windows, GNU-style elsewhere.
+        "IfxMsvcToolchain" if sys.platform == "win32" else "IfxToolchain",
         "LatexToolchain",
         "LlvmToolchain",
         "MsvcToolchain",

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsValueError
 from pcons.toolchains.qt.builders import (
     _qrc_xml,
     _qt_gen_dir_for,
@@ -82,7 +83,7 @@ class QtTranslationsBuilder:
         _require_qt_tool(env, "QtTranslations()")
         defined_at = defined_at or get_caller_location()
         if not ts_files:
-            raise ValueError(f"QtTranslations '{name}': ts_files is empty")
+            raise PconsValueError(f"QtTranslations '{name}': ts_files is empty")
         # An ObjectLibrary, so its generated sources sit beside its objects.
         root, qt_dir = _qt_gen_dir_for(
             project, env, f"qt.{name}{_qt_gen_dir_suffix('ObjectLibrary')}"

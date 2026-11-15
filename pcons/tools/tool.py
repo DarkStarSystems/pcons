@@ -7,18 +7,20 @@ compiling C files). Tools attach to Environments and provide Builders.
 
 from __future__ import annotations
 
+import dataclasses
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pcons.core.flags import FlagList
+from pcons.core.paths import PathList
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder, OutputGroup
     from pcons.core.environment import Environment
     from pcons.core.node import Node
-    from pcons.core.toolconfig import ToolConfig
 
 
 def standalone_tool_tokens(tool_name: str, command_var: str) -> list | None:
@@ -99,6 +101,12 @@ def _pin_cmd_path(cmd: str) -> str:
     return shutil.which(cmd) or cmd
 
 
+#: Tool variables that list directories, under the names every toolchain
+#: gives them. A relative entry is read from the directory of the script that
+#: adds it, as ``sources=`` reads one.
+_PATH_LIST_VARS = frozenset({"includes", "system_includes", "libdirs", "frameworkdirs"})
+
+
 def _flag_list(flags: list, env: Environment) -> FlagList:
     """A tool's flag list, grouped by the environment's toolchain rules.
 
@@ -134,20 +142,6 @@ class Tool(Protocol):
         """Tool name (e.g., 'cc', 'cxx', 'ar', 'link')."""
         ...
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Detect and configure this tool.
-
-        Called during the configure phase. Should detect the tool's
-        executable, version, and capabilities.
-
-        Args:
-            config: Configure context for running checks.
-
-        Returns:
-            ToolConfig with detected settings, or None if not available.
-        """
-        ...
-
     def setup(self, env: Environment) -> None:
         """Initialize the tool in an environment.
 
@@ -175,6 +169,41 @@ class Tool(Protocol):
     def env_var(self) -> str | None:
         """Conventional selection env var for this tool's command, or None."""
         ...
+
+
+@dataclass(frozen=True)
+class Probe:
+    """How a configure check compiles a test program with a tool.
+
+    Attributes:
+        suffix: The suffix a probe's source file is written with, which
+            tells the compiler its language.
+        program: The smallest program the tool compiles and links.
+        strict: Flags that make the compiler reject an option it doesn't
+            support, rather than warn about it and carry on.
+        msvc_style: The compiler takes cl.exe's ``/c``, ``/Fo``, ``/Fe``,
+            ``/I`` and ``/D`` rather than ``-c``, ``-o``, ``-I`` and ``-D``.
+    """
+
+    suffix: str
+    program: str
+    strict: tuple[str, ...] = ("-Werror",)
+    msvc_style: bool = False
+
+    def msvc(self) -> Probe:
+        """This probe for a compiler with cl.exe's command line."""
+        return dataclasses.replace(self, strict=("/WX",), msvc_style=True)
+
+
+_C_MAIN = "int main(void) { return 0; }\n"
+
+#: The probe for each language a compiler tool can declare.
+PROBES: dict[str, Probe] = {
+    "c": Probe(".c", _C_MAIN),
+    "cxx": Probe(".cpp", _C_MAIN),
+    "cuda": Probe(".cu", _C_MAIN),
+    "fortran": Probe(".f90", "end\n"),
+}
 
 
 class BaseTool(ABC):
@@ -209,54 +238,10 @@ class BaseTool(ABC):
     def language(self) -> str | None:
         return self._language
 
-    def configure(self, config: object) -> ToolConfig | None:
-        """Default implementation returns None (tool not configured)."""
-        return None
-
-    def _find_tool_config(
-        self,
-        config: object,
-        *programs: str,
-        hints: list[Path | str] | None = None,
-        version_flag: str = "--version",
-        with_version: bool = False,
-    ) -> ToolConfig | None:
-        """Locate the first available program and build this tool's ToolConfig.
-
-        Tries each name in *programs* in order. Returns None if *config* is not
-        a Configure or none of the candidates are found.
-
-        Args:
-            config: The Configure instance (anything else yields None).
-            programs: Candidate executable names, tried in order.
-            hints: Extra directories to search.
-            version_flag: Flag used to probe the version; pass "" for tools
-                that don't support --version (e.g. lib.exe, lld-link).
-            with_version: Copy the detected program version onto the config.
-        """
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        override = resolve_env_cmd_override(self.env_var)
-        if override is not None:
-            # Authoritative: the env var replaces the candidate list.
-            programs = (override,)
-            hints = None
-        found = None
-        for name in programs:
-            found = config.find_program(name, hints=hints, version_flag=version_flag)
-            if found is not None:
-                break
-        if found is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig(self._name, cmd=str(found.path))
-        if with_version and found.version:
-            tool_config.set("version", found.version)
-        return tool_config
+    def probe(self) -> Probe | None:
+        """How configure checks compile with this tool: its language's
+        probe, or None for a tool they can't use."""
+        return PROBES.get(self._language or "")
 
     def setup(self, env: Environment) -> None:
         """Set up the tool namespace with default values."""
@@ -271,6 +256,8 @@ class BaseTool(ABC):
                     value = _pin_cmd_path(value)
                 elif key == "flags" and isinstance(value, list):
                     value = _flag_list(value, env)
+                elif key in _PATH_LIST_VARS and isinstance(value, list):
+                    value = PathList(value)
                 tool_config.set(key, value)
 
         # Attach builders to the tool config
@@ -333,12 +320,6 @@ class StandaloneTool(BaseTool):
             def builders(self) -> dict[str, Builder]:
                 return {}  # Builders registered via @builder decorator
     """
-
-    def configure(self, config: object) -> ToolConfig | None:
-        """Standalone tools are always available; no detection needed."""
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig(self.name)
 
 
 class BuilderMethod:

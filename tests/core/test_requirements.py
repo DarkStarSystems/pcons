@@ -277,6 +277,29 @@ class TestRequirementOrigins:
         assert eff.defines.count("SHARED_DEF") == 1
         assert eff.origins[("defines", "SHARED_DEF")] == ("app", "private")
 
+    def test_env_use_attributes_a_relative_dir_to_the_package(
+        self, gcc_toolchain, tmp_path
+    ):
+        """A tool's include list stores a relative dir anchored, and the
+        package still gets the credit for it."""
+        from pcons.tools.requirements import apply_requirements_to_env
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment(toolchain=gcc_toolchain)
+        apply_requirements_to_env(
+            env, UsageRequirements(include_dirs=[Path("pkg/include")]), origin="fmt"
+        )
+
+        target = Target("app", target_type="program")
+        target._env = env
+        eff = compute_effective_requirements(target, env)
+
+        includes = [v for (f, v) in eff.origins if f == "include_dirs"]
+        assert includes
+        assert {eff.origins[("include_dirs", v)] for v in includes} == {
+            ("fmt", "package")
+        }
+
     def test_env_use_attributes_the_package(self):
         """Values env.use() applied are attributed to the package by name."""
         from pcons.tools.requirements import apply_requirements_to_env

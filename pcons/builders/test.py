@@ -20,9 +20,12 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.configure.platform import get_platform
 from pcons.core.builder_registry import builder
+from pcons.core.errors import PconsError, PconsTypeError, PconsValueError
+from pcons.core.paths import executable_form
 from pcons.core.target import Target
-from pcons.core.test import TestSpec
+from pcons.core.test import TestSpec, test_args
 from pcons.util.source_location import get_caller_location
 
 logger = logging.getLogger(__name__)
@@ -77,12 +80,13 @@ class TestNodeFactory:
 
         spec = TestSpec(
             name=partial["name"],
-            command=[program_path, *partial["args"]],
+            command=[program_path, *self._args_text(partial, cwd_value)],
             cwd=cwd_value,
             env=dict(partial["env"]),
             labels=tuple(partial["labels"]),
             timeout=partial["timeout"],
             should_fail=partial["should_fail"],
+            skip_returncode=partial["skip_returncode"],
             serial=partial["serial"],
             disabled=partial["disabled"],
             data=tuple(Path(p) for p in partial["data"]),
@@ -91,11 +95,36 @@ class TestNodeFactory:
             defined_at=partial["defined_at"],
         )
         target._builder_data["spec"] = spec
-        # Drop the partial — keeps __repr__/print_targets tidy.
+        # Drop the partial — keeps __repr__ tidy.
         target._builder_data.pop("spec_partial", None)
 
     def resolve_pending(self, target: Target) -> None:  # noqa: ARG002
         """Test targets have no pending sources to resolve."""
+
+    def _args_text(self, partial: dict, cwd: Path | None) -> list[str]:
+        """The test's arguments, with each file written as seen from where
+        the test runs: *cwd*, or the build directory."""
+        resolver = self.project.top_path_resolver
+        text: list[str] = []
+        for arg in partial["args"]:
+            if isinstance(arg, Target):
+                if not arg.output_nodes:
+                    raise PconsError(
+                        f"Test '{partial['name']}': argument target "
+                        f"'{arg.name}' builds no file to name."
+                    )
+                # Written to run as a program, which "./tool" still is as
+                # a file name.
+                arg = executable_form(
+                    resolver.path_text(
+                        arg.output_nodes[0].path, built=True, run_dir=cwd
+                    ),
+                    windows=get_platform().is_windows,
+                )
+            elif isinstance(arg, Path):
+                arg = resolver.path_text(arg, built=False, run_dir=cwd)
+            text.append(arg)
+        return text
 
     def _format_path(self, path: Path) -> str:
         """Render a program path relative to the build directory if possible.
@@ -128,12 +157,13 @@ class TestBuilder:
         name: str,
         program: Target | Path | str,
         *,
-        args: Sequence[str] = (),
+        args: Sequence[str | Path | Target] = (),
         cwd: Path | str | None = None,
         env: dict[str, str] | None = None,
         labels: Sequence[str] = (),
         timeout: float | None = None,
         should_fail: bool = False,
+        skip_returncode: int | None = None,
         serial: bool = False,
         disabled: bool = False,
         data: Sequence[Path | str] = (),
@@ -151,7 +181,10 @@ class TestBuilder:
                 so a Catch2 sentence or a gtest name with colons is fine.
             program: The thing to run. A Target (typically from
                 ``project.Program``), a path, or a string command name.
-            args: Arguments passed after the program.
+            args: Arguments passed after the program. A ``Path`` is a
+                file, read like ``sources=``, and a ``Target`` the file it
+                builds, which the test depends on; both are written as
+                the test sees them from where it runs.
             cwd: Working directory for the test process. Defaults to the
                 build directory.
             env: Extra environment variables for the test process.
@@ -161,6 +194,10 @@ class TestBuilder:
                 means no timeout.
             should_fail: If True, the runner inverts the pass/fail
                 interpretation of the exit code (used for XFAIL tests).
+            skip_returncode: An exit code the runner reports as skipped
+                rather than failed, like CTest's ``SKIP_RETURN_CODE``
+                (77 is the automake/Meson convention). ``None`` means
+                every exit code is a pass or a fail.
             serial: If True, runner will not parallelize this test with
                 others (useful for tests that contend on shared
                 resources like ports or GPUs).
@@ -182,11 +219,11 @@ class TestBuilder:
                              timeout=30)
         """
         if not isinstance(name, str) or not name:
-            raise TypeError(
+            raise PconsTypeError(
                 f"Test name must be a non-empty string, got {type(name).__name__}."
             )
         if discover is not None and discover not in ("gtest", "doctest", "catch2"):
-            raise ValueError(
+            raise PconsValueError(
                 f"Test {name!r}: discover={discover!r} is not a known protocol. "
                 "Use 'gtest', 'doctest', or 'catch2' — or None to disable."
             )
@@ -205,12 +242,13 @@ class TestBuilder:
             "spec_partial": {
                 "name": name,
                 "program": program,
-                "args": [str(a) for a in args],
+                "args": [],
                 "cwd": cwd,
                 "env": dict(env) if env else {},
                 "labels": tuple(labels),
                 "timeout": timeout,
                 "should_fail": should_fail,
+                "skip_returncode": skip_returncode,
                 "serial": serial,
                 "disabled": disabled,
                 "data": tuple(data),
@@ -225,5 +263,6 @@ class TestBuilder:
         # and so the Ninja `test-build` phony pulls it in transitively.
         if isinstance(program, Target):
             target.depends(program)
+        target._builder_data["spec_partial"]["args"] = test_args(target, args)
 
         return target

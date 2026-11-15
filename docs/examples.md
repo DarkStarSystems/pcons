@@ -30,7 +30,7 @@ uvx pcons
 | [`10_paths_with_spaces`](https://github.com/DarkStarSystems/pcons/tree/main/examples/10_paths_with_spaces) | Paths with spaces throughout: a source file, its directory, an include directory, and a define whose value contains spaces |
 | [`11_windows_resource`](https://github.com/DarkStarSystems/pcons/tree/main/examples/11_windows_resource) | Demonstrates compiling Windows resource files (.rc) with MSVC |
 | [`12_env_override`](https://github.com/DarkStarSystems/pcons/tree/main/examples/12_env_override) | Demonstrates env.override() for per-file compiler settings |
-| [`13_subdirs`](https://github.com/DarkStarSystems/pcons/tree/main/examples/13_subdirs) | Nested subdirectories with add_subdirectory(), a sibling's library handed down with imports=, and a generator declared two levels down in libfoo/libbar: its output lands in that subdirectory's build directory and its inputs are read from that subdirectory |
+| [`13_subdirs`](https://github.com/DarkStarSystems/pcons/tree/main/examples/13_subdirs) | Nested subdirectories with add_subdirectory(), a sibling's library handed down with imports=, app's include directory on a clone of the parent's environment, read from app's own directory, and a generator declared two levels down in libfoo/libbar: its output lands in that subdirectory's build directory and its inputs are read from that subdirectory |
 | [`14_install_dir`](https://github.com/DarkStarSystems/pcons/tree/main/examples/14_install_dir) | InstallDir for recursive directory copying |
 | [`15_custom_builder`](https://github.com/DarkStarSystems/pcons/tree/main/examples/15_custom_builder) | Demonstrates creating a custom builder with the @builder decorator |
 | [`16_xcode`](https://github.com/DarkStarSystems/pcons/tree/main/examples/16_xcode) | Demonstrates Xcode project generation (macOS only) |
@@ -42,7 +42,7 @@ uvx pcons
 | [`22_wasm_wasi`](https://github.com/DarkStarSystems/pcons/tree/main/examples/22_wasm_wasi) | Demonstrates compiling a C program to WebAssembly via wasi-sdk |
 | [`23_wasm_emscripten`](https://github.com/DarkStarSystems/pcons/tree/main/examples/23_wasm_emscripten) | Demonstrates compiling a C program to WebAssembly via Emscripten |
 | [`24_configure_file`](https://github.com/DarkStarSystems/pcons/tree/main/examples/24_configure_file) | Demonstrates compiler feature checks feeding configure_file() |
-| [`25_fortran_hello`](https://github.com/DarkStarSystems/pcons/tree/main/examples/25_fortran_hello) | Demonstrates compiling a simple Fortran program with gfortran |
+| [`25_fortran_hello`](https://github.com/DarkStarSystems/pcons/tree/main/examples/25_fortran_hello) | Demonstrates compiling a simple Fortran program with whichever compiler is found (gfortran, flang or ifx) |
 | [`26_fortran_modules`](https://github.com/DarkStarSystems/pcons/tree/main/examples/26_fortran_modules) | Demonstrates Fortran modules with correct dyndep dependency ordering |
 | [`27_fortran_calls_cxx`](https://github.com/DarkStarSystems/pcons/tree/main/examples/27_fortran_calls_cxx) | Fortran primary calling C++ via BIND(C) interface, with automatic C++ runtime injection |
 | [`28_cxx_calls_fortran`](https://github.com/DarkStarSystems/pcons/tree/main/examples/28_cxx_calls_fortran) | C++ primary calling Fortran via BIND(C), with automatic Fortran runtime injection |
@@ -110,3 +110,11 @@ uvx pcons
 | [`91_python_builder_pipeline`](https://github.com/DarkStarSystems/pcons/tree/main/examples/91_python_builder_pipeline) | Two PyBuilders, each called twice, feeding a C compile and link: one fetches a document, one embeds it as a byte array |
 | [`92_python_builder_emitter`](https://github.com/DarkStarSystems/pcons/tree/main/examples/92_python_builder_emitter) | A PyBuilder emitter names the edge's output after a program's real file name, which only resolve knows |
 | [`93_vendored_subdirectory`](https://github.com/DarkStarSystems/pcons/tree/main/examples/93_vendored_subdirectory) | A dependency's source tree pulled in with add_subdirectory(build_tier="manual"): its library builds because the app needs it, its demo doesn't, and its own Default() doesn't decide this project's build |
+| [`94_fortran_submodules`](https://github.com/DarkStarSystems/pcons/tree/main/examples/94_fortran_submodules) | Demonstrates Fortran submodules, nested, compiled in dependency order |
+| [`95_cuda_runtime`](https://github.com/DarkStarSystems/pcons/tree/main/examples/95_cuda_runtime) | Demonstrates a C++ program calling a CUDA kernel, linked with the static or shared CUDA runtime |
+| [`95_fortran_includes`](https://github.com/DarkStarSystems/pcons/tree/main/examples/95_fortran_includes) | Demonstrates Fortran #include and INCLUDE, with edits to included files rebuilding their includers |
+| [`96_fortran_configure_checks`](https://github.com/DarkStarSystems/pcons/tree/main/examples/96_fortran_configure_checks) | Demonstrates configure checks with a Fortran compiler: flags it accepts, and a feature probe passed to the source as a define |
+| [`96_static_runtime`](https://github.com/DarkStarSystems/pcons/tree/main/examples/96_static_runtime) | Build a C++ program with the shared and with static language runtimes |
+| [`97_sanitize`](https://github.com/DarkStarSystems/pcons/tree/main/examples/97_sanitize) | Build a program with AddressSanitizer and check it reports a planted overflow |
+| [`98_whole_archive`](https://github.com/DarkStarSystems/pcons/tree/main/examples/98_whole_archive) | A static library whose self-registering plugin nothing references is linked whole, so the program finds the plugin |
+| [`99_resource_dll`](https://github.com/DarkStarSystems/pcons/tree/main/examples/99_resource_dll) | A resource-only DLL of translated strings declares no import library, so it builds once and a program loads it at run time |

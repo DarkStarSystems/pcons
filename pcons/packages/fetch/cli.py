@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -25,6 +27,7 @@ import click
 
 from pcons import __version__
 from pcons._cli_click import MergingGroup, run_cli
+from pcons.core.errors import PconsRuntimeError
 from pcons.packages.description import PackageDescription
 
 logger = logging.getLogger("pcons-fetch")
@@ -73,7 +76,7 @@ def _verify_sha256(path: Path, expected: str | None) -> None:
 
     actual = digest.hexdigest()
     if actual.lower() != expected.lower():
-        raise RuntimeError(
+        raise PconsRuntimeError(
             f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}"
         )
 
@@ -84,7 +87,15 @@ def _ensure_member_is_within_root(root: Path, member_name: str) -> Path:
     destination = (root / member_name).resolve()
     if destination == resolved_root or resolved_root in destination.parents:
         return destination
-    raise RuntimeError(f"Archive member escapes extraction root: {member_name}")
+    raise PconsRuntimeError(f"Archive member escapes extraction root: {member_name}")
+
+
+def _set_mode(path: Path, mode: int) -> None:
+    """Give an extracted file the permissions its archive recorded, as
+    tarfile's "data" filter does: no setuid, setgid or sticky bit, no write
+    for group or other, and always readable and writable by its owner. A
+    configure script stays executable."""
+    path.chmod((mode & 0o755) | 0o600)
 
 
 def _safe_extract_zip(archive_path: Path, source_dir: Path) -> None:
@@ -98,13 +109,15 @@ def _safe_extract_zip(archive_path: Path, source_dir: Path) -> None:
 
             mode = (member.external_attr >> 16) & 0o170000
             if mode == 0o120000:
-                raise RuntimeError(
+                raise PconsRuntimeError(
                     f"Refusing to extract symlink from zip archive: {member.filename}"
                 )
 
             destination.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member, "r") as src, destination.open("wb") as dst:
                 shutil.copyfileobj(src, dst)
+            if member.create_system == 3 and mode:  # made on Unix
+                _set_mode(destination, member.external_attr >> 16)
 
 
 def _safe_extract_tar(archive_path: Path, source_dir: Path) -> None:
@@ -112,7 +125,7 @@ def _safe_extract_tar(archive_path: Path, source_dir: Path) -> None:
     with tarfile.open(archive_path) as tf:
         for member in tf.getmembers():
             if member.issym() or member.islnk():
-                raise RuntimeError(
+                raise PconsRuntimeError(
                     f"Refusing to extract link from tar archive: {member.name}"
                 )
 
@@ -128,6 +141,30 @@ def _safe_extract_tar(archive_path: Path, source_dir: Path) -> None:
             destination.parent.mkdir(parents=True, exist_ok=True)
             with extracted, destination.open("wb") as dst:
                 shutil.copyfileobj(extracted, dst)
+            _set_mode(destination, member.mode)
+
+
+def _remove_tree(path: Path) -> None:
+    """Remove *path* and everything in it. Git makes its object files
+    read-only, which stops a plain rmtree on Windows, so a file that won't
+    go is made writable and tried again."""
+
+    def make_writable(func: Callable[[str], object], name: str, *_: object) -> None:
+        os.chmod(name, stat.S_IWRITE)
+        func(name)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=make_writable)
+    else:
+        shutil.rmtree(path, onerror=make_writable)
+
+
+def _run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run git, saying so plainly when it isn't installed."""
+    try:
+        return subprocess.run(["git", *args], capture_output=True, text=True)
+    except FileNotFoundError as e:
+        raise PconsRuntimeError("git not found, needed to fetch a git source") from e
 
 
 def download_source(
@@ -175,55 +212,60 @@ def download_source(
         if is_sha:
             assert ref is not None  # guarded by is_sha check
             # Commit SHAs require a full clone + checkout (can't use --branch)
-            cmd = ["git", "clone", git_url, str(source_dir)]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = _run_git(["clone", git_url, str(source_dir)])
             if result.returncode != 0:
-                raise RuntimeError(f"Git clone failed: {result.stderr}")
-            result = subprocess.run(
-                ["git", "-C", str(source_dir), "checkout", ref],
-                capture_output=True,
-                text=True,
-            )
+                raise PconsRuntimeError(f"Git clone failed: {result.stderr}")
+            result = _run_git(["-C", str(source_dir), "checkout", ref])
             if result.returncode != 0:
-                raise RuntimeError(f"Git checkout {ref} failed: {result.stderr}")
+                # A clone at the wrong commit would be reused next time.
+                _remove_tree(source_dir)
+                raise PconsRuntimeError(f"Git checkout {ref} failed: {result.stderr}")
         else:
-            cmd = ["git", "clone", "--depth=1"]
+            cmd = ["clone", "--depth=1"]
             if ref:
                 cmd.extend(["--branch", ref])
             cmd.extend([git_url, str(source_dir)])
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = _run_git(cmd)
             if result.returncode != 0:
-                raise RuntimeError(f"Git clone failed: {result.stderr}")
+                raise PconsRuntimeError(f"Git clone failed: {result.stderr}")
 
     elif url.endswith((".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip")):
         archive_name = url.split("/")[-1]
         archive_path = dest_dir / archive_name
 
-        logger.info("Downloading %s", url)
-        urllib.request.urlretrieve(url, archive_path)
-        _verify_sha256(archive_path, sha256)
-
-        logger.info("Extracting %s", archive_path)
-        source_dir.mkdir(parents=True, exist_ok=True)
-
         try:
+            logger.info("Downloading %s", url)
+            try:
+                urllib.request.urlretrieve(url, archive_path)
+            except OSError as e:
+                raise PconsRuntimeError(f"Download of {url} failed: {e}") from e
+            _verify_sha256(archive_path, sha256)
+
+            logger.info("Extracting %s", archive_path)
+            source_dir.mkdir(parents=True, exist_ok=True)
             if url.endswith(".zip"):
                 _safe_extract_zip(archive_path, source_dir)
             else:
                 _safe_extract_tar(archive_path, source_dir)
+        except BaseException:
+            # A partial tree would be reused as "already exists" next time.
+            if source_dir.exists():
+                _remove_tree(source_dir)
+            raise
         finally:
             archive_path.unlink(missing_ok=True)
 
-        # If archive contained a single directory, move its contents up
+        # If archive contained a single directory, move its contents up. It
+        # moves aside first, since it may hold an entry of its own name.
         contents = list(source_dir.iterdir())
         if len(contents) == 1 and contents[0].is_dir():
-            inner_dir = contents[0]
+            inner_dir = contents[0].rename(source_dir / f".{contents[0].name}.top")
             for item in inner_dir.iterdir():
                 shutil.move(str(item), str(source_dir))
             inner_dir.rmdir()
 
     else:
-        raise RuntimeError(f"Unsupported URL format: {url}")
+        raise PconsRuntimeError(f"Unsupported URL format: {url}")
 
     return source_dir
 
@@ -275,8 +317,10 @@ def build_cmake(
 
     # Build
     logger.info("Building")
+    # --config picks Release where the generator holds several (Visual
+    # Studio's builds Debug otherwise); single-config generators ignore it.
     result = subprocess.run(
-        [cmake, "--build", str(build_dir), "--parallel"],
+        [cmake, "--build", str(build_dir), "--parallel", "--config", "Release"],
         capture_output=True,
         text=True,
     )
@@ -287,7 +331,7 @@ def build_cmake(
     # Install
     logger.info("Installing to %s", install_prefix)
     result = subprocess.run(
-        [cmake, "--install", str(build_dir)],
+        [cmake, "--install", str(build_dir), "--config", "Release"],
         capture_output=True,
         text=True,
     )
@@ -315,6 +359,9 @@ def build_autotools(
     Returns:
         True if build succeeded, False otherwise.
     """
+    # configure runs in build_dir, and wants an absolute --prefix.
+    source_dir, build_dir = source_dir.absolute(), build_dir.absolute()
+    install_prefix = install_prefix.absolute()
     build_dir.mkdir(parents=True, exist_ok=True)
 
     configure_script = source_dir / "configure"
@@ -332,9 +379,13 @@ def build_autotools(
                 logger.error("autogen.sh failed: %s", result.stderr)
                 return False
         elif (source_dir / "configure.ac").exists():
+            autoreconf = shutil.which("autoreconf")
+            if autoreconf is None:
+                logger.error("autoreconf not found, needed for %s", source_dir)
+                return False
             logger.info("Running autoreconf")
             result = subprocess.run(
-                ["autoreconf", "-i"],
+                [autoreconf, "-i"],
                 cwd=source_dir,
                 capture_output=True,
                 text=True,
@@ -366,7 +417,7 @@ def build_autotools(
         return False
 
     result = subprocess.run(
-        [make, "-j"],
+        [make, f"-j{os.cpu_count() or 1}"],
         cwd=build_dir,
         capture_output=True,
         text=True,
@@ -726,13 +777,13 @@ def cmd_clean(deps_dir: str, remove_all: bool, verbose: bool, debug: bool) -> in
 
     if remove_all:
         logger.info("Removing entire dependencies directory: %s", deps_path)
-        shutil.rmtree(deps_path)
+        _remove_tree(deps_path)
     else:
         # Just remove build directory
         build_dir = deps_path / "build"
         if build_dir.exists():
             logger.info("Removing build directory: %s", build_dir)
-            shutil.rmtree(build_dir)
+            _remove_tree(build_dir)
 
     logger.info("Clean complete")
     return 0

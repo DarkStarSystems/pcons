@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import textwrap
 from pathlib import Path
 from unittest.mock import patch
@@ -11,16 +13,21 @@ from unittest.mock import patch
 import pytest
 
 from pcons import Project
+from pcons.configure.platform import get_platform
 from pcons.core.target import Target
+from pcons.toolchains.fortran import FORTRAN_EXTENSIONS, find_fortran_toolchain
+from pcons.toolchains.fortran_scanner import (
+    depfile_text,
+    expand_includes,
+    scan_fortran_source,
+    scan_info,
+)
 from pcons.toolchains.fortran_scanner import main as fortran_scanner_main
-from pcons.toolchains.fortran_scanner import scan_fortran_source, scan_info
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.gfortran import (
-    FORTRAN_EXTENSIONS,
     GfortranCompiler,
     GfortranLinker,
     GfortranToolchain,
-    find_fortran_toolchain,
 )
 from pcons.tools.toolchain import SourceHandler, toolchain_registry
 
@@ -44,16 +51,6 @@ def test_gfortran_toolchain_creation() -> None:
     assert tc.name == "gfortran"
 
 
-def test_gfortran_language_priority() -> None:
-    """GfortranToolchain includes 'fortran' in its language_priority."""
-    tc = GfortranToolchain()
-    priority = tc.language_priority
-    assert "fortran" in priority
-    # Fortran should outrank C and C++
-    assert priority["fortran"] > priority["c"]
-    assert priority["fortran"] >= priority.get("cxx", 0)
-
-
 # =============================================================================
 # Source handler tests
 # =============================================================================
@@ -68,19 +65,10 @@ def test_get_source_handler_all_fortran_extensions() -> None:
         assert isinstance(handler, SourceHandler)
         assert handler.tool_name == "fc"
         assert handler.language == "fortran"
-        assert handler.object_suffix == ".o"
+        assert handler.object_suffix == get_platform().object_suffix
         # No depfile/deps_style for Fortran (uses dyndep instead)
         assert handler.depfile is None
         assert handler.deps_style is None
-
-
-def test_get_source_handler_c_fallthrough() -> None:
-    """GfortranToolchain falls through to UnixToolchain for C/C++ files."""
-    tc = GfortranToolchain()
-    handler = tc.get_source_handler(".c")
-    assert handler is not None
-    assert handler.tool_name == "cc"
-    assert handler.language == "c"
 
 
 def test_get_source_handler_unknown() -> None:
@@ -226,7 +214,167 @@ def test_scan_submodule_procedures_are_not_modules() -> None:
         end submodule
     """)
     produces, uses = scan_fortran_source(src)
-    assert produces == []
+    assert produces == ["parent:child"]
+    assert uses == ["parent"]
+
+
+def test_scan_prefixed_module_procedures_are_not_modules() -> None:
+    """ "module pure function f(x)" once read as a module named "pure"."""
+    src = textwrap.dedent("""\
+        submodule (shapes) impl
+        contains
+          module pure function area(r) result(a)
+          end function
+          module elemental subroutine scale(x)
+          end subroutine
+          module real function perimeter(r)
+          end function
+        end submodule
+    """)
+    produces, _ = scan_fortran_source(src)
+    assert produces == ["shapes:impl"]
+
+
+def test_scan_nested_submodule_uses_its_parent() -> None:
+    src = "SUBMODULE (Shapes : Impl) Helpers\nEND SUBMODULE\n"
+    assert scan_fortran_source(src) == (["shapes:helpers"], ["shapes:impl"])
+
+
+def test_scan_info_names_submodule_files_as_the_compiler_does() -> None:
+    src = "submodule (shapes) impl\nend submodule\n"
+
+    gnu = scan_info(src, "modules")
+    flang = scan_info(src, "modules", "{ancestor}-{name}.mod")
+
+    assert gnu["provides"] == [
+        {"name": "shapes:impl", "path": "modules/shapes@impl.smod"}
+    ]
+    assert flang["extra_outputs"] == ["modules/shapes-impl.mod"]
+    assert flang["requires"] == ["shapes"]
+
+
+def test_scan_info_points_submodules_at_gfortran_smod() -> None:
+    """gfortran keeps a module's private entities, which its submodules see,
+    out of the .mod: they read the .smod it writes beside it."""
+    parent = textwrap.dedent("""\
+        module shapes
+          real, parameter, private :: pi = 3.14159
+          interface
+            module pure function area(r) result(a)
+              real, intent(in) :: r
+              real :: a
+            end function
+          end interface
+        end module
+    """)
+    child = "submodule (shapes) impl\nend submodule\n"
+
+    provider = scan_info(parent, "modules", ancestor_file="{name}.smod")
+    consumer = scan_info(child, "modules", ancestor_file="{name}.smod")
+
+    assert provider["provides"] == [
+        {"name": "shapes", "path": "modules/shapes.mod"},
+        {"name": "shapes:", "path": "modules/shapes.smod"},
+    ]
+    assert provider["extra_outputs"] == ["modules/shapes.mod", "modules/shapes.smod"]
+    assert consumer["requires"] == ["shapes:"]
+    # flang and ifx put everything in the .mod.
+    assert scan_info(child, "modules")["requires"] == ["shapes"]
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "module subroutine s(x)",
+        "integer module function f()",
+        "PURE MODULE FUNCTION f(x) RESULT(y)",
+        "real(kind=8) module function f()",
+    ],
+)
+def test_scan_separate_module_procedures_make_a_smod(declaration) -> None:
+    src = f"module m\ninterface\n  {declaration}\n  end\nend interface\nend module\n"
+    produces, _ = scan_fortran_source(src, ancestor_file_apart=True)
+    assert produces == ["m", "m:"]
+
+
+def test_scan_only_a_module_with_separate_procedures_makes_a_smod() -> None:
+    """gfortran writes no .smod for the rest; claiming one would leave
+    ninja waiting forever for a file nothing writes."""
+    src = textwrap.dedent("""\
+        module plain
+          interface g
+            module procedure foo
+          end interface
+        contains
+          subroutine foo()
+          end subroutine
+        end module
+        module hosting
+          interface
+            module subroutine s()
+            end subroutine
+          end interface
+        end module
+        submodule (hosting) impl
+        contains
+          module subroutine s()
+          end subroutine
+        end submodule
+        module after
+        end module
+        subroutine external()
+        end subroutine
+    """)
+    produces, consumes = scan_fortran_source(src, ancestor_file_apart=True)
+    assert produces == ["plain", "hosting", "after", "hosting:impl", "hosting:"]
+    # The submodule's parent is in this same file.
+    assert consumes == []
+
+
+_SMOD_LAYOUTS = {
+    "plain": "module m\n  integer :: x\nend module\n",
+    "generic interface": (
+        "module m\ninterface g\n  module procedure foo\nend interface\n"
+        "contains\nsubroutine foo()\nend subroutine\nend module\n"
+    ),
+    "separate procedure": (
+        "module m\ninterface\n  module subroutine s()\n  end subroutine\n"
+        "end interface\nend module\n"
+    ),
+    "prefixes": (
+        "module m\ninterface\n  recursive module subroutine s(n)\n"
+        "    integer, intent(in) :: n\n  end subroutine\n"
+        "  module character(len=8) function name()\n  end function\n"
+        "end interface\nend module\n"
+    ),
+    "continued": (
+        "module m\ninterface\n  module &\n    function f() result(r)\n"
+        "    integer :: r\n  end function\nend interface\nend module\n"
+    ),
+    "one line": (
+        "module m; interface; module subroutine s(); end subroutine; "
+        "end interface; end module\n"
+    ),
+    "body in the module": (
+        "module m\ninterface\n  module subroutine s()\n  end subroutine\n"
+        "end interface\ncontains\n  module procedure s\n  end procedure\n"
+        "end module\n"
+    ),
+}
+
+
+@pytest.mark.skipif(shutil.which("gfortran") is None, reason="needs gfortran")
+@pytest.mark.parametrize("layout", sorted(_SMOD_LAYOUTS))
+def test_scan_predicts_gfortran_smod(layout, tmp_path) -> None:
+    """The scanner claims a module's .smod exactly when gfortran writes one:
+    a missed one leaves submodules stale, and one gfortran never writes
+    leaves ninja rebuilding forever."""
+    source = tmp_path / "m.f90"
+    source.write_text(_SMOD_LAYOUTS[layout])
+    subprocess.run(["gfortran", "-c", source.name], cwd=tmp_path, check=True)
+
+    produces, _ = scan_fortran_source(source.read_text(), ancestor_file_apart=True)
+    assert ("m:" in produces) == (tmp_path / "m.smod").exists()
 
 
 def test_scan_module_names_lowercased() -> None:
@@ -348,12 +496,168 @@ def test_scan_one_cli_reports_a_missing_source(tmp_path: Path, capsys) -> None:
 
 
 # =============================================================================
-# Scanner wiring (GfortranToolchain.after_resolve)
+# Included files
 # =============================================================================
 
 
-@pytest.fixture
-def fortran_toolchain() -> GfortranToolchain:
+def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(text))
+    return path
+
+
+def test_includes_are_found_beside_the_source_then_on_the_path(tmp_path) -> None:
+    """#include and INCLUDE look in the including file's directory first,
+    then the -I directories in order."""
+    src = _write(
+        tmp_path / "src" / "main.F90",
+        """\
+        program main
+        #include "local.h"
+          include 'shared.inc'
+        end program
+        """,
+    )
+    _write(tmp_path / "src" / "local.h", "! local\n")
+    _write(tmp_path / "first" / "shared.inc", "! first\n")
+    _write(tmp_path / "second" / "shared.inc", "! second\n")
+
+    text, found = expand_includes(
+        src, src.read_text(), [tmp_path / "first", tmp_path / "second"]
+    )
+
+    assert found == [tmp_path / "src" / "local.h", tmp_path / "first" / "shared.inc"]
+    assert "! local" in text and "! first" in text and "! second" not in text
+
+
+def test_an_angle_include_skips_the_source_directory(tmp_path) -> None:
+    src = _write(tmp_path / "src" / "main.F90", "#include <defs.h>\n")
+    _write(tmp_path / "src" / "defs.h", "")
+    _write(tmp_path / "inc" / "defs.h", "")
+
+    _text, found = expand_includes(src, src.read_text(), [tmp_path / "inc"])
+
+    assert found == [tmp_path / "inc" / "defs.h"]
+
+
+def test_nested_includes_resolve_from_their_own_directory(tmp_path) -> None:
+    src = _write(tmp_path / "main.F90", '#include "inc/outer.h"\n')
+    _write(tmp_path / "inc" / "outer.h", '#include "inner.h"\n')
+    _write(tmp_path / "inc" / "inner.h", "")
+
+    _text, found = expand_includes(src, src.read_text(), [])
+
+    assert found == [tmp_path / "inc" / "outer.h", tmp_path / "inc" / "inner.h"]
+
+
+def test_a_file_is_read_once_even_when_it_includes_itself(tmp_path) -> None:
+    src = _write(tmp_path / "main.F90", '#include "loop.h"\n#include "loop.h"\n')
+    _write(tmp_path / "loop.h", '#include "loop.h"\nUSE once\n')
+
+    text, found = expand_includes(src, src.read_text(), [])
+
+    assert found == [tmp_path / "loop.h"]
+    assert text.count("USE once") == 1
+
+
+def test_missing_and_commented_out_includes_are_skipped(tmp_path) -> None:
+    """A missing include may be one #if leaves out; the compiler reports it
+    if it matters. A comment is no include at all."""
+    src = _write(
+        tmp_path / "main.F90",
+        """\
+        #include "missing.h"
+        ! include 'commented.inc'
+        !#include "commented.h"
+        """,
+    )
+    _write(tmp_path / "commented.inc", "")
+    _write(tmp_path / "commented.h", "")
+
+    _text, found = expand_includes(src, src.read_text(), [])
+
+    assert found == []
+
+
+def test_fixed_form_and_uppercase_include_lines(tmp_path) -> None:
+    src = _write(tmp_path / "old.F", '      INCLUDE "common.inc"\n')
+    _write(tmp_path / "common.inc", "")
+
+    _text, found = expand_includes(src, src.read_text(), [])
+
+    assert found == [tmp_path / "common.inc"]
+
+
+def test_modules_reached_through_an_include_count(tmp_path) -> None:
+    """An interface header that USEs a module needs it, and a module
+    declared in an included file is written by this compile."""
+    src = _write(
+        tmp_path / "main.F90",
+        """\
+        #include "decl.inc"
+        subroutine s
+        #include "s.intfb.h"
+        end subroutine
+        """,
+    )
+    _write(tmp_path / "decl.inc", "module declared\nend module declared\n")
+    _write(
+        tmp_path / "s.intfb.h",
+        """\
+        interface
+          subroutine t(x)
+            use parkind1, only: jprb
+            real(kind=jprb) :: x
+          end subroutine t
+        end interface
+        """,
+    )
+
+    text, found = expand_includes(src, src.read_text(), [])
+    info = scan_info(text, "modules", included=[p.as_posix() for p in found])
+
+    assert info["provides"] == [{"name": "declared", "path": "modules/declared.mod"}]
+    assert info["requires"] == ["parkind1"]
+    assert info["extra_deps"] == [p.as_posix() for p in found]
+
+
+def test_depfile_escapes_what_make_syntax_reserves() -> None:
+    assert depfile_text("a b.json", ["x$y.h", "c#d.inc", "plain.h"]) == (
+        "a\\ b.json: x$$y.h c\\#d.inc plain.h\n"
+    )
+
+
+def test_scan_one_cli_reports_includes_and_writes_a_depfile(tmp_path) -> None:
+    """The included files become the compile's extra_deps and, in the
+    depfile, inputs of the scan edge itself."""
+    src = _write(tmp_path / "src" / "main.F90", '#include "defs.h"\nend\n')
+    header = _write(tmp_path / "inc" / "defs.h", "")
+    out = tmp_path / "obj" / "main.F90.o.fscan.json"
+    depfile = tmp_path / "obj" / "main.F90.o.fscan.json.d"
+
+    rc = fortran_scanner_main(
+        [
+            "--scan-one",
+            str(src),
+            f"-I{tmp_path / 'inc'}",
+            "--out",
+            str(out),
+            "--depfile",
+            str(depfile),
+        ]
+    )
+
+    assert rc == 0
+    assert json.loads(out.read_text())["extra_deps"] == [header.as_posix()]
+    assert depfile.read_text() == f"{out}: {header.as_posix()}\n"
+
+
+# =============================================================================
+# Scanner wiring (FortranToolchain.after_resolve)
+# =============================================================================
+
+
+def _configured_gfortran() -> GfortranToolchain:
     """A GfortranToolchain with its tools populated, needing no gfortran."""
     tc = GfortranToolchain()
     tc._tools = {
@@ -361,8 +665,12 @@ def fortran_toolchain() -> GfortranToolchain:
         "ar": GccArchiver(),
         "link": GfortranLinker(),
     }
-    tc._configured = True
     return tc
+
+
+@pytest.fixture
+def fortran_toolchain() -> GfortranToolchain:
+    return _configured_gfortran()
 
 
 def _two_target_project(
@@ -405,7 +713,7 @@ class TestScannerWiring:
         scope = project._scan_scopes[("fortran-modules", "xt::mathlib")]
         governed = [n.path.name for n in scope.governed]
 
-        assert governed == ["mathmod.f90.o"]
+        assert governed == [f"mathmod.f90{get_platform().object_suffix}"]
         assert scope.dyndep_rel == "scan/fortran-modules/xt.mathlib.dyndep"
 
     def test_governed_compile_takes_the_dyndep_in_order_only_position(
@@ -446,11 +754,55 @@ class TestScannerWiring:
     def test_the_module_directory_is_created(
         self, tmp_path, monkeypatch, fortran_toolchain
     ):
-        """gfortran will not create the -J directory itself."""
+        """Compilers will not create the module directory themselves."""
         monkeypatch.chdir(tmp_path)
         _two_target_project(tmp_path, fortran_toolchain)
 
         assert (tmp_path / "build" / "modules").is_dir()
+
+    def test_a_source_with_its_own_env_uses_its_module_directory(
+        self, tmp_path, monkeypatch, fortran_toolchain
+    ):
+        """add_sources(env=...): that environment compiles the source, so
+        its module directory is where the scan points and what is made."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.f90").write_text("PROGRAM p\nEND PROGRAM\n")
+        (tmp_path / "src" / "special.f90").write_text("MODULE special\nEND MODULE\n")
+        project = Project("own", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=fortran_toolchain)
+        special = env.clone()
+        special.fc.moddir = "special_mods"
+        prog = project.Program("app", env, sources=["src/main.f90"])
+        prog.add_sources(["src/special.f90"], env=special)
+        project.resolve()
+
+        scope = project._scan_scopes[("fortran-modules", "own::app")]
+        moddirs = {
+            n.path.name.split(".")[0]: n._build_info["vars"]["FC_MODDIR"]
+            for n in scope.collate_node._build_info["sources"]
+            if n.path.name.endswith(".fscan.json")
+        }
+        assert moddirs == {"main": "modules", "special": "special_mods"}
+        assert (tmp_path / "build" / "special_mods").is_dir()
+
+    def test_each_fortran_toolchain_scans_its_own_targets(self, tmp_path, monkeypatch):
+        """Two environments, each with its own gfortran: each toolchain
+        attaches its scanner only to the targets it compiles."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "mathmod.f90").write_text("MODULE mathmod\nEND MODULE\n")
+        (tmp_path / "src" / "main.f90").write_text(
+            "PROGRAM p\n  USE mathmod\nEND PROGRAM\n"
+        )
+        project = Project("two", root_dir=tmp_path, build_dir="build")
+        lib_env = project.Environment(toolchain=_configured_gfortran(), name="lib")
+        app_env = project.Environment(toolchain=_configured_gfortran(), name="app")
+        lib = project.StaticLibrary("mathlib", lib_env, sources=["src/mathmod.f90"])
+        project.Program("app", app_env, sources=["src/main.f90"]).link(lib)
+        project.resolve()
+
+        assert len(project._scan_scopes) == 2
 
     def test_scan_command_carries_the_module_directory_per_edge(
         self, tmp_path, monkeypatch, fortran_toolchain
@@ -465,7 +817,38 @@ class TestScannerWiring:
             if n.path.name.endswith(".fscan.json")
         )
 
-        assert info_node._build_info["vars"] == {"FC_MODDIR": "modules"}
+        assert info_node._build_info["vars"] == {
+            "FC_SCAN_INCLUDES": [],
+            "FC_MODDIR": "modules",
+            "FC_SUBMODULE_FILE": "{ancestor}@{name}.smod",
+            "FC_ANCESTOR_FILE": "{name}.smod",
+        }
+
+    def test_scan_searches_the_compiles_include_path(
+        self, tmp_path, monkeypatch, fortran_toolchain
+    ):
+        """The scan resolves includes as the compile does: the
+        environment's directories, then those a dependency adds."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.F90").write_text("PROGRAM p\nEND PROGRAM\n")
+        project = Project("inc", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=fortran_toolchain)
+        env.fc.includes.append("include")
+        dep = project.HeaderOnlyLibrary("defs", env)
+        dep.public.include_dirs.append(tmp_path / "defs")
+        project.Program("app", env, sources=["src/main.F90"]).link(dep)
+        project.resolve()
+
+        scope = project._scan_scopes[("fortran-modules", "inc::app")]
+        info_node = scope.collate_node._build_info["sources"][0]
+        tokens = info_node._build_info["vars"]["FC_SCAN_INCLUDES"]
+
+        assert [(t.prefix, Path(t.path)) for t in tokens] == [
+            ("-I", Path("include")),
+            ("-I", Path("defs")),
+        ]
+        assert info_node._build_info["deps_style"] == "gcc"
 
     def test_no_scanner_without_fortran_sources(
         self, tmp_path, monkeypatch, gcc_toolchain
@@ -489,43 +872,14 @@ class TestScannerWiring:
 
 
 def test_find_fortran_toolchain_raises_when_not_found() -> None:
-    """find_fortran_toolchain raises RuntimeError when gfortran not found."""
+    """find_fortran_toolchain raises RuntimeError when no compiler is found."""
     with patch("shutil.which", return_value=None):
         with pytest.raises(RuntimeError, match="No Fortran toolchain found"):
             find_fortran_toolchain()
 
 
 def test_find_fortran_toolchain_returns_toolchain() -> None:
-    """find_fortran_toolchain returns GfortranToolchain when gfortran found."""
+    """find_fortran_toolchain prefers gfortran when every compiler is found."""
     with patch("shutil.which", return_value="/usr/bin/gfortran"):
         tc = find_fortran_toolchain()
         assert isinstance(tc, GfortranToolchain)
-
-
-class TestGfortranConfigure:
-    """GfortranCompiler/Linker configure() delegates to _find_tool_config."""
-
-    @pytest.mark.parametrize("cls", [GfortranCompiler, GfortranLinker])
-    def test_configure_finds_program(self, cls, tmp_path):
-        from pcons.configure.config import Configure, ProgramInfo
-
-        config = Configure(build_dir=tmp_path)
-        config.find_program = (  # type: ignore[method-assign]
-            lambda *a, **k: ProgramInfo(path=Path("/usr/bin/gfortran"), version="14")
-        )
-        cfg = cls().configure(config)
-        assert cfg is not None
-        assert cfg.cmd == str(Path("/usr/bin/gfortran"))
-
-    @pytest.mark.parametrize("cls", [GfortranCompiler, GfortranLinker])
-    def test_configure_returns_none_when_missing(self, cls, tmp_path):
-        from pcons.configure.config import Configure
-
-        config = Configure(build_dir=tmp_path)
-        config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
-        assert cls().configure(config) is None
-
-    def test_linker_builders(self):
-        """GfortranLinker.builders exposes the GNU link builders."""
-        builders = GfortranLinker().builders()
-        assert "Program" in builders

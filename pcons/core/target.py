@@ -13,6 +13,12 @@ from collections.abc import Callable, Iterable, MutableSequence, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
+from pcons.core.errors import (
+    PconsAttributeError,
+    PconsRuntimeError,
+    PconsTypeError,
+    PconsValueError,
+)
 from pcons.core.flags import merge_flags
 from pcons.core.names import validate_name
 from pcons.core.tiers import validate_tier
@@ -91,6 +97,12 @@ _KNOWN_USAGE_REQUIREMENTS: set[str] = {
 }
 
 
+#: The usage requirements a link reads.
+_LINK_REQUIREMENTS: frozenset[str] = frozenset(
+    {"link_flags", "link_libs", "link_dirs", "frameworks", "framework_dirs"}
+)
+
+
 def _unknown_requirement_message(name: str) -> str:
     """Explain an unrecognized usage-requirement name, and guess the intent."""
     import difflib
@@ -141,6 +153,13 @@ def register_target_option(name: str, description: str) -> None:
     call misses. Registration is process-wide and idempotent.
     """
     _KNOWN_TARGET_OPTIONS[name] = description
+
+
+register_target_option(
+    "max_jobs",
+    "how many of this target's build steps may run at once, for compiles too "
+    "big to run many of in parallel (a ninja pool; make has no equivalent)",
+)
 
 
 def known_target_options() -> dict[str, str]:
@@ -212,7 +231,7 @@ class UsageRequirements(_UsageRequirementsStubs):
         empty list.
         """
         if name not in _KNOWN_USAGE_REQUIREMENTS:
-            raise AttributeError(_unknown_requirement_message(name))
+            raise PconsAttributeError(_unknown_requirement_message(name))
         data: dict[str, list[Any] | UserList[Any]] = object.__getattribute__(
             self, "_data"
         )
@@ -223,9 +242,9 @@ class UsageRequirements(_UsageRequirementsStubs):
             object.__setattr__(self, name, value)
         else:
             if name not in _KNOWN_USAGE_REQUIREMENTS:
-                raise AttributeError(_unknown_requirement_message(name))
+                raise PconsAttributeError(_unknown_requirement_message(name))
             if not isinstance(value, (list, UserList)):
-                raise TypeError(
+                raise PconsTypeError(
                     f"Usage requirement '{name}' must be a list, "
                     f"got {type(value).__name__}. "
                     f"Use target.public.{name}.append(value) to add items, "
@@ -277,6 +296,15 @@ class UsageRequirements(_UsageRequirementsStubs):
         result = UsageRequirements()
         for k, v in self._data.items():
             result._data[k] = type(v)(v)
+        return result
+
+    def for_link(self) -> UsageRequirements:
+        """A copy holding only what a link reads: libraries, their
+        directories, link flags and frameworks."""
+        result = UsageRequirements()
+        for k, v in self._data.items():
+            if k in _LINK_REQUIREMENTS:
+                result._data[k] = type(v)(v)
         return result
 
     def make_includes_system(self) -> None:
@@ -336,7 +364,7 @@ def split_qualified_name(
         return None, parts[0]
     else:
         if raise_on_invalid:
-            raise ValueError(
+            raise PconsValueError(
                 f"Invalid qualified name: {name!r}. Too many '::' separators."
             )
         return None, name
@@ -357,10 +385,12 @@ def split_target_spec(spec: str) -> tuple[str | None, str, str | None]:
     if len(parts) == 1:
         return project, target, None
     if len(parts) > 2:
-        raise ValueError(f"Invalid target spec: {spec!r}. Too many '@' separators.")
+        raise PconsValueError(
+            f"Invalid target spec: {spec!r}. Too many '@' separators."
+        )
     name, env = parts
     if not env:
-        raise ValueError(
+        raise PconsValueError(
             f"Invalid target spec: {spec!r}. Name the environment after the '@'."
         )
     return project, name, env
@@ -464,6 +494,9 @@ class Target:
         public: Usage requirements that propagate to dependents.
         private: Usage requirements for this target only.
         required_languages: Languages used by this target (set by toolchains).
+        link_language: The language whose driver links this target, in
+            place of the strongest one among its objects (CMake's
+            ``LINKER_LANGUAGE``). None, the default, lets the objects decide.
         defined_at: Where this target was created in user code.
         target_type: Type of target (e.g., "program", "static_library").
         intermediate_nodes: Intermediate build artifacts (e.g., object files).
@@ -479,6 +512,7 @@ class Target:
         "public",
         "private",
         "required_languages",
+        "link_language",
         "defined_at",
         "_collected_requirements",
         # NEW for target-centric build model:
@@ -573,6 +607,7 @@ class Target:
         self.public = _make_default_requirements(self.__link_libs_validator)
         self.private = _make_default_requirements(self.__link_libs_validator)
         self.required_languages: set[str] = set()
+        self.link_language: str | None = None
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
         self.target_type: str | None = target_type
@@ -583,7 +618,8 @@ class Target:
         # For install targets:
         self._install_nodes: list[FileNode] = []
         # Base name for the output, in place of the target's name; the
-        # toolchain's prefix and suffix still apply:
+        # toolchain's prefix and suffix still apply, to its last component
+        # ("lib/foo" -> "lib/libfoo.so"):
         self.output_name: str | None = None
         # Override platform prefix/suffix (e.g., output_prefix="" to drop "lib"):
         self.output_prefix: str | None = None
@@ -770,7 +806,7 @@ class Target:
     @sources.setter
     def sources(self, value: list[Node]) -> None:
         """Always raises; use add_source() or add_sources()."""
-        raise AttributeError(
+        raise PconsAttributeError(
             f"Cannot assign directly to {self.name}.sources. "
             f"Use add_source() or add_sources() instead. "
             f"Example: target.add_sources({value!r})"
@@ -810,9 +846,11 @@ class Target:
 
     def __link_libs_validator(self, item: Target | str):
         if self._resolved:
-            raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
+            raise PconsRuntimeError(
+                f"Cannot modify target '{self.name}' after resolve(). "
+            )
         if item is self:
-            raise ValueError(f"Target '{self.name}' cannot link itself.")
+            raise PconsValueError(f"Target '{self.name}' cannot link itself.")
         if isinstance(item, Target):
             self._check_same_tree(item, "link")
         # Invalidate cached requirements
@@ -912,27 +950,27 @@ class Target:
     ) -> Target:
         """Validate and append link dependencies; shared by link()/link_private()."""
         if self._resolved:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
                 f"Add link dependencies before project.resolve() or project.generate()."
             )
         for lib in libs:
             if isinstance(lib, (list, tuple)):
-                raise TypeError(
+                raise PconsTypeError(
                     f"{method}() takes individual arguments, not a list. "
                     f"Use target.{method}(a, b) or target.{method}(*libs)."
                 )
             if not isinstance(lib, (Target, str)):
-                raise TypeError(
+                raise PconsTypeError(
                     f"{method}() requires Target objects or library-name strings, "
                     f"got {type(lib).__name__}. Pass a Target to depend on it "
                     f"(bringing its headers and usage requirements), or a string "
                     f"like 'm' for a raw system library."
                 )
             if isinstance(lib, str) and not lib.strip():
-                raise ValueError(f"{method}() got an empty library name.")
+                raise PconsValueError(f"{method}() got an empty library name.")
             if isinstance(lib, str) and _looks_like_a_path(lib):
-                raise TypeError(
+                raise PconsTypeError(
                     f"{method}() got {lib!r}, which looks like a file path; a "
                     f"string here should be a library name, which the toolchain turns "
                     f"into a link argument like -l{lib}. To link a library "
@@ -943,7 +981,7 @@ class Target:
                     f"use just the library name here."
                 )
             if lib is self:
-                raise ValueError(f"Target '{self.name}' cannot link itself.")
+                raise PconsValueError(f"Target '{self.name}' cannot link itself.")
             link_libs.append(
                 lib
             )  # ValidatedUniqueList: validates, de-dupes, invalidates cache
@@ -1008,14 +1046,16 @@ class Target:
         from pcons.core.node import Node
 
         if self._resolved:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
                 f"Add dependencies before project.resolve() or project.generate()."
             )
         for item in items:
             if isinstance(item, Target):
                 if item is self:
-                    raise ValueError(f"Target '{self.name}' cannot depend on itself.")
+                    raise PconsValueError(
+                        f"Target '{self.name}' cannot depend on itself."
+                    )
                 self._check_same_tree(item, "depend on")
             elif not isinstance(item, Node):
                 # str or Path: a FileNode, read from this target's script
@@ -1186,17 +1226,17 @@ class Target:
                 lib.add_sources(["cuda-support.cxx"], env=careful)
         """
         if self._resolved:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
                 f"Call add_sources() before project.resolve() or project.generate()."
             )
         if isinstance(sources, str):
-            raise TypeError(
+            raise PconsTypeError(
                 f"add_sources() requires a list, got a string. "
                 f'Use add_sources(["{sources}"]) or add_source("{sources}").'
             )
         if isinstance(sources, Path):
-            raise TypeError(
+            raise PconsTypeError(
                 f"add_sources() requires a list, got a Path. "
                 f"Use add_sources([{sources!r}]) or add_source({sources!r})."
             )
@@ -1223,7 +1263,7 @@ class Target:
         if self._pending_sources is None:
             self._pending_sources = []
         if source in self._pending_sources:
-            raise ValueError(
+            raise PconsValueError(
                 f"Target '{self.name}' already has source target "
                 f"'{source.name}'. Its outputs would be built once and "
                 f"consumed twice."
@@ -1254,7 +1294,7 @@ class Target:
         """
         if node in self._source_set:
             if env is None:
-                raise ValueError(
+                raise PconsValueError(
                     f"Target '{self.name}' already has source '{node.name}'. "
                     f"Adding it again links it twice, which the linker reports "
                     f"as duplicate symbols in one object file.\n"
@@ -1282,7 +1322,7 @@ class Target:
             return
         existing = self._source_envs.get(node.path)
         if existing is not None and existing is not env:
-            raise ValueError(
+            raise PconsValueError(
                 f"Source '{node.path}' was added to target '{self.name}' twice "
                 f"with different environments. One source compiles once per "
                 f"target; use a separate target if you need two variants."
@@ -1310,14 +1350,14 @@ class Target:
                 nothing would read it.
         """
         if key not in _KNOWN_TARGET_OPTIONS:
-            raise ValueError(_unknown_option_message(key))
+            raise PconsValueError(_unknown_option_message(key))
         self._builder_data[key] = value
         return self
 
     def get_option(self, key: str, default: Any = None) -> Any:
         """Get an option previously set with :meth:`set_option`."""
         if key not in _KNOWN_TARGET_OPTIONS:
-            raise ValueError(_unknown_option_message(key))
+            raise PconsValueError(_unknown_option_message(key))
         return self._builder_data.get(key, default)
 
     def pre_build(self, command: str) -> Target:
@@ -1378,13 +1418,25 @@ class Target:
             if dep.qualified_name in visited:
                 continue
             visited.add(dep.qualified_name)
-            result.merge(dep.public)
+            result.merge(dep.public_for_dependents())
+
+    def public_for_dependents(self) -> UsageRequirements:
+        """The public requirements as a dependent compiles with them: an
+        imported package asked for as ``system`` (the default) gives its
+        include directories as system ones."""
+        if not (getattr(self, "system", False) and self.public.include_dirs):
+            return self.public
+        reqs = self.public.clone()
+        reqs.make_includes_system()
+        return reqs
 
     def get_all_languages(self) -> set[str]:
-        """The languages linked into this target (e.g. {'c', 'cxx'}), which
-        pick the linker: its own, those of the targets whose outputs are its
-        sources, and those of the libraries it links, all the way down. A
-        depends() target is built first but not linked, so it has no say.
+        """The languages of this target and everything it links (e.g.
+        {'c', 'cxx'}): its own, those of the targets whose outputs are its
+        sources, and those of the libraries it links, all the way down,
+        shared ones included. A depends() target is built first but not
+        linked, so it has no say. (The link itself counts only what it pulls
+        in: static libraries, not shared ones.)
         """
         languages = set(self.required_languages)
         visited: set[str] = {self.qualified_name}

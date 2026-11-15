@@ -8,6 +8,7 @@ serves as the context for build descriptions.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
@@ -17,7 +18,14 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.environment import Environment as Env
-from pcons.core.errors import OutputCollisionError, PconsError
+from pcons.core.errors import (
+    OutputCollisionError,
+    PconsAttributeError,
+    PconsError,
+    PconsKeyError,
+    PconsTypeError,
+    PconsValueError,
+)
 from pcons.core.graph import (
     collect_all_nodes,
     detect_cycles_in_targets,
@@ -127,6 +135,19 @@ def _in_virtualenv(path: Path, root: Path) -> bool:
     return False
 
 
+@functools.cache
+def _module_file(filename: str) -> Path | None:
+    """A loaded module's file, resolved; None if it can't be.
+
+    Cached because every resolve scans all of ``sys.modules``, and a test
+    suite resolves thousands of projects in one process.
+    """
+    try:
+        return Path(filename).resolve()
+    except OSError:
+        return None
+
+
 #: The pending "this build script was run directly" notice: (armed, script).
 #: Deferred to interpreter exit because at construction time an embedded
 #: driver is indistinguishable from a build script, and a driver that goes
@@ -205,11 +226,11 @@ def _refuse_duplicate(existing: Target, new: Target) -> None:
     if existing_name and new_name and existing_name != new_name:
         return
     if existing_env is not None and existing_env is new_env and existing_name:
-        raise ValueError(
+        raise PconsValueError(
             f"Target '{new.name}'{kind} already exists in environment "
             f"'{existing_name}'{where}."
         )
-    raise ValueError(
+    raise PconsValueError(
         f"Target '{new.name}'{kind} already exists{where}. Two targets of one "
         f"type may share a name only when their environments are named and "
         f"different. Name the environment: "
@@ -281,7 +302,7 @@ class Imports(Mapping[str, Any]):
     def __getitem__(self, key: str) -> Any:
         if key not in self._given:
             given = ", ".join(repr(k) for k in self._given) or "nothing"
-            raise KeyError(
+            raise PconsKeyError(
                 f"{key!r} was not handed to this directory. The including "
                 f"script passes objects down with "
                 f"add_subdirectory(imports={{...}}); it passed: {given}."
@@ -492,7 +513,7 @@ class Project(_ProjectBuilders):
             try:
                 self._offset = self.root_dir.relative_to(top.root_dir)
             except ValueError as exc:
-                raise ValueError(
+                raise PconsValueError(
                     f"Sub-project '{self.name}' at {self.root_dir} is not inside "
                     f"the top-level project at {top.root_dir}. add_subdirectory() "
                     f"only works for directories under the top-level project."
@@ -519,7 +540,7 @@ class Project(_ProjectBuilders):
                     )
                 build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
             if not self.root_dir.is_absolute():
-                raise ValueError(
+                raise PconsValueError(
                     f"Root directory must be absolute (got: {self.root_dir})"
                 )
             bd = Path(build_dir)
@@ -594,13 +615,13 @@ class Project(_ProjectBuilders):
     @staticmethod
     def current() -> Project:
         if Project.__current is None:
-            raise ValueError("no project is currently active")
+            raise PconsValueError("no project is currently active")
         return Project.__current
 
     @staticmethod
     def top_level() -> Project:
         if Project.__top_level is None:
-            raise ValueError("no top-level project is currently active")
+            raise PconsValueError("no top-level project is currently active")
         return Project.__top_level
 
     @property
@@ -619,7 +640,7 @@ class Project(_ProjectBuilders):
     def parent(self) -> Project:
         """Get the parent project if this is a subdir, or None if top-level."""
         if self._parent is None:
-            raise ValueError("This project has no parent (it is top-level).")
+            raise PconsValueError("This project has no parent (it is top-level).")
         return self._parent
 
     @property
@@ -760,7 +781,7 @@ class Project(_ProjectBuilders):
                     )
                 )
             elif recorded.command_override != wanted:
-                raise ValueError(
+                raise PconsValueError(
                     "write_build_files(regen_command=...): this run already "
                     "owns the regen rule"
                     + (
@@ -947,7 +968,7 @@ class Project(_ProjectBuilders):
             self._child_index.add(path, self._normalize_for_index(path))
         node = self._nodes[path]
         if not isinstance(node, FileNode):
-            raise TypeError(
+            raise PconsTypeError(
                 f"Path {path} is registered as {type(node).__name__}, not FileNode"
             )
         if role is not None:
@@ -965,7 +986,7 @@ class Project(_ProjectBuilders):
             self._child_index.add(path, self._normalize_for_index(path))
         node = self._nodes[path]
         if not isinstance(node, DirNode):
-            raise TypeError(
+            raise PconsTypeError(
                 f"Path {path} is registered as {type(node).__name__}, not DirNode"
             )
         if role is not None:
@@ -1067,7 +1088,7 @@ class Project(_ProjectBuilders):
                         else f" '{target_name}' has no named environment."
                     )
                     if raise_if_missing:
-                        raise KeyError(f"Target '{name}' not found.{where}")
+                        raise PconsKeyError(f"Target '{name}' not found.{where}")
                     return None
                 matches = in_env
             if len(matches) > 1:
@@ -1078,7 +1099,7 @@ class Project(_ProjectBuilders):
                 return matches[0]
             if project is not None:
                 if raise_if_missing:
-                    raise KeyError(f"Target '{name}' not found.")
+                    raise PconsKeyError(f"Target '{name}' not found.")
                 return None
 
         if recursive:
@@ -1094,7 +1115,7 @@ class Project(_ProjectBuilders):
                 return targets_found[0]
 
         if raise_if_missing:
-            raise KeyError(f"Target '{name}' not found.")
+            raise PconsKeyError(f"Target '{name}' not found.")
         return None
 
     def get_targets(self, *names: str) -> list[Target]:
@@ -1154,7 +1175,7 @@ class Project(_ProjectBuilders):
         """
         env = self._resolve_default_environment()
         if env is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"No environments have been registered in project '{self.name}' "
                 f"or any enclosing project."
             )
@@ -1217,7 +1238,7 @@ class Project(_ProjectBuilders):
         for t in flat:
             match t:
                 case AliasNode() if reaches(t, alias):
-                    raise ValueError(
+                    raise PconsValueError(
                         f"Adding alias '{t.alias_name}' to '{name}' would "
                         f"create a cycle."
                     )
@@ -1227,7 +1248,7 @@ class Project(_ProjectBuilders):
                 case Node():
                     alias.add_target(t)
                 case _:
-                    raise TypeError(
+                    raise PconsTypeError(
                         f"Alias targets must be Target, Node, or list of them, got {type(t)}"
                     )
 
@@ -1299,7 +1320,7 @@ class Project(_ProjectBuilders):
                 case Node():
                     target = self._find_target_for_node(t)
                     if target is None:
-                        raise ValueError(
+                        raise PconsValueError(
                             f"Default(): {t!r} is not an output of any "
                             f"target registered in project '{self.name}', "
                             "so it can't be used as a default build target. "
@@ -1312,7 +1333,7 @@ class Project(_ProjectBuilders):
                     for target in self._resolve_default_name(t):
                         self._add_default_target(target, location)
                 case _:
-                    raise TypeError(
+                    raise PconsTypeError(
                         f"Default() arguments must be Target, Node, or str; "
                         f"got {type(t)!r}"
                     )
@@ -1369,7 +1390,7 @@ class Project(_ProjectBuilders):
                     if target is not None and target not in resolved:
                         resolved.append(target)
             if not resolved:
-                raise ValueError(
+                raise PconsValueError(
                     f"Default(): alias '{name}' does not resolve to any "
                     "target-backed build output, so it can't be used as a "
                     "default build target."
@@ -1380,7 +1401,7 @@ class Project(_ProjectBuilders):
         if target is not None:
             return [target]
 
-        raise KeyError(
+        raise PconsKeyError(
             f"Default(): '{name}' is not a known alias or target in "
             f"project '{self.name}'. Tried aliases "
             f"{sorted(self.tree_aliases)!r} and targets "
@@ -1567,7 +1588,8 @@ class Project(_ProjectBuilders):
 
         top = self.top
         root = top.root_dir.resolve()
-        pcons_dir = Path(__file__).resolve().parent.parent
+        root_parts = root.parts
+        pcons_parts = Path(__file__).resolve().parent.parent.parts
 
         inv = invocation.current()
         if inv is not None:
@@ -1577,11 +1599,12 @@ class Project(_ProjectBuilders):
             filename = getattr(module, "__file__", None)
             if not filename or not filename.endswith(".py"):
                 continue
-            try:
-                path = Path(filename).resolve()
-            except OSError:
+            path = _module_file(filename)
+            # Comparing parts is is_relative_to() for resolved paths, without
+            # building every parent of every module.
+            if path is None or path.parts[: len(root_parts)] != root_parts:
                 continue
-            if not path.is_relative_to(root) or path.is_relative_to(pcons_dir):
+            if path.parts[: len(pcons_parts)] == pcons_parts:
                 continue
             if _in_virtualenv(path, root):
                 continue
@@ -1729,31 +1752,6 @@ class Project(_ProjectBuilders):
             Targets sorted so dependencies come before dependents.
         """
         return topological_sort_targets(self._targets)
-
-    def print_targets(self) -> None:
-        """Print a human-readable summary of all targets.
-
-        Useful for debugging. Shows target names, types, and dependencies.
-        """
-        print(f"Project: {self.name}")
-        print(f"Build dir: {self.build_dir}")
-        print(f"Targets ({len(self._targets)}):")
-
-        for target in sorted(self._targets, key=lambda t: t.name):
-            print(f"  {target.name} ({target.target_type})")
-            if target.sources:
-                print(f"    sources: {len(target.sources)} files")
-            if target.output_nodes:
-                for node in target.output_nodes[:3]:
-                    print(f"    output: {node.path}")
-                if len(target.output_nodes) > 3:
-                    print(f"    ... and {len(target.output_nodes) - 3} more")
-            if target.dependencies:
-                deps = [
-                    d.name if hasattr(d, "name") else str(d)
-                    for d in target.dependencies
-                ]
-                print(f"    links: {', '.join(deps)}")
 
     def resolve(self, strict: bool = False) -> None:
         """Resolve all targets, populating their nodes for generation
@@ -2092,7 +2090,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: Literal[True] = True,
-        system: bool = False,
+        system: bool = True,
     ) -> Target: ...
 
     @overload
@@ -2104,7 +2102,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: bool,
-        system: bool = False,
+        system: bool = True,
     ) -> Target | None: ...
 
     def find_package(
@@ -2115,7 +2113,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: bool = True,
-        system: bool = False,
+        system: bool = True,
     ) -> Target | None:
         """Find an external package and return it as an ImportedTarget.
 
@@ -2140,13 +2138,12 @@ class Project(_ProjectBuilders):
             components: Optional list of package components.
             required: If True (default), raises PackageNotFoundError when
                      the package is not found. If False, returns None.
-            system: If True, the package's include directories are treated as
-                   system headers (-isystem, /external:I), so warnings from
-                   its headers are suppressed in every dependent. Off by
-                   default: -isystem on a directory the compiler already
-                   searches (/usr/include) reorders the search and can break
-                   the standard library. Use it for prefixes owned by a
-                   package manager or a fetched source tree.
+            system: The package's include directories are system headers
+                   (-isystem, /external:I), so warnings from its headers are
+                   suppressed in every dependent, as CMake does for imported
+                   targets. A directory the compiler already searches
+                   (/usr/include) is left to the compiler. False makes them
+                   ordinary include directories.
 
         Returns:
             An ImportedTarget representing the package, or None if not
@@ -2159,7 +2156,7 @@ class Project(_ProjectBuilders):
             zlib = project.find_package("zlib")
             openssl = project.find_package("openssl", version=">=3.0")
             boost = project.find_package("boost", components=["filesystem"])
-            doctest = project.find_package("doctest", system=True)
+            mylib = project.find_package("mylib", system=False)  # its warnings too
 
             app.link(zlib)
             env.use(openssl)
@@ -2193,7 +2190,7 @@ class Project(_ProjectBuilders):
             where = (
                 f" in environment '{env.name}'" if env is not None and env.name else ""
             )
-            raise ValueError(
+            raise PconsValueError(
                 f"Package '{name}' was already found{where} with "
                 f"system={conflicting.system}; requesting system={system} would "
                 f"need a second target of the same name. Pick one spelling."
@@ -2323,7 +2320,7 @@ class Project(_ProjectBuilders):
                     import sys
 
                     if sys.platform not in registration.platforms:
-                        raise AttributeError(
+                        raise PconsAttributeError(
                             f"Builder '{name}' is only available on "
                             f"{', '.join(registration.platforms)} "
                             f"(current platform: {sys.platform})"

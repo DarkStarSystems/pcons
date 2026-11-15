@@ -1,0 +1,23 @@
+# Test configuration for the whole-archive example
+
+[test]
+description = "A static library whose self-registering plugin nothing references is linked whole, so the program finds the plugin"
+
+expected_outputs = [
+    "build/libplugins.a",
+    "build/main",
+]
+
+[verify]
+commands = [
+    { run = "./build/main", expect_stdout = "plugins: hello" },
+]
+
+[[rebuild]]
+description = "Nothing changed: nothing to do"
+expect_no_work = true
+
+[skip]
+# The Xcode generator writes its own link settings and has no whole-archive
+# form yet.
+generators = ["xcode"]

@@ -23,7 +23,459 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `create_appx()` takes every `create_msix()` option (`executable`,
   `depends`, `icon`, signing), and a signed AppX package is named
   `.signed.appx`, not `.signed.msix`.
-- `python -m pcons._gen_stubs` writes LF line endings on Windows too.
+
+## [0.33.0] - 2026-11-14
+
+### Added
+
+- Python 3.15 is supported and tested.
+- pcons ships a `py.typed` marker, so mypy checks build scripts against
+  pcons's own types. Without it mypy skipped pcons entirely.
+- Releases on PyPI carry attestations, so PyPI's security tab shows where
+  each file was built and published from.
+
+## [0.32.0] - 2026-11-01
+
+### Added
+
+- `dll.set_option("import_library", False)` for a Windows DLL that exports
+  nothing, such as a resource-only DLL: link.exe writes no import library
+  for it, so declaring one made the DLL relink on every build. Linking
+  against such a DLL is an error that says why. See
+  `examples/99_resource_dll`.
+- `lib.set_option("whole_archive", True)` links every object of a static
+  library into whatever links it, including ones nothing references, such
+  as a plugin that registers itself. See `examples/98_whole_archive`.
+- `env.use_include_what_you_use()` runs include-what-you-use alongside
+  each C and C++ compile, as `use_clang_tidy()` runs clang-tidy, to report
+  `#include`s a source doesn't need or is missing.
+- `target.set_option("max_jobs", N)` lets at most N of a target's build
+  steps run at once, for compiles that need lots of memory.
+- Compiler warnings and errors are colored under Ninja, for GCC, Clang,
+  clang-cl, gfortran and flang. Logs and CI output stay plain text; set
+  `NO_COLOR` to turn colors off, or `FORCE_COLOR` to get them with n2. See
+  [Colored Diagnostics](https://pcons.readthedocs.io/en/latest/user-guide/#colored-diagnostics).
+- Conan dependencies for cross builds: `ConanFinder.sync_profile(env=env)`
+  describes the platform a cross preset builds for (Linux, Android, iOS,
+  bare metal), so Conan builds the dependencies for it with the
+  environment's compiler and target flags.
+
+### Changed
+
+- MSVC and clang-cl compile C++ with standard exceptions (`/EHsc`), as
+  CMake and Visual Studio projects do. They compiled without unwinding, so
+  a thrown exception skipped destructors. `env.cxx.set_exceptions("none")`
+  turns them off on every compiler (`-fno-exceptions` with GCC and Clang),
+  and `"async"` is MSVC's `/EHa`. See [C++ Exceptions](https://pcons.readthedocs.io/en/latest/user-guide/#c-exceptions).
+- A found package's headers are system headers by default
+  (`find_package()`, `ImportedTarget.from_package()`, `env.use()`), as
+  CMake makes an imported target's, so they don't set off your warnings
+  or `-Werror`. `system=False` turns that off. A directory the compiler
+  searches anyway, such as `/usr/include`, is left out of the system
+  includes, so GCC's C++ headers keep working.
+
+### Removed
+
+- `toolchain.configure()`, deprecated in 0.31: it did nothing. Delete the
+  call.
+
+### Fixed
+
+- On macOS and Linux, a static library is written afresh each time it's
+  rebuilt. `ar` updated the old archive in place, which kept the objects
+  of removed sources and failed on a macOS universal (fat) archive.
+- A configure check whose compiler can't compile anything (missing,
+  crashed, or given broken flags) stops configure with the compiler's
+  error. It used to answer "no", or `None` from `check_type_size()`, and
+  the build was configured on that.
+- `pcons test -V` shows what a failed test printed to stdout, where
+  gtest, Catch2 and doctest report failures; it showed only stderr. A
+  failed test's line in the summary gives its exit code, or the signal
+  that killed it, and each test keeps one number from start to finish.
+- MSVC finds headers in system include directories: cl.exe ignores
+  `/external:I` without `/external:W0`, which it never got.
+- A program linking a static library now gets the libraries of packages
+  that library links privately (`link_private()`), which it needs since
+  the archive doesn't contain them. It failed to link.
+- The Conan profile follows the compilers the build uses, `$CC`/`$CXX`
+  included. With `CXX=g++-16` on macOS it said apple-clang, and Conan
+  built the dependencies with Apple clang.
+- `ConanFinder.pkgconfig_dir` names the directory the `.pc` files are in
+  for a recipe using `cmake_layout`.
+- On macOS, a program that GCC or gfortran links no longer gets
+  `@loader_path` twice, which made ld64 warn "duplicate -rpath".
+- `build.ninja` stays relocatable with C++20 modules and with
+  `CargoBuild`: the module scan's include directories and cargo's
+  paths are written relative to the build, as the compiles' are.
+- The "not relocatable" warning names the path and the target whose
+  command has it, and shortens a long flag.
+- A toolchain asked for by name, or in a preference list, takes the
+  compiler `$CC`, `$CXX`, `$FC`, `$CUDACXX` or `$SWIFTC` chooses, even
+  when only a versioned one such as `gcc-16` is installed. It used to need
+  the plain command (`gcc`) on PATH as well, and on macOS refused gcc
+  because `/usr/bin/gcc` is Apple clang. `find_cuda_toolchain()` follows
+  `$CUDACXX` too.
+- Conan builds tools a dependency needs to build (flex, m4, protoc) with
+  this machine's usual compiler, not the build's. Building with Homebrew
+  GCC on macOS gave a `flex` that couldn't run `m4`, and libpq failed.
+
+## [0.31.0] - 2026-10-21
+
+Fortran is a first-class language now. LLVM flang and Intel ifx join
+gfortran, all three build on Windows too, and mixing Fortran with C and
+C++ in one program just works: each compiler gets its own flags for the
+variant and every preset, the right driver links the program, and each
+language's runtime comes along. Fortran include files, submodules and
+configure checks work too, and `pcons explain` shows how a mixed program
+links and why. The new [Fortran page](https://pcons.readthedocs.io/en/latest/fortran/)
+in the docs has the details. The mixed-toolchain rework changes a few
+things for C and C++ builds as well, so read "Changed" before you
+upgrade.
+
+### Added
+
+- `pcons explain` says how a mixed-language program links: which
+  compiler's driver links it and why (`cxx leads fortran`, or `overridden
+  by link_language`), and each runtime library, directory or rpath the
+  link adds, with the compiler whose objects need it
+  (`lib gfortran <- gfortran (fortran)`).
+- A test's `args` can name files: a `Target` is the file it builds, which
+  the test then depends on, and a `Path` is a file in the source tree.
+  Each is written as the test sees it from where it runs, so a test can
+  run a script that drives a built program, like Meson's `test()` with an
+  executable among its arguments.
+- A program or shared library that links the build's own shared libraries
+  runs from the build tree on Linux and macOS, with no `LD_LIBRARY_PATH` or
+  `DYLD_LIBRARY_PATH`: it gets an rpath to each library's directory,
+  relative to itself, as CMake and Meson give one. A C program linking a
+  Fortran shared library didn't load on macOS before. Turn it off with
+  `target.set_option("build_rpath", False)`.
+- `env.set_runtime_linkage("static")` links the language runtimes
+  statically: `/MT` (`/MTd` under `debug`) for MSVC, clang-cl and ifx,
+  `-static-libgcc -static-libstdc++` for GCC, and each other compiler's
+  own way. The default stays `"shared"`. It applies to every compiler in
+  the environment, or raises, as clang on Apple's platforms does. The
+  Conan profile follows it (`compiler.runtime=static`).
+- LLVM flang (21 or newer) and Intel ifx join gfortran as Fortran
+  toolchains: `toolchain="flang"` or `"ifx"`, or `toolchain="fortran"` to
+  find whichever is installed (gfortran first). `$FC` steers that choice,
+  like `$CC`/`$CXX` for C/C++. Mixed C++/Fortran builds link each
+  compiler's own runtime.
+- Fortran builds on Windows, with all three compilers: MinGW gfortran,
+  and flang and ifx (MSVC ABI, so they mix with MSVC and clang-cl C++).
+- A flang that can't find its intrinsic modules (Visual Studio's bundled
+  `flang.exe`) doesn't count as available; pcons warns and looks further.
+- `env.add_toolchain()` picks a toolchain whose ABI matches the
+  environment's primary one: on Windows, `"fortran"` beside MSVC or
+  clang-cl finds flang or ifx rather than MinGW gfortran, and `"c"` beside
+  gfortran finds MinGW gcc. An incompatible toolchain, named or chosen
+  with `$FC`/`$CC`/`$CXX`, is an error naming the ones that would fit.
+  Toolchains declare their ABI with the `abi` property; undeclared (None)
+  matches anything. clang and flang report theirs from their target
+  triple, so MSYS2's clang64 compilers count as MinGW.
+- `project.Test(..., skip_returncode=77)`: a test that exits with that code
+  is reported as skipped, not failed, like CTest's `SKIP_RETURN_CODE`. For
+  tests that can tell only at run time that they can't run.
+- The `pyproject.toml` build backend builds real packages. It takes the
+  usual `[project]` fields (description, readme, license and
+  license-files, authors, keywords, classifiers, urls, scripts,
+  entry-points and the rest) and writes Metadata-Version 2.4. Before,
+  any of them made the build fail. `[tool.pcons]` gains `build-dir`,
+  and `jobs` (or `-C jobs=N`) caps ninja's parallelism. (#215)
+
+### Changed
+
+- A custom toolchain realizes a variant, a target arch, a cross target or
+  a feature preset only through `make_variant_preset()`,
+  `make_arch_preset()`, `make_target_preset()` or `make_feature_preset()`.
+  pcons no longer calls a toolchain's `apply_variant()`,
+  `apply_target_arch()`, `apply_cross_preset()` or `apply_preset()`, and a
+  toolchain that still defines one is an error saying which to override
+  instead. `env.set_target_arch()` no longer takes keyword arguments, which
+  no toolchain read.
+- A custom toolchain needs no `_configure_tools()` and its tools no
+  `configure()`: pcons never called them. It gets its tools from the
+  registry's `tool_classes`, or from the finder that makes it.
+  `Configure.find_toolchain()` and `Configure.register_toolchain()` are
+  gone.
+- Static and object libraries compile as position-independent code on
+  Linux, Android and the BSDs, so they can go into a shared library, as
+  Meson builds them. Before, linking one into a shared library failed with
+  `recompile with -fPIC`. `target.set_option("pic", False)` opts a library
+  out.
+- A Swift shared library builds on Linux: pcons passed swiftc `-fPIC`,
+  which it rejects. Its code is always position-independent.
+- A bare-metal triple (`arm-none-eabi`, `aarch64-none-elf`) means a
+  bare-metal platform, not the host, so a firmware build on Linux doesn't
+  get the host's conventions.
+- **Presets, variants and linking in environments with several
+  toolchains (`add_toolchain()`) were reworked**, on an intent-based model
+  internally, so that each compiler gets its own toolchain's flags and the
+  result doesn't depend on the order of the calls. The changes you may
+  notice follow.
+- **A feature preset applies to every compiler in the environment, or
+  raises.** With clang and flang, `apply_preset("sanitize")` is an error
+  naming flang, which has no sanitizer: sanitizing only the C and C++
+  sources isn't a sanitized build. Compile the sources it can't take in a
+  clone of the environment made before the preset, with
+  `target.add_sources(sources, env=clone)`.
+  `env.has_preset()` says whether `apply_preset()` would raise.
+- Each compiler has its own flags for each built-in feature preset,
+  checked against the real compilers. gfortran now has all of GCC's (`sanitize`,
+  `lto`, `hardened`, `pthread`, `profile`). ifx gains `sanitize` (address
+  only), `profile`, `hardened` and, on Linux, `lto` and `pthread`. Swift
+  gains `sanitize`, `lto`, `coverage` and `hardened`, and CUDA has a table
+  of its own on `nvcc` (no `lto`, so `lto` beside CUDA raises). flang's `warnings` is now a deliberate no-op, since
+  its `-Wall` did nothing but warn, and it gains `lto` and `pthread`.
+- **A program is linked by the driver of its strongest language, in one
+  order for every environment: C++, then C, then Fortran** (Meson's
+  order), since a C or C++ driver can take the Fortran runtime as
+  libraries. So with gfortran primary and gcc added, a program with C++
+  objects now links with `g++` and the Fortran runtime, as it does with
+  gcc primary; before, it was `gfortran` and `-lstdc++`. A Fortran-only
+  program in a C or C++ environment links with the Fortran compiler, with
+  its own flags for the variant and presets (ifx's `-qopenmp`, not gcc's
+  `-fopenmp`). `target.link_language = "fortran"` picks the driver for one
+  target, like CMake's `LINKER_LANGUAGE`: an ifx Fortran main program with
+  C or C++ helpers needs it, since ifx's `main` is in its runtime.
+- A shared library no longer counts toward the link language: it's
+  linked already, with its own runtime, so a C program linking only a C++
+  shared library links with the C driver. Static libraries count, as in
+  CMake.
+- `PackageDescription.languages` says what a package's libraries are
+  built from (`["cxx"]`). A link that pulls in a C++ package then gets the
+  C++ runtime, from the environment's C++ toolchain or, with none, from
+  the driver. Its compile flags reach only the compilers of those
+  languages, the C family when it declares none: a package's `-pthread`
+  no longer reaches gfortran or nvcc (which rejects it) when the package
+  is linked as a target, as it already didn't with `env.use()`.
+- `ConanFinder.sync_profile(env=env)` takes the environment's C/C++
+  toolchain, which in a Fortran-primary environment isn't the primary one,
+  and the C++ standard `env.cxx.set_standard()` set.
+- A `Command`'s plain-string flags are passed as written. Before, one
+  starting like a path flag of a toolchain in the project (`-Iinclude`)
+  had its path rewritten. Put a path in a command as a `Path` or a node,
+  and pcons writes it for where the command runs.
+
+### Deprecated
+
+- `toolchain.configure(config)` does nothing, and never did. A script
+  that calls it gets a warning; delete the call. Pcons 0.32 removes it.
+
+### Removed
+
+- `pcons.contrib.platform`. Its helpers described the machine running
+  pcons, not the platform being built for, so they gave the wrong answer
+  in a cross build. Use `env.target` (`env.target.is_macos`,
+  `env.target.shared_lib_suffix`) for the platform a build is for, and
+  `pcons.get_platform()` for the machine running pcons.
+- `env.Glob()`, a placeholder that globbed from the current directory
+  rather than the script's, and `project.print_targets()`; `pcons explain`
+  shows the targets.
+
+### Fixed
+
+- `pcons-fetch` builds an autotools release tarball. Extraction dropped the
+  files' executable bits, so `configure` couldn't run, and the default
+  `.deps` gave it a relative `--prefix`, which configure rejects.
+- `pcons-fetch` fails cleanly, without a traceback, when a download fails
+  or git or autoreconf is missing. It no longer reuses a half-extracted
+  archive or a clone left at the wrong commit, builds and installs CMake's
+  Release configuration with Visual Studio too, and `clean --all` removes
+  git clones on Windows.
+- A Swift static library built for Windows from another platform gets the
+  `-static` its importers need; it was decided by the build machine.
+- A toolchain preference list, such as `toolchain=["llvm", "msvc"]`, passes
+  over a toolchain that `$CC`, `$CXX` or `$FC` contradicts and takes the
+  next one: `CC=cl` builds with MSVC. Before, it stopped at `llvm` with an
+  error.
+- A DLL linked with an import library (MSVC, clang-cl, flang and ifx on
+  Windows) no longer relinks on every build after its objects are rebuilt
+  with the same exports. link.exe leaves such an import library alone, and
+  ninja took it for out of date; the relink then failed with `LNK1104`
+  while a program had the DLL loaded.
+- On Windows, a source outside the project (from a package cache, say)
+  compiles to an object under the build directory, as on Linux and macOS.
+  Before, its object was written beside the source, inside that other
+  directory.
+- `pcons test` skips everything below a failed test in a `depends_on`
+  chain, as documented. Before, a test whose dependency was skipped (for
+  a failed dependency of its own) still ran.
+- `pcons test`'s pass rate counts only the tests that ran, as CTest's
+  does: "100% tests passed, 0 tests failed out of 5 (2 skipped)". Skipped
+  tests used to count against it.
+- Editing a file a Fortran source includes, with `#include` or `INCLUDE`,
+  now recompiles that source; before, nothing did. A module declared or
+  used in an included file now counts too, so an interface header's
+  `USE` orders the compile after that module.
+- Configure checks work with Fortran: `ToolChecks(config, env, "fc")` runs
+  `check_flag()` and `try_compile()` with the Fortran compiler. Before, the
+  probe was written as C++, so every Fortran check failed. ifx's checks now
+  reject an option it would only warn about, as `-Werror` does for the
+  others, and the header, type, function and macro checks raise for a tool
+  that doesn't compile C rather than report a wrong answer.
+- flang links shared libraries and frameworks on macOS. Its driver takes
+  none of `-dynamiclib`, `-framework` and `-F`, so those links failed.
+  GNU-style drivers now link every shared library with `-shared`, and pass
+  frameworks and their directories to the linker as
+  `-Wl,-framework,<name>` and `-Wl,-F<dir>`.
+- A relative directory in a tool's list (`env.cc.includes`,
+  `system_includes`, `env.link.libdirs`, `frameworkdirs`) is read from the
+  directory of the script that adds it, like `sources=`. Under
+  `add_subdirectory` it was read from the top directory, so
+  `env.cc.includes.append("include")` missed the subdirectory's headers.
+  These entries now read back as absolute paths.
+- On macOS, the `openmp` preset gives each compiler its own flags. With
+  `$CC` naming Homebrew's clang and C++ left to Apple's, the C compiler
+  got Apple clang's `-Xclang -fopenmp` and Homebrew's `libomp` too.
+- The `hardened` preset links on macOS and Windows. GCC's and clang's
+  `-Wl,-z,relro,-z,now` are for ELF, and macOS's and MinGW's linkers
+  reject them. On macOS it's now the compile flags without `-fPIE`, since
+  programs there are position-independent already. MinGW links with
+  `-Wl,--dynamicbase,--nxcompat`, and clang for the MSVC ABI adds Control
+  Flow Guard, as MSVC's `hardened` does. The flags follow the platform
+  being built for, so apply a cross preset first; applying one after
+  `hardened` raises.
+- A program with CUDA objects links the CUDA runtime. Before, the C++
+  driver linking it didn't know to, so every link failed with undefined
+  `cudaMalloc`, `__cudaRegisterFunction` and the like. It's the static
+  runtime by default, as with nvcc and CMake; `env.cuda.runtime =
+  "shared"` links the shared one, and `"none"` neither.
+- On Windows, nvcc's host compiles use the C runtime pcons' MSVC builds
+  do (`/MD`, `/MDd` under `debug`, or `/MT` with
+  `set_runtime_linkage("static")`). They used `cl.exe`'s default, the
+  static one, so CUDA and C++ objects disagreed.
+- A program with ifx objects links with `sanitize` beside MSVC or
+  clang-cl. ifx's objects don't name the AddressSanitizer runtime, and
+  only ifx's own preset linked it, so a program linked by MSVC's or
+  clang-cl's linker had none unless C or C++ objects brought it. The
+  linker now adds the one it uses.
+- clang-cl's `sanitize` links. Its AddressSanitizer objects don't name
+  their runtime, and pcons links with lld-link (or link.exe), not
+  clang-cl, so every sanitized link failed with undefined `__asan_*`
+  symbols. The link now gets the runtime libraries clang-cl's own driver
+  would add, as it lists them (`-###`), since they change between LLVM
+  releases and with the C runtime. `openmp`'s libomp comes the same way.
+- MSVC link options that start with `/I` reach link.exe as written. pcons
+  read them as cl's `/I` with a path, so `/INCREMENTAL:NO` in
+  `env.link.flags` came out as `/I../NCREMENTAL:NO`, which link.exe
+  ignores with a warning. Each tool's command line is now checked only for
+  the path flags that tool takes: `/LIBPATH:` on a link line, `/I` on a
+  compile line. Before, every command was checked for the path flags of
+  every toolchain in the project.
+- The Makefile generator rewrites the paths in flags written as plain
+  text, as the ninja generator does. `-Iinclude` in `env.cc.flags` reached
+  the compiler as written, and make runs in the build directory, so the
+  compiler looked for `build/include`.
+- clang for the MSVC ABI (LLVM's own Windows builds) uses the DLL C
+  runtime, as pcons' MSVC, clang-cl, flang and ifx builds do:
+  `-fms-runtime-lib=dll`, `dll_dbg` under `debug`. It used clang's
+  default, the static runtime, so a program mixing its objects with
+  flang's or ifx's got both (`LNK4098`), and it didn't match the
+  `compiler.runtime=dynamic` pcons gives Conan for clang.
+- Fortran submodules are compiled after the module (or submodule) they
+  extend. Before, nothing ordered them, and a separate module procedure
+  with a prefix (`module pure function f()`) was read as a module named
+  `pure`.
+- In a target with both C and C++ sources, each source now gets its own
+  compiler's environment includes and defines: `env.cc.includes` for C,
+  `env.cxx.includes` for C++. Before, every source got one compiler's,
+  and which one depended on internal ordering. **This can break a build
+  that set a path on only one of them and worked by luck:** set it on
+  both, or on the target (`target.private.include_dirs`), which applies to
+  every source.
+- A toolchain added with `add_toolchain()` gets everything the script
+  already asked for: the variant, features, cross target and C++
+  standard, as if it had been added first. Before, its tools kept the
+  toolchain's defaults (no `-O0 -g` for an added Fortran compiler under
+  `debug`), and a cross target applied first left its sources built for
+  the host.
+- `set_variant()` on an environment with two toolchains applied only the
+  last one's flags: with C++ and Fortran together, `debug` left the C++
+  compiles without `-O0 -g`.
+- A Fortran-primary environment no longer compiles C and C++ sources
+  itself (GNU-style, even beside clang-cl); the C/C++ toolchain added to
+  it does.
+- `$FC` (or any other variable a toolchain added with `add_toolchain()`
+  honors) no longer replaces the primary toolchain's tools: with C++
+  primary and Fortran added, `FC=gfortran-15` changed the link driver to
+  gfortran.
+- A toolchain's variant, feature, C++-standard and cross-target flags now
+  reach only the tools it brought into the environment. Before, on Windows
+  with flang primary and clang-cl added, `set_variant("debug")` handed
+  flang's link driver link.exe's `/DEBUG`, which flang read as a file, and
+  gcc with gfortran put `-ffast-math` and `-flto` on the link twice.
+- A cross preset retargets flang's Fortran sources too (`--target=` on
+  `fc`), and with gfortran a preset needs a cross gfortran in its
+  `tool_cmds`. Before, Fortran sources were silently built for the host.
+  `set_target_arch()` with gfortran, flang, Swift or Linux ifx is an
+  error, since none of them retargets the CPU by flag, and so is one other
+  than the host's with CUDA.
+- A CUDA shared library on Linux compiles with nvcc's own
+  `-Xcompiler=-fPIC`, not gcc's bare `-fPIC`, which nvcc rejects.
+- clang and flang targeting the MSVC ABI write a PDB for a debug build:
+  the link now gets `-g` too.
+- A program linking a static library built in another environment gets
+  what that library's objects need: a Fortran program linking a C++
+  archive gets the C++ runtime, and a C program linking a Fortran one the
+  Fortran runtime. Before, the link failed with undefined symbols.
+- ifx on Linux gets its own `-qopenmp` for `openmp`, not `-fopenmp`.
+- A C or C++ program linking Swift objects on Linux gets what swiftc's
+  own driver would add: `swiftrt.o`, an rpath to the Swift runtime, and
+  the Swift libraries its objects autolink. Before, a debug build failed
+  to link, and a release one could link with Swift's runtime metadata
+  never registered, so casts to a protocol failed at run time. On macOS
+  it gets the `/usr/lib/swift` rpath that older deployment targets need.
+- Objects built with a feature get its runtime whichever driver links
+  them: gfortran's `coverage` objects get libgcov under clang++, and
+  ifx's `openmp` objects Intel's OpenMP runtime under g++.
+- clang targeting the MSVC ABI beside ifx links a Fortran program as a
+  console program (`-Wl,/SUBSYSTEM:CONSOLE`). Before, link.exe failed with
+  `LNK1561`, since ifx's `main` is in its runtime.
+- A shared library linked by clang or flang for the MSVC ABI comes with
+  its import library (`foo.lib`), and that is what targets linking it
+  take. Before, they were given `foo.dll`, which link.exe rejects
+  (LNK1107). `exported_symbols` now works for these links too, as a
+  `.def` file; before, it only warned.
+- A Fortran source added with `add_sources(env=...)` writes its modules
+  to that environment's module directory, which pcons now creates, and the
+  build's dependency scan looks for them there. Before, the scan assumed
+  the target's own directory.
+
+- The gcc toolchain archives with `gcc-ar` instead of `ar`, so static
+  libraries built with the `lto` preset get a symbol index even when
+  binutils can't find GCC's LTO plugin. A `$CC`/`$CXX` driver or a cross
+  preset's drivers bring their own (`g++-16` → `gcc-ar-16`); `$AR` still
+  wins (#214).
+- On Windows without Developer Mode, every generate warned that it couldn't
+  create the root `compile_commands.json` symlink. Pcons now skips the link
+  quietly and explains why under `-v` (#217).
+- A directory in `output_name` works for libraries: `output_name =
+  "lib/foo"` on a shared library writes `lib/libfoo.so` (`lib/libfoo.dylib`,
+  `lib/foo.dll` and `lib/foo.lib`). The prefix and suffix go on the file's
+  own name; before, the `lib` went in front of the directory
+  (`liblib/foo.so`). An `output_prefix` with a directory in it still works
+  as before.
+- A mistake in a build script, such as a toolchain that isn't installed
+  or a `$FC` that contradicts the toolchain asked for, is reported in one
+  line after the script line that led to it (`pcons-build.py:12: ...`),
+  not with a Python traceback that made it look like a crash. Pcons's
+  errors are still the exceptions they were, so `except RuntimeError`
+  keeps working, and a bug in pcons itself still shows its traceback.
+- A wheel build no longer shares saved settings with a plain `pcons`
+  run in the same directory: after `uv sync`, `pcons` used the packaging
+  settings, and the backend used your variant. An editable install under
+  build isolation warns that the next regen will fail. (#215)
+- `import std;` with clang and libc++ works on Debian and Ubuntu (Ubuntu
+  26.04's clang 21, for one). Clang there reports a copy of
+  `libc++.modules.json` whose paths lead nowhere
+  ([llvm#172497](https://github.com/llvm/llvm-project/issues/172497)),
+  so pcons reads the one in clang's own `lib` directory.
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20): #215 (the `pyproject.toml` backend), and
+  raised #213
 
 ## [0.30.0] - 2026-09-27
 
@@ -2634,7 +3086,10 @@ see **Changed** below for each one and what to write instead.
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/DarkStarSystems/pcons/compare/v0.32.0...v0.33.0
+[0.32.0]: https://github.com/DarkStarSystems/pcons/compare/v0.31.0...v0.32.0
+[0.31.0]: https://github.com/DarkStarSystems/pcons/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/DarkStarSystems/pcons/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/DarkStarSystems/pcons/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/DarkStarSystems/pcons/compare/v0.28.0...v0.29.0

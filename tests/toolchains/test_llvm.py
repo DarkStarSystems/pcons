@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.llvm."""
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -102,16 +103,12 @@ class TestLlvmLinker:
         assert "progcmd" in vars
         assert "sharedcmd" in vars
 
-    def test_shared_flag_platform_specific(self):
-        """The host's flag by default; the command reads it through a
-        variable so a cross preset can retarget it."""
+    def test_shared_flag_is_the_same_everywhere(self):
+        """-shared links a shared library for every target, Mach-O too."""
         link = LlvmLinker()
         vars = link.default_vars()
         assert "$link.sharedflag" in vars["sharedcmd"]
-        if get_platform().is_macos:
-            assert vars["sharedflag"] == "-dynamiclib"
-        else:
-            assert vars["sharedflag"] == "-shared"
+        assert vars["sharedflag"] == "-shared"
 
     def test_builders(self):
         link = LlvmLinker()
@@ -280,7 +277,6 @@ def _metal_env(project):
 
     tc = LlvmToolchain()
     tc._tools = {"metal": MetalCompiler()}
-    tc._configured = True
     return project.Environment(toolchain=tc)
 
 
@@ -532,7 +528,8 @@ class TestLlvmCompileFlagsForTargetType:
         assert flags == []
 
     def test_static_library_linux(self, monkeypatch):
-        """Static libraries don't need -fPIC."""
+        """Static libraries compile PIC, so they can go into a shared library,
+        unless their pic option says not to."""
         linux_platform = Platform(
             os="linux",
             arch="x86_64",
@@ -550,8 +547,8 @@ class TestLlvmCompileFlagsForTargetType:
 
         tc = LlvmToolchain()
         flags = tc.get_compile_flags_for_target_type("static_library")
-        assert "-fPIC" not in flags
-        assert flags == []
+        assert flags == ["-fPIC"]
+        assert tc.get_compile_flags_for_target_type("static_library", pic=False) == []
 
     def test_program_linux(self, monkeypatch):
         """Programs don't need -fPIC."""
@@ -576,6 +573,18 @@ class TestLlvmCompileFlagsForTargetType:
         assert flags == []
 
 
+def _libcxx_manifest(lib_dir: Path) -> Path:
+    """A libc++.modules.json in lib_dir, with the std.cppm it points at."""
+    cppm = lib_dir.parent / "share/libc++/v1/std.cppm"
+    cppm.parent.mkdir(parents=True, exist_ok=True)
+    cppm.write_text("export module std;\n", encoding="utf-8")
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    manifest = lib_dir / "libc++.modules.json"
+    entry = {"logical-name": "std", "source-path": "../share/libc++/v1/std.cppm"}
+    manifest.write_text(json.dumps({"version": 1, "modules": [entry]}), "utf-8")
+    return manifest
+
+
 class TestLibcxxModulesManifest:
     """Tests for libc++ std-module manifest discovery and parsing.
 
@@ -589,8 +598,7 @@ class TestLibcxxModulesManifest:
     ) -> None:
         from pcons.toolchains.llvm import _find_libcxx_modules_manifest
 
-        manifest = tmp_path / "libc++.modules.json"
-        manifest.write_text("{}", encoding="utf-8")
+        manifest = _libcxx_manifest(tmp_path / "lib")
 
         class _Result:
             returncode = 0
@@ -624,8 +632,7 @@ class TestLibcxxModulesManifest:
         # issue #98.
         from pcons.toolchains.llvm import _find_libcxx_modules_manifest
 
-        manifest = tmp_path / "libc++.modules.json"
-        manifest.write_text("{}", encoding="utf-8")
+        manifest = _libcxx_manifest(tmp_path / "lib")
 
         def _fake_run(cmd: list[str], **_kw: object) -> object:
             query = next(
@@ -644,6 +651,44 @@ class TestLibcxxModulesManifest:
 
         monkeypatch.setattr("pcons.toolchains.llvm.subprocess.run", _fake_run)
         assert _find_libcxx_modules_manifest("clang++", ["-std=c++23"]) == manifest
+
+    def test_debian_multiarch_manifest_is_read_from_the_llvm_lib_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Debian and Ubuntu install the manifest in the multiarch lib dir,
+        # with a symlink to it from llvm-N/lib, and clang reports the
+        # multiarch copy; its relative paths only work from the symlink's
+        # directory (llvm/llvm-project#172497).
+        from pcons.toolchains.llvm import (
+            _find_libcxx_modules_manifest,
+            _parse_libcxx_manifest,
+        )
+
+        llvm = tmp_path / "llvm-21"
+        _libcxx_manifest(llvm / "lib").unlink()
+        multiarch = _libcxx_manifest(tmp_path / "multiarch" / "lib")
+        (multiarch.parent.parent / "share").rename(tmp_path / "unrelated")
+        beside = llvm / "lib" / "libc++.modules.json"
+        try:
+            beside.symlink_to(multiarch)
+        except OSError:
+            pytest.skip("symlinks need privileges here")
+        clang = llvm / "bin" / "clang++"
+
+        class _Result:
+            returncode = 0
+            stdout = f"{multiarch}\n"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.subprocess.run", lambda *_a, **_k: _Result()
+        )
+        monkeypatch.setattr("pcons.toolchains.llvm.shutil.which", lambda _: clang)
+        found = _find_libcxx_modules_manifest("clang++", [])
+        assert found == beside
+        assert found is not None
+        std = _parse_libcxx_manifest(found)["std"]["source-path"]
+        assert std == (llvm / "share/libc++/v1/std.cppm").resolve()
 
     def test_returns_none_when_compiler_echoes_query(
         self, monkeypatch: pytest.MonkeyPatch
@@ -803,36 +848,6 @@ class TestLibcxxModulesManifest:
         )
         modules = _parse_libcxx_manifest(manifest)
         assert list(modules.keys()) == ["std"]
-
-
-class TestLlvmConfigure:
-    """Each tool's configure() delegates to _find_tool_config."""
-
-    @pytest.mark.parametrize(
-        "cls", [ClangCCompiler, ClangCxxCompiler, LlvmArchiver, LlvmLinker]
-    )
-    def test_configure_finds_program(self, cls, tmp_path):
-        from pathlib import Path
-
-        from pcons.configure.config import Configure, ProgramInfo
-
-        config = Configure(build_dir=tmp_path)
-        config.find_program = (  # type: ignore[method-assign]
-            lambda *a, **k: ProgramInfo(path=Path("/usr/bin/tool"), version="1.0")
-        )
-        cfg = cls().configure(config)
-        assert cfg is not None
-        assert cfg.cmd == str(Path("/usr/bin/tool"))
-
-    @pytest.mark.parametrize(
-        "cls", [ClangCCompiler, ClangCxxCompiler, LlvmArchiver, LlvmLinker]
-    )
-    def test_configure_returns_none_when_missing(self, cls, tmp_path):
-        from pcons.configure.config import Configure
-
-        config = Configure(build_dir=tmp_path)
-        config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
-        assert cls().configure(config) is None
 
 
 class TestStdlibQueryFlags:

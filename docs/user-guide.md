@@ -189,6 +189,8 @@ IDE autocompletion for these names comes from the generated `KnownToolchain` typ
 - **Windows**: clang-cl → msvc → llvm → gcc
 - **Linux / macOS**: llvm → gcc
 
+**Default Fortran search order:** gfortran → flang → ifx
+
 ### Selecting compilers with environment variables
 
 Pcons honors the conventional tool-selection environment variables, same as
@@ -204,7 +206,7 @@ $ CXX=/opt/llvm/bin/clang++ pcons
 |----------|---------|------------|
 | `CC` | C compiler (and the link driver) | gcc, llvm, msvc, clang-cl |
 | `CXX` | C++ compiler | gcc, llvm, msvc, clang-cl |
-| `FC` | Fortran compiler | gfortran |
+| `FC` | Fortran compiler (and the link driver) | gfortran, flang, ifx |
 | `AR` | archiver | gcc, llvm, swift |
 | `SWIFTC` | Swift compiler | swift |
 | `CUDACXX` | CUDA compiler (nvcc) | cuda |
@@ -218,10 +220,24 @@ error. Specifically, the rules are as follows:
   named compiler's *family* — `CXX=g++-15` selects the gcc toolchain even
   where clang would normally win. Classification checks `--version`, so
   macOS's `g++`-that-is-really-Apple-clang is identified correctly.
+- With `toolchain="fortran"`, `$FC` does the same for Fortran:
+  `FC=flang-21` selects the flang toolchain.
+- A toolchain asked for by name uses the variable's compiler, which is
+  all it needs: `toolchain="gcc"` with `CC=gcc-16` works where only
+  `gcc-16` is installed.
 - An explicitly requested toolchain that *contradicts* the variable
-  (`CXX=g++-15` with `toolchain="msvc"`) is an error.
+  (`CXX=g++-15` with `toolchain="msvc"`) is an error. A preference list
+  passes over such a toolchain: `toolchain=["llvm", "msvc"]` with `CC=cl`
+  builds with MSVC.
 - Values a compiler-id can't classify (e.g. wrapper scripts) are used
   as-is on whichever toolchain is selected.
+- On the gcc toolchain, `$CXX` or `$CC` also picks the archiver: the
+  `gcc-ar` next to that driver, keeping its prefix and version
+  (`CXX=g++-15` archives with `gcc-ar-15`). `gcc-ar` gives `ar` that GCC's
+  LTO plugin, so `-flto` static libraries work whatever binutils has
+  installed. A cross preset's `tool_cmds` drivers do the same, and `$AR`
+  overrides both. A script that sets `env.cxx.cmd` itself should set
+  `env.ar.cmd` too.
 - Explicit script assignments (`env.cxx.cmd = ...`) and cross-preset
   `tool_cmds` still win over the environment; SDK-owned toolchains
   (emscripten, wasi) ignore these variables entirely, like CMake's
@@ -304,26 +320,37 @@ env = project.Environment(toolchain="swift")
 env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
 ```
 
-**Fortran** (`gfortran`) is available as `toolchain="fortran"`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
+**Fortran** is available as `toolchain="fortran"`, which finds gfortran, LLVM's flang or Intel's ifx (`$FC` picks one; see above). Ask for one by name to require it: `toolchain="flang"`. Modules and submodules are compiled in dependency order, so sources can be listed in any order:
 
 ```python
 env = project.Environment(toolchain="fortran")
 project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 ```
 
-**Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
+[Fortran](fortran.md) has the rest: how the compilers differ, mixing Fortran with C and C++, OpenMP, Windows, packages and configure checks.
+
+**Mixed-language builds** use `env.add_toolchain()`. A program is linked by the compiler of its strongest language, C++, then C, then Fortran, whichever toolchain came first: a C or C++ driver can take the Fortran runtime as libraries, which a Fortran driver can't do for a C compiler's sanitizer or coverage runtimes. CUDA links through the C++ driver, and Swift objects link with swiftc where Swift is the primary toolchain, else with clang++ and the Swift runtime. Pcons adds the runtime libraries the other languages' objects need: `-lgfortran` (or flang's or ifx's) for Fortran objects, `-lstdc++` or `-lc++` for C++ objects, Swift's runtime for Swift objects. That holds for objects in static libraries too, even ones built in another environment.
 
 ```python
-# Fortran primary: gfortran links, -lc++ / -lstdc++ injected for C++ objects
-env = project.Environment(toolchain="fortran")
-env.add_toolchain("c")
-
-# C++ primary: g++/clang++ links, -lgfortran injected for Fortran objects
 env = project.Environment(toolchain="c++")
 env.add_toolchain("fortran")
 
-project.Program("hello", env, sources=["src/main.f90", "src/helper.cpp"])
+# g++ (or clang++) links, adding the Fortran runtime
+project.Program("solver", env, sources=["src/main.cpp", "src/kernel.f90"])
+# Fortran only: the Fortran compiler links it
+project.Program("tool", env, sources=["src/tool.f90"])
 ```
+
+A program whose `main` is in Fortran, with C or C++ helpers, can say so, and the Fortran compiler links it, adding the C++ runtime where there are C++ objects:
+
+```python
+sim = project.Program("sim", env, sources=["src/main.f90", "src/helper.cpp"])
+sim.link_language = "fortran"
+```
+
+With ifx on Linux this is required: ifx keeps a Fortran program's `main` in its runtime, which only its own driver links, so a C or C++ link fails with an undefined `main`. gfortran and flang link either way. `link_language` takes any language a toolchain in the environment compiles.
+
+Order doesn't matter: a variant, preset or cross target set before `add_toolchain()` reaches the added toolchain too.
 
 **CUDA** is designed to work alongside a C/C++ toolchain — CUDA handles `.cu` compilation while the host toolchain handles linking:
 
@@ -331,6 +358,14 @@ project.Program("hello", env, sources=["src/main.f90", "src/helper.cpp"])
 env = project.Environment(toolchain="c++")
 env.add_toolchain("cuda")
 ```
+
+A program with CUDA objects links the CUDA runtime, which nvcc would add if it linked. `env.cuda.runtime` picks which, like CMake's `CUDA_RUNTIME_LIBRARY`:
+
+- `"static"` (the default, as with nvcc and CMake): `cudart_static`, part of the program. On Linux it also links `libdl`, `librt` and `libpthread`.
+- `"shared"`: `cudart`, which the program loads when it runs (`libcudart.so.12`, `cudart64_12.dll`), so it has to be found then.
+- `"none"`: neither, for a program that links one itself, or uses only the driver API.
+
+On Windows, nvcc's host compiles use the C runtime pcons' MSVC builds do (`-Xcompiler=/MD`, `/MDd` under `debug`, or `/MT` with [static runtimes](#static-runtimes)), and a link with the static CUDA runtime leaves out the static C runtime that `cudart_static.lib` names (`/NODEFAULTLIB:LIBCMT`) unless that's the one in use. [`examples/95_cuda_runtime/`](https://github.com/DarkStarSystems/pcons/tree/main/examples/95_cuda_runtime) builds a program each way.
 
 **Emscripten** requires the Emscripten SDK. Set the `EMSDK` environment variable, or install to `~/emsdk` or `/opt/emsdk`.
 
@@ -462,7 +497,7 @@ explicitly:
 ```python
 env = project.Environment(toolchain="msvc")
 env.cxx.modules = True
-env.cxx.flags.extend(["/std:c++latest", "/EHsc"])
+env.cxx.flags.append("/std:c++latest")
 project.Program("hello", env, sources=["main.cpp"])  # main.cpp does `import std;`
 ```
 
@@ -656,6 +691,8 @@ Each environment has namespaced tool configurations:
 - `env.cc` - C compiler settings
 - `env.cxx` - C++ compiler settings
 - `env.link` - Linker settings
+
+Each source compiles with its own tool's settings, even in a target that mixes languages: a `.c` file gets `env.cc.includes`, a `.cpp` file `env.cxx.includes`. For a path every source needs, set it on both, or on the target (`target.private.include_dirs`).
 
 Environments can be cloned and then the clone modified, to set up multiple variants; see [Environment Cloning](#environment-cloning).
 
@@ -975,8 +1012,10 @@ down, it is `build/libfoo/`. The same holds several levels deep, and
 sibling subdirectories stay in separate build directories.
 
 Every relative path a script writes is read from the script's own
-directory: `sources=`, `depends=`, include directories, `project.node()`,
-`configure_file()`, `cwd=`, a `Path` in a command, and `$SRCDIR`.
+directory: `sources=`, `depends=`, include and library directories (a
+target's, or a tool's like `env.cxx.includes`, even on an environment the
+parent made), `project.node()`, `configure_file()`, `cwd=`, a `Path` in a
+command, and `$SRCDIR`.
 `project.build_dir` and `env.build_dir` are absolute, so a path built on
 them names one file wherever it goes: `project.build_dir / "config.h"`
 works as a source, a target, a command argument, or a file on disk.
@@ -1399,15 +1438,14 @@ app.link(sdk)
 
 Everything that works for `includes` works here: transitive propagation, deduplication, and path relativization in the generated build files. See `examples/58_system_includes`.
 
-An external package takes the same treatment through a `system=` argument, which moves its include dirs across without any list surgery:
+An external package gets the same treatment by default: the include directories of `find_package()`, `ImportedTarget.from_package()` and `env.use()` are system includes, as CMake makes an imported target's. Pass `system=False` to hold a package's headers to your warnings too:
 
 ```python
-doctest = project.find_package("doctest", system=True)
-nanobind = ImportedTarget.from_package(description, system=True)
-env.use(description, system=True)
+mylib = project.find_package("mylib", system=False)
+env.use(description, system=False)
 ```
 
-`system=` is off by default, deliberately: `-isystem` on a directory the compiler already searches — which is what a system or pkg-config prefix usually is — reorders the include search and can break the standard library. Best to use it on prefixes owned by a package manager or a fetched source tree. Packages fetched by `pcons-fetch` are already recorded that way, and opt out per package with `system = false` in `deps.toml`.
+A directory the compiler already searches by itself, such as `/usr/include`, is left out of the system includes: named there, it would move ahead in the compiler's search, and GCC's C++ headers, which `#include_next` the C library's, would stop finding them. pcons asks each compiler for its own list (`-v`), as CMake does. Packages fetched by `pcons-fetch` opt out per package with `system = false` in `deps.toml`.
 
 A package that uses  `-isystem` in its pkg-config `Cflags` needs also works: both the pkg-config and Conan finders read it into `system_include_dirs`, so even MSVC properly gets `/external:I`.
 
@@ -1448,6 +1486,9 @@ libplugin.output_filename = "myplugin.ofx"  # instead of libplugin.so
 #   Program "foo":
 #     Linux/macOS: foo
 #     Windows:     foo.exe
+# A directory in output_name stays in front, and the prefix and suffix go
+# on the file's own name: output_name = "lib/foo" gives lib/libfoo.so,
+# lib/libfoo.dylib, or lib/foo.dll (and lib/foo.lib to link against).
 
 # Create program that uses the library
 app = project.Program("host", env)
@@ -1456,6 +1497,10 @@ app.link_private(libplugin)
 
 project.Default(app, libplugin)
 ```
+
+A program or shared library that links one of the build's own shared libraries runs from the build tree as it is, with no `LD_LIBRARY_PATH` or `DYLD_LIBRARY_PATH`. On Linux and macOS each link gets an rpath to the directory the library is built in, written relative to the linked file (`$ORIGIN/...`, `@loader_path/...`), so the build tree can move. Windows finds a DLL beside its program, so it needs nothing. CMake and Meson do the same. Turn it off for one target with `target.set_option("build_rpath", False)`. The rpath follows the build tree's layout, so an install that puts programs and libraries in different directories needs an rpath of its own.
+
+On Linux, Android and the BSDs, a static or object library compiles as position-independent code (`-fPIC`) too, so it can go into a shared library, as Meson builds them. Turn that off for one library with `lib.set_option("pic", False)`. macOS code is position-independent already, and Windows doesn't use it.
 
 ### Project with Subdirectories
 
@@ -1620,6 +1665,17 @@ Presets are toolchain-specific — each toolchain produces the appropriate flags
 | `lto` | `-flto` (compile+link) | `/GL` (compile) + `/LTCG` (link) |
 | `hardened` | `-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE` + `-pie -Wl,-z,relro,-z,now` | `/GS /guard:cf` + `/DYNAMICBASE /NXCOMPAT /guard:cf` |
 
+The Unix `hardened` flags are for ELF platforms like Linux. On macOS it's the
+compile flags without `-fPIE`, since programs there are position-independent
+already. On Windows, MinGW links with `-Wl,--dynamicbase,--nxcompat`, and clang
+for the MSVC ABI uses Control Flow Guard (`-Xclang -cfguard` + `-Wl,/guard:cf`)
+in place of `-fPIE` and RELRO. These follow the platform being built for, so
+apply a cross preset before `hardened`: applying one after it raises.
+
+clang-cl's `sanitize` and `openmp` link the runtime that clang-cl's own driver would, which pcons asks it for: for `sanitize`, a different AddressSanitizer runtime for the DLL and the static C runtime (see [Static Runtimes](#static-runtimes)). clang's AddressSanitizer needs a release C runtime, so clang-cl can't sanitize a `debug` build (`'/MDd' not allowed with '-fsanitize=address'`): use `relwithdebinfo`. MSVC's can. A program built with clang's AddressSanitizer needs its DLL (`clang_rt.asan_dynamic-x86_64.dll`) on `PATH` when it runs: it's in `lib\windows` under clang's resource directory (`clang-cl --print-resource-dir`). MSVC's DLL, beside `cl.exe` and on `PATH` in a Developer Command Prompt, has the same name but doesn't work with clang's, so put clang's directory first. [`examples/97_sanitize/`](https://github.com/DarkStarSystems/pcons/tree/main/examples/97_sanitize) builds a sanitized program.
+
+A program has one AddressSanitizer runtime, and the linker's toolchain chooses it: MSVC's with link.exe (`/INFERASANLIBS`), even for a Fortran program with only ifx objects, or clang's with clang-cl's lld-link, ifx's objects included.
+
 Combine presets with variants for a complete configuration:
 
 ```python
@@ -1628,11 +1684,103 @@ env.apply_preset("warnings")
 env.apply_preset("lto")
 ```
 
+With several compilers in one environment (C++ and Fortran, say), each
+realizes a preset with its own flags, and a preset applies to all of them or
+fails: with clang and flang, `apply_preset("sanitize")` is an error naming
+flang, which has no sanitizer, since a build that sanitizes only the C++
+sources isn't a sanitized build. To sanitize only the C++, compile the
+Fortran in a clone of the environment, made before the preset, so it keeps
+the other settings (the variant, the runtime linkage). The program still
+links with clang, sanitizer runtime and Fortran runtime included.
+`env.has_preset()` says beforehand whether a preset would apply to every
+compiler.
+
+```python
+env = project.Environment(toolchain="c")
+env.set_variant("debug")
+fortran = env.clone()  # debug too, but not sanitized
+fortran.add_toolchain("flang")
+env.apply_preset("sanitize")
+
+app = project.Program("app", env, sources=["main.cpp"])
+app.add_sources(["solver.f90"], env=fortran)
+```
+
+A separate environment made from scratch would build the Fortran as a
+release build, and on Windows a debug C++ program and a release Fortran
+runtime don't link (`LNK2038`, `RuntimeLibrary`).
+
+Mixing languages also mixes compilers' runtimes, and some don't combine
+on some platforms, so a mixed build may need a platform-specific
+workaround. For example, on a Mac, Apple clang's and GCC's sanitizer
+runtimes can't be mixed in one program. On Windows, MSVC's sanitizer
+annotates the C++ standard library's containers, which C++ libraries built
+without it don't (flang's runtime among them), so the link fails with
+`LNK2038` for `annotate_string` and `annotate_vector`. Define
+`_DISABLE_STRING_ANNOTATION` and `_DISABLE_VECTOR_ANNOTATION` in the
+sanitized code to leave the annotations out.
+
 Variants act like a knob: calling `set_variant()` again *replaces* the
 previous variant's flags rather than piling on top of them, so
 `env.set_variant("release")` followed by `env.set_variant("debug")` switches
 cleanly. To build both variants side by side, clone the environment (see
 [Environment Cloning](#environment-cloning)).
+
+### Static Runtimes
+
+A program links its language runtimes, the C and C++ runtimes and
+Fortran's, as shared libraries unless you ask otherwise:
+
+```python
+env.set_runtime_linkage("static")
+```
+
+Each compiler links its own runtime that way:
+
+| Compiler | `"shared"` (the default) | `"static"` |
+|---|---|---|
+| MSVC, clang-cl, ifx on Windows | `/MD` (`/MDd` under `debug`) | `/MT` (`/MTd`) |
+| clang and flang for the MSVC ABI | `-fms-runtime-lib=dll` (`dll_dbg`) | `-fms-runtime-lib=static` (`static_dbg`) |
+| GCC, and clang on Linux and MinGW | | `-static-libgcc -static-libstdc++` |
+| gfortran | | `-static-libgfortran -static-libquadmath -static-libgcc` |
+| flang | | `-static-libflangrt` |
+| ifx on Linux | | `-static-intel -static-libgcc` |
+| Swift on Linux | | `-static-stdlib`: Swift's own runtime, while libstdc++ stays shared |
+
+It applies to every compiler in the environment, or raises. On Windows
+the compilers' objects have to agree on one C runtime, and the Conan
+profile pcons writes says the same (`compiler.runtime=static`). The
+default is the DLL runtime, as it is for CMake and Conan, though the
+compilers' own default is the static one.
+
+On Apple's platforms, clang links the system's libc++, which is shared
+only, so it can't, and neither can Swift there. Homebrew's flang can't
+either: it ships only the shared flang-rt. GCC and gfortran from Homebrew
+can. The system's own libraries stay shared in every case: this isn't
+`-static`. With MinGW's GCC, that includes `libwinpthread-1.dll`, which
+the static libstdc++ uses; `-static` in `env.link.flags` links it in too.
+Some Linux distributions package the static runtimes separately: on
+Fedora, install `libstdc++-static`.
+
+### C++ Exceptions
+
+C++ code can throw and catch exceptions in every environment, as it does
+with CMake. GCC and Clang have them on already; MSVC and clang-cl compile
+C++ without unwinding unless told, so pcons gives them `/EHsc`. To change
+that:
+
+```python
+env.cxx.set_exceptions("none")  # or "standard" (the default), or "async"
+```
+
+| Mode | MSVC, clang-cl | GCC, Clang |
+|---|---|---|
+| `"standard"` (the default) | `/EHsc` | (nothing: they're on) |
+| `"none"` | (no `/EH` flag) | `-fno-exceptions` |
+| `"async"` | `/EHa`: also catches structured exceptions | raises: there's no equivalent |
+
+It's a knob: a second call replaces the first. `pcons explain` shows the
+flag coming from `exceptions-standard`, or whichever mode you set.
 
 ### Where Did This Flag Come From? (`pcons explain`)
 
@@ -1948,6 +2096,25 @@ qualified names rather than picking one.
 See `examples/75_multi_env` for the smallest complete case, and
 `examples/74_bare_metal` for the cross-compiled one.
 
+### Colored Diagnostics
+
+Ninja runs each compile with its output going to a pipe, and a compiler that isn't writing to a terminal leaves its colors off. So in `build.ninja`, pcons asks GCC, Clang, clang-cl, gfortran and flang for colored warnings and errors outright. Ninja strips the colors again whenever its own output isn't a terminal, so a log file or a CI capture still gets plain text.
+
+To turn colors off, set `NO_COLOR` to any non-empty value. pcons reads it when it writes `build.ninja`, and the color flags are part of every compile command, so changing `NO_COLOR` recompiles everything. `pcons` notices the change and regenerates by itself; running `ninja` directly doesn't, so run `pcons generate` after changing it.
+
+The flags go only where something will strip them off a non-terminal:
+
+- **Make, Xcode and `compile_commands.json`** never get them. Make passes escape codes straight through, but it also leaves the compiler writing to your terminal, so it colors its output by itself there.
+- **n2 and samurai** pass them through as well, so pcons leaves the flags out when `--ninja` or `$NINJA` names a runner other than ninja.
+
+To get colors with n2 or samurai anyway, set `FORCE_COLOR` or `CLICOLOR_FORCE` to anything but `0`. Their output is then colored even when it goes to a file. `FORCE_COLOR` beats `NO_COLOR`; `CLICOLOR_FORCE` doesn't.
+
+To turn colors off for one environment, empty the tool's `colorflags`:
+
+```python
+env.cc.colorflags = []
+```
+
 ### Compiler Cache
 
 Speed up rebuilds by wrapping compile commands with [ccache](https://ccache.dev/) or [sccache](https://github.com/mozilla/sccache):
@@ -2014,6 +2181,18 @@ Put the checks in a `.clang-tidy` file next to the sources; clang-tidy finds it 
 Under the hood this is a launcher, `python -m pcons.tools.co_compile`, and it composes with `use_compiler_cache()` in either order: the cache keeps wrapping the compiler, and the analysis never sees it. If clang-tidy isn't installed, a warning is logged and the compiles are left alone. `compile_commands.json` still reports the compiler itself.
 
 See `examples/76_clang_tidy`.
+
+### Checking #includes With include-what-you-use
+
+[include-what-you-use](https://include-what-you-use.org) (IWYU) reads each source with its compile's flags and reports the `#include` lines it doesn't need, and the headers it uses without including them, so a source doesn't compile only because another header happens to pull something in. `env.use_include_what_you_use()` runs it alongside each C and C++ compile, the way `use_clang_tidy()` runs clang-tidy, and the two can be combined:
+
+```python
+env.use_include_what_you_use()
+env.use_include_what_you_use(args=["-Xiwyu", "--mapping_file=qt.imp"])
+env.use_include_what_you_use(args=["-Xiwyu", "--error"])   # findings fail the build
+```
+
+IWYU only reports by default: older versions exit nonzero whatever they found, so its status is ignored unless `args` hold its own `--error` option. This is CMake's `CXX_INCLUDE_WHAT_YOU_USE`.
 
 ---
 
@@ -2131,6 +2310,14 @@ httplib = ImportedTarget.from_package(
 )
 ```
 
+A package built from C++ (or Fortran) should say so with `languages`. A program that links it then gets that language's runtime, and the package's compile flags reach only that language's compiler. Without it, a package is taken to be C or C++: its compile flags (`-pthread`, say) go to C and C++ compiles, never to Fortran or CUDA ones. Include directories and defines reach every compiler, so a Fortran package's module directories need nothing more.
+
+```python
+fortran_lib = ImportedTarget.from_package(
+    PackageDescription(name="netcdf-fortran", libraries=["netcdff"], languages=["fortran"])
+)
+```
+
 If the manual package depends on another package, `link()` it to wire up transitive dependencies — you don't need to copy public requirements manually:
 
 ```python
@@ -2244,6 +2431,10 @@ conan.sync_profile(
 `build_type` follows the environment's variant when you leave it out: `debug` is `Debug`, `release` and `release-fastest` are `Release`, `relwithdebinfo` and `minsizerel` their Conan names. With one environment per variant, one `ConanFinder` per variant (each with its own `output_folder`) gives each its matching packages.
 
 The `cppstd` parameter sets `compiler.cppstd` in the Conan profile, which many packages require. If omitted, it's inferred from `env.cxx.flags` (e.g., `-std=c++23` becomes `compiler.cppstd=23`). You can also use the lower-level `conan.set_profile_setting("compiler.cppstd", "23")` before calling `sync_profile()`.
+
+The profile describes the platform the environment builds for. After `env.apply_cross_preset()`, that's the preset's target: its OS and CPU, Android's API level, C++ runtime and NDK, iOS's version and SDK, and the `--target` and `--sysroot` flags the environment compiles with. For a target pcons can't describe to Conan, `sync_profile()` raises; give the settings yourself with `conan.set_profile_setting("os", ...)` and `conan.set_profile_setting("arch", ...)`.
+
+Tools that dependencies need while they build, such as flex or protoc (Conan's `tool_requires`), have to run on this machine, so Conan builds them for it, with its usual compiler. pcons has Conan detect that profile once, into `pcons-build-profile` in the output folder, leaving out `$CC` and `$CXX`.
 
 A conf entry set with `conan.set_profile_conf()`, such as `tools.build:cxxflags`, is not part of Conan's package id: changing it reuses the binary Conan already built unless you tell Conan the conf matters:
 
@@ -2688,9 +2879,31 @@ env.Command(
 
 The variables are written into the generated build file, in front of the one command they belong to: `env NAME=VALUE` on POSIX, a small pcons helper on Windows (which has no `env`). So they survive a direct `ninja` or `make` run, and no other command sees them. Setting `os.environ` in the build script would do neither — it reaches every command, and only while pcons itself runs. See `examples/73_command_env`.
 
+### Linking a Whole Static Library
+
+A linker takes an object out of a static library only when something needs one of its symbols. An object that registers itself from a static constructor (a plugin, a factory, a test case) is needed by nothing, so it's left out, and the program never finds it. The `whole_archive` option on the library links every one of its objects into whatever links it:
+
+```python
+plugins = project.StaticLibrary("plugins", env, sources=["hello_plugin.cpp"])
+plugins.set_option("whole_archive", True)
+main.link(plugins)
+```
+
+Each linker gets its own form, in the library's place on the link line: `-Wl,-force_load,` on Apple, `-Wl,--whole-archive ... -Wl,--no-whole-archive` with GNU ld and lld, `/WHOLEARCHIVE:` with MSVC's link. See `examples/98_whole_archive`.
+### Limiting How Many of a Target's Steps Run at Once
+
+Some sources take gigabytes of memory to compile (heavy templates, big generated files), and ninja's default parallelism runs as many of them at once as there are cores. `max_jobs` caps how many of one target's build steps run at the same time, while the rest of the build keeps its full parallelism:
+
+```python
+tests = project.Program("tests", env, sources=test_sources)
+tests.set_option("max_jobs", 2)
+```
+
+It is a ninja pool of that depth, holding the target's compiles and its link. Make has no equivalent, so the Makefile generator ignores it.
+
 ### Exporting Only Some Symbols
 
-Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file with MSVC and clang-cl.
+Some shared libs, plugins for instance, should export only certain symbols. `-fvisibility=hidden` can be insufficient in some cases. The `.set_option("exported_symbols", [...])` method on a shared library or executable target allows users to specify a list of symbol names to be exported, in an OS-independent way: a symbol list on macOS, a version script on Linux, a `.def` file for any MSVC-ABI link (MSVC, clang-cl, and clang or flang targeting the MSVC ABI).
 
 ```python
 plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])
@@ -2707,6 +2920,23 @@ just pass it as a source to the builder: a `.def` in the target's
 sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
 or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
 the link then depends on.
+
+### A DLL That Exports Nothing
+
+An MSVC-ABI link writes an import library (`foo.lib`) for a DLL, and whatever
+links the DLL links that. But link.exe writes none for a DLL that exports
+nothing, such as a resource-only DLL of translated strings, so the build would
+wait for it forever and relink the DLL every time. Say there's none:
+
+```python
+strings = project.SharedLibrary("strings_fr", env, sources=["strings_fr.rc"])
+strings.set_option("import_library", False)
+strings.private.link_flags.append("/NOENTRY")  # no code, so no entry point
+```
+
+Nothing can link against such a DLL, and a target that tries gets an error;
+a program loads it at run time instead. On other platforms the option does
+nothing. See `examples/99_resource_dll`.
 
 ### Python Functions as Build Steps: env.PyBuilder()
 
@@ -3067,7 +3297,9 @@ Generator().generate(project, root_symlink=False)  # no root symlink
 ```
 
 With multiple build configurations in one project root, the last generation
-to run owns the root symlink.
+to run owns the root symlink. On Windows, creating a symlink needs Developer
+Mode or admin rights; without them pcons skips the root link (`-v` says so).
+clangd still finds the database in the default `build` directory.
 
 This enables source inspection and completion features in:
 
@@ -3424,6 +3656,26 @@ assert result2.cached is True  # Second run: from cache
 The cache key includes a signature of the compiler command *and its current flags*, so switching compilers — or retargeting the same compiler with a cross preset (`--target=`, `-isysroot`) — invalidates the relevant entries automatically. Checks probe the same compilation the build will do.
 
 Checks compile the same way the build does: the tool's flags, defines, and include directories all apply, and are properly cached. 
+
+A failed check is an answer only if the compiler works. When a check fails, pcons compiles an empty program with the same compiler and flags, once per checker; if that fails too, because the compiler is missing, crashed or rejects the environment's flags, configure stops with the compiler's error instead of answering "no".
+
+`check_flag()` and `try_compile()` work with any compiler tool: `cc`, `cxx`, `cuda`, or `fc` for Fortran. Each tool writes its probe in its own language and rejects an option the way its compiler can (`-Werror`, `/WX`, ifx's `-diag-error=`), so a flag gfortran accepts and ifx only warns about is reported unsupported for ifx. The header, type, function and macro checks write C programs, so they need a C, C++ or CUDA tool, and raise for any other.
+
+```python
+checks = ToolChecks(config, env, "fc")
+
+# Each Fortran compiler has its own form for this; keep whichever it accepts
+for flag in ("-fbacktrace", "-traceback"):
+    if checks.check_flag(flag).success:
+        env.fc.flags.append(flag)
+
+quad = checks.try_compile("""
+    integer, parameter :: qp = selected_real_kind(33)
+    real(qp) :: x
+    end
+""")
+env.fc.defines.append(f"WITH_QP={int(quad.success)}")
+```
 
 #### Reading Macros From Headers
 
@@ -4014,11 +4266,9 @@ One `.ico` can serve both.
 #### Complete Platform-Conditional Example
 
 ```python
-from pcons.contrib import platform
-
 installer_targets = []
 
-if platform.is_macos():
+if env.target.is_macos:
     from pcons.contrib.installers import macos
 
     pkg = macos.create_pkg(
@@ -4033,7 +4283,7 @@ if platform.is_macos():
     dmg = macos.create_dmg(project, env, name="MyApp", sources=[app])
     installer_targets.extend([pkg, dmg])
 
-elif platform.is_windows():
+elif env.target.is_windows:
     from pcons.contrib.installers import windows
 
     msix = windows.create_msix(
@@ -4085,6 +4335,8 @@ requires-python = ">=3.11"
 variant = "release"          # optional: pcons variant to build
 install-target = "install"   # alias to build for wheels (default: "wheel")
 # variables = { SOME_VAR = "value" }  # optional: extra pcons variables
+# build-dir = "build"        # optional: wheel build directory (default: "build")
+# jobs = 4                   # optional: ninja parallel jobs (default: ninja's)
 ```
 
 #### How wheels are built
@@ -4136,13 +4388,120 @@ the compiled extensions in `build/`, so after editing C++ sources, re-running
 `ninja` is enough — no reinstall needed. (`PCONS_BUILD_WHEEL` is *not* set for
 editable builds.)
 
+`build/build.ninja` records the Python that ran the backend. It runs that
+Python to regenerate itself when `pcons-build.py` changes, and for any command
+built on `sys.executable`. Under build isolation, the default for uv and pip,
+that Python doesn't outlive the install: uv deletes its build venv, and pip's
+interpreter can't import pcons once the temporary build requirements are gone.
+The next regen then fails:
+
+```
+/bin/sh: .../uv/builds-v0/.tmpbL8Fju/bin/python: No such file or directory
+ninja: error: rebuilding 'build.ninja': subcommand failed
+```
+
+Plain C++ rebuilds keep working, and re-running the install recovers.
+
+To get a build directory you can always rerun ninja in, turn build isolation
+off for your package. With `uv sync`, put pcons, ninja and your other build
+requirements in the dev dependency group:
+
+```toml
+[dependency-groups]
+dev = ["pcons", "ninja"]
+
+[tool.uv]
+no-build-isolation-package = ["<name>"]
+```
+
+uv installs the dev group first, then builds your package with the project's
+Python. With pip or `uv pip`:
+
+```sh
+pip install pcons ninja && pip install --no-build-isolation -e .
+uv pip install pcons ninja && uv pip install --no-build-isolation -e .
+```
+
+#### Build directory
+
+Wheel builds use `build/wheel/` by default. A wheel build configures with the
+wheel layout, so it keeps out of `build/`, where a plain `pcons` run and an
+editable install build. Set `build-dir` to put it somewhere else:
+
+```toml
+[tool.pcons]
+build-dir = "build-wheel"
+```
+
+The path is relative to the project directory, or absolute. Editable builds
+ignore `build-dir`. They always use `build/`, the directory the `.pth` file
+points at.
+
+Use a dedicated directory. The project directory, its parents and a Windows
+drive-relative path such as `C:build` are refused. An sdist leaves the
+build directory out when it lies inside the project, so a source directory
+like `src` would be missing from the sdist.
+
+The backend neither reads nor writes `pcons_cache.json`. Its `variant` and
+`variables` come from `pyproject.toml` on every build, so a variant, generator
+or variable you persisted with `pcons -B build --variant=debug SOMEVAR=ON`
+does not reach the backend build. The cache stays as it was after `uv sync`.
+
+#### Parallel jobs
+
+Ninja runs as many jobs as it chooses by default. Cap it with `jobs`, or per
+build with the `jobs` config setting, which wins over the key:
+
+```bash
+uv build --wheel -C jobs=4
+pip install -C jobs=4 .
+```
+
+For `uv sync`, set it in `pyproject.toml`:
+
+```toml
+[tool.uv]
+config-settings = { jobs = "4" }
+```
+
+The value must be a positive integer. `jobs` caps the ninja build only. The
+configure step, including any subprocess a build script runs, is not limited.
+
 #### Metadata and sdists
 
-The backend honors the PEP 621 `[project]` fields `name`, `version`,
-`requires-python`, and `dependencies` (emitted as `Requires-Dist`). Any other
-non-empty `[project]` field raises an error rather than being silently
-dropped from the wheel's metadata — remove the field or file an issue.
-`name` and `version` are required.
+The backend renders these PEP 621 `[project]` fields into `METADATA`
+(Metadata-Version 2.4):
+
+- `name`, `version` and `requires-python`. `name` and `version` are required.
+- `dependencies`, as `Requires-Dist`.
+- `optional-dependencies`, as `Provides-Extra` plus one `Requires-Dist` per
+  requirement, tagged with the extra marker. Extra names are normalized to
+  lowercase with `-` for runs of `-`, `_` and `.`.
+- `description`, as `Summary`. It must be one line.
+- `readme`, a file name or a table with `file` or `text` and `content-type`.
+  A file name needs the suffix `.md`, `.rst` or `.txt`. The text becomes the
+  message body and `Description-Content-Type` is set.
+- `license`, an SPDX expression string (`License-Expression`). The legacy
+  `{text = ...}` and `{file = ...}` tables become `License`. The expression is
+  passed through, not validated.
+- `license-files`, a list of globs. Each match gets a `License-File` line and is
+  copied to `<name>-<version>.dist-info/licenses/`. A glob that matches nothing
+  is an error.
+- `authors` and `maintainers`, as `Author`, `Author-email`, `Maintainer` and
+  `Maintainer-email`.
+- `scripts`, `gui-scripts` and `entry-points`, written to `entry_points.txt`
+  as the groups `console_scripts`, `gui_scripts` and one group per
+  `entry-points` table. `entry-points` must not define `console_scripts` or
+  `gui_scripts`. Editable installs get the script launchers too.
+- `keywords`, `classifiers` and `urls`, as `Keywords`, `Classifier` and
+  `Project-URL`.
+
+Files named by `readme`, `license` and `license-files` must lie inside the
+project.
+
+An unknown `[project]` key, or a non-empty `dynamic`, raises an error rather
+than being silently dropped from the wheel's metadata. Remove it or file an
+issue.
 
 `build_sdist` ships the whole source tree (recursively, excluding build
 output, VCS data, and tool caches) plus the spec-required `PKG-INFO`.
@@ -4938,21 +5297,13 @@ if platform.is_macos():
 |-------------------------------|-------------|
 | `find_latex_toolchain()` | Find and configure a LaTeX toolchain (requires `latexmk` in PATH) |
 
-| `pcons.contrib.platform` Function | Description |
-|----------------------------------|-------------|
-| `is_macos()`, `is_linux()`, `is_windows()` | Platform checks |
-| `get_platform_name()` | Get platform name ("darwin", "linux", "win32") |
-| `get_arch()` | Get current architecture ("x86_64", "arm64", etc.) |
-| `get_shared_lib_extension()` | Get shared lib extension (".dylib", ".so", ".dll") |
-| `format_shared_lib_name(name)` | Format as shared lib filename |
-
 ---
 
 ## Troubleshooting
 
 ### No toolchain found
 
-**Error:** `RuntimeError: No C/C++ toolchain found`
+**Error:** `No C/C++ toolchain found. Tried: ...`
 
 **Solution:** Install a compiler:
 
@@ -4973,15 +5324,29 @@ if platform.is_macos():
 
 ### Missing sources
 
-**Error:** `MissingSourceError: File not found: src/missing.cpp`
+**Error:** `source file not found: src/missing.cpp`
 
 **Solution:** Check that all source files exist and paths are correct.
 
 ### Dependency cycles
 
-**Error:** `DependencyCycleError: Cycle detected: A -> B -> A`
+**Error:** `dependency cycle: A -> B -> A`
 
 **Solution:** Refactor to break the cycle. Two libraries shouldn't depend on each other.
+
+### Things keep rebuilding
+
+Ask Ninja why it's running each step:
+
+```bash
+ninja -C build -d explain
+```
+
+The usual causes:
+
+- **A command doesn't create the output it declares.** Ninja finds the output missing and runs the command again on every build. pcons checks for this after each successful build and warns that "the build did not converge".
+- **A generator rewrites files that haven't changed.** Everything downstream of a fresh timestamp rebuilds. Give its `env.Command()` `write_if_different=True` (see [Custom Commands](#custom-commands-with-envcommand)).
+- **A command line changed.** Ninja reruns any step whose command differs from last time: new flags, a different compiler, or `NO_COLOR` set or unset (see [Colored Diagnostics](#colored-diagnostics)). This rebuilds once, not every time, unless something keeps changing between runs.
 
 ---
 

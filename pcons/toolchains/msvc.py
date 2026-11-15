@@ -13,11 +13,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.errors import PconsValueError
 from pcons.core.preset import ToolContribution
-from pcons.core.subst import SourcePath, TargetPath
+from pcons.core.subst import NodeVar, SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
-from pcons.tools.tool import BaseTool
-from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES, ToolchainContext
+from pcons.tools.tool import BaseTool, Probe
+from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,6 @@ if TYPE_CHECKING:
     from pcons.core.node import FileNode
     from pcons.core.project import Project
     from pcons.core.target import Target
-    from pcons.core.toolconfig import ToolConfig
     from pcons.tools.toolchain import SourceHandler
 
 
@@ -356,7 +356,7 @@ def cross_arch_contributions(
         return []
     toolset = _find_cross_toolset(target)
     if toolset is None:
-        raise ValueError(
+        raise PconsValueError(
             f"MSVC {target} cross toolset not found: no bin/{host}/{target}/"
             f"cl.exe in any installed VC tools version. Install the "
             f"'MSVC ... {target.upper()} build tools' component in the "
@@ -386,14 +386,18 @@ class MsvcCompiler(BaseTool):
     def __init__(self, name: str = "cc", language: str = "c") -> None:
         super().__init__(name, language=language)
 
+    def probe(self) -> Probe | None:
+        base = super().probe()
+        return base.msvc() if base else None
+
     def default_vars(self) -> dict[str, object]:
         return {
             "cmd": "cl.exe",
             "flags": ["/nologo"],
             "iprefix": "/I",
             "includes": [],
-            # /external:I needs /external:W0 to actually silence anything;
-            # see MsvcToolchain.get_compile_flags_for_system_includes.
+            # /external:I needs /external:W0, without which cl.exe ignores
+            # it (D9007); see MsvcToolchain.system_include_flags.
             "isysprefix": "/external:I",
             "system_includes": [],
             "dprefix": "/D",
@@ -425,32 +429,6 @@ class MsvcCompiler(BaseTool):
                 deps_style="msvc",
             ),
         }
-
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-
-        cl = config.find_program("cl.exe", version_flag="")
-        if cl is None:
-            bin_dir = _find_msvc_bin_dir()
-            if bin_dir is not None:
-                cl_path = bin_dir / "cl.exe"
-                if cl_path.exists():
-                    from pcons.configure.config import ProgramInfo
-
-                    cl = ProgramInfo(path=cl_path)
-
-        if cl is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig(self._name, cmd=str(cl.path))
 
 
 class MsvcCxxCompiler(MsvcCompiler):
@@ -538,21 +516,6 @@ class MsvcLibrarian(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-        lib = config.find_program("lib.exe", version_flag="")
-        if lib is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("lib", cmd=str(lib.path))
-
 
 class MsvcResourceCompiler(BaseTool):
     """MSVC resource compiler tool (rc.exe)."""
@@ -593,42 +556,6 @@ class MsvcResourceCompiler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-
-        rc = config.find_program("rc.exe", version_flag="")
-        if rc is None:
-            # Fall back to the Windows SDK install, newest version first
-            program_files_x86 = os.environ.get(
-                "ProgramFiles(x86)", r"C:\Program Files (x86)"
-            )
-            sdk_path = Path(program_files_x86) / "Windows Kits" / "10" / "bin"
-            if sdk_path.exists():
-                for version_dir in _sorted_version_dirs(sdk_path):
-                    if version_dir.name.startswith("10."):
-                        for arch in ["x64", "arm64", "x86"]:
-                            rc_path = version_dir / arch / "rc.exe"
-                            if rc_path.exists():
-                                from pcons.configure.config import ProgramInfo
-
-                                rc = ProgramInfo(path=rc_path)
-                                break
-                        if rc is not None:
-                            break
-
-        if rc is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("rc", cmd=str(rc.path))
-
 
 class MsvcAssembler(BaseTool):
     """MSVC macro assembler tool (ml64.exe for x64, ml.exe for x86)."""
@@ -666,37 +593,6 @@ class MsvcAssembler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-
-        # ml64.exe (x64) first, then ml.exe (x86)
-        ml = config.find_program("ml64.exe", version_flag="")
-        if ml is None:
-            ml = config.find_program("ml.exe", version_flag="")
-        if ml is None:
-            # Fall back to the VS install (host-aware: ARM64 hosts get
-            # HostARM64/arm64, not x64)
-            bin_dir = _find_msvc_bin_dir()
-            if bin_dir is not None:
-                ml_path = bin_dir / "ml64.exe"
-                if ml_path.exists():
-                    from pcons.configure.config import ProgramInfo
-
-                    ml = ProgramInfo(path=ml_path)
-
-        if ml is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ml", cmd=str(ml.path))
-
 
 class MsvcLinker(BaseTool):
     """MSVC linker tool."""
@@ -716,6 +612,7 @@ class MsvcLinker(BaseTool):
                 "$link.flags",
                 TargetPath(prefix="/OUT:"),
                 SourcePath(),
+                NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -724,8 +621,8 @@ class MsvcLinker(BaseTool):
                 "/DLL",
                 "$link.flags",
                 TargetPath(prefix="/OUT:", index=0),
-                TargetPath(prefix="/IMPLIB:", index=1),
                 SourcePath(),
+                NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -755,20 +652,54 @@ class MsvcLinker(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
 
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-        link = config.find_program("link.exe", version_flag="")
-        if link is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
+def use_msvc_tool_paths(env: Environment, tool_exes: dict[str, str]) -> None:
+    """Point *env*'s MSVC tools (tool name -> executable) at full paths when
+    PATH alone would get them wrong.
 
-        return ToolConfig("link", cmd=str(link.path))
+    Handles two cases:
+    1. cl.exe is in PATH but link.exe resolves to the wrong binary
+       (e.g. Git's /usr/bin/link.exe shadows MSVC's link.exe).
+       Sets the full path only for the shadowed tool.
+    2. cl.exe is not in PATH at all (not a VS Developer shell).
+       Warns and sets full paths for all the tools via vswhere.
+    """
+    import shutil
+
+    cl_which = shutil.which("cl.exe")
+    if cl_which is not None:
+        cl_dir = Path(cl_which).parent
+        for tool_name, exe_name in tool_exes.items():
+            tool_which = shutil.which(exe_name)
+            if tool_which is not None and Path(tool_which).parent == cl_dir:
+                continue  # Correct tool, nothing to do
+            # Wrong tool or not found — use the one next to cl.exe
+            correct_path = cl_dir / exe_name
+            if correct_path.exists():
+                logger.warning(
+                    "%s in PATH is not the MSVC one (expected in %s). "
+                    "Using full path: %s",
+                    exe_name,
+                    cl_dir,
+                    correct_path,
+                )
+                env.add_tool(tool_name).set("cmd", str(correct_path))
+        return
+
+    # cl.exe not in PATH — try vswhere
+    bin_dir = _find_msvc_bin_dir()
+    if bin_dir is None:
+        return
+    logger.warning(
+        "MSVC found via vswhere at %s but cl.exe is not in PATH. "
+        "Consider running from a Visual Studio Developer shell "
+        "for full SDK support (headers, libraries, rc.exe, etc.).",
+        bin_dir,
+    )
+    for tool_name, exe_name in tool_exes.items():
+        full_path = bin_dir / exe_name
+        if full_path.exists():
+            env.add_tool(tool_name).set("cmd", str(full_path))
 
 
 class MsvcToolchain(MsvcCompatibleToolchain):
@@ -780,6 +711,12 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
     def __init__(self) -> None:
         super().__init__("msvc")
+
+    def system_include_flags(self) -> list[str]:
+        """``/external:W0``: cl.exe ignores ``/external:I`` without an
+        ``/external:W`` level (D9007), and 0 is what makes the headers'
+        warnings go away."""
+        return ["/external:W0"]
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Add /MACHINE: (via base) and, for a cross arch, repoint the tools.
@@ -794,98 +731,11 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         return contribs
 
     def setup(self, env: Environment) -> None:
-        """Set up MSVC tools, resolving full paths when needed.
-
-        Handles two cases:
-        1. cl.exe is in PATH but link.exe resolves to the wrong binary
-           (e.g. Git's /usr/bin/link.exe shadows MSVC's link.exe).
-           Emits full path only for the shadowed tool.
-        2. cl.exe is not in PATH at all (not a VS Developer shell).
-           Warns and emits full paths for all MSVC tools via vswhere.
-        """
-        import shutil
-
+        """Set up MSVC tools, resolving full paths when needed."""
         super().setup(env)
-
-        cl_which = shutil.which("cl.exe")
-        if cl_which is not None:
-            cl_dir = Path(cl_which).parent
-            # Check if link.exe and lib.exe resolve to the same dir as cl.exe
-            for tool_name, exe_name in [("link", "link.exe"), ("lib", "lib.exe")]:
-                tool_which = shutil.which(exe_name)
-                if tool_which is not None and Path(tool_which).parent == cl_dir:
-                    continue  # Correct tool, nothing to do
-                # Wrong tool or not found — use the one next to cl.exe
-                correct_path = cl_dir / exe_name
-                if correct_path.exists():
-                    logger.warning(
-                        "%s in PATH is not the MSVC one (expected in %s). "
-                        "Using full path: %s",
-                        exe_name,
-                        cl_dir,
-                        correct_path,
-                    )
-                    env.add_tool(tool_name).set("cmd", str(correct_path))
-        else:
-            # cl.exe not in PATH — try vswhere
-            bin_dir = _find_msvc_bin_dir()
-            if bin_dir is None:
-                return
-            logger.warning(
-                "MSVC found via vswhere at %s but cl.exe is not in PATH. "
-                "Consider running from a Visual Studio Developer shell "
-                "for full SDK support (headers, libraries, rc.exe, etc.).",
-                bin_dir,
-            )
-            tool_exes = {
-                "cc": "cl.exe",
-                "cxx": "cl.exe",
-                "link": "link.exe",
-                "lib": "lib.exe",
-            }
-            for tool_name, exe_name in tool_exes.items():
-                full_path = bin_dir / exe_name
-                if full_path.exists():
-                    env.add_tool(tool_name).set("cmd", str(full_path))
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-        platform = get_platform()
-        if not platform.is_windows:
-            return False
-
-        cc = MsvcCompiler("cc", "c")
-        if cc.configure(config) is None:
-            return False
-
-        cxx = MsvcCxxCompiler()
-        cxx.configure(config)
-
-        lib = MsvcLibrarian()
-        lib.configure(config)
-
-        link = MsvcLinker()
-        if link.configure(config) is None:
-            return False
-
-        rc = MsvcResourceCompiler()
-        rc.configure(config)  # Optional - not required for toolchain to work
-
-        ml = MsvcAssembler()
-        ml.configure(config)  # Optional - not required for toolchain to work
-
-        self._tools = {
-            "cc": cc,
-            "cxx": cxx,
-            "lib": lib,
-            "link": link,
-            "rc": rc,
-            "ml": ml,
-        }
-        return True
+        use_msvc_tool_paths(
+            env, {"cc": "cl.exe", "cxx": "cl.exe", "link": "link.exe", "lib": "lib.exe"}
+        )
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Extend base MSVC handler to recognize C++20 module interface units."""
@@ -968,7 +818,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                     iprefix="/I",
                     isysprefix="/external:I",
                     dprefix="/D",
-                    root=project.root_dir,
                 )
                 obj_rel = rel(obj_node.path)
                 key = bmi_key_for_flags(flags, flag_spec)
@@ -1004,7 +853,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         ) -> dict[str, object]:
             facts = edge_facts[id(governed)]
             return {
-                "SCAN_FLAGS": list(cast("list[str]", facts["flags"])),
+                "SCAN_FLAGS": list(cast("list[object]", facts["flags"])),
                 # /Fo takes the joined form; the p1689 primary-output is
                 # named after it, so the scan must know the real object.
                 "SCAN_FO": f"/Fo{facts['obj_rel']}",
@@ -1219,24 +1068,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             + "\n",
         )
         return {std_key: exports_rel}, None
-
-    def create_build_context(
-        self,
-        target: Target,
-        env: Environment,
-        for_compilation: bool = True,
-    ) -> ToolchainContext | None:
-        """Create an MsvcCompileLinkContext (/I, /D, /LIBPATH: prefixes)."""
-        from pcons.toolchains.build_context import MsvcCompileLinkContext
-        from pcons.tools.requirements import compute_effective_requirements
-
-        effective = compute_effective_requirements(target, env, for_compilation)
-
-        mode = "compile" if for_compilation else "link"
-        return MsvcCompileLinkContext.from_effective_requirements(
-            effective,
-            mode=mode,
-        )
 
 
 # =============================================================================

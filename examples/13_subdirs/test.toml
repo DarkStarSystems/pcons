@@ -1,7 +1,7 @@
 # Test configuration for subdirs example
 
 [test]
-description = "Nested subdirectories with add_subdirectory(), a sibling's library handed down with imports=, and a generator declared two levels down in libfoo/libbar: its output lands in that subdirectory's build directory and its inputs are read from that subdirectory"
+description = "Nested subdirectories with add_subdirectory(), a sibling's library handed down with imports=, app's include directory on a clone of the parent's environment, read from app's own directory, and a generator declared two levels down in libfoo/libbar: its output lands in that subdirectory's build directory and its inputs are read from that subdirectory"
 # Both libraries claim to build either way. Build each on its own as well as
 # embedded, so that claim stays true. libfoo/libbar also covers the two-level
 # case: it sits one level down standalone and two levels down from here, and

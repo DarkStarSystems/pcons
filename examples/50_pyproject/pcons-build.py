@@ -26,16 +26,14 @@ else:
 env = project.Environment(toolchain=toolchain_spec)
 toolchain = env.toolchain
 
-# NOTE: this example builds under PEP 517 isolation, where the build backend is
-# the *released* pcons — so it sticks to released APIs and avoids newer ones
-# (e.g. env.cxx.set_standard). Revisit after the next release.
-if toolchain.name == "msvc":
-    env.cxx.flags.extend(["/std:c++20", "/EHsc", "/permissive-"])
+# This example builds under PEP 517 isolation, where the build backend is the
+# *released* pcons, so it sticks to released APIs.
+env.cxx.set_standard("c++20")
+if toolchain.name in ("msvc", "clang-cl"):
+    env.cxx.flags.append("/permissive-")
 elif toolchain.name == "llvm":
-    env.cxx.flags.extend(["-std=c++20", "-stdlib=libc++"])
+    env.cxx.flags.append("-stdlib=libc++")
     env.link.libs.append("c++")
-else:
-    env.cxx.flags.append("-std=c++20")
 
 # Discover Python's dev headers from the *running* interpreter via sysconfig,
 # rather than pkg-config.
@@ -109,17 +107,6 @@ if toolchain.name in ("gcc", "llvm"):
 if sys.platform == "darwin":
     # A Python extension leaves the CPython C-API symbols (Py*) undefined
     pcons_hello_ext.private.link_flags.append("-Wl,-undefined,dynamic_lookup")
-
-if toolchain.name in ("gcc", "llvm"):
-    # Add an rpath relative to the extension itself so it finds hello_lib
-    # wherever the wheel is installed (e.g. site-packages), with no
-    # LD_LIBRARY_PATH / DYLD_* patching in tests.
-    # pcons already gives the dylib an @rpath install_name on macOS,
-    # so we just need the matching rpath origin:
-    # - ELF uses $ORIGIN ($$ so pcons passes it through literally)
-    # - Mach-O uses @loader_path.
-    rpath_origin = "@loader_path" if sys.platform == "darwin" else "$$ORIGIN"
-    pcons_hello_ext.private.link_flags.append(f"-Wl,-rpath,{rpath_origin}")
 
 hello_lib = project.SharedLibrary("hello_lib", env, sources=["src/hello.cpp"])
 hello_lib.public.include_dirs.append("src")

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.clang_cl."""
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import pcons.toolchains.clang_cl as clang_cl_mod
 from pcons.toolchains.clang_cl import (
     ClangClCCompiler,
     ClangClCxxCompiler,
@@ -13,39 +13,6 @@ from pcons.toolchains.clang_cl import (
     ClangClLinker,
     ClangClToolchain,
 )
-
-
-class TestClangClConfigure:
-    """configure() is Windows-gated and otherwise delegates to _find_tool_config."""
-
-    _CLASSES = [ClangClCCompiler, ClangClCxxCompiler, ClangClLibrarian, ClangClLinker]
-
-    @pytest.mark.parametrize("cls", _CLASSES)
-    def test_returns_none_off_windows(self, cls, monkeypatch, tmp_path):
-        from pcons.configure.config import Configure
-        from pcons.toolchains import clang_cl
-
-        monkeypatch.setattr(
-            clang_cl, "get_platform", lambda: SimpleNamespace(is_windows=False)
-        )
-        config = Configure(build_dir=tmp_path)
-        assert cls().configure(config) is None
-
-    @pytest.mark.parametrize("cls", _CLASSES)
-    def test_finds_program_on_windows(self, cls, monkeypatch, tmp_path):
-        from pcons.configure.config import Configure, ProgramInfo
-        from pcons.toolchains import clang_cl
-
-        monkeypatch.setattr(
-            clang_cl, "get_platform", lambda: SimpleNamespace(is_windows=True)
-        )
-        config = Configure(build_dir=tmp_path)
-        config.find_program = (  # type: ignore[method-assign]
-            lambda *a, **k: ProgramInfo(path=Path("C:/llvm/tool.exe"))
-        )
-        cfg = cls().configure(config)
-        assert cfg is not None
-        assert cfg.cmd == str(Path("C:/llvm/tool.exe"))
 
 
 class TestClangClCCompiler:
@@ -59,7 +26,9 @@ class TestClangClCCompiler:
         vars = cc.default_vars()
         assert vars["cmd"] == "clang-cl"
         assert "/nologo" in vars["flags"]
-        assert "objcmd" in vars
+        # $cc.flags brings it to the command line, so the command has none.
+        assert "/nologo" not in vars["objcmd"]
+        assert "$cc.flags" in vars["objcmd"]
 
 
 class TestClangClCxxCompiler:
@@ -72,7 +41,9 @@ class TestClangClCxxCompiler:
         cxx = ClangClCxxCompiler()
         vars = cxx.default_vars()
         assert vars["cmd"] == "clang-cl"
-        assert "objcmd" in vars
+        assert "/nologo" not in vars["objcmd"]
+        assert "$cxx.cmd" in vars["objcmd"]
+        assert "$cxx.flags" in vars["objcmd"]
 
 
 class TestClangClLibrarian:
@@ -251,3 +222,175 @@ class TestClangClLtoPreset:
         assert {k: v for k, v in ours.items() if k != "lto"} == {
             k: v for k, v in base.items() if k != "lto"
         }
+
+
+class TestClangClDriverRuntimes:
+    """clang-cl's AddressSanitizer and OpenMP objects don't name their
+    runtime, so its link needs are what clang-cl's own driver would add."""
+
+    @staticmethod
+    def _fake_driver(monkeypatch, link_line) -> None:
+        """subprocess.run answering ``-###`` with *link_line(flags, obj)*,
+        or failing when that returns None."""
+        import subprocess
+
+        def run(cmd, **kwargs):
+            flags, obj = cmd[1:-2], cmd[-1]
+            line = link_line(flags, obj)
+            if line is None:
+                return subprocess.CompletedProcess(cmd, 1, "", "error: not allowed")
+            return subprocess.CompletedProcess(
+                cmd, 0, "", f'clang version 19.1.5\n "cc1" ...\n{line}\n'
+            )
+
+        monkeypatch.setattr(subprocess, "run", run)
+        monkeypatch.setattr(clang_cl_mod, "driver_link_args", _uncached())
+
+    def test_the_drivers_link_arguments_are_read(self, monkeypatch):
+        def link_line(flags, obj):
+            esc = obj.replace("\\", "\\\\")
+            return (
+                ' "C:\\\\VS\\\\link.exe" "-out:probe.exe" "-nologo"'
+                ' "C:\\\\LLVM\\\\lib\\\\clang_rt.asan_dynamic-x86_64.lib"'
+                ' "-include:__asan_seh_interceptor"'
+                f' "{esc}" "/INFERASANLIBS:NO"'
+            )
+
+        self._fake_driver(monkeypatch, link_line)
+        assert clang_cl_mod.driver_link_args("clang-cl", ("/MD",)) == (
+            "-nologo",
+            "C:\\LLVM\\lib\\clang_rt.asan_dynamic-x86_64.lib",
+            "-include:__asan_seh_interceptor",
+            "/INFERASANLIBS:NO",
+        )
+
+    def test_a_feature_adds_what_the_driver_adds(self, monkeypatch):
+        """The AddressSanitizer runtime is a different library for /MD and
+        /MT, and a debug C runtime is refused."""
+
+        def link_line(flags, obj):
+            if "-fsanitize=address" in flags and ("/MDd" in flags or "/MTd" in flags):
+                return None
+            line = ' "link.exe" "-out:p.exe" "-libpath:C:\\\\LLVM\\\\lib"'
+            if "/LD" in flags:
+                line += ' "-dll"'
+            if "-fsanitize=address" in flags:
+                asan = "asan_dynamic" if "/MD" in flags else "asan"
+                if "/MT" in flags and "/LD" in flags:
+                    asan = "asan_dll_thunk"
+                line += f' "clang_rt.{asan}-x86_64.lib" "/INFERASANLIBS:NO"'
+            return line
+
+        self._fake_driver(monkeypatch, link_line)
+        add = clang_cl_mod.driver_link_additions
+        san = "-fsanitize=address"
+        assert add("clang-cl", ("/MD",), san) == (
+            "clang_rt.asan_dynamic-x86_64.lib",
+            "/INFERASANLIBS:NO",
+        )
+        assert add("clang-cl", ("/MT",), san) == (
+            "clang_rt.asan-x86_64.lib",
+            "/INFERASANLIBS:NO",
+        )
+        assert add("clang-cl", ("/MT", "/LD"), san) == (
+            "clang_rt.asan_dll_thunk-x86_64.lib",
+            "/INFERASANLIBS:NO",
+        )
+        assert add("clang-cl", ("/MDd",), san) is None
+
+    def test_the_linker_chooses_the_asan_runtime(self, monkeypatch, tmp_path):
+        """clang-cl's objects need the AddressSanitizer runtime; its linker
+        chooses which, for the C runtime and the kind of link."""
+        from pcons import Project
+        from pcons.toolchains.clang_cl import (
+            ClangClCCompiler,
+            ClangClCxxCompiler,
+            ClangClLinker,
+        )
+
+        def additions(clang_cl, link, flag):
+            if link[0].endswith("d"):
+                return None
+            return (f"asan-for-{'-'.join(link)}.lib",)
+
+        monkeypatch.setattr(clang_cl_mod, "driver_link_additions", additions)
+        toolchain = ClangClToolchain()
+        toolchain._tools = {
+            t.name: t
+            for t in (ClangClCCompiler(), ClangClCxxCompiler(), ClangClLinker())
+        }
+        env = Project("asan", root_dir=tmp_path).Environment(toolchain=toolchain)
+        env.apply_preset("sanitize")
+        program = SimpleNamespace(name="app", target_type="program", _env=env)
+        dll = SimpleNamespace(name="lib", target_type="shared_library", _env=env)
+        needs = toolchain.link_needs(program, {"cxx"}, "cxx", env)
+        assert needs.sanitizers == ("address",)
+
+        def link(target=program):
+            return toolchain.realize_link_needs(needs, target, [])
+
+        assert link() == ["asan-for-/MD.lib"]
+        env.set_runtime_linkage("static")
+        assert link() == ["asan-for-/MT.lib"]
+        assert link(dll) == ["asan-for-/MT-/LD.lib"]
+        env.set_variant("debug")
+        with pytest.raises(ValueError, match="relwithdebinfo"):
+            link()
+
+    def test_link_exe_links_its_own_asan_runtime(self):
+        """For objects that don't name it, as ifx's don't."""
+        from pcons.toolchains.msvc import MsvcToolchain
+        from pcons.tools.toolchain import LinkNeeds
+
+        target = SimpleNamespace(name="app", target_type="program")
+        needs = LinkNeeds(sanitizers=("address",))
+        assert MsvcToolchain().realize_link_needs(needs, target, []) == [
+            "/INFERASANLIBS"
+        ]
+
+    def test_openmp_links_what_the_driver_adds(self, monkeypatch, tmp_path):
+        """clang-cl's /openmp objects name no runtime; the link gets the
+        libomp arguments its driver would add, or raises without them."""
+        from pcons import Project
+        from pcons.toolchains.clang_cl import (
+            ClangClCCompiler,
+            ClangClCxxCompiler,
+            ClangClLinker,
+        )
+
+        omp = (
+            "-nodefaultlib:vcomp.lib",
+            "-libpath:C:\\LLVM\\lib",
+            "-defaultlib:libomp.lib",
+        )
+        monkeypatch.setattr(
+            clang_cl_mod, "driver_link_additions", lambda clang_cl, link, flag: omp
+        )
+        toolchain = ClangClToolchain()
+        toolchain._tools = {
+            t.name: t
+            for t in (ClangClCCompiler(), ClangClCxxCompiler(), ClangClLinker())
+        }
+        env = Project("omp", root_dir=tmp_path).Environment(toolchain=toolchain)
+        env.apply_preset("openmp")
+        assert "/openmp" in env.cxx.flags
+        program = SimpleNamespace(name="app", target_type="program", _env=env)
+        needs = toolchain.link_needs(program, {"cxx"}, "cxx", env)
+        assert needs.libs == ("libomp",)
+        assert needs.libdirs == ("C:\\LLVM\\lib",)
+        assert needs.excluded_default_libs == ("vcomp.lib",)
+        monkeypatch.setattr(
+            clang_cl_mod, "driver_link_additions", lambda clang_cl, link, flag: None
+        )
+        with pytest.raises(ValueError, match="libomp"):
+            toolchain.link_needs(program, {"cxx"}, "cxx", env)
+
+
+def _uncached():
+    """driver_link_args without its cache, so each test probes afresh."""
+    return clang_cl_mod.driver_link_args.__wrapped__
+
+
+def test_a_driver_argument_with_no_neutral_form_is_an_error() -> None:
+    with pytest.raises(ValueError, match="-wholearchive"):
+        clang_cl_mod.link_needs_from_args(("-wholearchive:foo.lib",))

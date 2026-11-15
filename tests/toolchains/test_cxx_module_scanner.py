@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from pcons.core.subst import PathToken
 from pcons.toolchains.cxx_module_scanner import (
     CxxModuleScannerNotFound,
     StdModuleFlagSpec,
@@ -307,10 +308,32 @@ class TestMergeScanCompileFlags:
             "-std=c++23",
             "-fmodules",
             "-O2",
-            "-Iinc",
-            "-I/abs/inc",
+            PathToken("-I", "inc", "project"),
+            PathToken("-I", "/abs/inc", "project"),
             "-DFOO=1",
             "-DBAR",
+        ]
+
+    def test_include_dirs_are_written_as_the_compile_writes_them(self) -> None:
+        """A generated include dir stays build-relative and a source one
+        project-relative, so build.ninja names neither absolutely."""
+        from types import SimpleNamespace
+
+        from pcons.core.subst import BuildPath, ProjectPath
+
+        ctx = SimpleNamespace(
+            flags=[],
+            includes=[ProjectPath("include"), BuildPath("gen")],
+            system_includes=[ProjectPath("third_party")],
+            defines=[],
+        )
+        result = merge_scan_compile_flags(
+            [], ctx, iprefix="/I", isysprefix="/external:I"
+        )
+        assert result == [
+            PathToken("/I", "include", "project"),
+            PathToken("/I", "gen", "build"),
+            PathToken("/external:I", "third_party", "project"),
         ]
 
     def test_no_context(self) -> None:

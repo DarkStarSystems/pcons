@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, overload
 
 from pcons.configure.platform import get_platform
-from pcons.core.errors import ConfigureError
+from pcons.core.errors import ConfigureError, PconsAttributeError, PconsValueError
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.pkgconfig import PkgConfigFinder
 from pcons.packages.imported import ImportedTarget
@@ -249,7 +249,7 @@ class QtPackage:
         modules = self.__dict__.get("modules", {})
         if name in modules:
             return modules[name]
-        raise AttributeError(
+        raise PconsAttributeError(
             f"Qt module '{name}' was not requested. "
             f"Available: {', '.join(sorted(modules))}. "
             f"Add it to find_qt(modules=[...])."
@@ -385,7 +385,7 @@ def find_qt(
         A QtPackage, or None (only when required=False).
     """
     if probe not in _PROBES:
-        raise ValueError(
+        raise PconsValueError(
             f"find_qt: probe={probe!r} is not one of "
             f"{', '.join(repr(p) for p in _PROBES)}."
         )
@@ -681,7 +681,7 @@ def _version_satisfies(found: str, constraint: str) -> bool:
     """
     match = re.match(r"(>=|<=|=|>|<)?\s*(.+)", constraint)
     if not match or not re.search(r"\d", match.group(2)):
-        raise ValueError(
+        raise PconsValueError(
             f"Invalid Qt version constraint {constraint!r} "
             f"(expected e.g. '>=6.4', '=6.7.2')."
         )
@@ -963,7 +963,7 @@ def _apply_private_headers(qt: QtPackage, private_headers: Sequence[str]) -> Non
             continue
         target = qt.modules.get(name)
         if target is None:
-            raise ValueError(
+            raise PconsValueError(
                 f"private_headers names '{name}', which is not in modules=[...]."
             )
         probed: list[Path] = []

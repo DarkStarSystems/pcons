@@ -354,19 +354,3 @@ class TestEmsdkHints:
         monkeypatch.setattr(emscripten, "find_emsdk", lambda: tmp_path)
         monkeypatch.setattr(emscripten, "_find_emcc_dir", lambda _p: None)
         assert emscripten._emsdk_hints() is None
-
-
-class TestEmccConfigureMissing:
-    """configure() returns None when the program is not found."""
-
-    @pytest.mark.parametrize(
-        "cls", [EmccCCompiler, EmccCxxCompiler, EmccArchiver, EmccLinker]
-    )
-    def test_configure_returns_none(self, cls, monkeypatch, tmp_path):
-        from pcons.configure.config import Configure
-        from pcons.toolchains import emscripten
-
-        monkeypatch.setattr(emscripten, "_emsdk_hints", lambda: None)
-        config = Configure(build_dir=tmp_path)
-        config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
-        assert cls().configure(config) is None

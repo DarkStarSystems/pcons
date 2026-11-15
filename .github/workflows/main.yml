@@ -16,8 +16,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Install dependencies
@@ -35,8 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Install pandoc and ninja
@@ -57,7 +57,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-22.04, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
         exclude:
           # Only test oldest Python on Ubuntu 22.04
           - os: ubuntu-22.04
@@ -66,19 +66,19 @@ jobs:
             python-version: "3.13"
           - os: ubuntu-22.04
             python-version: "3.14"
+          - os: ubuntu-22.04
+            python-version: "3.15"
     runs-on: ${{ matrix.os }}
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Set up MSVC (Windows only)
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-      - name: Set Python version
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-        run: uv python install $PYTHON_VERSION
+        uses: ilammy/msvc-dev-cmd@v1.13.0
       - name: Install LaTeX (one Ubuntu job only)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
         env:
@@ -114,6 +114,11 @@ jobs:
         # `xcrun metal` is a stub until it's installed.
         if: runner.os == 'macOS'
         run: xcrun metal --version || xcodebuild -downloadComponent MetalToolchain
+      - name: Warm up the compilers (Windows only)
+        # See test-windows-toolchains. These checks compile with each
+        # compiler the unit tests use, under a 30 s limit.
+        if: runner.os == 'Windows'
+        run: uv run pytest tests/configure/test_checks.py tests/configure/test_checks_languages.py -o addopts="" -q
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
         run: uv run pytest -n auto --cov=pcons --cov-report=xml --ignore=tests/test_examples.py -k "not 21_msvcup_hello"
@@ -136,7 +141,7 @@ jobs:
             exit 1
           fi
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -145,23 +150,25 @@ jobs:
   test-examples-windows:
     name: "test examples (windows-latest, ${{ matrix.python-version }})"
     needs: lint
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     runs-on: windows-latest
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+      # The runner has LLVM's clang-cl on PATH, which pcons would pick
+      # first. test-windows-toolchains covers clang-cl; this job is MSVC's.
+      CC: cl
+      CXX: cl
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-      - name: Set Python version
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-        run: uv python install $PYTHON_VERSION
+        uses: ilammy/msvc-dev-cmd@v1.13.0
       - name: Install dependencies
         run: uv sync
       - name: Cache Conan packages
@@ -169,15 +176,18 @@ jobs:
         # configure step, under the example runner's generate timeout. A warm
         # cache takes the network and the fmt build off that clock — the
         # windows runners are the ones that flake on it.
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: ~/.conan2
           key: conan2-${{ runner.os }}-${{ hashFiles('examples/**/conanfile.*') }}
           restore-keys: conan2-${{ runner.os }}-
+      - name: Warm up the compilers
+        # See test-windows-toolchains.
+        run: uv run pytest tests/test_examples.py -o addopts="" -q -k "ninja and (01_hello_c or 43_rust)"
       - name: Run example tests
-        run: uv run pytest tests/test_examples.py -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
+        run: uv run pytest tests/test_examples.py -n auto --durations=20 --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -202,14 +212,15 @@ jobs:
         # container. clang/libcxx-devel bring the newest std-module manifest;
         # gcc, make, cmake and ninja round out the toolchains the examples
         # exercise (cmake/make are also what the conan example builds fmt with).
+        # libstdc++-static is for the static runtime example.
         run: |
           dnf -y install \
             git tar which findutils \
             clang libcxx libcxx-devel libcxxabi libcxxabi-devel lld \
-            gcc gcc-c++ make cmake ninja-build \
+            gcc gcc-c++ libstdc++-static make cmake ninja-build \
             python3 python3-devel
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Show toolchain versions
@@ -227,7 +238,7 @@ jobs:
         # their tools are absent.
         run: uv run pytest -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello and not 46_swift and not 47_swift and not 48_swift and not 49_swift"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -243,8 +254,8 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Install dependencies
@@ -261,10 +272,145 @@ jobs:
         run: echo "::warning::swiftc not found on ${{ matrix.os }} runner image; Swift example tests skipped"
       - name: Upload coverage to Codecov
         if: steps.verify-swift.outcome == 'success'
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  test-fortran:
+    name: "test fortran examples (${{ matrix.compiler }})"
+    # gfortran is on every Linux and macOS runner, so the test job covers
+    # it; these build the same examples with the other Fortran compilers,
+    # selected through $FC.
+    needs: lint
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [flang, ifx]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "latest"
+      - name: Install flang
+        if: matrix.compiler == 'flang'
+        # apt.llvm.org's packages, not Ubuntu's: Ubuntu's flang lacks its
+        # runtime library, so nothing links.
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q flang-21 libflang-21-dev
+          echo "FC=/usr/bin/flang-21" >> "$GITHUB_ENV"
+      - name: Install ifx
+        if: matrix.compiler == 'ifx'
+        run: |
+          curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB | sudo gpg --dearmor -o /usr/share/keyrings/oneapi-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          sudo apt-get update -q
+          sudo apt-get install -y -q intel-oneapi-compiler-fortran
+          # ifx and its runtime are found through the oneAPI environment.
+          source /opt/intel/oneapi/setvars.sh
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          echo "FC=ifx" >> "$GITHUB_ENV"
+      - name: Show compiler version
+        run: $FC --version
+      - name: Install dependencies
+        run: uv sync
+      - name: Run Fortran example and toolchain tests
+        run: uv run pytest -n auto --cov=pcons --cov-report=xml -v -rs -k "fortran" tests/test_examples.py tests/toolchains/test_fortran_compilers.py
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7.1.1
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  test-windows-toolchains:
+    name: "test windows examples (${{ matrix.name }})"
+    # The windows test job builds with MSVC; these build with the other
+    # Windows compilers, selected through $CC, $CXX and $FC, beside MSVC's
+    # tools.
+    needs: lint
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Visual Studio's clang-cl. The examples left out ask for a
+          # toolchain or use C++ modules, which pcons doesn't build with
+          # clang-cl.
+          - name: clang-cl
+            cc: clang-cl
+            cxx: clang-cl
+            examples: "not (02_multi_file or 29_ or 30_ or 31_ or 32_ or 35_ or 36_ or 37_ or 39_ or 71_ or 72_)"
+          # LLVM's own clang for the MSVC ABI, as the runner has it, leaving
+          # out the same kinds of examples.
+          - name: clang
+            cc: clang
+            cxx: clang++
+            examples: "not (02_multi_file or 11_ or 12_ or 17_ or 20_ or 32_ or 35_ or 36_ or 37_ or 39_ or 50_ or 71_ or 72_ or 99_)"
+          # conda-forge's flang, beside MSVC.
+          - name: flang
+            flang: "23.1.3"
+            examples: "(fortran or 25_ or 26_ or 27_ or 28_ or 94_ or 96_)"
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "latest"
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1.13.0
+      - name: Use Visual Studio's clang-cl
+        if: matrix.name == 'clang-cl'
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          echo "$vs\VC\Tools\Llvm\x64\bin" >> $env:GITHUB_PATH
+      - name: Select the C and C++ compilers
+        if: matrix.cc
+        run: |
+          echo "CC=${{ matrix.cc }}" >> $env:GITHUB_ENV
+          echo "CXX=${{ matrix.cxx }}" >> $env:GITHUB_ENV
+      - name: Put clang's runtime DLLs on PATH
+        # The AddressSanitizer and OpenMP DLLs a program needs when it runs.
+        if: matrix.cc
+        run: echo "$(& ${{ matrix.cc }} --print-resource-dir)\lib\windows" >> $env:GITHUB_PATH
+      - name: Install flang
+        if: matrix.flang
+        run: |
+          & "$env:CONDA\Scripts\conda.exe" create -q -y -p "$env:RUNNER_TEMP\flang" --override-channels -c conda-forge "flang_win-64=${{ matrix.flang }}"
+          echo "FC=$env:RUNNER_TEMP\flang\Library\bin\flang.exe" >> $env:GITHUB_ENV
+      - name: Add flang's intrinsic modules
+        # conda-forge's flang for Windows has none (iso_c_binding and the
+        # rest); LLVM's release of the same version does.
+        if: matrix.flang
+        shell: bash
+        run: |
+          v=${{ matrix.flang }}
+          tmp=$(cygpath -u "$RUNNER_TEMP")
+          curl -sSfL "https://github.com/llvm/llvm-project/releases/download/llvmorg-$v/clang+llvm-$v-x86_64-pc-windows-msvc.tar.zst" \
+            | zstd -dc --long=31 | tar -xf - -C "$tmp" --wildcards "*/lib/clang/${v%%.*}/finclude/*"
+          mkdir -p "$tmp/flang/Library/lib/clang/${v%%.*}"
+          cp -r "$tmp/clang+llvm-$v-x86_64-pc-windows-msvc/lib/clang/${v%%.*}/finclude" "$tmp/flang/Library/lib/clang/${v%%.*}/"
+      - name: Show compiler versions
+        run: |
+          if ($env:CC) { & $env:CC --version }
+          if ($env:FC) { & $env:FC --version }
+      - name: Install dependencies
+        run: uv sync
+      - name: Warm up the compilers
+        # A fresh runner reads each compiler from disk slowly the first time
+        # it runs, and the parallel run starts many at once: a one-file
+        # example can take half a minute. Building one C and one Rust example
+        # first, one at a time, pays that cost once.
+        if: matrix.cc
+        run: uv run pytest tests/test_examples.py -o addopts="" -q -k "ninja and (01_hello_c or 43_rust)"
+      - name: Run example tests
+        run: uv run pytest tests/test_examples.py -n auto -v -rs -k "(ninja or nested or explain) and not 21_msvcup_hello and ${{ matrix.examples }}"
 
   test-qt:
     name: "test qt examples"
@@ -276,13 +422,13 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Set up MSVC (Windows only)
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        uses: ilammy/msvc-dev-cmd@v1.13.0
       - name: Install Qt (Linux)
         if: runner.os == 'Linux'
         # base: moc/uic/rcc + qtpaths6; declarative: Qml module +
@@ -311,7 +457,7 @@ jobs:
         # flakiness surface; a warm cache takes it off the clock. No
         # restore-keys: a partial Qt tree is worse than none, and the key
         # carries the version so a bump re-downloads.
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: C:\Qt
           key: qt-windows-6.8.3-win64_msvc2022_64
@@ -334,7 +480,7 @@ jobs:
       - name: Run Qt example tests
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -v -k "52_qt or 53_qt or 54_qt or 55_qt or 56_qt or 81_qml"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -349,12 +495,12 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Install Emscripten
-        uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
+        uses: emscripten-core/setup-emsdk@v16
         with:
           actions-cache-folder: 'emsdk-cache'
       - name: Install wasi-sdk
@@ -370,7 +516,7 @@ jobs:
           curl -sSfL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VERSION}/wasi-sdk-${WASI_VERSION_FULL}-${ARCH}-${OS}.tar.gz" | tar xz
           sudo mv "wasi-sdk-${WASI_VERSION_FULL}-${ARCH}-${OS}" /opt/wasi-sdk
       - name: Install wasmtime
-        uses: jcbhmr/setup-wasmtime@960c367a99921eb0b02f5778fce9ae8f110bf0f0 # v2
+        uses: jcbhmr/setup-wasmtime@v2.0.4
       - name: Install dependencies
         run: uv sync
       - name: Verify Emscripten tools
@@ -391,7 +537,7 @@ jobs:
           WASI_SDK_PATH: /opt/wasi-sdk
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml --cov-append -v -k "22_wasm_wasi"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -403,8 +549,8 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Install the ARM bare-metal toolchain and QEMU
@@ -435,7 +581,7 @@ jobs:
             exit 1
           fi
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -457,8 +603,8 @@ jobs:
       # test skipping is otherwise silent and green.
       PCONS_REQUIRE_ANDROID_NDK: "1"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       # No install step: the runner image ships the NDKs already.
@@ -494,7 +640,7 @@ jobs:
         # main flakiness surface; a warm cache takes them off the clock. No
         # restore-keys: a partial Qt tree is worse than none, and the key
         # carries the version so a bump re-downloads.
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: ~/Qt
           key: qt-android-6.8.3-linux_gcc_64-android_arm64_v8a
@@ -531,7 +677,7 @@ jobs:
             exit 1
           fi
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -542,8 +688,8 @@ jobs:
     needs: lint
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       # No MSVC setup - msvcup installs its own toolchain
@@ -554,7 +700,7 @@ jobs:
       - name: Run msvcup example tests
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "21_msvcup_hello" tests/contrib/test_msvcup.py -v
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -566,22 +712,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # 26.04's gcc is 15, the first with `import std`, and its clang is 21.
+        os: [ubuntu-26.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
-      - name: Set up clang tools (Linux)
+      - name: Set up clang-scan-deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo update-alternatives --install /usr/bin/clang-scan-deps clang-scan-deps \
-            /usr/bin/clang-scan-deps-18 100
-          sudo update-alternatives --install /usr/bin/clang++ clang++ \
-            /usr/bin/clang++-18 100
-          sudo update-alternatives --install /usr/bin/clang clang \
-            /usr/bin/clang-18 100
+            /usr/bin/clang-scan-deps-21 100
       - name: Add Homebrew LLVM to PATH (macOS)
         if: runner.os == 'macOS'
         run: echo "$(brew --prefix llvm@18)/bin" >> $GITHUB_PATH
@@ -589,34 +732,11 @@ jobs:
         run: uv python install 3.12 && uv sync
       - name: Install libc++ for `import std;` (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y libc++-18-dev libc++abi-18-dev
-      - name: Install gcc-15 (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-
-          # Add the PPA by hand rather than with add-apt-repository, which
-          # asks Launchpad's API for the signing key and gets an HTTP 500
-          # GPGKeyTemporarilyNotFoundError on the runners while serving the
-          # same key fine elsewhere. The keyserver is a separate service.
-          sudo install -d /etc/apt/keyrings
-          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x60C317803A41BA51845E371A1E9377A2BA9EF27F" \
-            | sudo gpg --dearmor -o /etc/apt/keyrings/ubuntu-toolchain-r.gpg
-          . /etc/os-release
-          echo "deb [signed-by=/etc/apt/keyrings/ubuntu-toolchain-r.gpg] https://ppa.launchpadcontent.net/ubuntu-toolchain-r/test/ubuntu ${VERSION_CODENAME} main" \
-            | sudo tee /etc/apt/sources.list.d/ubuntu-toolchain-r.list
-          sudo apt-get update
-
-          sudo apt-get install -y gcc-15 g++-15
-
-          sudo update-alternatives --install /usr/bin/gcc gcc \
-            /usr/bin/gcc-15 100
-          sudo update-alternatives --install /usr/bin/g++ g++ \
-            /usr/bin/g++-15 100
+        run: sudo apt-get install -y libc++-21-dev libc++abi-21-dev
       - name: Run C++20 modules example tests
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules or 30_cxx_partitions or 31_cxx_modules_optin or 32_cxx_import_std or 35_cxx_modules_deps or 39_bmi_compat" -v
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -632,8 +752,8 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Install dependencies (with rez)
@@ -676,7 +796,7 @@ jobs:
           rez-env hello_lib -- "$VENV/bin/python" -m pytest tests/test_examples.py \
             --cov=pcons --cov-report=xml --cov-append -k "45_rez_integration" -v
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        uses: codecov/codecov-action@v7.1.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -688,23 +808,25 @@ jobs:
     # whatever the platform — a rolling :latest canary included; if one
     # breaks for upstream reasons, fixing or consciously skipping it is
     # part of cutting the release.
-    needs: [docs, test, test-examples-windows, test-fedora, test-swift, test-qt, test-wasm, test-msvcup, test-cxx-modules, test-rez]
+    needs: [docs, test, test-examples-windows, test-windows-toolchains, test-fedora, test-swift, test-fortran, test-qt, test-wasm, test-msvcup, test-cxx-modules, test-rez]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # PyPI trusts uploads only from this workflow file and environment.
+    environment: pypi
     permissions:
       contents: write
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           version: "latest"
       - name: Build package
         run: uv build
       - name: Sign distributions with Sigstore
-        uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # v3.5.0
+        uses: sigstore/gh-action-sigstore-python@v3.5.0
         with:
           inputs: ./dist/*.tar.gz ./dist/*.whl
           upload-signing-artifacts: false
@@ -712,15 +834,16 @@ jobs:
       - name: Generate Changelog
         run: .github/release_message.sh > release_message.md
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@v3.0.3
         with:
           body_path: release_message.md
           files: |
             dist/*.tar.gz
             dist/*.whl
             dist/*.sigstore.json
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: uvx twine upload dist/*.tar.gz dist/*.whl
+      # The upload takes everything in dist/, and the Sigstore bundles aren't
+      # distributions; PyPI gets its own attestations instead.
+      - name: Remove the Sigstore bundles from dist
+        run: rm dist/*.sigstore.json
+      - name: Publish to PyPI, with attestations
+        uses: pypa/gh-action-pypi-publish@v1.14.3

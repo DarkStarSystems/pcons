@@ -203,13 +203,6 @@ class QtScanner:
 
     # -- target scan -------------------------------------------------------
 
-    def _in_project(self, path: Path) -> bool:
-        try:
-            path.resolve().relative_to(self.project_root)
-            return True
-        except ValueError:
-            return False
-
     def scan_target_sources(
         self,
         sources: Iterable[Path],

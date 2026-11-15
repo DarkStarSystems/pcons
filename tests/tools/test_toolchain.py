@@ -33,13 +33,10 @@ class MockCxxTool(BaseTool):
 class MockToolchain(BaseToolchain):
     def __init__(self) -> None:
         super().__init__("mock")
-
-    def _configure_tools(self, config: object) -> bool:
         self._tools: dict[str, Tool] = {
             "cc": MockCTool(),
             "cxx": MockCxxTool(),
         }
-        return True
 
 
 class TestToolchainProtocol:
@@ -53,16 +50,13 @@ class TestBaseToolchain:
         tc = MockToolchain()
         assert tc.name == "mock"
 
-    def test_configure(self):
+    def test_tools(self):
         tc = MockToolchain()
-        result = tc.configure(None)
-        assert result is True
         assert "cc" in tc.tools
         assert "cxx" in tc.tools
 
     def test_setup(self, test_project):  # noqa: F811
         tc = MockToolchain()
-        tc.configure(None)
 
         env = Environment()
         tc.setup(env)
@@ -177,9 +171,13 @@ class TestNamingFollowsTheTarget:
         assert tc.get_install_dir("shared_library", android) == "bin"
 
 
-class TestLanguagePriority:
-    def test_default_priorities(self):
-        tc = MockToolchain()
-        priority = tc.language_priority
-        assert priority["c"] < priority["cxx"]
-        assert priority["cxx"] < priority["cuda"]
+class TestLinkLanguageOrder:
+    def test_one_order_whichever_toolchain_is_primary(self):
+        """C++ over C over Fortran (Meson's order): a C or C++ driver takes
+        the Fortran runtime as libraries."""
+        from pcons.tools.toolchain import link_language_rank
+
+        order = ["fortran", "c", "objc", "cxx", "objcxx", "cuda", "swift"]
+        ranks = [link_language_rank(lang) for lang in order]
+        assert ranks == sorted(ranks) and len(set(ranks)) == len(ranks)
+        assert link_language_rank("cobol") == 0

@@ -9,23 +9,107 @@ diagnostics and optimizations.
 
 from __future__ import annotations
 
+import functools
 import logging
+import re
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
-from pcons.core.preset import Preset, ToolContribution
-from pcons.core.subst import SourcePath, TargetPath
-from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
+from pcons.core.errors import PconsValueError
+from pcons.core.preset import ToolContribution
+from pcons.core.subst import ColorFlag, NodeVar, SourcePath, TargetPath
+from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain, msvc_crt
+from pcons.toolchains.gnu_common import clang_color_flags
 from pcons.toolchains.msvc import MsvcAssembler, MsvcResourceCompiler
-from pcons.tools.tool import BaseTool
+from pcons.tools.tool import BaseTool, Probe
+from pcons.tools.toolchain import LinkNeeds
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pcons.core.builder import Builder
-    from pcons.core.toolconfig import ToolConfig
+    from pcons.core.environment import Environment
+    from pcons.core.flags import FlagToken
+    from pcons.core.target import Target
+
+
+@functools.cache
+def driver_link_args(clang_cl: str, flags: tuple[str, ...]) -> tuple[str, ...] | None:
+    """The arguments of the link *clang_cl*'s driver would run with
+    *flags*, from ``-###``, leaving out the linker, its output and the
+    object. None if it can't say: it refuses the flags, as it does
+    AddressSanitizer with a debug C runtime."""
+    with tempfile.TemporaryDirectory() as tmp:
+        obj = Path(tmp) / "probe.obj"
+        obj.write_bytes(b"")
+        try:
+            result = subprocess.run(
+                [clang_cl, *flags, "-###", str(obj)],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+    lines = result.stderr.strip().splitlines()
+    if result.returncode != 0 or not lines:
+        return None
+    # The link is the last command, each argument quoted, with \\ and \"
+    # escaped.
+    args = [
+        re.sub(r"\\(.)", r"\1", arg)
+        for arg in re.findall(r'"((?:[^"\\]|\\.)*)"', lines[-1])
+    ]
+    return tuple(
+        arg for arg in args[1:] if arg != str(obj) and not arg.startswith("-out:")
+    )
+
+
+def driver_link_additions(
+    clang_cl: str, link: tuple[str, ...], flag: str
+) -> tuple[str, ...] | None:
+    """What *flag* adds to the link *clang_cl*'s driver would run with
+    *link*, the C runtime (``/MD``) and ``/LD`` for a DLL: the runtime
+    libraries a feature needs, and how they're linked. These change between
+    LLVM releases, and with the C runtime and the kind of link, so the
+    driver is asked. None if it can't say."""
+    base = driver_link_args(clang_cl, link)
+    with_flag = driver_link_args(clang_cl, (*link, flag))
+    if base is None or with_flag is None:
+        return None
+    return tuple(arg for arg in with_flag if arg not in base)
+
+
+def link_needs_from_args(args: tuple[str, ...]) -> LinkNeeds:
+    """The link needs a driver's link arguments state (``-defaultlib:`` a
+    library, ``-libpath:`` its directory, ``-nodefaultlib:`` a default
+    library to leave out), so that whichever linker links writes them its
+    own way. Any other argument is an error: it has no neutral form."""
+    libs: list[str] = []
+    libdirs: list[str] = []
+    excluded: list[str] = []
+    for arg in args:
+        option, _, value = arg.partition(":")
+        match option.lower().lstrip("/-"):
+            case "defaultlib":
+                libs.append(value.removesuffix(".lib"))
+            case "libpath":
+                libdirs.append(value)
+            case "nodefaultlib" if value:
+                excluded.append(value)
+            case _:
+                raise PconsValueError(
+                    f"clang-cl's driver links with {arg!r}, which pcons can't "
+                    f"state as a link need."
+                )
+    return LinkNeeds(
+        libs=tuple(libs), libdirs=tuple(libdirs), excluded_default_libs=tuple(excluded)
+    )
 
 
 class ClangClCompiler(BaseTool):
@@ -38,9 +122,14 @@ class ClangClCompiler(BaseTool):
         super().__init__(name, language=language)
         self._language = language
 
+    def probe(self) -> Probe | None:
+        base = super().probe()
+        return base.msvc() if base else None
+
     def default_vars(self) -> dict[str, object]:
         return {
             "cmd": "clang-cl",
+            "colorflags": [ColorFlag(flag) for flag in clang_color_flags()],
             "flags": ["/nologo"],
             "iprefix": "/I",
             "includes": [],
@@ -53,7 +142,6 @@ class ClangClCompiler(BaseTool):
             # clang-cl uses /showIncludes for MSVC-style deps
             "objcmd": [
                 "$cc.cmd" if self._language == "c" else "$cxx.cmd",
-                "/nologo",
                 "/showIncludes",
                 "/c",
                 TargetPath(prefix="/Fo"),
@@ -66,6 +154,7 @@ class ClangClCompiler(BaseTool):
                 "${prefix(cc.dprefix, cc.defines)}"
                 if self._language == "c"
                 else "${prefix(cxx.dprefix, cxx.defines)}",
+                "$cc.colorflags" if self._language == "c" else "$cxx.colorflags",
                 "$cc.flags" if self._language == "c" else "$cxx.flags",
                 SourcePath(),
             ],
@@ -86,11 +175,6 @@ class ClangClCompiler(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        if not get_platform().is_windows:
-            return None
-        return self._find_tool_config(config, "clang-cl", with_version=True)
-
 
 class ClangClCCompiler(ClangClCompiler):
     """Clang-CL C compiler."""
@@ -108,30 +192,6 @@ class ClangClCxxCompiler(ClangClCompiler):
 
     def __init__(self) -> None:
         super().__init__("cxx", "cxx")
-
-    def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "clang-cl",
-            "flags": ["/nologo"],
-            "iprefix": "/I",
-            "includes": [],
-            "isysprefix": "-imsvc",
-            "system_includes": [],
-            "dprefix": "/D",
-            "defines": [],
-            "objcmd": [
-                "$cxx.cmd",
-                "/nologo",
-                "/showIncludes",
-                "/c",
-                TargetPath(prefix="/Fo"),
-                "${prefix(cxx.iprefix, cxx.includes)}",
-                "${prefix(cxx.isysprefix, cxx.system_includes)}",
-                "${prefix(cxx.dprefix, cxx.defines)}",
-                "$cxx.flags",
-                SourcePath(),
-            ],
-        }
 
 
 class ClangClLibrarian(BaseTool):
@@ -164,12 +224,6 @@ class ClangClLibrarian(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        if not get_platform().is_windows:
-            return None
-        # Prefer llvm-lib, fall back to lib.exe
-        return self._find_tool_config(config, "llvm-lib", "lib.exe", version_flag="")
-
 
 class ClangClLinker(BaseTool):
     """Linker for clang-cl (uses lld-link or link.exe)."""
@@ -190,6 +244,7 @@ class ClangClLinker(BaseTool):
                 "$link.flags",
                 TargetPath(prefix="/OUT:"),
                 SourcePath(),
+                NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -198,8 +253,8 @@ class ClangClLinker(BaseTool):
                 "/DLL",
                 "$link.flags",
                 TargetPath(prefix="/OUT:", index=0),
-                TargetPath(prefix="/IMPLIB:", index=1),
                 SourcePath(),
+                NodeVar("LINK_ARCHIVES"),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -228,12 +283,6 @@ class ClangClLinker(BaseTool):
             ),
         }
 
-    def configure(self, config: object) -> ToolConfig | None:
-        if not get_platform().is_windows:
-            return None
-        # Prefer lld-link, fall back to link.exe
-        return self._find_tool_config(config, "lld-link", "link.exe", version_flag="")
-
 
 class ClangClToolchain(MsvcCompatibleToolchain):
     """Clang-CL toolchain: MSVC-compatible flags and binaries on Windows."""
@@ -251,7 +300,7 @@ class ClangClToolchain(MsvcCompatibleToolchain):
     # /O2 alone here.
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
         **MsvcCompatibleToolchain.MSVC_VARIANTS,
-        "release-fastest": (["/O2", "/MD"], ["NDEBUG"]),
+        "release-fastest": (["/O2"], ["NDEBUG"]),
     }
 
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
@@ -287,79 +336,66 @@ class ClangClToolchain(MsvcCompatibleToolchain):
     def __init__(self) -> None:
         super().__init__("clang-cl")
 
-    def make_feature_preset(self, name: str) -> Preset | None:
-        """Realize ``openmp`` dynamically: unlike MSVC (whose objects carry a
-        vcomp /DEFAULTLIB directive), clang-cl's ``/openmp`` embeds no
-        defaultlib, so the runtime must be linked explicitly. libomp.lib
-        lives next to clang-cl (``<llvm>/<arch>/lib``); None if not found.
-        Note libomp.dll (in clang-cl's bin dir) must be on PATH at run time.
-        """
-        if name == "openmp":
-            libdir = self._libomp_dir()
-            if libdir is None:
-                return None
-            return Preset(
-                name="openmp",
-                category="feature",
-                contributions=(
-                    ToolContribution("cc", flags=("/openmp",)),
-                    ToolContribution("cxx", flags=("/openmp",)),
-                    ToolContribution(
-                        "link", flags=(f"/LIBPATH:{libdir}", "libomp.lib")
-                    ),
-                ),
+    def link_needs(
+        self,
+        target: Target,
+        languages: set[str],
+        link_language: str,
+        env: Environment,
+    ) -> LinkNeeds:
+        """clang-cl's objects don't name their AddressSanitizer or OpenMP
+        runtime, as cl's do: its own driver adds them when it links, and
+        pcons links with lld-link or link.exe. The AddressSanitizer runtime
+        is the linker's to choose (see _sanitizer_link_args); libomp is
+        what the driver adds for /openmp."""
+        needs = super().link_needs(target, languages, link_language, env)
+        if not languages & {"c", "cxx"}:
+            return needs
+        if env.feature_realized("sanitize", self):
+            needs = needs | LinkNeeds(sanitizers=("address",))
+        if env.feature_realized("openmp", self):
+            args = driver_link_additions(self._driver(env), ("/MD",), "/openmp")
+            if not args:
+                raise PconsValueError(
+                    f"Target '{target.name}': clang-cl doesn't say how to link "
+                    f"its OpenMP runtime (libomp, beside clang-cl)."
+                )
+            needs = needs | link_needs_from_args(args)
+        return needs
+
+    def _sanitizer_link_args(
+        self, sanitizers: Sequence[str], target: Target
+    ) -> list[FlagToken]:
+        """clang's AddressSanitizer runtime, as clang-cl's driver would link
+        it for this link's C runtime: a different library for /MD and /MT,
+        and with /MT, a DLL links only a thunk to the program's. Any
+        sanitized object in the program uses it, ifx's too."""
+        if "address" not in sanitizers:
+            return []
+        env = target._env
+        if env is None:
+            # A pcons bug, not a user error.
+            raise ValueError(f"Target '{target.name}' has no environment to link.")
+        crt = self.MSVC_CRT_FLAGS[msvc_crt(env.runtime_linkage, env.variant)]
+        link = (crt, "/LD") if target.target_type == "shared_library" else (crt,)
+        args = driver_link_additions(self._driver(env), link, "-fsanitize=address")
+        if args is None:
+            hint = (
+                " clang's AddressSanitizer has no debug C runtime: build with "
+                "relwithdebinfo rather than debug."
+                if crt.endswith("d")
+                else ""
             )
-        return super().make_feature_preset(name)
+            raise PconsValueError(
+                f"Target '{target.name}': clang-cl can't link AddressSanitizer "
+                f"with the {crt} C runtime.{hint}"
+            )
+        return list(args)
 
-    def _libomp_dir(self) -> Path | None:
-        """Directory containing libomp.lib, or None if unavailable."""
-        import shutil
-
-        exe = shutil.which("clang-cl")
-        if not exe:
-            return None
-        libdir = Path(exe).parent.parent / "lib"
-        return libdir if (libdir / "libomp.lib").is_file() else None
-
-    def _configure_tools(self, config: object) -> bool:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return False
-        platform = get_platform()
-        if not platform.is_windows:
-            return False
-
-        cc = ClangClCCompiler()
-        if cc.configure(config) is None:
-            return False
-
-        cxx = ClangClCxxCompiler()
-        cxx.configure(config)
-
-        lib = ClangClLibrarian()
-        if lib.configure(config) is None:
-            return False
-
-        link = ClangClLinker()
-        if link.configure(config) is None:
-            return False
-
-        rc = MsvcResourceCompiler()
-        rc.configure(config)  # Optional - not required for toolchain to work
-
-        ml = MsvcAssembler()
-        ml.configure(config)  # Optional - not required for toolchain to work
-
-        self._tools = {
-            "cc": cc,
-            "cxx": cxx,
-            "lib": lib,
-            "link": link,
-            "rc": rc,
-            "ml": ml,
-        }
-        return True
+    @staticmethod
+    def _driver(env: Environment) -> str:
+        """The clang-cl *env* compiles with."""
+        return str((env.cxx if env.has_tool("cxx") else env.cc).cmd)
 
     # Architecture to Clang target triple mapping for Windows
     CLANG_CL_TARGET_MAP: dict[str, str] = {

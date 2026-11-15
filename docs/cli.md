@@ -179,6 +179,19 @@ Environment #1  (toolchain: llvm)  pcons-build.py:8
     -g     <- debug (variant)
 ```
 
+A link that had a choice of driver, or adds something its objects need,
+says so under its command: which driver links and why, and each runtime
+library, directory or rpath the link adds, with the compiler whose objects
+need it. A program with C++ and Fortran sources:
+
+```console
+  * build/hello  <-  build/obj.hello/src/{main.cpp.o,math_utils.f90.o}
+      /usr/bin/clang++ -o hello obj.hello/src/main.cpp.o obj.hello/src/math_utils.f90.o -L/opt/homebrew/Cellar/gcc/16.2.0/lib/gcc/current -lgfortran
+    link: clang++  (cxx leads fortran; set link_language to change)
+      lib gfortran                                            <- gfortran (fortran)
+      libdir /opt/homebrew/Cellar/gcc/16.2.0/lib/gcc/current  <- gfortran (fortran)
+```
+
 A node compiled with a per-source environment override, or a dependency
 built in a different environment, is annotated with that environment's
 label (`[env #2]`).
@@ -403,6 +416,8 @@ Read by pcons:
 | `PCONS_MODULES_PATH` | Extra add-on module directories, as if `--modules-path` |
 | `PCONS_DEBUG` | Subsystems to trace, as if `--debug` |
 | `NINJA` | Ninja-compatible runner to invoke, as if `--ninja` |
+| `NO_COLOR` | Non-empty: compile without colored diagnostics. Changing it recompiles everything. See [Colored Diagnostics](user-guide.md#colored-diagnostics) |
+| `FORCE_COLOR`, `CLICOLOR_FORCE` | Not `0`: colored diagnostics with any ninja-compatible runner, even into a file. `FORCE_COLOR` beats `NO_COLOR` |
 | `CC`, `CXX`, `FC`, `AR`, `RC`, `SWIFTC`, `CUDACXX` | Authoritative choice of that tool. A value that cannot be found is an error, never a fall-through to detection |
 
 Read by a build script, through `get_var()`:

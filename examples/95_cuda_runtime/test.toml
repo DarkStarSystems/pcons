@@ -1,0 +1,20 @@
+# Test configuration for the cuda_runtime example
+
+[test]
+description = "Demonstrates a C++ program calling a CUDA kernel, linked with the static or shared CUDA runtime"
+
+expected_outputs = [
+    "build/app_static",
+    "build/app_shared",
+]
+
+[verify]
+# Without a GPU the programs still run, and say so.
+commands = [
+    { run = "./build/app_static", expect_stdout = "CUDA runtime linked" },
+    { run = "./build/app_shared", expect_stdout = "CUDA runtime linked" },
+]
+
+[skip]
+requires_toolchains = ["c++", "cuda"]
+generators = ["xcode"]

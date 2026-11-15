@@ -17,4 +17,5 @@ NB_MODULE(pcons_hello_ext, m) {
         std::cout << hello() << ", " << name << "!\n";
       },
       "name"_a);
+  m.def("hello_world", [] { std::cout << hello() << ", world!\n"; });
 }

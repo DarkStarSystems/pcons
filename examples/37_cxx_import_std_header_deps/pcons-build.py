@@ -12,7 +12,7 @@ env = project.Environment(
 # import std needs C++23 (MSVC has no /std:c++23, so it maps to /std:c++latest).
 env.cxx.set_standard("c++23")
 if env.toolchain.name == "msvc":
-    env.cxx.flags.extend(["/EHsc", "/permissive-"])
+    env.cxx.flags.append("/permissive-")
 elif env.toolchain.name == "llvm":
     env.cxx.flags.append("-stdlib=libc++")  # libc++ ships the std module
     env.link.libs.append("c++")

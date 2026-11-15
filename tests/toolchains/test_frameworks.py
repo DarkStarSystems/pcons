@@ -18,8 +18,8 @@ class TestGccLinkerFrameworks:
         vars = link.default_vars()
         assert vars["frameworks"] == []
         assert vars["frameworkdirs"] == []
-        assert vars["fprefix"] == "-framework"
-        assert vars["Fprefix"] == "-F"
+        assert vars["fprefix"] == "-Wl,-framework,"
+        assert vars["Fprefix"] == "-Wl,-F"
 
     def test_progcmd_includes_framework_vars(self):
         """progcmd should expand framework variables."""
@@ -49,8 +49,8 @@ class TestLlvmLinkerFrameworks:
         vars = link.default_vars()
         assert vars["frameworks"] == []
         assert vars["frameworkdirs"] == []
-        assert vars["fprefix"] == "-framework"
-        assert vars["Fprefix"] == "-F"
+        assert vars["fprefix"] == "-Wl,-framework,"
+        assert vars["Fprefix"] == "-Wl,-F"
 
     def test_progcmd_includes_framework_vars(self):
         """progcmd should expand framework variables."""

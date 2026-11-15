@@ -34,7 +34,7 @@ from pcons.toolchains.gcc import (
     GccLinker,
     GccToolchain,
 )
-from tests.support import NO_ANDROID_NDK, find_android_ndk
+from tests.support import NO_ANDROID_NDK, TOOL_ENV_VARS, find_android_ndk
 
 # Hypothesis profiles for the property tests in tests/fuzz/. "dev" is the
 # default: small and derandomized, so a normal `make test` costs little and
@@ -72,6 +72,29 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.setdefault("COVERAGE_FILE", str(_REPO_ROOT / ".coverage"))
 
 
+@pytest.hookimpl(trylast=True)
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Measure the subprocesses a test starts with coverage's ctrace core.
+
+    On 3.14 coverage defaults to sys.monitoring, which measures in-process
+    code fastest but adds about two seconds to the start of every measured
+    subprocess; ctrace adds almost nothing. A process that runs tests has
+    started its own coverage by now and keeps its core; the processes it
+    starts read this. xdist's controller runs none, and its workers would
+    inherit the variable before starting theirs, so it sets nothing.
+    """
+    try:
+        import coverage
+    except ImportError:
+        return
+
+    config = session.config
+    if config.getoption("numprocesses", None) and not hasattr(config, "workerinput"):
+        return
+    if coverage.Coverage.current() is not None:
+        os.environ["COVERAGE_CORE"] = "ctrace"
+
+
 @pytest.fixture
 def gcc_toolchain():
     """Create a pre-configured GCC toolchain for testing.
@@ -86,7 +109,31 @@ def gcc_toolchain():
         "ar": GccArchiver(),
         "link": GccLinker(),
     }
-    toolchain._configured = True
+    return toolchain
+
+
+@pytest.fixture
+def clang_cl_toolchain():
+    """A clang-cl toolchain, configured the way the gcc fixture is.
+
+    Its own configure() only answers on Windows; a cross build to Windows
+    names the binaries itself, so the tools are populated by hand here too.
+    """
+    from pcons.toolchains.clang_cl import (
+        ClangClCCompiler,
+        ClangClCxxCompiler,
+        ClangClLibrarian,
+        ClangClLinker,
+        ClangClToolchain,
+    )
+
+    toolchain = ClangClToolchain()
+    toolchain._tools = {
+        "cc": ClangClCCompiler(),
+        "cxx": ClangClCxxCompiler(),
+        "lib": ClangClLibrarian(),
+        "link": ClangClLinker(),
+    }
     return toolchain
 
 
@@ -170,9 +217,10 @@ def clear_tool_env_vars(monkeypatch):
     CC/CXX/etc. are authoritative when set (they select compilers and
     steer toolchain auto-detection), so an exported CXX in a dev shell
     would perturb every Environment-creating test. Tests that exercise
-    the mechanism set the vars explicitly.
+    the mechanism set the vars explicitly; example tests pass the original
+    values on to the pcons they run (tests/support.py, USER_TOOL_ENV).
     """
-    for var in ("CC", "CXX", "FC", "AR", "SWIFTC", "CUDACXX", "RC"):
+    for var in TOOL_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
 
 

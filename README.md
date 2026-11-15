@@ -1,6 +1,6 @@
 # Pcons
 
-A modern open-source cross-platform zero-install Python-based build system. Builds anything that requires a repeatable workflow, using a dependency graph. Easy to use, reliable and quick. Uses Ninja (or Makefile, XCode, or MSVS) to do the builds. Optimized for C/C++, Fortran, CUDA, wasm etc. but should work for anything that needs building.
+A modern open-source cross-platform zero-install Python-based build system. Builds anything that requires a repeatable workflow, using a dependency graph. Easy to use, reliable and quick. Uses Ninja (or Make or Xcode) to do the builds. Optimized for C/C++, Fortran, CUDA, wasm etc. but should work for anything that needs building.
 
 [![CI](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml/badge.svg)](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/DarkStarSystems/pcons/graph/badge.svg)](https://codecov.io/gh/DarkStarSystems/pcons)
@@ -32,6 +32,7 @@ Pcons can build not just executables, but also tar/zip archives, python packages
 
 ## What's in the box
 
+- **[Fortran](https://pcons.readthedocs.io/en/latest/fortran/)**: gfortran and flang on Linux, macOS and Windows, and Intel's ifx on Linux and Windows; modules and submodules ordered automatically, and Fortran mixed with C and C++ in one program
 - **[Qt 6](https://pcons.readthedocs.io/en/latest/qt/)**: `find_qt()`, automoc/autouic/autorcc, QML modules, translations, and `ninja deploy`
 - **C++20 modules**: named modules, partitions, and `import std` on GCC, Clang and MSVC, with automatic dependency scanning
 - **[Tests and fuzzing](https://pcons.readthedocs.io/en/latest/testing/)**: `project.Test()`, `pcons test`, gtest/doctest/Catch2 case discovery, JUnit XML, libFuzzer/AFL++
@@ -56,7 +57,7 @@ Here's a [comparison](COMPARISONS.md) between pcons and other common modern buil
 
 ✅ **Ready for small-scale production use** - and still under active development, so feedback is very welcome. It's working in several medium-sized projects.
 
-Core functionality is working and well tested across Linux, macOS and Windows, on every commit: C/C++/ObjC/Fortran/Swift/CUDA compilation, C++20 modules, Qt 6, static and shared libraries, install targets, installers, cross-compilation, and mixed-language builds. There are 66 self-contained [examples](examples/), and every one is built and verified in CI. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
+Core functionality is working and well tested across Linux, macOS and Windows, on every commit: C/C++/ObjC/Fortran/Swift/CUDA compilation, C++20 modules, Qt 6, static and shared libraries, install targets, installers, cross-compilation, and mixed-language builds. There are nearly 100 self-contained [examples](examples/), and every one is built and verified in CI. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 
 ### Rust / Go interop
 
@@ -179,7 +180,18 @@ uv tool install -e ~/src/pcons             # install the checkout, editable
 
 ## This Project is AI-Assisted
 
-PCons is my long-term vision for a modern build tool. I've used Claude Code extensively to assist in creating this project, mostly Claude Opus 4.6. It has been a huge help in realizing the vision I've had for a long time. If you reflexively or morally reject all AI-generated or AI-assisted code, pcons is not for you. That said, I've reviewed every decision and nearly every line, and this code reflects my vision, my architecture, my goals and my priorities. I take full responsibility for it, and as a professional software engineer with 40+ years of C/C++/python experience I stand behind it. I also intend to support it long-term.
+Pcons is my long-term vision for a modern build tool. I've used Claude Code extensively to assist in creating this project, mostly with Claude Opus models (Opus 5.5 as of Sept 2026). It has been a huge help in realizing the vision I've had for a long time. If you reflexively or morally reject all AI-generated or AI-assisted code, pcons is not for you. That said, this code reflects my vision, my architecture, my goals and my priorities. I take full responsibility for it, and as a professional software engineer with 40+ years of C/C++/python experience I stand behind it. I also intend to support it long-term.
+
+### How is this different from "vibe coding?"
+
+The short answer is you have to treat it like a real project with a project team, except most of the team is AI. Here's how I work as a solo AI-assisted developer working on an open source project:
+
+- **Know what you're building.** Deep domain knowledge is vital. I know what I want pcons to be. I have 30+ years experience building software with all kinds of tools, and being a toolsmith myself. I can feel when it's right and when it's having trouble.
+- **Understand software engineering.** Pcons has over 6,000 unit tests, full system tests, and nearly 100 examples, each built and checked on every commit. [CI](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml) runs on Linux, macOS and Windows across every supported Python version. Every commit is gated on lint, formatting, type checks and passing tests. I also have a suite of over a dozen medium-size open source projects in various languages which I ported to pcons; I use those as a test suite before every release. I co-design each new feature with the AI assistant and I don't let it start until I like the proposed design, and then we iterate until it's clean and I like it.
+- **Have a long-term vision.** I started pcons seriously in January of 2026, and I've been working on it continuously since then (around 1000 commits total), moving toward the system I've always wanted it to be. Good design takes iteration, learning from users, judgment, and persistence. It's not one-shot prompt-to-app slop.
+- **Own the product.** Working with AI assistance, you become partly (or even mostly) a product manager. Does it do what it says? Does it do what users want? Is it fast enough, and secure? Is the design clean and maintainable?
+- **Review what matters.** I review changes closely, especially anything significant or gnarly. That's where you catch an agent spinning, or hacking around a problem instead of taking the principled approach. Everyday code from current models (Opus 5.5) is mostly trustworthy, tests catch most of what isn't, and I review all the interesting parts carefully.
+- **Get a second opinion.** On a regular basis, a separate agent does a full code review in a fresh session, with no context from the work it's reviewing.
 
 One of my sub-goals has been to make sure the documentation and source organization is clear; not just for humans but for browsing by AI agents. I want to make it easy for a human or an AI agent to create a best-practices `pcons-build.py` for *your* project quickly and easily. Using AI to auto-generate doc and making sure APIs are clean and consistent helps with that goal.
 

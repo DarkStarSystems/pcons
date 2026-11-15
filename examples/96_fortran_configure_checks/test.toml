@@ -1,0 +1,20 @@
+# Test configuration for the fortran_configure_checks example
+
+[test]
+description = "Demonstrates configure checks with a Fortran compiler: flags it accepts, and a feature probe passed to the source as a define"
+
+expected_outputs = [
+    "build/obj.precision/src/main.F90.o",
+    "build/precision",
+]
+
+[verify]
+commands = [
+    { run = "./build/precision", expect_stdout = "Built with the widest real kind this compiler has" },
+]
+
+[skip]
+requires_toolchains = ["fortran"]
+# Xcode generator does not support Fortran
+# Make generator doesn't support Ninja dyndep for Fortran module ordering
+generators = ["xcode", "make"]

@@ -3,9 +3,11 @@
 
 This example shows:
 - Declaring tests with ``project.Test(...)``
+- A test running a script, with a built program and a data file as arguments
 - Filtering tests by ``labels``
 - Marking a test ``should_fail=True`` for expected-failure assertions
 - Marking a test ``disabled=True`` so the runner records it as skipped
+- Letting a test skip itself at run time with ``skip_returncode``
 - Chaining tests with ``depends_on`` so fixtures gate dependents
 - Adjusting test properties after the fact with ``set_test_property``
 
@@ -19,6 +21,8 @@ Run::
 """
 
 import os
+import sys
+from pathlib import Path
 
 from pcons import Project, set_test_property
 
@@ -34,6 +38,17 @@ test_prog = project.Program(
 # Common case: pass an exit-code test against a built program.
 unit_add = project.Test("math.add", test_prog, args=["add"], labels=["unit", "fast"])
 unit_mul = project.Test("math.mul", test_prog, args=["mul"], labels=["unit", "fast"])
+
+# A test can run a script that drives a built program. In `args`, a
+# Target is the file it builds and a Path is a file in the source tree,
+# each written as the test sees it from where it runs; the test depends on
+# the Target, so `test-build` builds it.
+project.Test(
+    "math.cases",
+    sys.executable,
+    args=[Path("check_cases.py"), test_prog, Path("cases.txt")],
+    labels=["unit"],
+)
 
 # `should_fail` inverts the pass/fail interpretation. Use it for XFAIL
 # tests (e.g., to verify your build correctly rejects bad input).
@@ -54,6 +69,17 @@ project.Test(
     args=["add"],
     labels=["slow"],
     disabled=True,
+)
+
+# `skip_returncode` lets a test decide at run time that it can't run
+# (a missing tool, say): exiting with that code reports it as skipped,
+# not failed.
+project.Test(
+    "math.needs_tool",
+    test_prog,
+    args=["skip"],
+    labels=["unit"],
+    skip_returncode=77,
 )
 
 # `depends_on` chains tests. `math.regression` only runs if both

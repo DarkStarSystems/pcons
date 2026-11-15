@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from types import FrameType
+    from types import FrameType, TracebackType
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,10 +121,34 @@ def get_caller_location() -> SourceLocation:
         del frame
 
 
+def script_location(tb: TracebackType | None) -> SourceLocation | None:
+    """Where an error last passed through a build script.
+
+    The innermost frame of *tb* outside pcons: the line of the script (or of a
+    module it imported) that led to the error. None when the error never left
+    pcons, as for one raised while generating after the script has finished.
+    """
+    found = None
+    while tb is not None:
+        if not _skipped(tb.tb_frame.f_code.co_filename):
+            found = SourceLocation(
+                filename=tb.tb_frame.f_code.co_filename,
+                lineno=tb.tb_lineno,
+                function=_function_name(tb.tb_frame),
+            )
+        tb = tb.tb_next
+    return found
+
+
+def _function_name(frame: FrameType) -> str | None:
+    """A frame's function, or None at a module's top level."""
+    return frame.f_code.co_name if frame.f_code.co_name != "<module>" else None
+
+
 def _location_of(frame: FrameType) -> SourceLocation:
     """Describe one stack frame."""
     return SourceLocation(
         filename=frame.f_code.co_filename,
         lineno=frame.f_lineno,
-        function=frame.f_code.co_name if frame.f_code.co_name != "<module>" else None,
+        function=_function_name(frame),
     )

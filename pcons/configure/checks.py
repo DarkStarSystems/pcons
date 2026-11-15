@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import trace
+from pcons.core.errors import ConfigureError, PconsError, PconsValueError
+from pcons.core.paths import _script_dir_path
+from pcons.tools.tool import PROBES, BaseTool, Probe
 
 if TYPE_CHECKING:
     from pcons.configure.config import Configure
@@ -154,7 +157,7 @@ def _decode_c_string(value: str, name: str) -> str:
     """
     remainder = _STRING_LITERAL.sub("", value).strip()
     if remainder or not value.strip():
-        raise ValueError(
+        raise PconsValueError(
             f"Macro {name} is {value!r}, which is not a string literal. "
             f"Drop as_string=True to get the expansion text as-is."
         )
@@ -180,6 +183,11 @@ def cache_signature(*parts: str) -> str:
     """
     joined = "\x00".join(parts)
     return hashlib.sha1(joined.encode(errors="replace")).hexdigest()[:12]
+
+
+#: Languages whose compilers take the C programs the header, type, define
+#: and function checks write (CUDA's nvcc compiles C as host code).
+_C_SOURCE_LANGUAGES = frozenset({"c", "cxx", "objc", "objcxx", "cuda"})
 
 
 @dataclass
@@ -236,6 +244,9 @@ class ToolChecks:
         self._env = env
         self._tool_name = tool_name
         self._tool_config = getattr(env, tool_name, None)
+        # Signatures of the commands seen compiling the tool's smallest
+        # program, so a run of failed checks pays for that once.
+        self._working: set[str] = set()
 
     @staticmethod
     def _caller_location(depth: int = 2) -> str:
@@ -253,6 +264,51 @@ class ToolChecks:
         if len(oneline) > maxlen:
             return oneline[:maxlen] + "..."
         return oneline
+
+    def _tool(self) -> BaseTool | None:
+        """The tool being checked, from the toolchain that owns it."""
+        owner = self._env._tool_owners.get(self._tool_name, self._env._toolchain)
+        tool = owner.tools.get(self._tool_name) if owner is not None else None
+        return tool if isinstance(tool, BaseTool) else None
+
+    def _language(self) -> str | None:
+        """The checked tool's language. A tool set up by hand, with no
+        toolchain, is taken to be C for ``cc`` and C++ otherwise."""
+        tool = self._tool()
+        if tool is not None:
+            return tool.language
+        return "c" if self._tool_name == "cc" else "cxx"
+
+    def _probe(self) -> Probe:
+        """How this tool compiles a probe, as the tool declares it.
+
+        A tool set up by hand has none to ask, so its command decides
+        whether it takes cl.exe's command line.
+        """
+        tool = self._tool()
+        if tool is not None:
+            probe = tool.probe()
+            if probe is None:
+                raise PconsError(
+                    f"Configure checks can't compile with the '{self._tool_name}' "
+                    f"tool ({type(tool).__name__}): it declares no probe."
+                )
+            return probe
+        probe = PROBES[self._language() or "cxx"]
+        compiler = self._get_compiler() or ""
+        if Path(compiler).stem.lower() in ("cl", "clang-cl"):
+            return probe.msvc()
+        return probe
+
+    def _require_c_source(self, check: str) -> None:
+        """Refuse a check whose test program is C, for a tool that doesn't
+        compile C."""
+        if self._language() not in _C_SOURCE_LANGUAGES:
+            raise PconsError(
+                f"{check}() compiles a C program, which the "
+                f"'{self._tool_name}' tool can't. Use try_compile() with "
+                f"source in its own language."
+            )
 
     def _get_compiler(self) -> str | None:
         """Get the compiler command."""
@@ -299,9 +355,10 @@ class ToolChecks:
         ]
 
     def _project_root(self) -> Path | None:
-        """The project root, for resolving relative include dirs."""
+        """The top-level project's root, for a relative include dir given
+        when no script is running."""
         project = getattr(self._env, "_project", None)
-        return getattr(project, "root_dir", None)
+        return None if project is None else project.top.root_dir
 
     def _cache_key(self, check_type: str, *args: str) -> str:
         """Generate a cache key for a check.
@@ -381,6 +438,23 @@ class ToolChecks:
             return outcome
         compiler = outcome
 
+        result = self._compile_probe(
+            compiler, source, extra_flags=extra_flags, link=link
+        )
+        trace("configure", "  result: %s", "yes" if result.success else "no")
+        self._config.set(cache_key, result.success)
+        return result
+
+    def _compile_probe(
+        self,
+        compiler: str,
+        source: str,
+        *,
+        extra_flags: list[str] | None = None,
+        link: bool = False,
+    ) -> CheckResult:
+        """Compile one check's program, whose failure means "no" only once
+        the compiler is shown to work (see _require_working_compiler)."""
         cdir = self._make_check_dir()
         try:
             result = self._try_compile(
@@ -388,33 +462,41 @@ class ToolChecks:
             )
         finally:
             self._cleanup_check_dir(*cdir)
-        trace("configure", "  result: %s", "yes" if result.success else "no")
-        self._config.set(cache_key, result.success)
+        if not result.success:
+            self._require_working_compiler(compiler)
         return result
 
+    def _require_working_compiler(self, compiler: str) -> None:
+        """Raise unless the tool compiles its smallest program.
+
+        A check fails both when the answer is no and when the compiler can't
+        compile anything: it's missing, crashed, timed out, or the
+        environment's flags are wrong. Only the first is an answer; taking
+        the second for one would configure the build on something untrue.
+
+        The program is compiled, not linked: a bare-metal target compiles
+        but may link nothing without its startup files, and there a failed
+        link check is a true "no".
+
+        Raises:
+            ConfigureError: With the compiler's output, if it fails.
+        """
+        signature = cache_signature(compiler, *self._probe_flags())
+        if signature in self._working:
+            return
+        result = self._try_compile(compiler, self._probe().program)
+        if not result.success:
+            output = "\n".join(result.output.strip().splitlines()[:20])
+            raise ConfigureError(
+                f"Configure checks can't use the '{self._tool_name}' tool: "
+                f"{compiler} can't compile even an empty program.\n{output}"
+            )
+        self._working.add(signature)
+
     def _is_msvc_style(self) -> bool:
-        """Whether the configured compiler uses MSVC-style command lines.
-
-        MSVC and clang-cl (in its cl.exe-compatible mode) both take
-        slash-flags (/c, /Fo, /Fe, /E, /WX, ...) instead of the Unix-style
-        flags (-c, -o, -l, -E, -Werror, ...) used by GCC/Clang.
-        """
-        toolchain = getattr(self._env, "_toolchain", None)
-        tc_name = getattr(toolchain, "name", "") if toolchain else ""
-        if tc_name:
-            return tc_name in ("msvc", "clang-cl")
-        # No toolchain object attached to the environment (e.g. a bare
-        # Environment with cc.cmd set directly) -- fall back to sniffing the
-        # compiler executable's name.
-        compiler = self._get_compiler() or ""
-        return Path(compiler).stem.lower() in ("cl", "clang-cl")
-
-    def _get_werror_flag(self) -> str:
-        """Return the appropriate treat-warnings-as-errors flag.
-
-        MSVC and clang-cl use /WX; GCC and Clang use -Werror.
-        """
-        return "/WX" if self._is_msvc_style() else "-Werror"
+        """Whether the compiler takes cl.exe's slash options (/c, /Fo, /Fe,
+        /E, /I, /D) rather than the Unix ones (-c, -o, -E, -I, -D)."""
+        return self._probe().msvc_style
 
     def _lib_flag(self, lib: str) -> str:
         """Return the command-line argument to link against a library.
@@ -428,16 +510,18 @@ class ToolChecks:
     def _include_flag(self, directory: str | Path) -> str:
         """Return the command-line argument adding an include directory.
 
-        A relative directory is resolved against the project root: probes
-        compile in a temporary directory, so ``-Iinclude`` would otherwise
-        search a directory that doesn't exist.
+        A relative directory is read from the directory of the script
+        making the check, as a tool's include dirs are (the project root
+        when no script is running): probes compile in a temporary
+        directory, so ``-Iinclude`` would otherwise search a directory that
+        doesn't exist.
 
         Rootedness is tested with ``anchor`` rather than ``is_absolute()``,
         which is platform-dependent: ``Path("/opt/sdk").is_absolute()`` is
         False on Windows (no drive), and prefixing the project root onto it
         would point the probe somewhere that doesn't exist.
         """
-        path = Path(directory)
+        path = Path(_script_dir_path(directory))
         if not path.anchor:
             root = self._project_root()
             if root is not None:
@@ -453,9 +537,10 @@ class ToolChecks:
     def check_flag(self, flag: str) -> CheckResult:
         """Check if the compiler accepts a flag.
 
-        Compiles a minimal program with the flag to test if it's accepted.
-        Uses -Werror (or /WX for MSVC/clang-cl) so that flags which produce
-        warnings (e.g., clang's "unknown warning option") are rejected.
+        Compiles the tool's smallest program with the flag, adding the
+        tool's own options for rejecting an option it would only warn
+        about (``-Werror``, cl.exe's ``/WX``, ifx's ``-diag-error=``), so
+        that clang's "unknown warning option" counts as unsupported.
 
         Args:
             flag: Compiler flag to test (e.g., '-Wall', '-std=c++20').
@@ -476,16 +561,11 @@ class ToolChecks:
             return outcome
         compiler = outcome
 
-        source = "int main(void) { return 0; }\n"
-        werror = self._get_werror_flag()
+        probe = self._probe()
 
-        cdir = self._make_check_dir()
-        try:
-            result = self._try_compile(
-                compiler, source, extra_flags=[werror, flag], check_dir=cdir
-            )
-        finally:
-            self._cleanup_check_dir(*cdir)
+        result = self._compile_probe(
+            compiler, probe.program, extra_flags=[*probe.strict, flag]
+        )
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -513,6 +593,7 @@ class ToolChecks:
             # ucontext.h requires _XOPEN_SOURCE on macOS
             checks.check_header("ucontext.h", defines=["_XOPEN_SOURCE"])
         """
+        self._require_c_source("check_header")
         trace(
             "configure",
             "check_header: %s (%s) at %s",
@@ -536,13 +617,7 @@ class ToolChecks:
 
         source = f"{define_lines}#include <{header}>\nint main(void) {{ return 0; }}\n"
 
-        cdir = self._make_check_dir()
-        try:
-            result = self._try_compile(
-                compiler, source, extra_flags=extra_flags, check_dir=cdir
-            )
-        finally:
-            self._cleanup_check_dir(*cdir)
+        result = self._compile_probe(compiler, source, extra_flags=extra_flags)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -559,6 +634,7 @@ class ToolChecks:
         Returns:
             CheckResult indicating success/failure.
         """
+        self._require_c_source("check_type")
         trace(
             "configure",
             "check_type: %s (%s) at %s",
@@ -583,11 +659,7 @@ class ToolChecks:
 
         source = f"{includes}\nint main(void) {{ {type_name} x; (void)x; return 0; }}\n"
 
-        cdir = self._make_check_dir()
-        try:
-            result = self._try_compile(compiler, source, check_dir=cdir)
-        finally:
-            self._cleanup_check_dir(*cdir)
+        result = self._compile_probe(compiler, source)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -604,6 +676,7 @@ class ToolChecks:
         Returns:
             Size in bytes, or None if check failed.
         """
+        self._require_c_source("check_type_size")
         trace(
             "configure",
             "check_type_size: %s (%s) at %s",
@@ -646,6 +719,7 @@ int main(void) {{ return 0; }}
         finally:
             self._cleanup_check_dir(*cdir)
 
+        self._require_working_compiler(compiler)
         trace("configure", "  result: unknown size")
         return None
 
@@ -704,6 +778,7 @@ int main(void) {{ return 0; }}
                 "VERSION_NAME", headers=["core/version.h"], include_dirs=[src_dir]
             )  # -> '"MyApp 2024"'
         """
+        self._require_c_source("check_define")
         trace(
             "configure",
             "check_define: %s (%s) at %s",
@@ -753,6 +828,7 @@ int main(void) {{ return 0; }}
                 include_dirs=[src_dir],
             )
         """
+        self._require_c_source("check_defines")
         trace(
             "configure",
             "check_defines: %s (%s) at %s",
@@ -852,6 +928,7 @@ int main(void) {{ return 0; }}
             # generation (project.generated_input()) a header may simply not
             # exist yet on the first configure pass, and a cached "no such
             # header" would stick after the build produced it.
+            self._require_working_compiler(compiler)
             trace("configure", "  probe failed; not caching")
             return answer(results)
 
@@ -883,6 +960,7 @@ int main(void) {{ return 0; }}
         Returns:
             CheckResult indicating success/failure.
         """
+        self._require_c_source("check_function")
         trace(
             "configure",
             "check_function: %s (%s) at %s",
@@ -920,13 +998,9 @@ int main(void) {{
         if libs:
             extra_flags.extend(self._lib_flag(lib) for lib in libs)
 
-        cdir = self._make_check_dir()
-        try:
-            result = self._try_compile(
-                compiler, source, extra_flags=extra_flags, link=True, check_dir=cdir
-            )
-        finally:
-            self._cleanup_check_dir(*cdir)
+        result = self._compile_probe(
+            compiler, source, extra_flags=extra_flags, link=True
+        )
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -987,7 +1061,7 @@ int main(void) {{
         Returns:
             CheckResult with compilation result.
         """
-        suffix = ".c" if self._tool_name == "cc" else ".cpp"
+        suffix = self._probe().suffix
         owns_dir = check_dir is None
         dir_path, persistent = check_dir if check_dir else self._make_check_dir()
 
@@ -1063,7 +1137,7 @@ int main(void) {{
         Returns:
             CheckResult with preprocessor output.
         """
-        suffix = ".c" if self._tool_name == "cc" else ".cpp"
+        suffix = self._probe().suffix
         owns_dir = check_dir is None
         dir_path, persistent = check_dir if check_dir else self._make_check_dir()
         extra = list(extra_flags or [])

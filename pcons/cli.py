@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -43,7 +44,7 @@ from pcons._cli_click import (
     value_taking_options,
     watch_option,
 )
-from pcons.core.errors import PconsError
+from pcons.core.errors import PconsError, PconsKeyError
 
 if TYPE_CHECKING:
     from pcons.core.cache import BuildCache
@@ -52,6 +53,19 @@ if TYPE_CHECKING:
 
 # Set up logging
 logger = logging.getLogger("pcons")
+
+
+def _with_script_location(error: PconsError, cwd: Path) -> str:
+    """An error's message, after the build-script line that led to it."""
+    from pcons.util.source_location import script_location
+
+    where = None if error.location else script_location(error.__traceback__)
+    if where is None:
+        return str(error)
+    path = Path(where.filename)
+    if path.is_relative_to(cwd):
+        where = dataclasses.replace(where, filename=str(path.relative_to(cwd)))
+    return f"{where}: {error}"
 
 
 def setup_logging(verbose: bool = False, debug: str | None = None) -> None:
@@ -94,13 +108,21 @@ def find_script(name: str, search_dir: Path | None = None) -> Path | None:
     return None
 
 
-def _needs_generation(build_dir: Path, build_script: str | None = None) -> bool:
+def _needs_generation(
+    build_dir: Path, build_script: str | None = None, runner: str | None = None
+) -> bool:
     """Check if build files need (re)generation.
 
-    Returns True if no build files exist, or if the build script
-    is newer than the existing build files.
+    Returns True if no build files exist, if the build script is newer than
+    the existing build files, or if build.ninja's colored diagnostics no
+    longer match NO_COLOR and the *runner* (see ``writes_color_flags``).
     """
+    from pcons.generators.ninja import color_flags_written, writes_color_flags
+
     ninja_file = build_dir / "build.ninja"
+    written = color_flags_written(ninja_file)
+    if written is not None and written != writes_color_flags(runner):
+        return True
     makefile = build_dir / "Makefile"
     xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
 
@@ -871,8 +893,9 @@ def run_script(
                 return exit_code, pcons.get_registered_projects()
             except PconsError as e:
                 # Expected configure/generate failures carry actionable messages;
-                # a Python traceback would only bury them.
-                logger.error("%s", e)
+                # a Python traceback would only bury them. The script line that
+                # led to one is what the traceback would have added.
+                logger.error("%s", _with_script_location(e, Path(old_cwd)))
                 _cancel_pending_generation()
                 _maybe_postmortem(e)
                 return 1, []
@@ -986,8 +1009,10 @@ def run_ninja(
 
     logger.info("Running: %s", " ".join(cmd))
 
+    # The runner's own regeneration edge has to see which runner it is too.
+    env = {**os.environ, "NINJA": runner} if runner else None
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, env=env)
         return result.returncode
     except OSError as e:
         logger.error("Failed to run ninja: %s", e)
@@ -1186,6 +1211,7 @@ def _generate(
     mermaid: str | None = None,
     graph_detail: str | None = None,
     jobs: int | None = None,
+    ninja: str | None = None,
 ) -> tuple[int, list[Project]]:
     """Run the build script, which writes the build files into *build_dir*.
 
@@ -1200,6 +1226,8 @@ def _generate(
         jobs: How many subprocesses configure may run at once. Configure has
             its own parallel work (C++ module scanning), and a user who capped
             the build's jobs meant to cap that too.
+        ninja: The ninja-compatible runner this run will use (--ninja), which
+            the ninja generator asks about, as it would $NINJA.
 
     Returns:
         Tuple of (exit code, the top-level projects the script created, in
@@ -1228,6 +1256,8 @@ def _generate(
         extra_env["PCONS_GRAPH_DETAIL"] = graph_detail
     if jobs:
         extra_env["PCONS_JOBS"] = str(jobs)
+    if ninja:
+        extra_env["NINJA"] = ninja
 
     exit_code, _projects = run_script(
         script,
@@ -1537,11 +1567,11 @@ def _cached_target_lookup(build_dir: Path) -> Callable[[str], list[str] | None]:
                 if its_paths and spelling != token and _picks_out(spelling, token)
             )
             if not choices:
-                raise KeyError(
+                raise PconsKeyError(
                     f"'{token}' names several targets, and no spelling tells "
                     f"them apart. Give one an alias, or name the file it builds."
                 )
-            raise KeyError(
+            raise PconsKeyError(
                 f"'{token}' names several targets; pick one: {', '.join(choices)}"
             )
         if not paths:
@@ -1711,7 +1741,7 @@ def _build(
         own.
     """
     if force_regenerate or _needs_generation(
-        build_dir, build_script=str(script) if script else None
+        build_dir, build_script=str(script) if script else None, runner=ninja
     ):
         found = _resolve_build_script(script)
         if found is not None and found.exists():
@@ -2667,6 +2697,7 @@ def cli_build(
             reconfigure=reconfigure,
             fresh=fresh,
             jobs=jobs,
+            ninja=ninja,
         )
         if code == 0:
             known_projects[:] = projects

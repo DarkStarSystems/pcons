@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsValueError
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -54,7 +56,9 @@ class Worker:
         object.__setattr__(self, "command", tuple(self.command))
         object.__setattr__(self, "key", tuple(self.key))
         if not self.command:
-            raise ValueError("Worker(command=...) needs a command to start a worker")
+            raise PconsValueError(
+                "Worker(command=...) needs a command to start a worker"
+            )
 
     @property
     def identity(self) -> str:

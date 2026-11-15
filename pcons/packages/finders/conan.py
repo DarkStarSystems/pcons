@@ -19,7 +19,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from pcons.configure.platform import get_platform
+from pcons.configure.platform import Platform, get_platform
+from pcons.core.errors import PconsRuntimeError, PconsValueError
 from pcons.core.flags import deduplicate_flags
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.base import BaseFinder
@@ -161,16 +162,45 @@ class ConanFinder(BaseFinder):
 
     @property
     def profile_path(self) -> Path:
-        """Path to the pcons-generated Conan profile."""
+        """Path to the pcons-generated Conan profile, which describes the
+        platform the build is for and the compiler it uses."""
         return self.output_folder / "pcons-profile"
 
     @property
+    def build_profile_path(self) -> Path:
+        """Path to the profile of the machine the build runs on, which
+        Conan builds tools such as flex and protoc (``tool_requires``) for.
+        """
+        return self.output_folder / "pcons-build-profile"
+
+    @property
     def pkgconfig_dir(self) -> Path:
-        """Path to the directory containing generated .pc files."""
-        return self.output_folder
+        """The directory holding the .pc files Conan generated.
+
+        The output folder, unless the recipe uses cmake_layout, which puts
+        them in a subfolder depending on whether the CMake generator is
+        single- or multi-config:
+
+          single-config (Make/Ninja, e.g. gcc):  build/<build_type>/generators/
+          multi-config (MSVC/Xcode):              build/generators/
+
+        Found by searching rather than by enumerating layouts, so any future
+        layout is handled too, preferring a directory named "generators".
+        """
+        if list(self.output_folder.glob("*.pc")):
+            return self.output_folder
+        candidates = sorted(
+            {p.parent for p in self.output_folder.rglob("*.pc")},
+            key=lambda d: (d.name != "generators", str(d)),
+        )
+        return candidates[0] if candidates else self.output_folder
 
     def _run_conan(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
         """Run conan with arguments.
+
+        Without $CC and $CXX: they choose the compiler of the build, which
+        the host profile gives Conan, and would otherwise reach the build
+        tools too.
 
         Args:
             *args: Arguments to pass to conan.
@@ -180,17 +210,95 @@ class ConanFinder(BaseFinder):
             CompletedProcess result.
         """
         cmd = [*self.conan_cmd, *args]
+        env = {k: v for k, v in os.environ.items() if k not in ("CC", "CXX")}
         return subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             check=check,
+            env=env,
         )
+
+    #: Conan's os for each platform pcons builds for.
+    _CONAN_OS: ClassVar[dict[str, str]] = {
+        "darwin": "Macos",
+        "ios": "iOS",
+        "linux": "Linux",
+        "android": "Android",
+        "windows": "Windows",
+        "freebsd": "FreeBSD",
+        "none": "baremetal",
+    }
+
+    #: Conan's arch for each pcons CPU name. 32-bit Arm isn't here: which
+    #: one it is comes from the triple (see _conan_arch).
+    _CONAN_ARCH: ClassVar[dict[str, str]] = {
+        "arm64": "armv8",
+        "x86_64": "x86_64",
+        "i686": "x86",
+        "riscv64": "riscv64",
+        "riscv32": "riscv32",
+        "powerpc64le": "ppc64le",
+        "powerpc64": "ppc64",
+        "mips": "mips",
+        "mips64": "mips64",
+    }
+
+    @classmethod
+    def _conan_arch(cls, arch: str, triple: str | None) -> str | None:
+        """Conan's arch for CPU *arch*, or None if it can't tell.
+
+        32-bit Arm needs the triple's CPU: armv7a-linux-androideabi is
+        armv7, arm-linux-gnueabihf (Debian's armhf) is armv7hf, and a bare
+        arm-none-eabi could be any of them.
+        """
+        if arch != "arm":
+            return cls._CONAN_ARCH.get(arch)
+        cpu = (triple or "").split("-")[0]
+        hard_float = (triple or "").endswith("hf")
+        if cpu.startswith(("armv7", "thumbv7")) or (cpu == "arm" and hard_float):
+            return "armv7hf" if hard_float else "armv7"
+        if cpu.startswith(("armv6", "thumbv6")):
+            return "armv6"
+        return None
+
+    @classmethod
+    def _platform_settings(cls, target: Platform, cross: Any) -> dict[str, str]:
+        """The settings that describe the platform *target*: os and arch,
+        plus what Conan needs to know about an Android or iOS target.
+
+        A cross preset whose target pcons can't identify (a triple it
+        doesn't recognize, WebAssembly) gets none: the script gives them
+        with set_profile_setting().
+        """
+        if cross is not None and getattr(cross, "target_platform", None) is None:
+            return {}
+        triple = getattr(cross, "triple", None)
+        settings: dict[str, str] = {}
+        if conan_os := cls._CONAN_OS.get(target.os):
+            settings["os"] = conan_os
+        if arch := cls._conan_arch(target.arch, triple):
+            settings["arch"] = arch
+        if target.os == "android" and triple:
+            if match := re.search(r"(\d+)$", triple):
+                settings["os.api_level"] = match.group(1)
+            stl = getattr(cross, "stl", None)
+            if stl and stl != "none":
+                settings["compiler.libcxx"] = stl
+        elif target.os == "ios" and triple:
+            if match := re.search(r"ios(\d+\.\d+)", triple):
+                settings["os.version"] = match.group(1)
+            simulator = triple.endswith("-simulator")
+            settings["os.sdk"] = "iphonesimulator" if simulator else "iphoneos"
+        return settings
 
     def _detect_compiler_settings(
         self,
         toolchain: Toolchain | None = None,
         build_type: str = "Release",
+        runtime_linkage: str = "shared",
+        compiler_cmd: str | None = None,
+        target: Platform | None = None,
     ) -> dict[str, str]:
         """Detect compiler settings for Conan profile.
 
@@ -198,39 +306,31 @@ class ConanFinder(BaseFinder):
             toolchain: Optional toolchain to get settings from.
             build_type: Build type, used to derive compiler.runtime_type
                 for MSVC (mandatory in Conan 2 profiles).
+            runtime_linkage: The environment's runtime linkage, which is
+                compiler.runtime for MSVC.
+            compiler_cmd: The compiler the build uses, which is asked for
+                its kind and version. Left out, the toolchain's.
+            target: The platform the compiler builds for. Left out, the
+                build machine.
 
         Returns:
             Dict of Conan settings.
         """
         settings: dict[str, str] = {}
-
-        # Detect OS
-        if self._platform.is_macos:
-            settings["os"] = "Macos"
-        elif self._platform.is_linux:
-            settings["os"] = "Linux"
-        elif self._platform.is_windows:
-            settings["os"] = "Windows"
-
-        # Detect architecture
-        if self._platform.arch in ("arm64", "aarch64"):
-            settings["arch"] = "armv8"
-        elif self._platform.arch in ("x86_64", "amd64"):
-            settings["arch"] = "x86_64"
-        elif self._platform.arch in ("x86", "i686", "i386"):
-            settings["arch"] = "x86"
+        target = target or self._platform
 
         # The version is detected by running the toolchain's actual
         # compiler command below — never a bare "gcc"/"clang" from PATH,
         # which could silently differ from the [buildenv] CC/CXX compiler.
-        compiler_cmd: str | None = None
         if toolchain is not None:
             compiler_name = toolchain.name.lower()
-            compiler_cmd = self._get_toolchain_compiler_cmd(
-                toolchain, "cc"
-            ) or self._get_toolchain_compiler_cmd(toolchain, "cxx")
+            compiler_cmd = (
+                compiler_cmd
+                or toolchain.tool_command("cc")
+                or toolchain.tool_command("cxx")
+            )
             if "gcc" in compiler_name:
-                if self._platform.is_macos and self._is_apple_clang(compiler_cmd):
+                if target.is_apple and self._is_apple_clang(compiler_cmd):
                     # /usr/bin/gcc on macOS is a shim for Apple Clang, so a
                     # toolchain named "gcc" is usually not GCC at all. Conan
                     # validates compiler.version against the compiler you
@@ -243,24 +343,29 @@ class ConanFinder(BaseFinder):
                     settings["compiler.libcxx"] = "libstdc++11"
             elif "clang" in compiler_name or "llvm" in compiler_name:
                 settings["compiler"] = "clang"
-                if self._platform.is_macos:
-                    settings["compiler"] = "apple-clang"
+                if target.is_apple:
+                    if self._is_apple_clang(compiler_cmd):
+                        settings["compiler"] = "apple-clang"
                     settings["compiler.libcxx"] = "libc++"
-                elif self._platform.is_windows:
+                elif target.is_windows:
                     settings.update(
-                        self._windows_clang_settings(compiler_cmd, build_type)
+                        self._windows_clang_settings(
+                            compiler_cmd, build_type, runtime_linkage
+                        )
                     )
-                else:
+                elif target.os != "android":
                     settings["compiler.libcxx"] = "libstdc++11"
             elif "msvc" in compiler_name:
                 settings["compiler"] = "msvc"
-                settings.update(self._msvc_runtime_settings(build_type))
+                settings.update(
+                    self._msvc_runtime_settings(build_type, runtime_linkage)
+                )
         else:
             # Default to system compiler detection
-            if self._platform.is_macos:
+            if target.is_macos:
                 settings["compiler"] = "apple-clang"
                 settings["compiler.libcxx"] = "libc++"
-            elif self._platform.is_linux:
+            elif target.is_linux:
                 settings["compiler"] = "gcc"
                 settings["compiler.libcxx"] = "libstdc++11"
 
@@ -272,7 +377,7 @@ class ConanFinder(BaseFinder):
         return settings
 
     def _windows_clang_settings(
-        self, compiler_cmd: str | None, build_type: str
+        self, compiler_cmd: str | None, build_type: str, runtime_linkage: str
     ) -> dict[str, str]:
         """Settings for clang on Windows: the MSVC runtime it links against.
 
@@ -293,20 +398,21 @@ class ConanFinder(BaseFinder):
                 target,
             )
             return {"compiler.libcxx": "libstdc++11"}
-        settings = self._msvc_runtime_settings(build_type)
+        settings = self._msvc_runtime_settings(build_type, runtime_linkage)
         settings["compiler.runtime_version"] = self._conan_runtime_version(
             find_msvc_toolset_version()
         )
         return settings
 
     @staticmethod
-    def _msvc_runtime_settings(build_type: str) -> dict[str, str]:
+    def _msvc_runtime_settings(build_type: str, runtime_linkage: str) -> dict[str, str]:
         """The runtime settings Conan 2 requires for msvc, and for clang
-        targeting MSVC. pcons links the dynamic CRT (/MD, /MDd); the debug
-        vs. release runtime follows the build type.
+        targeting MSVC: the C runtime pcons builds with, dynamic unless the
+        environment's runtime linkage is static, with the debug vs. release
+        runtime following the build type.
         """
         return {
-            "compiler.runtime": "dynamic",
+            "compiler.runtime": "static" if runtime_linkage == "static" else "dynamic",
             "compiler.runtime_type": "Debug" if build_type == "Debug" else "Release",
         }
 
@@ -348,10 +454,11 @@ class ConanFinder(BaseFinder):
 
     @staticmethod
     def _infer_cppstd(env: Any) -> str | None:
-        """Infer C++ standard from environment flags.
+        """The C++ standard *env* compiles with.
 
-        Parses -std=c++XX (GCC/Clang) or /std:c++XX (MSVC) from
-        env.cxx.flags to determine the C++ standard version.
+        The one ``env.cxx.set_standard()`` asked for, else one parsed from
+        a -std=c++XX (GCC/Clang) or /std:c++XX (MSVC) in env.cxx.flags,
+        which a script may have added by hand.
 
         Args:
             env: Environment with cxx.flags, or None.
@@ -361,6 +468,13 @@ class ConanFinder(BaseFinder):
         """
         if env is None:
             return None
+        asked = [
+            i.args[0]
+            for i in getattr(env, "_intents", ())
+            if i.kind == "setting" and i.name == "cxx.standard"
+        ]
+        if asked:
+            return str(asked[-1])
         cxx_config = getattr(env, "cxx", None)
         if cxx_config is None:
             return None
@@ -414,7 +528,7 @@ class ConanFinder(BaseFinder):
         Args:
             compiler: Compiler name (gcc, clang, apple-clang, msvc).
             compiler_cmd: The actual command to invoke, e.g. from
-                ``_get_toolchain_compiler_cmd`` — this must match what
+                ``Toolchain.tool_command`` — this must match what
                 [buildenv] CC/CXX use, so profile detection doesn't run a
                 bare "gcc"/"clang" off PATH while the build itself uses a
                 different, toolchain-selected compiler. Falls back to a
@@ -520,34 +634,53 @@ class ConanFinder(BaseFinder):
         """Generate or update Conan profile from pcons settings.
 
         Args:
-            toolchain: Toolchain to use for compiler settings.
-            env: Environment for additional settings (optional).
+            toolchain: Toolchain to use for compiler settings. Left out,
+                it's *env*'s C/C++ toolchain: the one whose ``cxx`` (else
+                ``cc``) the environment compiles with, which in a mixed
+                environment needn't be its primary toolchain. With neither,
+                the settings are the platform's usual compiler.
+            env: The environment the dependencies are for: the profile
+                follows its compilers, variant, C++ standard and the
+                platform it builds for, a cross preset's included.
             build_type: Build type (Release, Debug, etc.). Left out, it
                 follows *env*'s variant: ``debug`` is Debug, the release
                 flavors are Release, ``relwithdebinfo`` and ``minsizerel``
                 their Conan names; no environment or variant means Release.
             cppstd: C++ standard (e.g., "17", "20", "23"). Sets
                 compiler.cppstd in the profile. Many Conan packages
-                require this. If not provided, inferred from
-                env.cxx.flags if a -std=c++XX or /std:c++XX flag
-                is present.
+                require this. If not provided, it's the standard the
+                script set with ``env.cxx.set_standard()``, else one
+                read from a -std=c++XX or /std:c++XX in env.cxx.flags.
 
         Returns:
             Path to the generated profile.
         """
         self.output_folder.mkdir(parents=True, exist_ok=True)
 
-        cc_cmd = cxx_cmd = None
-        if toolchain is not None:
-            cc_cmd = self._get_toolchain_compiler_cmd(toolchain, "cc")
-            cxx_cmd = self._get_toolchain_compiler_cmd(toolchain, "cxx")
+        if toolchain is None and env is not None:
+            toolchain = next(
+                (env.toolchain_for(t) for t in ("cxx", "cc") if env.has_tool(t)),
+                None,
+            )
+
+        cc_cmd = self._compiler_cmd(toolchain, env, "cc")
+        cxx_cmd = self._compiler_cmd(toolchain, env, "cxx")
 
         lines: list[str] = []
         lines.append("[settings]")
 
         if build_type is None:
             build_type = self.build_type_for(env)
-        settings = self._detect_compiler_settings(toolchain, build_type)
+        target = getattr(env, "target", None) or self._platform
+        cross = getattr(env, "cross", None)
+        settings = self._detect_compiler_settings(
+            toolchain,
+            build_type,
+            env.runtime_linkage if env is not None else "shared",
+            compiler_cmd=cc_cmd or cxx_cmd,
+            target=target,
+        )
+        settings.update(self._platform_settings(target, cross))
         settings["build_type"] = build_type
 
         # Explicit parameter wins, then infer from env
@@ -557,6 +690,14 @@ class ConanFinder(BaseFinder):
 
         # Custom settings can override anything above
         settings.update(self._profile_settings)
+        if cross is not None and not {"os", "arch"} <= settings.keys():
+            raise PconsValueError(
+                f"Conan can't build dependencies for cross preset "
+                f"'{getattr(cross, 'name', cross)}': pcons doesn't know its "
+                f"Conan os and arch. Give them with "
+                f'set_profile_setting("os", ...) and '
+                f'set_profile_setting("arch", ...) before sync_profile().'
+            )
 
         for key, value in sorted(settings.items()):
             lines.append(f"{key}={value}")
@@ -575,7 +716,11 @@ class ConanFinder(BaseFinder):
             for key, value in sorted(buildenv.items()):
                 lines.append(f"{key}={value}")
 
-        conf = {**self._default_conf(settings, cc_cmd, cxx_cmd), **self._profile_conf}
+        conf = {
+            **self._default_conf(settings, cc_cmd, cxx_cmd),
+            **self._cross_conf(toolchain, cross),
+            **self._profile_conf,
+        }
         if conf:
             lines.append("")
             lines.append("[conf]")
@@ -611,29 +756,49 @@ class ConanFinder(BaseFinder):
             conf["tools.build:compiler_executables"] = executables
         return conf
 
-    def _get_toolchain_compiler_cmd(
-        self, toolchain: Toolchain, tool_name: str
-    ) -> str | None:
-        """Get compiler command from toolchain.
+    #: The conf entry that carries each tool's flags into Conan's builds.
+    _FLAG_CONFS: ClassVar[dict[str, tuple[str, ...]]] = {
+        "cc": ("tools.build:cflags",),
+        "cxx": ("tools.build:cxxflags",),
+        "link": ("tools.build:exelinkflags", "tools.build:sharedlinkflags"),
+    }
 
-        Args:
-            toolchain: Toolchain to query.
-            tool_name: Tool name ("cc" for C compiler, "cxx" for C++ compiler).
+    @classmethod
+    def _cross_conf(cls, toolchain: Toolchain | None, cross: Any) -> dict[str, Any]:
+        """Conf entries that build dependencies for cross target *cross*.
 
-        Returns:
-            Compiler command string, or None if not found.
+        The flags *toolchain* compiles and links with for that target
+        (--target, --sysroot and the preset's own), so a clang the
+        dependencies build with makes code for the same machine; and the
+        NDK, which Conan builds Android packages with.
         """
-        if hasattr(toolchain, "tools"):
-            tools_dict = toolchain.tools
-            if tool_name in tools_dict:
-                tool = tools_dict[tool_name]
-                default_vars_method = getattr(tool, "default_vars", None)
-                if callable(default_vars_method):
-                    defaults = default_vars_method()
-                    cmd = defaults.get("cmd")
-                    if cmd:
-                        return str(cmd)
-        return None
+        if cross is None or toolchain is None:
+            return {}
+        conf: dict[str, Any] = {}
+        for contribution in toolchain.make_target_preset(cross).contributions:
+            for key in cls._FLAG_CONFS.get(contribution.tool, ()):
+                conf.setdefault(key, []).extend(str(f) for f in contribution.flags)
+        conf = {key: flags for key, flags in conf.items() if flags}
+        ndk = getattr(cross, "ndk", None)
+        if ndk:
+            conf["tools.android:ndk_path"] = ndk
+        return conf
+
+    def _compiler_cmd(
+        self, toolchain: Toolchain | None, env: Any, tool_name: str
+    ) -> str | None:
+        """The command *toolchain*'s *tool_name* compiles with: the
+        environment's, which already follows $CC/$CXX and the script, when
+        that tool is the toolchain's there; else the toolchain's own."""
+        if (
+            env is not None
+            and env.has_tool(tool_name)
+            and env.toolchain_for(tool_name) is toolchain
+        ):
+            return str(getattr(env, tool_name).cmd)
+        if toolchain is None:
+            return None
+        return toolchain.tool_command(tool_name)
 
     def _compute_cache_key(self) -> str:
         """Compute a hash for caching purposes.
@@ -645,8 +810,9 @@ class ConanFinder(BaseFinder):
         if self.conanfile.exists():
             hasher.update(self.conanfile.read_bytes())
 
-        if self.profile_path.exists():
-            hasher.update(self.profile_path.read_bytes())
+        for profile in (self.profile_path, self.build_profile_path):
+            if profile.exists():
+                hasher.update(profile.read_bytes())
 
         hasher.update(str(self.build_missing).encode())
 
@@ -687,12 +853,26 @@ class ConanFinder(BaseFinder):
             RuntimeError: If conan is not available or install fails.
         """
         if not self.is_available():
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 "Conan is not available. Please install it: pip install conan"
             )
 
         if conanfile is not None:
             self.conanfile = Path(conanfile)
+
+        if not self.profile_path.exists():
+            self.sync_profile()
+        if not self.build_profile_path.exists():
+            # Conan's description of this machine and its usual compiler.
+            # Detected once per output folder: a clean build detects again.
+            detect = self._run_conan(
+                "profile", "detect", f"--name={self.build_profile_path}", check=False
+            )
+            if detect.returncode != 0:
+                raise PconsRuntimeError(
+                    f"Conan couldn't detect a profile for this machine:\n"
+                    f"{detect.stderr}"
+                )
 
         # A stale cache key whose .pc files were deleted out from under it
         # must not be treated as valid — fall through to a real install
@@ -702,36 +882,25 @@ class ConanFinder(BaseFinder):
             if packages:
                 return packages
 
-        if not self.profile_path.exists():
-            self.sync_profile()
-
-        self.output_folder.mkdir(parents=True, exist_ok=True)
-
-        # --profile:host and --profile:build avoid requiring a default profile
-        cmd: list[str] = [
-            *self.conan_cmd,
+        # Both profiles are files of ours, so no default profile is needed.
+        args = [
             "install",
             str(self.conanfile),
             f"--profile:host={self.profile_path}",
-            f"--profile:build={self.profile_path}",
+            f"--profile:build={self.build_profile_path}",
             "-g",
             "PkgConfigDeps",
             f"--output-folder={self.output_folder}",
         ]
-
         if self.build_missing:
-            cmd.append("--build=missing")
+            args.append("--build=missing")
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_conan(*args, check=False)
 
         if result.returncode != 0:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Conan install failed:\n"
-                f"Command: {' '.join(cmd)}\n"
+                f"Command: {shlex.join([*self.conan_cmd, *args])}\n"
                 f"Stdout: {result.stdout}\n"
                 f"Stderr: {result.stderr}"
             )
@@ -740,7 +909,7 @@ class ConanFinder(BaseFinder):
 
         packages = self._parse_pkgconfig_files()
         if not packages:
-            raise RuntimeError(
+            raise PconsRuntimeError(
                 f"Conan install succeeded but no packages were parsed. "
                 f"No .pc files found under {self.output_folder}. "
                 f"Check that the conanfile declares dependencies and that "
@@ -754,29 +923,12 @@ class ConanFinder(BaseFinder):
         Conan fully controls these files, so they are parsed directly
         rather than via a system pkg-config, whose presence and
         implementation vary (e.g. Strawberry Perl's fails to resolve
-        transitive Requires). Searches cmake_layout subfolders if no .pc
-        files are in the main output folder.
+        transitive Requires), from ``pkgconfig_dir``.
 
         Returns:
             Dict mapping package names to PackageDescription objects.
         """
-        # Find the directory containing .pc files. With cmake_layout their
-        # location depends on whether the CMake generator is single- or
-        # multi-config:
-        #   single-config (Make/Ninja, e.g. gcc):  build/<build_type>/generators/
-        #   multi-config (MSVC/Xcode):              build/generators/
-        # Search recursively rather than enumerating layouts, so any future
-        # layout is handled too. Prefer a directory literally named "generators".
-        pc_dir = self.output_folder
-        if not list(pc_dir.glob("*.pc")):
-            candidates = sorted(
-                {p.parent for p in self.output_folder.rglob("*.pc")},
-                key=lambda d: (d.name != "generators", str(d)),
-            )
-            if candidates:
-                pc_dir = candidates[0]
-
-        return self._parse_pc_files_manually(pc_dir)
+        return self._parse_pc_files_manually(self.pkgconfig_dir)
 
     def _parse_pc_files_manually(
         self, pc_dir: Path | None = None

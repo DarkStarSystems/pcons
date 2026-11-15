@@ -160,6 +160,14 @@ class TestMissingSwappedArguments:
         with pytest.raises(TypeError):
             project.Program(env, sources=["src/main.c"])
 
+    def test_program_name_and_env_swapped(self, project_env):
+        """User passes both, in the wrong order: pcons says which goes where."""
+        project, env = project_env
+        with pytest.raises(
+            PconsError, match='got an Environment. Use Program\\("name", env'
+        ):
+            project.Program(env, "app", sources=["src/main.c"])
+
     def test_project_no_name(self):
         """User forgets to name the project."""
         with pytest.raises(TypeError):
@@ -191,6 +199,20 @@ class TestTyposAndMisspellings:
         _, env = project_env
         with pytest.raises(AttributeError, match="Tool"):
             _ = env.ccx
+
+    def test_typo_target_option(self, project_env):
+        """A misspelled option would do nothing, so reading one is an error too."""
+        project, env = project_env
+        app = project.Program("app", env, sources=["src/main.c"])
+        with pytest.raises(PconsError, match="Unknown target option 'build_rpth'"):
+            app.get_option("build_rpth")
+
+    def test_assigning_sources(self, project_env):
+        """`target.sources = [...]` would drop the sources it already has."""
+        project, env = project_env
+        app = project.Program("app", env, sources=["src/main.c"])
+        with pytest.raises(PconsError, match="add_sources"):
+            app.sources = ["src/lib.c"]
 
     def test_typo_usage_requirement_name_raises(self, project_env):
         """A typo in a usage-requirement name is an error.
@@ -298,6 +320,13 @@ class TestWrongApiOrder:
 
 class TestPathErrors:
     """Users making path-related mistakes."""
+
+    def test_a_path_used_as_a_directory_and_a_file(self, project_env):
+        """One path is one node, so it can't be both."""
+        project, _ = project_env
+        project.dir_node("assets")
+        with pytest.raises(PconsError, match="registered as DirNode, not FileNode"):
+            project.node("assets")
 
     def test_nonexistent_source_file(self, project_env):
         """User references a source file that doesn't exist."""

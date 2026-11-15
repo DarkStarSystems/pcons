@@ -159,6 +159,20 @@
     }
     .copy-btn:hover { border-color: var(--teal); color: #e2e8f0; }
 
+    /* Screenshot */
+    .screenshot {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 0 1.5rem 1rem;
+    }
+    .screenshot img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.18);
+    }
+
     /* Sections */
     section {
       max-width: var(--max-width);
@@ -376,6 +390,13 @@
     </div>
   </div>
 
+  <div class="screenshot">
+    <a href="pcons-screenshot.webp">
+      <img src="pcons-screenshot.webp" width="2104" height="1528"
+           alt="A pcons-build.py script and C++ source beside a terminal: uvx pcons builds a static library and a program, the program runs, pcons explain shows where each flag came from, and a second build has no work to do.">
+    </a>
+  </div>
+
   <!-- Features -->
   <section id="features">
     <h2 class="section-title">Why pcons?</h2>
@@ -411,7 +432,7 @@
   <!-- Examples -->
   <section id="examples">
     <h2 class="section-title">Simple and expressive</h2>
-    <p class="section-subtitle">Real build scripts from the pcons examples. There are <a href="https://github.com/DarkStarSystems/pcons/tree/main/examples">66 of them</a>, and every one is built and verified on Linux, macOS and Windows on every commit.</p>
+    <p class="section-subtitle">Real build scripts from the pcons examples. There are <a href="https://github.com/DarkStarSystems/pcons/tree/main/examples">nearly 100 of them</a>, and every one is built and verified on Linux, macOS and Windows on every commit.</p>
     <div class="code-section">
       <div>
         <div class="code-block">
