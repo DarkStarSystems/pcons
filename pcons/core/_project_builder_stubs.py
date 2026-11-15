@@ -45,10 +45,15 @@ if TYPE_CHECKING:
             version: str,
             publisher: str,
             sources: Sequence[Target | FileNode | Path | str],
+            executable: str | None = None,
             output: str | Path | None = None,
+            depends: Sequence[Target] | None = None,
             display_name: str | None = None,
             description: str | None = None,
+            icon: Target | Path | str | None = None,
             processor_architecture: str = 'x64',
+            sign_cert: Path | None = None,
+            sign_password_env: str | None = None,
         ) -> Target:
             """Create a Windows AppX package (legacy MSIX format) [win32 only]"""
             ...
@@ -221,6 +226,7 @@ if TYPE_CHECKING:
             depends: Sequence[Target] | None = None,
             display_name: str | None = None,
             description: str | None = None,
+            icon: Target | Path | str | None = None,
             processor_architecture: str = 'x64',
             sign_cert: Path | None = None,
             sign_password_env: str | None = None,

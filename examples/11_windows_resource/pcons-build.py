@@ -1,8 +1,8 @@
 """Build script demonstrating Windows resource file compilation.
 
 This example shows how to compile Windows resource files (.rc) along with
-C source files using the MSVC toolchain. The resource file contains version
-information that gets embedded into the executable.
+C source files using the MSVC toolchain. The resource file holds the
+program's icon and version information, both embedded into the executable.
 
 Windows-only: requires MSVC toolchain.
 """

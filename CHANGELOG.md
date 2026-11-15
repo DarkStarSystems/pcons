@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MSIX packages can have an icon.** `create_msix(icon=...)` takes a square
+  `.png`, or an `.ico` whose largest PNG entry is used, and stages it as the
+  package's logos. Windows shows them in the Start menu and on the taskbar.
+  Previously every package had a blank 1x1 placeholder icon. The user guide
+  now explains how this icon differs from the `.exe`'s own icon, which comes
+  from a `.rc` file. Examples 11 and 19 show both.
+
+### Fixed
+
+- `create_msix(processor_architecture=...)` reaches the package manifest;
+  every package used to claim `x64`.
+- `create_appx()` takes every `create_msix()` option (`executable`,
+  `depends`, `icon`, signing), and a signed AppX package is named
+  `.signed.appx`, not `.signed.msix`.
+- `python -m pcons._gen_stubs` writes LF line endings on Windows too.
+
 ## [0.30.0] - 2026-09-27
 
 Big release this time! You can write builders as Python functions

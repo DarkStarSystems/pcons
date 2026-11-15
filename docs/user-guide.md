@@ -3967,6 +3967,7 @@ msix = windows.create_msix(
     display_name="My Application",
     description="A great application",
     executable="myapp.exe",
+    icon="myapp.ico",
 )
 ```
 
@@ -3979,9 +3980,36 @@ msix = windows.create_msix(
 | `executable` | Main executable name (defaults to first source) |
 | `display_name` | User-visible name |
 | `description` | Package description |
+| `icon` | The package's icon: a square `.png`, or an `.ico` whose largest PNG entry is used (see below). Without one, the icon is blank |
 | `processor_architecture` | `"x64"`, `"x86"`, or `"arm64"` (default: `"x64"`) |
 | `sign_cert` | Path to `.pfx` certificate for signing |
 | `sign_password_env` | Name of an environment variable holding the certificate password (not the password itself, so it's never baked into `build.ninja`) |
+
+`create_appx()` takes the same parameters and defaults to an `.appx` output.
+
+**Icons.** A Windows program has two icons, and each has its own source:
+
+- *The package's icon* is the one Windows shows in the Start menu, on the
+  taskbar and in the installer. It comes from the PNG logos listed in the
+  package manifest, which `icon=` supplies. Give a square image of 256px or
+  more; Windows scales it down. An `.ico` works if it has a PNG entry, as
+  icons saved by modern editors do for their 256px image. Its largest PNG
+  is used, and an `.ico` with no PNG entry is an error, since its bitmaps
+  are at most 48px. A path is read from the build script's directory, and a
+  `Target` that produces the image works too.
+- *The executable's own icon* is the one Explorer shows for the `.exe` file.
+  It is a resource compiled into the program from a `.rc` file:
+
+  ```c
+  IDI_APP ICON "myapp.ico"   // read relative to the .rc file
+  ```
+
+  Add the `.rc` file to the program's sources (see
+  `examples/11_windows_resource`). The resource compiler reports no
+  dependencies, so after changing only the `.ico`, rebuild the `.res`
+  (for instance by touching the `.rc` file).
+
+One `.ico` can serve both.
 
 #### Complete Platform-Conditional Example
 

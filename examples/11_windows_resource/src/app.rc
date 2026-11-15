@@ -1,5 +1,9 @@
-// Windows resource file for version information
+// Windows resource file: the program's icon and version information
 #include <winver.h>
+
+// The first icon resource is the one Explorer and the taskbar show.
+// The file is read relative to this .rc file.
+IDI_APP ICON "app.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION 1,0,0,0

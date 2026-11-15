@@ -14,11 +14,12 @@ expected_outputs_darwin = [
     "build/.pkg_staging/HelloApp/resources/readme.txt",
 ]
 
-# Windows: expect the MSIX installer to be built
+# Windows: expect the MSIX installer, with the icon staged as its logos
 expected_outputs_windows = [
     "build/obj.hello/src/main.c.obj",
     "build/hello.exe",
     "build/HelloApp-1.0.0.0.msix",
+    "build/.msix_staging/HelloApp/Assets/Square44x44Logo.png",
 ]
 
 # Linux: just the program (no installer support yet)
