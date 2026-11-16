@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Inno Setup installers.** `windows.create_inno_setup()` (or
+  `project.InnoSetup()`) compiles an Inno Setup script into a setup `.exe`
+  as a build step. It stages `sources` for the script as `{#StagingDir}`,
+  passes `defines` as `{#Name}` (files as absolute paths, tracked as
+  inputs), and decides the output's name. Inno Setup installs where MSIX
+  can't, such as plugin folders other programs share. See
+  `examples/100_inno_setup`.
 - **MSIX packages can have an icon.** `create_msix(icon=...)` takes a square
   `.png`, or an `.ico` whose largest PNG entry is used, and stages it as the
   package's logos. Windows shows them in the Start menu and on the taskbar.

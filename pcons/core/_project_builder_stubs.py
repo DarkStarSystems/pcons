@@ -151,6 +151,20 @@ if TYPE_CHECKING:
             """Create a header-only (interface) library target."""
             ...
 
+        def InnoSetup(
+            self,
+            env: Env,
+            *,
+            name: str,
+            script: Path | str,
+            sources: Sequence[Target | FileNode | Path | str] = (),
+            defines: Mapping[str, str | Path | Target | FileNode] | None = None,
+            output: str | Path | None = None,
+            depends: Sequence[Target | Path | str] | None = None,
+        ) -> Target:
+            """Compile an Inno Setup script into a Windows setup program [win32 only]"""
+            ...
+
         def Install(
             self,
             dest_dir: Path | str,

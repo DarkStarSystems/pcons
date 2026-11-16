@@ -3,7 +3,7 @@
 
 This package provides helpers for creating platform-native installers:
 - macOS: .pkg installers and .dmg disk images
-- Windows: .msix and .msi installers (future)
+- Windows: .msix packages and Inno Setup .exe installers
 - Linux: .deb and .rpm packages (future)
 
 Usage:
@@ -28,7 +28,7 @@ Usage:
 
 Available modules:
     - macos: macOS .pkg and .dmg creation
-    - windows: Windows MSIX and MSI creation (future)
+    - windows: Windows MSIX packages and Inno Setup installers
     - linux: Linux .deb and .rpm creation (future)
 """
 

@@ -1,0 +1,30 @@
+# Test configuration for the Inno Setup example
+
+[test]
+description = "A Windows installer compiled by Inno Setup from a script, packing the program it builds"
+
+expected_outputs = [
+    "build/hello.exe",
+    "build/.inno_staging/Hello/hello.exe",
+    "build/Hello-1.0.0-setup.exe",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello.exe", expect_stdout = "Hello from an Inno Setup installer!" },
+]
+
+[[rebuild]]
+description = "Nothing changed: the installer is the file the build declares"
+expect_no_work = true
+
+[[rebuild]]
+description = "The installer rebuilds when a file its script reads changes"
+touch = "readme.txt"
+expect_rebuild = ["Hello-1.0.0-setup.exe"]
+
+[skip]
+# Inno Setup is Windows-only; CI puts its ISCC.exe on PATH.
+platforms = ["linux", "darwin"]
+requires = ["ISCC"]
+generators = ["xcode"]

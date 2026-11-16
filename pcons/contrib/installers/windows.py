@@ -3,6 +3,7 @@
 
 This module provides functions for creating Windows installers:
 - create_msix(): Create .msix packages using MakeAppx.exe
+- create_inno_setup(): Compile an Inno Setup script into a setup .exe
 
 These functions integrate with the pcons build system, generating proper
 ninja rules with dependencies for incremental builds.
@@ -10,6 +11,7 @@ ninja rules with dependencies for incremental builds.
 Requirements:
     - MakeAppx.exe (included with Windows SDK)
     - SignTool.exe for signing (included with Windows SDK)
+    - ISCC.exe for Inno Setup (https://jrsoftware.org/isinfo.php)
 
 Example:
     from pcons.contrib.installers import windows
@@ -26,8 +28,9 @@ Example:
 
 from __future__ import annotations
 
+import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -36,6 +39,7 @@ from pcons.contrib.installers._helpers import (
     as_installer_step,
     staging_dir,
 )
+from pcons.core.errors import PconsValueError
 from pcons.core.paths import last_component
 
 if TYPE_CHECKING:
@@ -357,4 +361,140 @@ def create_appx(
         processor_architecture=processor_architecture,
         sign_cert=sign_cert,
         sign_password_env=sign_password_env,
+    )
+
+
+def _find_iscc() -> str | None:
+    """Find Inno Setup's compiler, ISCC.exe: on PATH, else where its
+    installer puts it, for all users or (as winget does) just one. The
+    newest version wins."""
+    import shutil
+
+    if path := shutil.which("ISCC"):
+        return path
+    roots = [
+        os.environ.get("ProgramFiles(x86)"),
+        os.environ.get("ProgramFiles"),
+        os.environ.get("LOCALAPPDATA") and Path(os.environ["LOCALAPPDATA"], "Programs"),
+    ]
+    for root in filter(None, roots):
+        found = sorted(Path(root).glob("Inno Setup */ISCC.exe"), reverse=True)
+        if found:
+            return str(found[0])
+    return None
+
+
+def create_inno_setup(
+    project: Project,
+    env: Environment,
+    *,
+    name: str,
+    script: Path | str,
+    sources: Sequence[Target | FileNode | Path | str] = (),
+    defines: Mapping[str, str | Path | Target | FileNode] | None = None,
+    output: str | Path | None = None,
+    depends: Sequence[Target | Path | str] | None = None,
+) -> Target:
+    """Compile an Inno Setup script into a setup program with ISCC.exe.
+
+    Inno Setup builds a single ``.exe`` that installs files anywhere,
+    including shared folders other programs read, such as plugin folders
+    under Common Files, which an MSIX package can't reach. The script
+    (``.iss``) describes the installer; this runs the compiler on it as a
+    build step and tells it what to pack.
+
+    ``sources`` are staged into one directory, which the script reads as
+    ``{#StagingDir}``::
+
+        [Files]
+        Source: "{#StagingDir}\\*"; DestDir: "{app}"; Flags: recursesubdirs
+
+    Each of ``defines`` is passed as ``/D<name>=<value>``, read in the
+    script as ``{#<name>}``. Inno Setup reads other relative paths in the
+    script (``SetupIconFile``, ``LicenseFile``, ``#include``) from the
+    script's own directory, as usual.
+
+    Args:
+        project: Pcons project.
+        env: Configured environment.
+        name: The installer's name, for its staging directory and its
+            default output.
+        script: The ``.iss`` script, read from the build script's directory.
+        sources: Files or directories to stage for the script to pack
+            (Targets or paths). A directory source stages as a
+            subdirectory. Without any, ``StagingDir`` is not defined.
+        defines: Preprocessor values for the script. A ``str`` is passed
+            as written. A ``Path`` (read from the build script's
+            directory), ``Target`` or ``FileNode`` is a file the script
+            reads, passed as an absolute path and tracked as an input, so
+            changing it rebuilds the installer.
+        output: The setup program, written like ``target=``. It must end
+            in ``.exe``; this decides the script's ``OutputDir`` and
+            ``OutputBaseFilename``. Defaults to ``<name>-setup.exe`` in
+            the build directory.
+        depends: Other inputs: files the script reads by itself
+            (``#include`` files, icons, license text), so changing them
+            rebuilds the installer, and Targets to build before staging,
+            for a directory source that other targets populate.
+
+    Returns:
+        Target representing the setup program.
+
+    Raises:
+        ToolNotFoundError: If ISCC.exe is not found.
+        ValueError: If ``output`` doesn't end in ``.exe``.
+    """
+    iscc = _find_iscc()
+    if iscc is None:
+        from pcons.contrib.installers._helpers import ToolNotFoundError
+
+        raise ToolNotFoundError(
+            "ISCC.exe",
+            "Install Inno Setup: https://jrsoftware.org/isinfo.php "
+            "(or winget install JRSoftware.InnoSetup)",
+        )
+
+    output = Path(output) if output is not None else Path(f"{name}-setup.exe")
+    if output.suffix.lower() != ".exe":
+        raise PconsValueError(
+            f"create_inno_setup: output must be an .exe, not {output}"
+        )
+
+    depends = list(depends or ())
+    define_args: list[str | Path | Target | FileNode] = []
+    if sources:
+        staging = staging_dir(env, "inno", name)
+        stage_target = project.Install(staging, sources, no_prefix=True, env=env)
+        stage_target.depends(*(d for d in depends if not isinstance(d, (Path, str))))
+        depends.append(stage_target)
+        define_args += ["--define-path", "StagingDir", staging]
+    for key, value in (defines or {}).items():
+        if isinstance(value, str):
+            # Written as given: a "$" is the script's, not a pcons variable.
+            define_args += ["--define", key, value.replace("$", "$$")]
+        else:
+            define_args += ["--define-path", key, value]
+            if isinstance(value, Path):  # nodes are inputs already
+                depends.append(value)
+
+    return as_installer_step(
+        env.Command(
+            target=env.build_dir / output,
+            source=[script],
+            command=[
+                sys.executable.replace("\\", "/"),
+                "-m",
+                "pcons.contrib.installers._helpers",
+                "run_iscc",
+                "--iscc",
+                iscc,
+                "--script",
+                "$SOURCE",
+                "--output",
+                "$TARGET",
+                *define_args,
+            ],
+            depends=depends,
+        ),
+        by="create_inno_setup",
     )

@@ -4263,6 +4263,60 @@ msix = windows.create_msix(
 
 One `.ico` can serve both.
 
+#### Windows: Inno Setup Installers
+
+[Inno Setup](https://jrsoftware.org/isinfo.php) builds a single setup
+`.exe` from a script (`.iss`) that says what to install where. Unlike an
+MSIX package, it can install into folders that other programs share, such
+as plugin folders under `Program Files\Common Files`, and it runs Pascal
+code for checks of its own. `create_inno_setup()` compiles the script with
+Inno Setup's `ISCC.exe` (found on `PATH` or where Inno Setup installs) as a
+build step:
+
+```python
+from pathlib import Path
+from pcons.contrib.installers import windows
+
+setup = windows.create_inno_setup(
+    project,
+    env,
+    name="MyApp",
+    script="myapp.iss",
+    sources=[app],
+    defines={"Version": "1.0.0", "Readme": Path("readme.txt")},
+    depends=["myapp.ico"],
+    output="MyApp-1.0.0-setup.exe",
+)
+```
+
+The script reads `sources`, staged into one directory, as `{#StagingDir}`,
+and each of `defines` as `{#Name}`:
+
+```ini
+[Setup]
+AppName=MyApp
+AppVersion={#Version}
+DefaultDirName={autopf}\MyApp
+InfoBeforeFile={#Readme}
+SetupIconFile=myapp.ico
+
+[Files]
+Source: "{#StagingDir}\*"; DestDir: "{app}"; Flags: recursesubdirs
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `name` | The installer's name, for its staging directory and default output |
+| `script` | The `.iss` script |
+| `sources` | Files or directories to stage, read in the script as `{#StagingDir}` |
+| `defines` | Values for the script, read as `{#Name}`. A `str` is passed as written; a `Path`, `Target` or `FileNode` is a file, passed as an absolute path and tracked as an input |
+| `output` | The setup `.exe`, which decides the script's `OutputDir` and `OutputBaseFilename` (default: `<name>-setup.exe`) |
+| `depends` | Files the script reads by itself (`#include` files, icons, license text), and Targets to build before staging |
+
+Inno Setup reads relative paths in the script, such as `SetupIconFile`,
+from the script's own directory, so list those files in `depends` to
+rebuild the installer when they change. See `examples/100_inno_setup`.
+
 #### Complete Platform-Conditional Example
 
 ```python
