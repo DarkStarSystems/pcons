@@ -22,6 +22,7 @@ import shutil
 import struct
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -342,6 +343,32 @@ def sign_msix(
     subprocess.run(sign_args, check=True)
 
 
+def run_iscc(
+    iscc: str,
+    script: Path,
+    output: Path,
+    defines: Sequence[tuple[str, str]] = (),
+    path_defines: Sequence[tuple[str, Path]] = (),
+) -> None:
+    """Compile an Inno Setup script into ``output``, a setup ``.exe``.
+
+    ``path_defines`` are passed absolute, as are the script and output
+    directory: Inno Setup reads relative paths from the script's
+    directory, not from where it runs.
+    """
+    output = output.absolute()
+    args = [
+        iscc,
+        "/Q",
+        f"/O{output.parent}",
+        f"/F{output.stem}",
+        *(f"/D{key}={value}" for key, value in defines),
+        *(f"/D{key}={path.absolute()}" for key, path in path_defines),
+        str(script.absolute()),
+    ]
+    subprocess.run(args, check=True)
+
+
 #: The logo files AppxManifest.xml lists, relative to the package root.
 #: Each is staged from the same image; Windows scales it to each use.
 MSIX_LOGOS = (
@@ -508,6 +535,30 @@ def main() -> int:
         help="Environment variable holding the certificate password",
     )
 
+    # run_iscc command
+    iscc_parser = subparsers.add_parser(
+        "run_iscc", help="Compile an Inno Setup script into a setup .exe"
+    )
+    iscc_parser.add_argument("--iscc", required=True, help="Path to ISCC.exe")
+    iscc_parser.add_argument("--script", required=True, help="The .iss script")
+    iscc_parser.add_argument("--output", required=True, help="The setup .exe")
+    iscc_parser.add_argument(
+        "--define",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("NAME", "VALUE"),
+        help="A preprocessor value, as written (can be repeated)",
+    )
+    iscc_parser.add_argument(
+        "--define-path",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("NAME", "PATH"),
+        help="A preprocessor value, made an absolute path (can be repeated)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "gen_plist":
@@ -552,6 +603,15 @@ def main() -> int:
             signtool=args.signtool,
             cert=Path(args.cert),
             password_env=args.password_env,
+        )
+
+    elif args.command == "run_iscc":
+        run_iscc(
+            args.iscc,
+            Path(args.script),
+            Path(args.output),
+            defines=[(key, value) for key, value in args.define],
+            path_defines=[(key, Path(value)) for key, value in args.define_path],
         )
 
     return 0

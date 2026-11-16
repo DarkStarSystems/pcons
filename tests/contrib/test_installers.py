@@ -1212,3 +1212,143 @@ class TestMsixIcon:
         assert [s.path.name for s in logos["sources"]] == ["app.png"]
         manifest = self._step(project, "AppxManifest.xml")["command"]
         assert manifest[manifest.index("--processor-architecture") + 1] == "arm64"
+
+
+class TestInnoSetup:
+    """Tests for windows.create_inno_setup's build graph and the run_iscc
+    step (platform-independent: ISCC.exe itself is mocked)."""
+
+    @staticmethod
+    def _installer(tmp_path: Path, monkeypatch, **options) -> tuple[Project, Target]:
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_iscc", lambda: "/fake/ISCC.exe")
+        monkeypatch.chdir(tmp_path)
+        for name in ("setup.iss", "app.exe", "readme.txt", "app.ico"):
+            (tmp_path / name).write_text(name)
+        project = Project("test_inno", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        setup = windows.create_inno_setup(
+            project, env, name="App", script="setup.iss", **options
+        )
+        return project, setup
+
+    @staticmethod
+    def _ninja(project: Project) -> str:
+        from pcons.generators.generator import BaseGenerator
+        from pcons.generators.ninja import NinjaGenerator
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        # One statement per line, in one form of separator.
+        ninja = (project.build_dir / "build.ninja").read_text()
+        return ninja.replace("$\n", "").replace("\\", "/")
+
+    def _edge(self, project: Project, produces: str) -> str:
+        """The ninja build statement that writes ``produces``."""
+        return next(
+            line
+            for line in self._ninja(project).splitlines()
+            if line.startswith("build ") and produces in line.split(":")[0]
+        )
+
+    def test_default_output(self, tmp_path, monkeypatch) -> None:
+        _, setup = self._installer(tmp_path, monkeypatch)
+
+        assert setup.output_nodes[0].path == Path("build/App-setup.exe")
+        command = setup.output_nodes[0]._build_info["command"]
+        assert isinstance(command[command.index("--script") + 1], SourcePath)
+        assert isinstance(command[command.index("--output") + 1], TargetPath)
+        assert "--define-path" not in command  # nothing staged
+
+    def test_output_must_be_an_exe(self, tmp_path, monkeypatch) -> None:
+        with pytest.raises(ValueError, match=r"\.exe"):
+            self._installer(tmp_path, monkeypatch, output="App.msi")
+
+    def test_sources_stage_for_the_script(self, tmp_path, monkeypatch) -> None:
+        project, setup = self._installer(tmp_path, monkeypatch, sources=["app.exe"])
+
+        command = setup.output_nodes[0]._build_info["command"]
+        at = command.index("--define-path")
+        assert command[at + 1] == "StagingDir"
+        assert Path(command[at + 2].path).parts[-2:] == (".inno_staging", "App")
+        assert ".inno_staging/App/app.exe" in self._edge(project, "App-setup.exe")
+
+    def test_defines(self, tmp_path, monkeypatch) -> None:
+        project, setup = self._installer(
+            tmp_path,
+            monkeypatch,
+            defines={"Version": "1.2.3", "Cost": "$5", "Readme": Path("readme.txt")},
+            depends=["app.ico"],
+        )
+
+        command = setup.output_nodes[0]._build_info["command"]
+        assert command[command.index("Version") - 1 :][:3] == [
+            "--define",
+            "Version",
+            "1.2.3",
+        ]
+        assert command[command.index("Readme") - 1] == "--define-path"
+        edge = self._edge(project, "App-setup.exe")
+        # The script, the files it reads and nothing else are its inputs.
+        inputs = edge.split(":", 1)[1]
+        for name in ("setup.iss", "readme.txt", "app.ico"):
+            assert name in inputs
+        # A "$" in a value reaches the script as written, not as a variable.
+        assert command[command.index("Cost") + 1] == "$5"
+
+    def test_a_target_define_is_an_input(self, tmp_path, monkeypatch) -> None:
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_iscc", lambda: "/fake/ISCC.exe")
+        (tmp_path / "setup.iss").write_text("")
+        project = Project("test_inno", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        readme = env.Command(
+            target="README.txt", source=None, command=["gen", "$TARGET"]
+        )
+        windows.create_inno_setup(
+            project, env, name="App", script="setup.iss", defines={"Readme": readme}
+        )
+
+        assert "README.txt" in self._edge(project, "App-setup.exe").split(":", 1)[1]
+
+    def test_missing_iscc(self, tmp_path, monkeypatch) -> None:
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_iscc", lambda: None)
+        project = Project("test_inno", build_dir=tmp_path / "build")
+        with pytest.raises(_helpers.ToolNotFoundError, match="ISCC"):
+            windows.create_inno_setup(
+                project, project.Environment(), name="App", script="setup.iss"
+            )
+
+    def test_run_iscc_arguments(self, tmp_path, monkeypatch) -> None:
+        """Paths reach ISCC absolute, since it reads relative ones from the
+        script's directory; the output decides /O and /F."""
+        ran: list[list[str]] = []
+        monkeypatch.setattr(
+            _helpers.subprocess, "run", lambda args, check: ran.append(args)
+        )
+        monkeypatch.chdir(tmp_path)
+
+        _helpers.run_iscc(
+            "ISCC.exe",
+            Path("src/setup.iss"),
+            Path("out/App-setup.exe"),
+            defines=[("Version", "1.0")],
+            path_defines=[("StagingDir", Path(".inno_staging/App"))],
+        )
+
+        assert ran == [
+            [
+                "ISCC.exe",
+                "/Q",
+                f"/O{tmp_path / 'out'}",
+                "/FApp-setup",
+                "/DVersion=1.0",
+                f"/DStagingDir={tmp_path / '.inno_staging' / 'App'}",
+                str(tmp_path / "src" / "setup.iss"),
+            ]
+        ]

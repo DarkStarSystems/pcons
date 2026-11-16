@@ -42,7 +42,11 @@ def _register_contrib_builders() -> None:
         create_dmg,
         create_pkg,
     )
-    from pcons.contrib.installers.windows import create_appx, create_msix
+    from pcons.contrib.installers.windows import (
+        create_appx,
+        create_inno_setup,
+        create_msix,
+    )
     from pcons.core.builder_registry import BuilderRegistry
 
     BuilderRegistry.register(
@@ -88,6 +92,15 @@ def _register_contrib_builders() -> None:
         target_type="installer",
         requires_env=True,
         description="Create a Windows AppX package (legacy MSIX format)",
+        platforms=["win32"],
+    )
+    BuilderRegistry.register(
+        "InnoSetup",
+        build_tier="all",  # packaging is a step on products
+        create_target=create_inno_setup,
+        target_type="installer",
+        requires_env=True,
+        description="Compile an Inno Setup script into a Windows setup program",
         platforms=["win32"],
     )
     BuilderRegistry.register(

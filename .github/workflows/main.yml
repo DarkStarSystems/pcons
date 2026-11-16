@@ -181,6 +181,12 @@ jobs:
           path: ~/.conan2
           key: conan2-${{ runner.os }}-${{ hashFiles('examples/**/conanfile.*') }}
           restore-keys: conan2-${{ runner.os }}-
+      - name: Install Inno Setup
+        # For examples/100_inno_setup, which skips without ISCC on PATH.
+        run: |
+          $dir = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          if (-not (Test-Path "$dir\ISCC.exe")) { choco install innosetup --no-progress -y }
+          Add-Content $env:GITHUB_PATH $dir
       - name: Warm up the compilers
         # See test-windows-toolchains.
         run: uv run pytest tests/test_examples.py -o addopts="" -q -k "ninja and (01_hello_c or 43_rust)"
