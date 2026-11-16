@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.contrib.installers._helpers import (
+    MSIX_LOGOS,
     as_installer_step,
     staging_dir,
 )
@@ -95,6 +96,7 @@ def create_msix(
     depends: Sequence[Target] | None = None,
     display_name: str | None = None,
     description: str | None = None,
+    icon: Target | Path | str | None = None,
     processor_architecture: str = "x64",
     sign_cert: Path | None = None,
     sign_password_env: str | None = None,
@@ -124,6 +126,14 @@ def create_msix(
             for a directory source that other targets populate.
         display_name: Display name shown to users. Defaults to name.
         description: Package description.
+        icon: The package's icon, shown in the Start menu, the taskbar and
+            the installer: a square ``.png``, or an ``.ico`` with a PNG
+            entry (modern icons store their 256px image as one), whose
+            largest PNG is used. 256px or larger looks best; Windows scales
+            it down. A path is read from the build script's directory, and
+            a Target that produces the image works too. Without one the
+            package has a blank icon. The icon embedded in the ``.exe``
+            itself comes from a ``.rc`` file (see examples/11).
         processor_architecture: Target architecture ("x64", "x86", "arm64").
         sign_cert: Path to .pfx certificate for signing, read from the build
             script's directory.
@@ -213,24 +223,25 @@ def create_msix(
                 executable,
                 *(["--display-name", display_name] if display_name else []),
                 *(["--description", description] if description else []),
+                "--processor-architecture",
+                processor_architecture,
             ],
         ),
         by="create_msix",
     )
 
-    # Generate placeholder assets (required for MSIX)
-    # Output a stamp file to track that assets were generated
-    assets_target = as_installer_step(
+    logos_target = as_installer_step(
         env.Command(
-            target=staging / "Assets" / ".stamp",
-            source=None,
+            target=[staging / logo for logo in MSIX_LOGOS],
+            source=[icon] if icon is not None else None,
             command=[
                 python_cmd,
                 "-m",
                 "pcons.contrib.installers._helpers",
-                "gen_msix_assets",
-                "--output-dir",
+                "stage_msix_logos",
+                "--package-dir",
                 staging,
+                *(["--icon", "$SOURCE"] if icon is not None else []),
             ],
         ),
         by="create_msix",
@@ -250,7 +261,7 @@ def create_msix(
     msix_target = as_installer_step(
         env.Command(
             target=output,
-            source=[stage_target, manifest_target, assets_target],
+            source=[stage_target, manifest_target, logos_target],
             command=makeappx_cmd,
         ),
         by="create_msix",
@@ -290,7 +301,7 @@ def create_msix(
 
         signed_target = as_installer_step(
             env.Command(
-                target=output.with_suffix(".signed.msix"),
+                target=output.with_suffix(f".signed{output.suffix}"),
                 source=[msix_target],
                 command=sign_cmd,
             ),
@@ -309,15 +320,20 @@ def create_appx(
     version: str,
     publisher: str,
     sources: Sequence[Target | FileNode | Path | str],
+    executable: str | None = None,
     output: str | Path | None = None,
+    depends: Sequence[Target] | None = None,
     display_name: str | None = None,
     description: str | None = None,
+    icon: Target | Path | str | None = None,
     processor_architecture: str = "x64",
+    sign_cert: Path | None = None,
+    sign_password_env: str | None = None,
 ) -> Target:
     """Create a Windows AppX package (legacy format).
 
-    This is an alias for create_msix() as the tooling is identical.
-    MSIX is the recommended format for new applications.
+    This is create_msix() with an ``.appx`` default output, as the tooling
+    is identical. MSIX is the recommended format for new applications.
 
     Args:
         See create_msix() for argument documentation.
@@ -325,9 +341,6 @@ def create_appx(
     Returns:
         Target representing the .appx file.
     """
-    if output is None:
-        output = Path(f"{name}-{version}.appx")
-
     return create_msix(
         project,
         env,
@@ -335,8 +348,13 @@ def create_appx(
         version=version,
         publisher=publisher,
         sources=sources,
-        output=output,
+        executable=executable,
+        output=output if output is not None else f"{name}-{version}.appx",
+        depends=depends,
         display_name=display_name,
         description=description,
+        icon=icon,
         processor_architecture=processor_architecture,
+        sign_cert=sign_cert,
+        sign_password_env=sign_password_env,
     )

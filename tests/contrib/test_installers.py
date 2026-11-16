@@ -1070,3 +1070,145 @@ class TestFileNamesFromTargets:
             for cmd in self._commands(project)
             for i in range(len(cmd))
         )
+
+
+def _png(width: int) -> bytes:
+    """The start of a PNG image of *width*: as much as `icon_png` reads."""
+    return (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"
+        + width.to_bytes(4, "big")
+        + width.to_bytes(4, "big")
+    )
+
+
+def _ico(*images: bytes) -> bytes:
+    """An .ico file holding *images*, each a PNG or a bitmap."""
+    import struct
+
+    offset = 6 + 16 * len(images)
+    entries = b""
+    for image in images:
+        entries += struct.pack("<BBBBHHII", 0, 0, 0, 0, 1, 32, len(image), offset)
+        offset += len(image)
+    return struct.pack("<HHH", 0, 1, len(images)) + entries + b"".join(images)
+
+
+_BITMAP = b"\x28\x00\x00\x00" + bytes(36)  # a BITMAPINFOHEADER, no pixels
+
+
+class TestMsixIcon:
+    """An MSIX package's logos come from a .png or the largest PNG in an .ico."""
+
+    def test_a_png_is_used_as_it_is(self, tmp_path: Path) -> None:
+        icon = tmp_path / "app.png"
+        icon.write_bytes(_png(512))
+        assert _helpers.icon_png(icon) == _png(512)
+
+    def test_an_ico_gives_its_largest_png(self, tmp_path: Path) -> None:
+        icon = tmp_path / "app.ico"
+        icon.write_bytes(_ico(_BITMAP, _png(256), _png(48), _png(1024)))
+        assert _helpers.icon_png(icon) == _png(1024)
+
+    def test_an_ico_of_bitmaps_only_is_refused(self, tmp_path: Path) -> None:
+        icon = tmp_path / "old.ico"
+        icon.write_bytes(_ico(_BITMAP, _BITMAP))
+        with pytest.raises(_helpers.InstallerError, match="no PNG image"):
+            _helpers.icon_png(icon)
+
+    @pytest.mark.parametrize(
+        "data", [b"GIF89a....", b"", _ico(_png(16))[:20]], ids=["gif", "empty", "cut"]
+    )
+    def test_other_files_are_refused(self, tmp_path: Path, data: bytes) -> None:
+        icon = tmp_path / "app.ico"
+        icon.write_bytes(data)
+        with pytest.raises(_helpers.InstallerError):
+            _helpers.icon_png(icon)
+
+    def test_every_manifest_logo_is_staged(self, tmp_path: Path) -> None:
+        icon = tmp_path / "app.ico"
+        icon.write_bytes(_ico(_png(256)))
+        _helpers.stage_msix_logos(tmp_path / "pkg", icon)
+        manifest = tmp_path / "AppxManifest.xml"
+        _helpers.generate_appx_manifest(
+            manifest, name="App", version="1.0", publisher="CN=Test"
+        )
+        for logo in _helpers.MSIX_LOGOS:
+            assert (tmp_path / "pkg" / logo).read_bytes() == _png(256)
+            assert str(logo).replace("/", "\\") in manifest.read_text()
+
+    def test_without_an_icon_the_logos_are_placeholders(self, tmp_path: Path) -> None:
+        _helpers.stage_msix_logos(tmp_path)
+        for logo in _helpers.MSIX_LOGOS:
+            assert (tmp_path / logo).read_bytes() == _helpers._PLACEHOLDER_PNG
+
+    def test_cli_stages_the_icon(self, tmp_path: Path) -> None:
+        import subprocess
+
+        icon = tmp_path / "app.png"
+        icon.write_bytes(_png(300))
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pcons.contrib.installers._helpers",
+                "stage_msix_logos",
+                "--package-dir",
+                str(tmp_path / "pkg"),
+                "--icon",
+                str(icon),
+            ],
+            check=True,
+        )
+        assert (tmp_path / "pkg" / _helpers.MSIX_LOGOS[0]).read_bytes() == _png(300)
+
+    @staticmethod
+    def _package(tmp_path: Path, monkeypatch, create: str, **kwargs) -> Project:
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_sdk_tool", lambda tool: f"C:/sdk/{tool}")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        getattr(windows, create)(
+            project,
+            project.Environment(),
+            name="App",
+            version="1.0.0",
+            publisher="CN=Test",
+            sources=[],
+            executable="app.exe",
+            **kwargs,
+        )
+        project.resolve()
+        return project
+
+    @staticmethod
+    def _step(project: Project, produces: str) -> dict:
+        return next(
+            node._build_info
+            for target in project.targets
+            for node in target.output_nodes
+            if node.path.name == produces and node._build_info
+        )
+
+    def test_the_icon_is_an_input_of_the_logo_step(self, tmp_path, monkeypatch):
+        project = self._package(tmp_path, monkeypatch, "create_msix", icon="app.ico")
+        step = self._step(project, "StoreLogo.png")
+
+        assert [s.path.name for s in step["sources"]] == ["app.ico"]
+        command = step["command"]
+        assert isinstance(command[command.index("--icon") + 1], SourcePath)
+
+    def test_create_appx_forwards_every_option(self, tmp_path, monkeypatch):
+        project = self._package(
+            tmp_path,
+            monkeypatch,
+            "create_appx",
+            icon="app.png",
+            processor_architecture="arm64",
+            sign_cert=Path("cert.pfx"),
+        )
+
+        assert self._step(project, "App-1.0.0.signed.appx")
+        logos = self._step(project, "StoreLogo.png")
+        assert [s.path.name for s in logos["sources"]] == ["app.png"]
+        manifest = self._step(project, "AppxManifest.xml")["command"]
+        assert manifest[manifest.index("--processor-architecture") + 1] == "arm64"

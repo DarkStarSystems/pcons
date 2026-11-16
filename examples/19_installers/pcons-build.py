@@ -61,7 +61,8 @@ if env.target.is_macos:
 elif env.target.is_windows:
     from pcons.contrib.installers import windows
 
-    # Create an MSIX package
+    # Create an MSIX package. Its icon, shown in the Start menu and the
+    # taskbar, may be a .png or, as here, an .ico with a 256px PNG entry.
     msix = windows.create_msix(
         project,
         env,
@@ -71,6 +72,7 @@ elif env.target.is_windows:
         sources=[app],
         display_name="Hello App",
         description="A simple hello world application",
+        icon="hello.ico",
     )
     installer_targets.append(msix)
 

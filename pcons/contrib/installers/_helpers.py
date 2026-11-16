@@ -19,6 +19,7 @@ import argparse
 import os
 import plistlib
 import shutil
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -341,42 +342,78 @@ def sign_msix(
     subprocess.run(sign_args, check=True)
 
 
-def generate_msix_assets(output_dir: Path) -> None:
-    """Generate placeholder PNG assets for MSIX packaging.
+#: The logo files AppxManifest.xml lists, relative to the package root.
+#: Each is staged from the same image; Windows scales it to each use.
+MSIX_LOGOS = (
+    Path("Assets", "StoreLogo.png"),
+    Path("Assets", "Square150x150Logo.png"),
+    Path("Assets", "Square44x44Logo.png"),
+)
 
-    Creates minimal 1x1 transparent PNG files that satisfy MSIX requirements.
-    For production use, replace these with proper app icons.
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
-    Also creates a .stamp file to serve as a build target.
+#: A 1x1 transparent PNG, the logo of a package that gives no icon.
+_PLACEHOLDER_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c636060606000000005000187a14ed4"
+    "0000000049454e44ae426082"
+)
+
+
+def _png_width(png: bytes) -> int:
+    """The width of a PNG image, from its IHDR chunk."""
+    return int.from_bytes(png[16:20], "big")
+
+
+def icon_png(icon: Path) -> bytes:
+    """The PNG image an icon file holds.
+
+    A ``.png`` is used as it is. An ``.ico`` gives its largest PNG entry:
+    icon editors store the 256px (and larger) images of a modern icon as
+    PNG, while smaller entries may be plain bitmaps, which are skipped.
+
+    Raises:
+        InstallerError: If *icon* is neither, or is an ``.ico`` with no PNG
+            entry.
+    """
+    data = icon.read_bytes()
+    if data.startswith(_PNG_SIGNATURE):
+        return data
+
+    # ICONDIR: reserved (0), type (1 for icons), entry count; then one
+    # 16-byte ICONDIRENTRY each, ending in the image's size and offset.
+    if len(data) < 6 or struct.unpack_from("<HH", data) != (0, 1):
+        raise InstallerError(f"{icon}: not a PNG or .ico file")
+    (count,) = struct.unpack_from("<H", data, 4)
+    if len(data) < 6 + 16 * count:
+        raise InstallerError(f"{icon}: truncated .ico file")
+    entries = (struct.unpack_from("<II", data, 6 + 16 * i + 8) for i in range(count))
+    pngs = [
+        image
+        for size, offset in entries
+        if (image := data[offset : offset + size]).startswith(_PNG_SIGNATURE)
+    ]
+    if not pngs:
+        raise InstallerError(
+            f"{icon} holds no PNG image, so it has nothing larger than 48px; "
+            "save it with a 256x256 PNG entry, or give a .png instead"
+        )
+    return max(pngs, key=_png_width)
+
+
+def stage_msix_logos(package_dir: Path, icon: Path | None = None) -> None:
+    """Write the logos an MSIX package's manifest lists.
 
     Args:
-        output_dir: Directory to create Assets folder in.
+        package_dir: The package's staging directory.
+        icon: The ``.png`` or ``.ico`` to use (see `icon_png`). Without one,
+            each logo is a transparent placeholder, which MakeAppx accepts.
     """
-    import base64
-
-    # Minimal 1x1 transparent PNG (67 bytes)
-    # This is a valid PNG that MakeAppx will accept
-    png_b64 = (
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg"
-        "YGBgAAAABQABh6FO1AAAAABJRU5ErkJggg=="
-    )
-    png_data = base64.b64decode(png_b64)
-
-    assets_dir = output_dir / "Assets"
-    assets_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create required asset files
-    asset_files = [
-        "StoreLogo.png",
-        "Square150x150Logo.png",
-        "Square44x44Logo.png",
-    ]
-
-    for asset_file in asset_files:
-        (assets_dir / asset_file).write_bytes(png_data)
-
-    # Create stamp file to track that assets were generated
-    (assets_dir / ".stamp").write_text("assets generated")
+    png = icon_png(icon) if icon is not None else _PLACEHOLDER_PNG
+    for logo in MSIX_LOGOS:
+        path = package_dir / logo
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(png)
 
 
 # CLI entry point for subprocess invocation
@@ -445,14 +482,18 @@ def main() -> int:
     )
     appx_parser.add_argument("--display-name", help="Display name")
     appx_parser.add_argument("--description", help="Package description")
+    appx_parser.add_argument(
+        "--processor-architecture", default="x64", help="x64, x86 or arm64"
+    )
 
-    # gen_msix_assets command
-    assets_parser = subparsers.add_parser(
-        "gen_msix_assets", help="Generate placeholder MSIX assets"
+    # stage_msix_logos command
+    logos_parser = subparsers.add_parser(
+        "stage_msix_logos", help="Write the logos an MSIX manifest lists"
     )
-    assets_parser.add_argument(
-        "--output-dir", "-o", required=True, help="Output directory"
+    logos_parser.add_argument(
+        "--package-dir", required=True, help="Package staging directory"
     )
+    logos_parser.add_argument("--icon", help=".png or .ico to use for the logos")
 
     # sign_msix command
     sign_parser = subparsers.add_parser(
@@ -500,9 +541,10 @@ def main() -> int:
             executable=args.executable,
             display_name=args.display_name,
             description=args.description,
+            processor_architecture=args.processor_architecture,
         )
-    elif args.command == "gen_msix_assets":
-        generate_msix_assets(Path(args.output_dir))
+    elif args.command == "stage_msix_logos":
+        stage_msix_logos(Path(args.package_dir), Path(args.icon) if args.icon else None)
     elif args.command == "sign_msix":
         sign_msix(
             Path(args.input),
