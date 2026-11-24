@@ -4447,14 +4447,16 @@ Python to regenerate itself when `pcons-build.py` changes, and for any command
 built on `sys.executable`. Under build isolation, the default for uv and pip,
 that Python doesn't outlive the install: uv deletes its build venv, and pip's
 interpreter can't import pcons once the temporary build requirements are gone.
-The next regen then fails:
+The next regen then fails, and says why:
 
 ```
-/bin/sh: .../uv/builds-v0/.tmpbL8Fju/bin/python: No such file or directory
-ninja: error: rebuilding 'build.ninja': subcommand failed
+pcons: can't regenerate build.ninja: .../uv/builds-v0/.tmpbL8Fju/bin/python is gone.
+This editable install was built in an isolated environment, which
+lasted only as long as the install. ...
 ```
 
-Plain C++ rebuilds keep working, and re-running the install recovers.
+Other commands built on `sys.executable` fail with no such explanation. Plain
+C++ rebuilds keep working, and re-running the install recovers.
 
 To get a build directory you can always rerun ninja in, turn build isolation
 off for your package. With `uv sync`, put pcons, ninja and your other build

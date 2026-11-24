@@ -592,6 +592,7 @@ def run_script(
     fresh: bool = False,
     generate: bool | Callable[[], bool] = True,
     inside: Callable[[], None] | None = None,
+    regen_launcher: Sequence[str] = (),
 ) -> tuple[int, list[Project]]:
     """Execute a Python build script in-process via exec(), so its Project
     objects are accessible through the global registry.
@@ -624,6 +625,8 @@ def run_script(
             script's environment still up: PCONS_* variables set, sys.path and
             the cwd still the script's. Its exceptions propagate untouched,
             since click signals both success and failure by exception.
+        regen_launcher: Argv the build files' regen command runs through,
+            ahead of the Python that runs pcons.
 
     Returns:
         Tuple of (exit_code, list of registered Projects).
@@ -752,6 +755,7 @@ def run_script(
             variables=dict(effective_vars),
             variant=effective_variant,
             generators=effective_gen.split(":") if effective_gen else [],
+            launcher=list(regen_launcher),
         )
     )
 

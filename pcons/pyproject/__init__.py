@@ -23,6 +23,7 @@ import subprocess
 import sys
 import sysconfig
 import zipfile
+from collections.abc import Sequence
 from email.headerregistry import Address
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
@@ -498,12 +499,14 @@ def _run_pcons(
     build_dir: Path,
     variant: str | None = None,
     variables: dict[str, str] | None = None,
+    regen_launcher: Sequence[str] = (),
 ) -> None:
     """Run pcons-build.py via pcons.cli.run_script (in-process).
 
     The build-dir cache is neither read nor written: *variables* and *variant*
     come from pyproject.toml on every build, and a developer's own settings in
-    a shared build directory stay as they were.
+    a shared build directory stay as they were. *regen_launcher* is what the
+    build files' regen command runs through.
     """
     from pcons.cli import run_script
 
@@ -518,9 +521,25 @@ def _run_pcons(
         variant=variant,
         persist=False,
         fresh=True,
+        regen_launcher=regen_launcher,
     )
     if exit_code != 0:
         raise PconsRuntimeError(f"pcons-build.py exited with code {exit_code}")
+
+
+def _editable_regen_launcher(build_dir: Path) -> list[str]:
+    """Copy the regen shim into *build_dir* and return the argv that runs it.
+
+    Under build isolation, the Python running this backend doesn't outlive
+    the install, so a plain regen command would fail with no explanation.
+    The base Python does outlive it, and runs the shim, which runs the regen
+    command or says how to fix it.
+    """
+    shim = build_dir / "pcons_regen.py"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(Path(__file__).with_name("regen.py"), shim)
+    python = getattr(sys, "_base_executable", None) or sys.executable
+    return [python.replace("\\", "/"), shim.absolute().as_posix()]
 
 
 def _jobs(
@@ -798,7 +817,13 @@ def _build(
     extras = _dist_info_extras(project, source_dir)
 
     if editable:
-        _run_pcons(source_dir, build_dir, variant=variant, variables=variables or None)
+        _run_pcons(
+            source_dir,
+            build_dir,
+            variant=variant,
+            variables=variables or None,
+            regen_launcher=_editable_regen_launcher(build_dir),
+        )
         _run_ninja(build_dir, jobs=jobs)
         _write_editable_wheel(
             wheel_dir / wheel_name,

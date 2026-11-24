@@ -16,6 +16,8 @@ from unittest.mock import patch
 import pytest
 
 import pcons.pyproject as backend
+from pcons.core.subst import to_shell_command
+from pcons.pyproject import regen
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -999,6 +1001,29 @@ class TestBuildSdist:
         assert not any(".pyc" in n for n in names)
 
 
+class TestEditableRegenShim:
+    """pcons/pyproject/regen.py: run the regen command, or explain (#299)."""
+
+    def test_runs_the_command(self) -> None:
+        assert regen.main([sys.executable, "-c", "raise SystemExit(3)"]) == 3
+
+    def test_a_python_that_is_gone(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        gone = str(tmp_path / "bin" / "python")
+        assert regen.main([gone, "-m", "pcons", "generate"]) == 1
+        message = capsys.readouterr().err
+        assert f"{gone} is gone" in message
+        assert regen.GUIDE in message
+
+    def test_a_python_that_cant_import_pcons(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch.object(regen.subprocess, "call", return_value=1):
+            assert regen.main([sys.executable, "-m", "pcons", "generate"]) == 1
+        assert "can't import pcons" in capsys.readouterr().err
+
+
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
 
 
@@ -1141,6 +1166,31 @@ class TestBuildEditable:
 
         python_tag, abi_tag, platform_tag = backend._wheel_tag()
         assert result == f"mypkg-0.1-{python_tag}-{abi_tag}-{platform_tag}.whl"
+
+    def test_regen_runs_through_the_shim(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The shim, run by the base Python, outlives an isolated build (#299)."""
+        src, wheel_dir = self._setup(tmp_path, monkeypatch)
+        (src / "pcons-build.py").write_text(
+            'from pcons import Project\nProject("mypkg")\n'
+        )
+
+        with patch("pcons.pyproject._run_ninja"):
+            backend.build_editable(str(wheel_dir))
+
+        shim = src / "build" / "pcons_regen.py"
+        assert shim.read_text() == Path(regen.__file__).read_text()
+        ninja = (src / "build" / "build.ninja").read_text()
+        command = ninja.split("rule pcons_regen\n  command = ")[1].splitlines()[0]
+        base_python = getattr(sys, "_base_executable", None) or sys.executable
+        assert command.startswith(
+            to_shell_command(
+                [base_python.replace("\\", "/"), shim.absolute().as_posix()],
+                shell="ninja",
+            )
+        )
+        assert " -m pcons generate " in command
 
     def test_wheel_file_created(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
