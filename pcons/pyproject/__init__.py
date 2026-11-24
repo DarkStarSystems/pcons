@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import sysconfig
 import zipfile
@@ -355,8 +356,9 @@ def _render_metadata(
     return text
 
 
-# Directories never shipped in an sdist: build outputs, VCS data and tooling
-# caches. Matched by name at any depth, so e.g. a nested __pycache__ is skipped.
+# Directories an sdist built outside git leaves out: build outputs, VCS data
+# and tooling caches. Matched by name at any depth, so e.g. a nested
+# __pycache__ is skipped.
 _SDIST_EXCLUDE_DIRS = frozenset(
     {
         "build",
@@ -404,13 +406,60 @@ def _build_dir(source_dir: Path, pcons_cfg: dict[str, Any]) -> Path:
     return build_dir
 
 
-def _sdist_files(source_dir: Path, build_dir: Path) -> list[Path]:
-    """Return every source file to ship in the sdist, recursively.
+def _git_files(source_dir: Path) -> list[Path] | None:
+    """Return the files git tracks under *source_dir*, submodules included.
 
-    Walks the whole project tree (so package subdirectories like ``src/`` are
-    included, not just top-level files) and skips *build_dir*, build artifacts,
-    VCS data and tooling caches listed in :data:`_SDIST_EXCLUDE_DIRS`.
+    Returns None outside a git checkout, or when git tracks nothing there, as
+    in an unpacked sdist. Inside a checkout, git must run: a failure raises
+    rather than falling back to every file, ignored ones included. A tracked
+    file deleted from the work tree is left out.
     """
+    resolved = source_dir.resolve()
+    if not any((d / ".git").exists() for d in (resolved, *resolved.parents)):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "-z", "--recurse-submodules"],
+            cwd=source_dir,
+            capture_output=True,
+        )
+    except OSError as e:
+        raise PconsRuntimeError(
+            f"{source_dir} is in a git checkout, and the sdist ships only the "
+            f"files git tracks, but git won't run: {e}"
+        ) from e
+    if result.returncode != 0:
+        raise PconsRuntimeError(
+            f"{source_dir} is in a git checkout, and the sdist ships only the "
+            "files git tracks, but `git ls-files` failed:\n"
+            + os.fsdecode(result.stderr).strip()
+        )
+    files = []
+    for name in os.fsdecode(result.stdout).split("\0"):
+        if not name:
+            continue
+        path = source_dir / name
+        # git lists a submodule that isn't checked out as its empty directory.
+        if path.is_dir() and not path.is_symlink():
+            raise PconsRuntimeError(
+                f"Submodule {name} isn't checked out, so the sdist would be "
+                "missing it. Run `git submodule update --init --recursive`."
+            )
+        if os.path.lexists(path):
+            files.append(path)
+    return files or None
+
+
+def _sdist_files(source_dir: Path, build_dir: Path) -> list[Path]:
+    """Return every source file to ship in the sdist.
+
+    In a git checkout, that's the files git tracks, so nothing it ignores
+    ships. Elsewhere, as in an unpacked sdist, it's the whole tree, less
+    *build_dir* and the directories in :data:`_SDIST_EXCLUDE_DIRS`.
+    """
+    tracked = _git_files(source_dir)
+    if tracked is not None:
+        return sorted(tracked)
     files = []
     try:
         build_rel: Path | None = build_dir.resolve().relative_to(source_dir.resolve())

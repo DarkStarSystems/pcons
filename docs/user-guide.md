@@ -4492,9 +4492,9 @@ ignore `build-dir`. They always use `build/`, the directory the `.pth` file
 points at.
 
 Use a dedicated directory. The project directory, its parents and a Windows
-drive-relative path such as `C:build` are refused. An sdist leaves the
-build directory out when it lies inside the project, so a source directory
-like `src` would be missing from the sdist.
+drive-relative path such as `C:build` are refused. An sdist built outside
+git leaves the build directory out when it lies inside the project, so a
+source directory like `src` would be missing from it.
 
 The backend neither reads nor writes `pcons_cache.json`. Its `variant` and
 `variables` come from `pyproject.toml` on every build, so a variant, generator
@@ -4557,8 +4557,13 @@ An unknown `[project]` key, or a non-empty `dynamic`, raises an error rather
 than being silently dropped from the wheel's metadata. Remove it or file an
 issue.
 
-`build_sdist` ships the whole source tree (recursively, excluding build
-output, VCS data, and tool caches) plus the spec-required `PKG-INFO`.
+`build_sdist` ships the files git tracks, plus the `PKG-INFO` the spec
+requires, so nothing in `.gitignore` gets in. `git add` a new file before
+building, or it's left out. A submodule that isn't checked out is an error,
+and so is a checkout where git won't run, as when git refuses a directory
+another user owns.
+Outside git, as in an unpacked sdist, it ships the whole tree, less build
+output, VCS data, and tool caches.
 
 Ninja is requested automatically as a build requirement in isolated builds
 when it isn't already on PATH (a `NINJA` environment variable override is
