@@ -212,10 +212,11 @@ class BaseGenerator:
                 cc_gen = CompileCommandsGenerator(root_symlink=root_symlink)
                 cc_gen._generate_impl(project, cc_gen._resolve_output_dir(project))
 
-            # No-op when the project declares no Test targets.
-            from pcons.core.test import write_test_manifest
+            # The manifest goes with the test targets a build generator writes.
+            if self._is_build_generator:
+                from pcons.core.test import write_test_manifest
 
-            write_test_manifest(project, output_dir)
+                write_test_manifest(project, output_dir)
 
         # Only top-level queues are drained; a subdirectory's own request
         # (a graph of its part of the tree, say) runs with its top's.

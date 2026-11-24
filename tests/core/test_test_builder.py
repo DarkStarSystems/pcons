@@ -205,6 +205,16 @@ class TestManifestSerialization:
         assert result is None
         assert not (tmp_path / "build" / MANIFEST_FILENAME).exists()
 
+    def test_stale_manifest_removed_when_tests_are(self, tmp_path):
+        """Turning the tests off removes the manifest an earlier run wrote."""
+        build = tmp_path / "build"
+        build.mkdir()
+        (build / MANIFEST_FILENAME).write_text('{"tests": []}\n')
+        proj = Project("empty", root_dir=tmp_path, build_dir=build)
+
+        assert write_test_manifest(proj, build) is None
+        assert not (build / MANIFEST_FILENAME).exists()
+
     def test_manifest_schema_header(self, project, tmp_path):
         proj, _env, prog = project
         proj.Test("a", prog)

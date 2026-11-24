@@ -244,14 +244,15 @@ def write_test_manifest(project: Project, output_dir: Path) -> Path | None:
     """Serialize the project's tests to ``<output_dir>/tests.json``.
 
     Returns the manifest path if one was written, or None when the
-    project has no tests (no file is created in that case, to avoid
-    leaving stale empty manifests around).
+    project has no tests. Then any manifest left from an earlier run is
+    removed, so ``pcons test`` doesn't run tests that no longer exist.
     """
     specs = collect_test_specs(project)
+    manifest_path = output_dir / MANIFEST_FILENAME
     if not specs:
+        manifest_path.unlink(missing_ok=True)
         return None
 
-    manifest_path = output_dir / MANIFEST_FILENAME
     data = {
         "version": MANIFEST_VERSION,
         "project": project.name,
