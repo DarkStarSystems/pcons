@@ -201,7 +201,8 @@ def _extract_links(root: Path, links: list[tuple[str, str, bool]]) -> None:
             )
 
     # A link checked alone can still lead out once a later link is made: with
-    # `b -> c/../x` and then `c -> .`, b reaches the parent of root.
+    # `b -> c/../x` and then `c -> .`, b reaches the parent of root on POSIX.
+    # (Windows drops `c/..` before following c, so there b stays inside.)
     for link, name, target in made:
         if not inside(link.resolve()):
             raise refuse(name, target)

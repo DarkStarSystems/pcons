@@ -274,7 +274,13 @@ class TestSafeExtractTar:
             [("pkg/link", "../../escape")],
             # Each target is inside on its own; together they lead out.
             [("a", "."), ("a/x", "../escape")],
-            [("b", "c/../escape"), ("c", ".")],
+            pytest.param(
+                [("b", "c/../escape"), ("c", ".")],
+                marks=pytest.mark.skipif(
+                    sys.platform == "win32",
+                    reason="Windows drops c/.. before following c, so b stays in",
+                ),
+            ),
         ],
     )
     def test_rejects_a_link_that_leads_out(
