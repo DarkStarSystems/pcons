@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Rust examples (43 and 44) link `synchronization` on Windows, which
   Rust's standard library now needs for `WaitOnAddress`. Add it if you
   copied their list of Windows libraries.
+- pcons-fetch extracts symbolic and hard links that stay inside the archive's
+  own tree, such as TinyUSB's `CLAUDE.md -> AGENTS.md`. It still refuses a
+  link that leads out, even through another link. Where the OS can't make a
+  symbolic link, as on Windows without the privilege, the link becomes a
+  copy of its target. (#297)
+- pcons-fetch clones a git dependency pinned to a commit without its history's
+  files, so it downloads only that commit's files. Tags are still there for
+  `git describe`. (#298)
 
 ## [0.33.0] - 2026-11-14
 
