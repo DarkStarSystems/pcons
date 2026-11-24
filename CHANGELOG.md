@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `create_appx()` takes every `create_msix()` option (`executable`,
   `depends`, `icon`, signing), and a signed AppX package is named
   `.signed.appx`, not `.signed.msix`.
+- The Rust examples (43 and 44) link `synchronization` on Windows, which
+  Rust's standard library now needs for `WaitOnAddress`. Add it if you
+  copied their list of Windows libraries.
 
 ## [0.33.0] - 2026-11-14
 
