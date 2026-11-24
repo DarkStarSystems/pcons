@@ -628,7 +628,7 @@ class TestDownloadSource:
         assert "main" in commands[0]
 
     def test_git_clone_with_commit_sha(self, tmp_path: Path) -> None:
-        """Commit SHAs should do full clone + checkout, not --branch."""
+        """A commit SHA is a clone without trees, then a checkout."""
         commands: list[list[str]] = []
 
         def mock_run(cmd, **kwargs):
@@ -642,8 +642,9 @@ class TestDownloadSource:
         with patch("subprocess.run", side_effect=mock_run):
             download_source(f"git+https://example.com/repo.git@{sha}", tmp_path, "repo")
 
-        # First command: full clone (no --depth=1, no --branch)
+        # First command: a clone with every commit but no files (no --branch)
         assert commands[0][:2] == ["git", "clone"]
+        assert "--filter=tree:0" in commands[0]
         assert "--depth=1" not in commands[0]
         assert "--branch" not in commands[0]
         # Second command: checkout the SHA

@@ -138,15 +138,26 @@ class TestSafeExtractZip:
             _safe_extract_zip(archive, tmp_path / "out")
         assert not (tmp_path / "escape.txt").exists()
 
-    def test_rejects_a_symlink(self, tmp_path: Path) -> None:
+    def _symlink(self, zf: zipfile.ZipFile, name: str, target: str) -> None:
+        info = zipfile.ZipInfo(name)
+        info.create_system = 3
+        info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        zf.writestr(info, target)
+
+    def test_rejects_a_symlink_that_leads_out(self, tmp_path: Path) -> None:
         archive = tmp_path / "a.zip"
         with zipfile.ZipFile(archive, "w") as zf:
-            info = zipfile.ZipInfo("link")
-            info.create_system = 3
-            info.external_attr = (stat.S_IFLNK | 0o777) << 16
-            zf.writestr(info, "../escape.txt")
-        with pytest.raises(RuntimeError, match="Refusing to extract symlink"):
+            self._symlink(zf, "link", "../escape.txt")
+        with pytest.raises(RuntimeError, match="Refusing to extract link"):
             _safe_extract_zip(archive, tmp_path / "out")
+
+    def test_extracts_a_symlink_inside_the_tree(self, tmp_path: Path) -> None:
+        archive = tmp_path / "a.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            self._symlink(zf, "pkg/CLAUDE.md", "AGENTS.md")
+            zf.writestr("pkg/AGENTS.md", "agents\n")
+        _safe_extract_zip(archive, tmp_path / "out")
+        assert (tmp_path / "out" / "pkg" / "CLAUDE.md").read_text() == "agents\n"
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
     def test_keeps_a_script_executable(self, tmp_path: Path) -> None:
@@ -205,6 +216,73 @@ class TestSafeExtractTar:
         link.type = tarfile.LNKTYPE
         link.linkname = "/etc/passwd"
         archive = self._tar(tmp_path / "a.tar.gz", [(link, b"")])
+        with pytest.raises(RuntimeError, match="Refusing to extract link"):
+            _safe_extract_tar(archive, tmp_path / "out")
+
+    def _link(self, name: str, target: str, kind: bytes = tarfile.SYMTYPE):
+        info = tarfile.TarInfo(name)
+        info.type = kind
+        info.linkname = target
+        return (info, b"")
+
+    def test_extracts_a_symlink_inside_the_tree(self, tmp_path: Path) -> None:
+        """The TinyUSB 0.21.0 tarball has CLAUDE.md -> AGENTS.md (#297)."""
+        archive = self._tar(
+            tmp_path / "a.tar.gz",
+            [
+                self._link("pkg/CLAUDE.md", "AGENTS.md"),
+                (self._file("pkg/AGENTS.md"), b"agents\n"),
+                self._link("pkg/inc", "src"),
+                (self._file("pkg/src/a.h"), b"int a;\n"),
+            ],
+        )
+        _safe_extract_tar(archive, tmp_path / "out")
+        pkg = tmp_path / "out" / "pkg"
+        assert (pkg / "CLAUDE.md").read_text() == "agents\n"
+        assert (pkg / "inc" / "a.h").read_text() == "int a;\n"
+
+    def test_a_hard_link_inside_the_tree_is_a_copy(self, tmp_path: Path) -> None:
+        archive = self._tar(
+            tmp_path / "a.tar.gz",
+            [
+                (self._file("pkg/a.c"), b"int a;\n"),
+                self._link("pkg/b.c", "pkg/a.c", tarfile.LNKTYPE),
+            ],
+        )
+        _safe_extract_tar(archive, tmp_path / "out")
+        assert (tmp_path / "out" / "pkg" / "b.c").read_text() == "int a;\n"
+
+    def test_without_symlinks_a_link_is_a_copy(self, tmp_path: Path) -> None:
+        """As on Windows without the symlink privilege."""
+        archive = self._tar(
+            tmp_path / "a.tar.gz",
+            [
+                (self._file("pkg/AGENTS.md"), b"agents\n"),
+                self._link("pkg/CLAUDE.md", "AGENTS.md"),
+            ],
+        )
+        with patch("os.symlink", side_effect=OSError("no privilege")):
+            _safe_extract_tar(archive, tmp_path / "out")
+        copy = tmp_path / "out" / "pkg" / "CLAUDE.md"
+        assert not copy.is_symlink()
+        assert copy.read_text() == "agents\n"
+
+    @pytest.mark.parametrize(
+        "links",
+        [
+            [("link", "/etc/passwd")],
+            [("pkg/link", "../../escape")],
+            # Each target is inside on its own; together they lead out.
+            [("a", "."), ("a/x", "../escape")],
+            [("b", "c/../escape"), ("c", ".")],
+        ],
+    )
+    def test_rejects_a_link_that_leads_out(
+        self, tmp_path: Path, links: list[tuple[str, str]]
+    ) -> None:
+        archive = self._tar(
+            tmp_path / "a.tar.gz", [self._link(name, to) for name, to in links]
+        )
         with pytest.raises(RuntimeError, match="Refusing to extract link"):
             _safe_extract_tar(archive, tmp_path / "out")
 

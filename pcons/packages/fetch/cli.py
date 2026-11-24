@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import click
@@ -99,7 +99,8 @@ def _set_mode(path: Path, mode: int) -> None:
 
 
 def _safe_extract_zip(archive_path: Path, source_dir: Path) -> None:
-    """Extract a zip archive while rejecting path traversal and symlinks."""
+    """Extract a zip archive, rejecting path traversal and links that lead out."""
+    links: list[tuple[str, str, bool]] = []
     with zipfile.ZipFile(archive_path, "r") as zf:
         for member in zf.infolist():
             destination = _ensure_member_is_within_root(source_dir, member.filename)
@@ -108,26 +109,26 @@ def _safe_extract_zip(archive_path: Path, source_dir: Path) -> None:
                 continue
 
             mode = (member.external_attr >> 16) & 0o170000
-            if mode == 0o120000:
-                raise PconsRuntimeError(
-                    f"Refusing to extract symlink from zip archive: {member.filename}"
-                )
+            if mode == 0o120000:  # a symbolic link; its contents are the target
+                links.append((member.filename, zf.read(member).decode(), False))
+                continue
 
             destination.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member, "r") as src, destination.open("wb") as dst:
                 shutil.copyfileobj(src, dst)
             if member.create_system == 3 and mode:  # made on Unix
                 _set_mode(destination, member.external_attr >> 16)
+    _extract_links(source_dir, links)
 
 
 def _safe_extract_tar(archive_path: Path, source_dir: Path) -> None:
-    """Extract a tar archive while rejecting path traversal and links."""
+    """Extract a tar archive, rejecting path traversal and links that lead out."""
+    links: list[tuple[str, str, bool]] = []
     with tarfile.open(archive_path) as tf:
         for member in tf.getmembers():
             if member.issym() or member.islnk():
-                raise PconsRuntimeError(
-                    f"Refusing to extract link from tar archive: {member.name}"
-                )
+                links.append((member.name, member.linkname, member.islnk()))
+                continue
 
             destination = _ensure_member_is_within_root(source_dir, member.name)
             if member.isdir():
@@ -142,6 +143,68 @@ def _safe_extract_tar(archive_path: Path, source_dir: Path) -> None:
             with extracted, destination.open("wb") as dst:
                 shutil.copyfileobj(extracted, dst)
             _set_mode(destination, member.mode)
+    _extract_links(source_dir, links)
+
+
+def _extract_links(root: Path, links: list[tuple[str, str, bool]]) -> None:
+    """Make an archive's links, after its files, so none is written through one.
+
+    Each entry is (member name, target, is a hard link). As in tar, a symbolic
+    link's target is relative to the link's directory and a hard link's to the
+    archive root. A target must stay inside *root*: an absolute one, or one
+    that leads out, even through another link, is refused. A hard link becomes
+    a copy of its target, and so does a symbolic link the OS won't make, as on
+    Windows without the symlink privilege.
+    """
+
+    def refuse(name: str, target: str) -> PconsRuntimeError:
+        return PconsRuntimeError(
+            f"Refusing to extract link that leads outside the archive: "
+            f"{name} -> {target}"
+        )
+
+    resolved_root = root.resolve()
+
+    def inside(path: Path) -> bool:
+        return path == resolved_root or resolved_root in path.parents
+
+    made: list[tuple[Path, str, str]] = []
+    for name, target, hard in links:
+        # Absolute on any OS (`/x` too). Even one that points inside the tree
+        # breaks once the tree moves.
+        if PureWindowsPath(target).anchor:
+            raise refuse(name, target)
+        destination = _ensure_member_is_within_root(root, name)
+        source = ((root if hard else destination.parent) / target).resolve()
+        if not inside(source):
+            raise refuse(name, target)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if not hard:
+            try:
+                os.symlink(
+                    target.replace("/", os.sep),
+                    destination,
+                    target_is_directory=source.is_dir(),
+                )
+                made.append((destination, name, target))
+                continue
+            except OSError:
+                pass
+        if source.is_dir():
+            shutil.copytree(source, destination)
+        elif source.is_file():
+            shutil.copy(source, destination)
+        else:
+            raise PconsRuntimeError(
+                f"Can't extract link {name} -> {target}: there's nothing at "
+                "its target to copy."
+            )
+
+    # A link checked alone can still lead out once a later link is made: with
+    # `b -> c/../x` and then `c -> .`, b reaches the parent of root.
+    for link, name, target in made:
+        if not inside(link.resolve()):
+            raise refuse(name, target)
 
 
 def _remove_tree(path: Path) -> None:
@@ -211,8 +274,12 @@ def download_source(
         )
         if is_sha:
             assert ref is not None  # guarded by is_sha check
-            # Commit SHAs require a full clone + checkout (can't use --branch)
-            result = _run_git(["clone", git_url, str(source_dir)])
+            # --branch takes no commit. A clone without trees still has every
+            # commit and tag (so `git describe` works), and the checkout
+            # fetches only that commit's files.
+            result = _run_git(
+                ["clone", "--filter=tree:0", "--no-checkout", git_url, str(source_dir)]
+            )
             if result.returncode != 0:
                 raise PconsRuntimeError(f"Git clone failed: {result.stderr}")
             result = _run_git(["-C", str(source_dir), "checkout", ref])
