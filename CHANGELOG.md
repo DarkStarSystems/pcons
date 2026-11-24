@@ -50,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In a git checkout, the Python build backend's sdist holds only the files
   git tracks, so ignored files such as `.env` or a second build directory
   stay out. Outside git it ships the whole tree, as before. (#293)
+- When an editable install was built in an isolated environment, the default
+  for uv and pip, regenerating `build.ninja` after the install now says why
+  it can't and how to fix it, instead of failing with "No such file or
+  directory" or "No module named pcons". (#299)
 
 ## [0.33.0] - 2026-11-14
 

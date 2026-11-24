@@ -52,6 +52,10 @@ class Invocation:
     #: regen_command=). Used as-is: only the driver knows how it is
     #: re-invoked, and it owns the command's relocatability.
     command_override: list[str] | None = None
+    #: Argv the regen command runs through: the Python that runs pcons and
+    #: its arguments are appended to it. An editable install uses this to
+    #: explain a regen whose isolated build environment is gone.
+    launcher: list[str] = field(default_factory=list)
 
     def command(self, *, root_dir: Path, run_dir: Path) -> list[str] | None:
         """The argv that re-runs pcons, to be executed from *run_dir*.
@@ -76,6 +80,7 @@ class Invocation:
         # and make, both of which treat backslashes as escapes, and Python's
         # chdir/open accept them on Windows.
         argv = [
+            *self.launcher,
             sys.executable.replace("\\", "/"),
             "-m",
             "pcons",
