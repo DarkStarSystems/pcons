@@ -36,7 +36,15 @@ elif sys.platform == "win32":
     # rustc prints the authoritative list for a crate with
     # `cargo rustc --release -- --print native-static-libs`.
     env.link.libs.extend(
-        ["ws2_32", "userenv", "advapi32", "bcrypt", "ntdll", "kernel32"]
+        [
+            "ws2_32",
+            "userenv",
+            "advapi32",
+            "bcrypt",
+            "ntdll",
+            "kernel32",
+            "synchronization",
+        ]
     )
 
 app = project.Program("stats", env, sources=["src/main.cpp"])
