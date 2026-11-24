@@ -259,13 +259,25 @@ class TestSafeExtractTar:
             [
                 (self._file("pkg/AGENTS.md"), b"agents\n"),
                 self._link("pkg/CLAUDE.md", "AGENTS.md"),
+                (self._file("pkg/src/a.h"), b"int a;\n"),
+                self._link("pkg/inc", "src"),
             ],
         )
         with patch("os.symlink", side_effect=OSError("no privilege")):
             _safe_extract_tar(archive, tmp_path / "out")
-        copy = tmp_path / "out" / "pkg" / "CLAUDE.md"
-        assert not copy.is_symlink()
-        assert copy.read_text() == "agents\n"
+        pkg = tmp_path / "out" / "pkg"
+        assert not (pkg / "CLAUDE.md").is_symlink()
+        assert (pkg / "CLAUDE.md").read_text() == "agents\n"
+        assert not (pkg / "inc").is_symlink()
+        assert (pkg / "inc" / "a.h").read_text() == "int a;\n"
+
+    def test_without_symlinks_a_dangling_link_is_an_error(self, tmp_path: Path) -> None:
+        archive = self._tar(tmp_path / "a.tar.gz", [self._link("pkg/link", "missing")])
+        with (
+            patch("os.symlink", side_effect=OSError("no privilege")),
+            pytest.raises(RuntimeError, match="nothing at its target"),
+        ):
+            _safe_extract_tar(archive, tmp_path / "out")
 
     @pytest.mark.parametrize(
         "links",
