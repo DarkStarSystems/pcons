@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
+import subprocess
 import sys
 import sysconfig
+import tarfile
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -994,6 +997,106 @@ class TestBuildSdist:
             names = tf.getnames()
         assert not any("artifact.o" in n for n in names)
         assert not any(".pyc" in n for n in names)
+
+
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _sdist_names(project: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    monkeypatch.chdir(project)
+    dist = project / "dist"
+    with tarfile.open(dist / backend.build_sdist(str(dist))) as tf:
+        return sorted(tf.getnames())
+
+
+@needs_git
+class TestBuildSdistFromGit:
+    def test_ships_only_tracked_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The project is a subdirectory of the repository, as in a monorepo."""
+        _git(tmp_path, "init", "-q")
+        (tmp_path / ".gitignore").write_text("local/\nbuild-*/\n.env\n")
+        project = tmp_path / "pkg"
+        project.mkdir()
+        _make_pyproject(project, '[project]\nname = "demo"\nversion = "0.1"\n')
+        (project / "src").mkdir()
+        (project / "src" / "demo.cpp").write_text("int x;\n")
+        _git(tmp_path, "add", ".")
+        for ignored in ("local/notes.txt", "build-release/out.o", ".env"):
+            (project / ignored).parent.mkdir(exist_ok=True)
+            (project / ignored).write_text("x\n")
+        (project / "new.txt").write_text("not added yet\n")
+
+        assert _sdist_names(project, monkeypatch) == [
+            "demo-0.1/PKG-INFO",
+            "demo-0.1/pyproject.toml",
+            "demo-0.1/src/demo.cpp",
+        ]
+
+    def test_leaves_out_a_tracked_file_deleted_from_the_work_tree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _git(tmp_path, "init", "-q")
+        _make_pyproject(tmp_path, '[project]\nname = "demo"\nversion = "0.1"\n')
+        (tmp_path / "gone.txt").write_text("x\n")
+        _git(tmp_path, "add", ".")
+        (tmp_path / "gone.txt").unlink()
+
+        assert _sdist_names(tmp_path, monkeypatch) == [
+            "demo-0.1/PKG-INFO",
+            "demo-0.1/pyproject.toml",
+        ]
+
+    def test_a_submodule_not_checked_out_is_an_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _git(tmp_path, "init", "-q")
+        _make_pyproject(tmp_path, '[project]\nname = "demo"\nversion = "0.1"\n')
+        _git(tmp_path, "add", ".")
+        # A gitlink with an empty directory: what a clone without
+        # --recurse-submodules leaves.
+        commit = "0123456789abcdef0123456789abcdef01234567"
+        _git(tmp_path, "update-index", "--add", "--cacheinfo", f"160000,{commit},sub")
+        (tmp_path / "sub").mkdir()
+
+        with pytest.raises(RuntimeError, match="Submodule sub isn't checked out"):
+            _sdist_names(tmp_path, monkeypatch)
+
+    def test_a_git_failure_in_a_checkout_is_an_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not a fall back to every file, as with "dubious ownership"."""
+        (tmp_path / ".git").write_text("gitdir: nowhere\n")
+        _make_pyproject(tmp_path, '[project]\nname = "demo"\nversion = "0.1"\n')
+
+        with pytest.raises(RuntimeError, match="`git ls-files` failed"):
+            _sdist_names(tmp_path, monkeypatch)
+
+    def test_a_checkout_without_git_is_an_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _git(tmp_path, "init", "-q")
+        _make_pyproject(tmp_path, '[project]\nname = "demo"\nversion = "0.1"\n')
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+
+        with pytest.raises(RuntimeError, match="git won't run"):
+            _sdist_names(tmp_path, monkeypatch)
+
+    def test_walks_the_tree_where_git_tracks_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unpacked sdist inside some other checkout."""
+        _git(tmp_path, "init", "-q")
+        project = tmp_path / "demo-0.1"
+        project.mkdir()
+        _make_pyproject(project, '[project]\nname = "demo"\nversion = "0.1"\n')
+
+        assert "demo-0.1/pyproject.toml" in _sdist_names(project, monkeypatch)
 
 
 # ---------------------------------------------------------------------------

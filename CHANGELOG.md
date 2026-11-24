@@ -47,6 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pcons test --junit` keeps both output streams of a test that fails, errors
   or times out: the failure text has stdout then stderr, and the test case
   gets `<system-out>` and `<system-err>`. Before, stderr hid stdout. (#296)
+- In a git checkout, the Python build backend's sdist holds only the files
+  git tracks, so ignored files such as `.env` or a second build directory
+  stay out. Outside git it ships the whole tree, as before. (#293)
 
 ## [0.33.0] - 2026-11-14
 
