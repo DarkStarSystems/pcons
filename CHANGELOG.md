@@ -41,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - pcons-fetch clones a git dependency pinned to a commit without its history's
   files, so it downloads only that commit's files. Tags are still there for
   `git describe`. (#298)
+- Removing a project's last `Test` removes `tests.json`, so `pcons test` no
+  longer runs the old tests. Graph generators no longer write a `tests.json`
+  next to their output. (#292)
+- `pcons test --junit` keeps both output streams of a test that fails, errors
+  or times out: the failure text has stdout then stderr, and the test case
+  gets `<system-out>` and `<system-err>`. Before, stderr hid stdout. (#296)
 
 ## [0.33.0] - 2026-11-14
 

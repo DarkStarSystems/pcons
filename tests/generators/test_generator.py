@@ -39,6 +39,24 @@ class DeferredMockGenerator(BaseGenerator):
         self.executed = True
 
 
+class TestTestManifest:
+    def test_only_build_generators_write_it(self, tmp_path):
+        """tests.json goes with the test targets, so a graph in docs/ gets none."""
+
+        class DocsGenerator(DeferredMockGenerator):
+            def _resolve_output_dir(self, project: Project) -> Path:
+                return tmp_path / "docs"
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        project.Test("smoke", sys.executable, args=["-c", "pass"])
+        DocsGenerator().generate(project)
+        # Also runs the default build generator, which writes into build/.
+        BaseGenerator._generate_pending(project)
+
+        assert (tmp_path / "build" / "tests.json").exists()
+        assert not (tmp_path / "docs" / "tests.json").exists()
+
+
 class TestGeneratorProtocol:
     def test_base_generator_is_generator(self):
         gen = MockGenerator()

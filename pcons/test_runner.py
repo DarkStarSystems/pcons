@@ -822,7 +822,8 @@ def write_junit(path: Path, project_name: str, results: list[TestResult]) -> Non
     The schema matches what Jenkins, GitLab CI, and most other CI
     systems consume by default. One ``<testsuite>`` per project,
     ``<testcase>`` per test, with ``<failure>`` / ``<error>`` /
-    ``<skipped>`` children where appropriate.
+    ``<skipped>`` children where appropriate. A test that didn't pass
+    also gets its output as ``<system-out>`` and ``<system-err>``.
     """
     total = len(results)
     failures = sum(1 for r in results if r.status == FAIL)
@@ -849,21 +850,30 @@ def write_junit(path: Path, project_name: str, results: list[TestResult]) -> Non
             classname=project_name,
             time=f"{r.duration:.3f}",
         )
-        if r.status == FAIL:
-            f = ET.SubElement(
-                case, "failure", message=_sanitize_xml_text(r.message or "test failed")
-            )
-            f.text = _sanitize_xml_text(r.stderr or r.stdout or "")
-        elif r.status in (TIMEOUT, ERROR):
-            e = ET.SubElement(
-                case,
-                "error",
-                type=r.status,
-                message=_sanitize_xml_text(r.message or ""),
-            )
-            e.text = _sanitize_xml_text(r.stderr or r.stdout or "")
-        elif r.status == SKIP:
+        if r.status == SKIP:
             ET.SubElement(case, "skipped", message=_sanitize_xml_text(r.message or ""))
+        elif r.status != PASS:
+            if r.status == FAIL:
+                problem = ET.SubElement(
+                    case,
+                    "failure",
+                    message=_sanitize_xml_text(r.message or "test failed"),
+                )
+            else:
+                problem = ET.SubElement(
+                    case,
+                    "error",
+                    type=r.status,
+                    message=_sanitize_xml_text(r.message or ""),
+                )
+            # Both streams in the body too, for viewers that show only the body.
+            both = [text for text in (r.stdout, r.stderr) if text]
+            problem.text = _sanitize_xml_text(
+                "\n".join(text.rstrip("\n") for text in both)
+            )
+            for tag, text in (("system-out", r.stdout), ("system-err", r.stderr)):
+                if text:
+                    ET.SubElement(case, tag).text = _sanitize_xml_text(text)
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")

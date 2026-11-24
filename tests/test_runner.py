@@ -367,6 +367,26 @@ class TestJUnitOutput:
         assert cases[1].find("failure") is not None
         assert cases[2].find("skipped") is not None
 
+    def test_failure_keeps_both_streams(self, tmp_path):
+        """A sanitizer report on stderr mustn't hide the assertion on stdout."""
+        results = [
+            TestResult(name="bad", status=FAIL, stdout="OUT\n", stderr="ERR\n"),
+            TestResult(name="slow", status=TIMEOUT, stdout="partial"),
+            TestResult(name="ok", status=PASS, stdout="chatter"),
+        ]
+        out = tmp_path / "junit.xml"
+        write_junit(out, "demo", results)
+
+        bad, slow, ok = ET.fromstring(out.read_text()).iter("testcase")
+        assert bad.findtext("failure") == "OUT\nERR"
+        assert bad.findtext("system-out") == "OUT\n"
+        assert bad.findtext("system-err") == "ERR\n"
+        assert slow.findtext("error") == "partial"
+        assert slow.findtext("system-out") == "partial"
+        assert slow.find("system-err") is None
+        # Passing tests stay small: no captured output.
+        assert ok.find("system-out") is None
+
     def test_control_chars_in_output_produce_valid_xml(self, tmp_path):
         # XML 1.0 forbids most C0 control chars (only tab/LF/CR survive
         # below 0x20). A test that dumps binary-ish output to stdout/stderr
