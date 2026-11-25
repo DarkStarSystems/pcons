@@ -4,7 +4,7 @@ build-backend = "pcons.pyproject"
 
 [project]
 name = "pcons_hello_ext"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Example nanobind extension built with the pcons backend"
 readme = "README.md"
 license = "MIT"
@@ -22,9 +22,13 @@ dev = ["pcons", "ninja", "conan"]
 
 [tool.uv]
 no-build-isolation-package = ["pcons_hello_ext"]
+# The version comes from VERSION through the provider, so a change there must
+# trigger a rebuild.
+cache-keys = [{ file = "pyproject.toml" }, { file = "VERSION" }]
 
 [tool.pcons]
 variant = "release"
+version-provider = "version_provider:get_version"
 # The install target to use for building the wheel.
 # If not specified, the default "wheel" target will be used.
 install-target = "install"

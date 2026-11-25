@@ -33,6 +33,10 @@ expected_outputs_windows = [
 # macOS runners have timed out there.
 commands = [
     # --- editable install ---
+    # With a dynamic version, uv sync asks the backend for the version inside
+    # .venv, so pcons must be there before the first sync.
+    { run = "uv venv" },
+    { run = "uv pip install --python .venv --group dev", timeout = 300 },
     { run = "uv sync", timeout = 300 },
     { run = "uv run python test_editable.py", expect_stdout = "Hello, world!" },
 
