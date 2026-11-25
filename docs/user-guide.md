@@ -4391,6 +4391,7 @@ install-target = "install"   # alias to build for wheels (default: "wheel")
 # variables = { SOME_VAR = "value" }  # optional: extra pcons variables
 # build-dir = "build"        # optional: wheel build directory (default: "build")
 # jobs = 4                   # optional: ninja parallel jobs (default: ninja's)
+# version-provider = "tools.version:get_version"  # optional, see "Dynamic version"
 ```
 
 #### How wheels are built
@@ -4523,6 +4524,51 @@ config-settings = { jobs = "4" }
 The value must be a positive integer. `jobs` caps the ninja build only. The
 configure step, including any subprocess a build script runs, is not limited.
 
+#### Dynamic version
+
+To compute the version at build time, list it in `dynamic` and name a
+provider function:
+
+```toml
+[project]
+name = "mypkg"
+dynamic = ["version"]
+
+[tool.pcons]
+version-provider = "tools.version:get_version"
+```
+
+The backend imports `tools.version` with the project directory first on
+`sys.path` and calls `get_version(source_dir)` with that directory as a
+`Path`. It must return a normalized PEP 440 version, such as `1.2.0` or
+`1.2.1.dev3+g1a2b3c4`, so `v1.2.0` is refused: it would break the sdist and
+wheel names.
+
+The provider in `examples/50_pyproject/version_provider.py` shows how this
+works, by reading a `VERSION` file. Other ways to use it:
+
+- To use the last `v*` git tag, run
+  `git describe --tags --abbrev=0 --match "v*"` and drop the `v`.
+- For a version per commit, return
+  `setuptools_scm.get_version(root=str(source_dir), local_scheme="no-local-version")`
+  and add `setuptools-scm` to `[build-system] requires`.
+
+The sdist writes the version into its `PKG-INFO`. An existing `PKG-INFO` at
+the root takes precedence. The sdist ships only the files git tracks, so
+commit the provider module. An editable install keeps its version until it is
+reinstalled.
+
+When using uv:
+
+- uv rebuilds a package only when one of its `cache-keys` changes, so add
+  whatever the version comes from: example 50 adds `VERSION`, and git tags
+  need `{ git = { commit = true, tags = true } }`.
+- With `no-build-isolation-package` and no `uv.lock`, the first `uv sync`
+  fails with `No module named 'pcons'`, because uv asks the backend for the
+  version inside `.venv`, which has no pcons yet. Run `uv venv` and
+  `uv pip install --python .venv --group dev` first, as example 50 does, or
+  commit `uv.lock`.
+
 #### Metadata and sdists
 
 The backend renders these PEP 621 `[project]` fields into `METADATA`
@@ -4555,9 +4601,10 @@ The backend renders these PEP 621 `[project]` fields into `METADATA`
 Files named by `readme`, `license` and `license-files` must lie inside the
 project.
 
-An unknown `[project]` key, or a non-empty `dynamic`, raises an error rather
-than being silently dropped from the wheel's metadata. Remove it or file an
-issue.
+An unknown `[project]` key raises an error rather than being silently dropped
+from the wheel's metadata. Remove it or file an issue. Only `version` may be
+in `dynamic`, see [Dynamic version](#dynamic-version). Any other entry raises an
+error that names it.
 
 `build_sdist` ships the files git tracks, plus the `PKG-INFO` the spec
 requires, so nothing in `.gitignore` gets in. `git add` a new file before
