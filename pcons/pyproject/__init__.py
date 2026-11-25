@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import glob
 import hashlib
+import importlib
 import io
 import logging
 import os
@@ -25,6 +26,7 @@ import sysconfig
 import zipfile
 from collections.abc import Sequence
 from email.headerregistry import Address
+from email.parser import HeaderParser
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -64,6 +66,125 @@ def _name_version(project: dict[str, Any]) -> tuple[str, str]:
             "without it."
         )
     return str(name).replace("-", "_"), str(version)
+
+
+_NORMALIZED_VERSION = re.compile(
+    r"(\d+!)?\d+(\.\d+)*((a|b|rc)\d+)?(\.post\d+)?(\.dev\d+)?(\+[a-z0-9]+(\.[a-z0-9]+)*)?"
+)
+
+
+def _project_metadata(
+    pyproject: dict[str, Any], source_dir: Path, metadata_directory: str | None = None
+) -> tuple[str, str, dict[str, Any]]:
+    """Return the (normalized name, version, ``[project]`` table) of a project.
+
+    A static ``version`` is used as is. With ``dynamic = ["version"]``, the
+    version comes from the prepared ``METADATA`` in *metadata_directory* when
+    given, else from a ``PKG-INFO`` at the root of *source_dir*, else from the
+    ``[tool.pcons] version-provider`` function. The returned table has
+    ``version`` set and removed from ``dynamic``. Only ``version`` may be
+    dynamic.
+    """
+    project = dict(pyproject.get("project", {}))
+    pcons_cfg = pyproject.get("tool", {}).get("pcons", {})
+    dynamic = project.get("dynamic") or []
+    if not isinstance(dynamic, list):
+        raise PconsRuntimeError(
+            f"pyproject [project] dynamic must be a list, got {dynamic!r}."
+        )
+    others = sorted({str(f) for f in dynamic if f != "version"})
+    if others:
+        raise PconsRuntimeError(
+            f"pyproject [project] dynamic = {others!r} is not supported: only "
+            "'version' may be dynamic. Give the other fields statically in "
+            "pyproject.toml."
+        )
+    provider = pcons_cfg.get("version-provider")
+    if "version" in dynamic:
+        if "version" in project:
+            raise PconsRuntimeError(
+                "pyproject [project] version is both static and listed in "
+                "dynamic. Remove one of them."
+            )
+        project["version"] = _dynamic_version(source_dir, provider, metadata_directory)
+        project["dynamic"] = []
+    elif provider is not None:
+        raise PconsRuntimeError(
+            "pyproject [tool.pcons] version-provider needs "
+            '[project] dynamic = ["version"] and no static version.'
+        )
+    name, version = _name_version(project)
+    return name, version, project
+
+
+def _dynamic_version(
+    source_dir: Path, provider: Any, metadata_directory: str | None
+) -> str:
+    """Return the dynamic version of the project in *source_dir*."""
+    if metadata_directory is not None:
+        path = Path(metadata_directory) / "METADATA"
+        version, source = _metadata_version(path), str(path)
+    elif (source_dir / "PKG-INFO").is_file():
+        version, source = _metadata_version(source_dir / "PKG-INFO"), "PKG-INFO"
+    else:
+        version = _call_provider(source_dir, provider)
+        source = f"pyproject [tool.pcons] version-provider {provider!r}"
+    if not _NORMALIZED_VERSION.fullmatch(version):
+        raise PconsRuntimeError(
+            f"{source} gave {version!r}, not a normalized PEP 440 version."
+        )
+    return version
+
+
+def _metadata_version(path: Path) -> str:
+    """Return the ``Version`` header of a core metadata file, PKG-INFO or METADATA."""
+    if not path.is_file():
+        raise PconsRuntimeError(f"Prepared metadata {path} does not exist.")
+    version = HeaderParser().parsestr(path.read_text(encoding="utf-8"))["Version"]
+    if not version or not str(version).strip():
+        raise PconsRuntimeError(f"{path} has no Version header.")
+    return str(version).strip()
+
+
+def _call_provider(source_dir: Path, provider: Any) -> str:
+    """Import and call the ``module:function`` named by *provider*.
+
+    *source_dir* is first on ``sys.path`` while the module is imported and the
+    function runs, so a module of the project is found. No bytecode is written
+    meanwhile, so the source tree gets no ``__pycache__``.
+    """
+    if provider is None:
+        raise PconsRuntimeError(
+            'pyproject [project] dynamic = ["version"] needs [tool.pcons] '
+            'version-provider = "module:function".'
+        )
+    spec = provider if isinstance(provider, str) else ""
+    module_name, _, attr = spec.partition(":")
+    if not module_name or not attr.isidentifier():
+        raise PconsRuntimeError(
+            "pyproject [tool.pcons] version-provider must be "
+            f'"module:function", with a function name after the colon, '
+            f"got {provider!r}."
+        )
+    entry = str(source_dir)
+    dont_write_bytecode = sys.dont_write_bytecode
+    sys.path.insert(0, entry)
+    sys.dont_write_bytecode = True
+    try:
+        version = getattr(importlib.import_module(module_name), attr)(source_dir)
+    except Exception as e:
+        raise PconsRuntimeError(
+            f"pyproject [tool.pcons] version-provider {provider!r} failed: {e}"
+        ) from e
+    finally:
+        sys.dont_write_bytecode = dont_write_bytecode
+        sys.path.remove(entry)
+    if not isinstance(version, str):
+        raise PconsRuntimeError(
+            f"pyproject [tool.pcons] version-provider {provider!r} returned "
+            f"{version!r}, not a str."
+        )
+    return version
 
 
 def _ninja_requirement() -> list[str]:
@@ -456,26 +577,29 @@ def _sdist_files(source_dir: Path, build_dir: Path) -> list[Path]:
 
     In a git checkout, that's the files git tracks, so nothing it ignores
     ships. Elsewhere, as in an unpacked sdist, it's the whole tree, less
-    *build_dir* and the directories in :data:`_SDIST_EXCLUDE_DIRS`.
+    *build_dir* and the directories in :data:`_SDIST_EXCLUDE_DIRS`. A
+    top-level ``PKG-INFO`` is left out, since :func:`build_sdist` writes its
+    own.
     """
-    tracked = _git_files(source_dir)
-    if tracked is not None:
-        return sorted(tracked)
-    files = []
-    try:
-        build_rel: Path | None = build_dir.resolve().relative_to(source_dir.resolve())
-    except ValueError:
-        build_rel = None
-    for path in source_dir.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(source_dir)
-        if any(part in _SDIST_EXCLUDE_DIRS for part in rel.parts):
-            continue
-        if build_rel is not None and rel.is_relative_to(build_rel):
-            continue
-        files.append(path)
-    return sorted(files)
+    files = _git_files(source_dir)
+    if files is None:
+        files = []
+        try:
+            build_rel: Path | None = build_dir.resolve().relative_to(
+                source_dir.resolve()
+            )
+        except ValueError:
+            build_rel = None
+        for path in source_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(source_dir)
+            if any(part in _SDIST_EXCLUDE_DIRS for part in rel.parts):
+                continue
+            if build_rel is not None and rel.is_relative_to(build_rel):
+                continue
+            files.append(path)
+    return sorted(f for f in files if f.relative_to(source_dir) != Path("PKG-INFO"))
 
 
 def _wheel_tag() -> tuple[str, str, str]:
@@ -756,8 +880,7 @@ def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
     meta_dir = Path(metadata_directory)
 
     pyproject = _load_pyproject(source_dir)
-    project = pyproject.get("project", {})
-    name, version = _name_version(project)
+    name, version, project = _project_metadata(pyproject, source_dir)
 
     python_tag, abi_tag, platform_tag = _wheel_tag()
     tag = f"{python_tag}-{abi_tag}-{platform_tag}"
@@ -789,6 +912,7 @@ def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
 def _build(
     wheel_directory: str,
     config_settings: dict[str, Any] | None = None,
+    metadata_directory: str | None = None,
     *,
     editable: bool,
 ) -> str:
@@ -796,8 +920,9 @@ def _build(
     wheel_dir = Path(wheel_directory)
 
     pyproject = _load_pyproject(source_dir)
-    project = pyproject.get("project", {})
-    name, version = _name_version(project)
+    name, version, project = _project_metadata(
+        pyproject, source_dir, metadata_directory
+    )
 
     pcons_cfg = pyproject.get("tool", {}).get("pcons", {})
     build_dir = source_dir / "build" if editable else _build_dir(source_dir, pcons_cfg)
@@ -897,7 +1022,7 @@ def build_wheel(
     metadata_directory: str | None = None,
 ) -> str:
     """Build a wheel and return its filename."""
-    return _build(wheel_directory, config_settings, editable=False)
+    return _build(wheel_directory, config_settings, metadata_directory, editable=False)
 
 
 def prepare_metadata_for_build_editable(
@@ -919,7 +1044,7 @@ def build_editable(
     build_dir to sys.path.  Re-running ninja in the build directory is enough
     to pick up rebuilt extensions without reinstalling.
     """
-    return _build(wheel_directory, config_settings, editable=True)
+    return _build(wheel_directory, config_settings, metadata_directory, editable=True)
 
 
 def build_sdist(
@@ -933,8 +1058,7 @@ def build_sdist(
     sdist_dir = Path(sdist_directory)
 
     pyproject = _load_pyproject(source_dir)
-    project = pyproject.get("project", {})
-    name, version = _name_version(project)
+    name, version, project = _project_metadata(pyproject, source_dir)
     _dist_info_extras(project, source_dir)
 
     sdist_name = f"{name}-{version}.tar.gz"
