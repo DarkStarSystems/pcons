@@ -327,7 +327,7 @@ def get_var(
 
 @overload
 def get_var(
-    name: str, default: None = None, *, type: builtins.type[list]
+    name: str, default: None = None, *, type: builtins.type[list[str]]
 ) -> list[str] | None: ...
 
 
