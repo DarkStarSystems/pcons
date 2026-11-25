@@ -8,6 +8,8 @@ assert "site-packages" in pcons_hello_ext.__file__, (
     f"Expected installed (non-editable) extension in site-packages, found: {pcons_hello_ext.__file__}"
 )
 
+assert metadata.version("pcons_hello_ext") == "0.0.1"
+
 meta = metadata.metadata("pcons_hello_ext")
 assert meta["Summary"] == "Example nanobind extension built with the pcons backend"
 assert meta["License-Expression"] == "MIT"
