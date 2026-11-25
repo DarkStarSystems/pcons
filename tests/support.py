@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -221,3 +224,119 @@ def apply_feature(toolchain: Any, env: Any, name: str) -> None:
     preset = toolchain.make_feature_preset(name, env.target)
     assert preset is not None, name
     env.apply_from(toolchain, preset)
+
+
+def gone(pid: int, deadline: float) -> bool:
+    """Whether process *pid* has exited, waiting up to *deadline* seconds.
+
+    Windows waits on a process handle: ``os.kill`` there terminates the
+    process instead of probing it.
+    """
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        synchronize = 0x00100000
+        handle = kernel32.OpenProcess(synchronize, False, pid)
+        if not handle:
+            return True
+        try:
+            return kernel32.WaitForSingleObject(handle, int(deadline * 1000)) == 0
+        finally:
+            kernel32.CloseHandle(handle)
+
+    end = time.monotonic() + deadline
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        if time.monotonic() >= end:
+            return False
+        time.sleep(0.05)
+
+
+_SPAWNER_PREFIX = """\
+import os, subprocess, sys, time
+
+def record(pid):
+    tmp = {pid_file!r} + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(str(pid))
+    os.replace(tmp, {pid_file!r})
+
+SLEEPER = [sys.executable, "-c", "import time; time.sleep(60)"]
+"""
+
+_SPAWNER_BODIES = {
+    "direct": """\
+print("partial", flush=True)
+record(subprocess.Popen(SLEEPER).pid)
+time.sleep(60)
+""",
+    "orphan": """\
+print("partial", flush=True)
+middle = "record(subprocess.Popen(SLEEPER).pid)"
+subprocess.run([sys.executable, "-c", PREFIX + middle], check=True)
+time.sleep(60)
+""",
+    "exited": """\
+print("partial", flush=True)
+record(subprocess.Popen(SLEEPER).pid)
+""",
+    "daemon": """\
+quiet = subprocess.DEVNULL
+record(subprocess.Popen(SLEEPER, stdin=quiet, stdout=quiet, stderr=quiet).pid)
+""",
+}
+
+
+def write_spawner(script: Path, pid_file: Path, how: str) -> Path:
+    """Write a Python script that starts a process sleeping 60 s.
+
+    The script records that process's pid in *pid_file*, atomically.
+
+    Args:
+        script: Where to write the script.
+        pid_file: Where the script records the pid.
+        how: ``direct``: the script prints ``partial``, starts the sleeper
+            with its stdout and stderr, and sleeps 60 s. ``orphan``: the same,
+            but a middle process starts the sleeper and exits first.
+            ``exited``: the same as ``direct``, but the script exits at once.
+            ``daemon``: the sleeper gets no stdio and the script exits 0.
+            Each script prints ``partial`` before the pid is recorded.
+
+    Returns:
+        *script*.
+    """
+    prefix = _SPAWNER_PREFIX.format(pid_file=str(pid_file))
+    script.write_text(f"{prefix}PREFIX = {prefix!r}\n{_SPAWNER_BODIES[how]}")
+    return script
+
+
+def read_pid(pid_file: Path, deadline: float) -> int:
+    """The pid recorded in *pid_file*, waiting up to *deadline* seconds for it."""
+    end = time.monotonic() + deadline
+    while not pid_file.exists():
+        assert time.monotonic() < end, f"{pid_file} never appeared"
+        time.sleep(0.05)
+    return int(pid_file.read_text())
+
+
+def kill_pid(pid: int) -> None:
+    """Kill process *pid* if it still runs, for test cleanup.
+
+    A pid that is gone is left alone: Windows reuses pids fast, and
+    ``os.kill`` there terminates whatever process holds it now.
+    """
+    if gone(pid, 0):
+        return
+    with contextlib.suppress(OSError):
+        os.kill(pid, signal.SIGTERM)
