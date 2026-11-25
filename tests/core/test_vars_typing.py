@@ -38,6 +38,7 @@ port: str = get_var("X", "ofx")
 prefix: Path = get_var("X", Path("/usr/local"))
 maybe_flag: bool | None = get_var("X", type=bool)
 maybe_prefix: Path | None = get_var("X", type=Path)
+flags: list[str] | None = get_var("X", type=list)
 """
 
 
@@ -70,3 +71,22 @@ def test_the_documented_calls_type_check(tmp_path: Path) -> None:
     out, status = _check(tmp_path, ACCEPTED)
 
     assert status == 0, out
+
+
+def test_no_overload_leaves_a_generic_unparameterized(tmp_path: Path) -> None:
+    vars_py = Path(__file__).parents[2] / "pcons" / "core" / "vars.py"
+    out, _err, _status = mypy_api.run(
+        [
+            str(vars_py),
+            "--disallow-any-generics",
+            "--no-error-summary",
+            "--no-incremental",
+            "--follow-imports=silent",
+            f"--cache-dir={tmp_path / '.mypy_cache'}",
+        ]
+    )
+
+    missing = [
+        line for line in out.splitlines() if "vars.py" in line and "type-arg" in line
+    ]
+    assert not missing, out
