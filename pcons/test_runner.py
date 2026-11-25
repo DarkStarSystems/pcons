@@ -28,6 +28,7 @@ import click
 
 from pcons._cli_click import run_cli
 from pcons.core.errors import PconsRuntimeError, PconsValueError
+from pcons.util.process_tree import ProcessTree
 
 logger = logging.getLogger("pcons.test")
 
@@ -450,14 +451,15 @@ def run_one_test(test: dict, build_dir: Path) -> TestResult:
 
     start = time.monotonic()
     try:
-        result = subprocess.run(
+        with ProcessTree(
             command,
             cwd=str(cwd),
             env=proc_env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
-        )
+        ) as tree:
+            stdout, stderr = _communicate(tree, timeout)
     except subprocess.TimeoutExpired as e:
         duration = time.monotonic() - start
         return TestResult(
@@ -488,29 +490,69 @@ def run_one_test(test: dict, build_dir: Path) -> TestResult:
             labels=labels,
         )
 
+    returncode = tree.proc.returncode
     duration = time.monotonic() - start
     message = ""
-    if result.returncode == test.get("skip_returncode"):
+    if returncode == test.get("skip_returncode"):
         # Checked before should_fail: a test that skips itself didn't run.
         status = SKIP
-        message = f"exit code {result.returncode}"
-    elif (result.returncode == 0) != should_fail:
+        message = f"exit code {returncode}"
+    elif (returncode == 0) != should_fail:
         status = PASS
     else:
         status = FAIL
-        message = _exit_description(result.returncode)
+        message = _exit_description(returncode)
         if should_fail:
             message += ", and the test should fail"
     return TestResult(
         name=name,
         status=status,
         duration=duration,
-        returncode=result.returncode,
-        stdout=result.stdout,
-        stderr=result.stderr,
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
         message=message,
         labels=labels,
     )
+
+
+_DRAIN_SECONDS = 5.0
+
+
+def _communicate(tree: ProcessTree, timeout: float | None) -> tuple[str, str]:
+    """The test's output, once it exits.
+
+    Raises:
+        subprocess.TimeoutExpired: The test ran past *timeout* and was killed,
+            carrying whatever output :func:`_finish_killed` collected.
+    """
+    try:
+        return tree.proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        raise _finish_killed(tree, e) from None
+
+
+def _finish_killed(
+    tree: ProcessTree, e: subprocess.TimeoutExpired
+) -> subprocess.TimeoutExpired:
+    """Kill a timed-out test and collect what it wrote.
+
+    When the kill reaches every descendant, the pipes close with it and the
+    output is drained in full. Otherwise a descendant may hold the pipes for
+    as long as it lives, so the child is only reaped and *e* is returned.
+    """
+    tree.kill()
+    if tree.reaches_descendants:
+        try:
+            stdout, stderr = tree.proc.communicate(timeout=_DRAIN_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            return subprocess.TimeoutExpired(
+                e.cmd, e.timeout, output=stdout, stderr=stderr
+            )
+    tree.proc.wait()
+    return e
 
 
 def _exit_description(returncode: int) -> str:

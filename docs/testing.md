@@ -37,7 +37,7 @@ The full set of fields (all keyword-only):
 | `cwd` | `Path \| str \| None` | Working directory; defaults to the build dir. |
 | `env` | `dict[str, str] \| None` | Extra environment variables for the test process. |
 | `labels` | `Sequence[str]` | Tags for filtering (`unit`, `integration`, `slow`, `fuzz`, ...). |
-| `timeout` | `float \| None` | Seconds before the runner kills the test. |
+| `timeout` | `float \| None` | Seconds before the runner kills the test. On Windows it also kills every process the test started. |
 | `should_fail` | `bool` | If True, a non-zero exit code is a pass. |
 | `skip_returncode` | `int \| None` | Exit code that means "skipped", not "failed". |
 | `serial` | `bool` | Don't run in parallel with other tests. |
@@ -107,6 +107,9 @@ project.Test(
     "server.stop", stop_script, depends_on=["server.start"], labels=["fixture"]
 )
 ```
+
+A test that exits on its own leaves the processes it started running, so
+`server.start` can leave its server up for the tests after it.
 
 When you filter with `-L` / `-R`, deps of selected tests are
 auto-included so fixtures keep working:
