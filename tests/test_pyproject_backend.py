@@ -9,7 +9,9 @@ import subprocess
 import sys
 import sysconfig
 import tarfile
+import uuid
 import zipfile
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1605,3 +1607,511 @@ class TestJobs:
         with patch("pcons.cli.run_ninja", return_value=0) as mock_run:
             backend._run_ninja(tmp_path, targets=["install"], jobs=3)
         mock_run.assert_called_once_with(tmp_path, targets=["install"], jobs=3)
+
+
+_RAISING_PROVIDER = (
+    "def get_version(source_dir):\n    raise RuntimeError('provider was called')\n"
+)
+
+
+@pytest.fixture
+def provider(tmp_path: Path) -> Iterator[Callable[..., str]]:
+    """Write a provider module under a unique name, return its spec."""
+    names: list[str] = []
+
+    def make(body: str, directory: Path = tmp_path) -> str:
+        name = f"vprov_{uuid.uuid4().hex}"
+        names.append(name)
+        (directory / f"{name}.py").write_text(body)
+        return f"{name}:get_version"
+
+    yield make
+    for name in names:
+        sys.modules.pop(name, None)
+
+
+def _returning(version: str | None) -> str:
+    return f"def get_version(source_dir):\n    return {version!r}\n"
+
+
+def _dynamic_project(directory: Path, spec: str | None, extra: str = "") -> Path:
+    tool = f'[tool.pcons]\nversion-provider = "{spec}"\n' if spec else ""
+    return _make_pyproject(
+        directory,
+        f'[project]\nname = "mypkg"\ndynamic = ["version"]\n{extra}{tool}',
+    )
+
+
+def _unpack(tarball: Path, dest: Path) -> None:
+    with tarfile.open(tarball) as tf:
+        for member in tf.getmembers():
+            data = tf.extractfile(member)
+            if data is None:
+                continue
+            out = dest / member.name
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(data.read())
+
+
+def _pkg_info_members(tarball: Path) -> list[str]:
+    with tarfile.open(tarball) as tf:
+        return [
+            n for n in tf.getnames() if n.count("/") == 1 and n.endswith("/PKG-INFO")
+        ]
+
+
+def _run_hook(hook: str, src: Path) -> str:
+    """Run one PEP 517 hook in *src*, return the name of what it built."""
+    if hook.startswith("prepare_metadata"):
+        return getattr(backend, hook)(str(src / "meta"))
+    if hook == "build_sdist":
+        return backend.build_sdist(str(src / "dist"))
+    _make_fake_extension(src / "build")
+    with (
+        patch("pcons.pyproject._run_pcons"),
+        patch("pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect),
+    ):
+        return getattr(backend, hook)(str(src / "dist"))
+
+
+def _named_version(filename: str) -> str:
+    rest = filename.removeprefix("mypkg-")
+    for suffix in (".dist-info", ".tar.gz"):
+        if rest.endswith(suffix):
+            return rest.removesuffix(suffix)
+    return rest.split("-")[0]
+
+
+_HOOKS = [
+    "prepare_metadata_for_build_wheel",
+    "prepare_metadata_for_build_editable",
+    "build_sdist",
+    "build_wheel",
+    "build_editable",
+]
+
+
+class TestDynamicVersion:
+    @pytest.mark.parametrize("hook", _HOOKS)
+    def test_every_hook_calls_the_provider(
+        self,
+        hook: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        _dynamic_project(tmp_path, provider(_returning("1.2.3")))
+        monkeypatch.chdir(tmp_path)
+        assert _named_version(_run_hook(hook, tmp_path)) == "1.2.3"
+
+    @pytest.mark.parametrize("hook", _HOOKS)
+    def test_every_hook_reads_pkg_info_of_an_unpacked_sdist(
+        self,
+        hook: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        _dynamic_project(tmp_path, provider(_RAISING_PROVIDER))
+        (tmp_path / "PKG-INFO").write_text(
+            "Metadata-Version: 2.4\nName: mypkg\nVersion: 4.5.6\n"
+        )
+        monkeypatch.chdir(tmp_path)
+        assert _named_version(_run_hook(hook, tmp_path)) == "4.5.6"
+
+    def test_prepared_metadata_holds_the_version(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        _dynamic_project(tmp_path, provider(_returning("1.2.3")))
+        monkeypatch.chdir(tmp_path)
+        name = backend.prepare_metadata_for_build_wheel(str(tmp_path / "meta"))
+        metadata = (tmp_path / "meta" / name / "METADATA").read_text()
+        assert name == "mypkg-1.2.3.dist-info"
+        assert "Version: 1.2.3\n" in metadata
+        assert "Dynamic:" not in metadata
+
+    def test_sdist_freezes_the_version_in_pkg_info(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        _dynamic_project(tmp_path, provider(_returning("1.2.3")))
+        monkeypatch.chdir(tmp_path)
+        name = backend.build_sdist(str(tmp_path / "dist"))
+        with tarfile.open(tmp_path / "dist" / name) as tf:
+            member = tf.extractfile("mypkg-1.2.3/PKG-INFO")
+            assert member is not None
+            pkg_info = member.read().decode()
+        assert name == "mypkg-1.2.3.tar.gz"
+        assert "Version: 1.2.3\n" in pkg_info
+        assert "Dynamic:" not in pkg_info
+
+    def test_sdist_of_an_unpacked_sdist_has_one_pkg_info(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        src = tmp_path / "src"
+        src.mkdir()
+        _dynamic_project(src, provider(_returning("1.2.3"), src))
+        monkeypatch.chdir(src)
+        first = src / "dist" / backend.build_sdist(str(src / "dist"))
+        _unpack(first, tmp_path / "unpacked")
+        unpacked = tmp_path / "unpacked" / "mypkg-1.2.3"
+        monkeypatch.chdir(unpacked)
+        second = unpacked / "dist" / backend.build_sdist(str(unpacked / "dist"))
+        assert _pkg_info_members(second) == ["mypkg-1.2.3/PKG-INFO"]
+
+    def test_a_nested_pkg_info_ships(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_pyproject(tmp_path, '[project]\nname = "mypkg"\nversion = "0.1"\n')
+        (tmp_path / "vendor").mkdir()
+        (tmp_path / "vendor" / "PKG-INFO").write_text("Version: 9\n")
+        assert "mypkg-0.1/vendor/PKG-INFO" in _sdist_names(tmp_path, monkeypatch)
+
+    @pytest.mark.parametrize("hook", ["build_wheel", "build_editable"])
+    def test_wheel_takes_the_version_of_the_prepared_metadata(
+        self,
+        hook: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        counting = (
+            "calls = [0]\n"
+            "def get_version(source_dir):\n"
+            "    calls[0] += 1\n"
+            "    return f'1.0.dev{calls[0]}'\n"
+        )
+        _dynamic_project(tmp_path, provider(counting))
+        monkeypatch.chdir(tmp_path)
+        prepare = (
+            backend.prepare_metadata_for_build_editable
+            if hook == "build_editable"
+            else backend.prepare_metadata_for_build_wheel
+        )
+        meta = tmp_path / "meta"
+        dist_info = prepare(str(meta))
+        assert dist_info == "mypkg-1.0.dev1.dist-info"
+        _make_fake_extension(tmp_path / "build")
+        with (
+            patch("pcons.pyproject._run_pcons"),
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ),
+        ):
+            wheel = getattr(backend, hook)(
+                str(tmp_path / "dist"), None, str(meta / dist_info)
+            )
+        assert _named_version(wheel) == "1.0.dev1"
+
+    def test_static_version_ignores_metadata_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_pyproject(tmp_path, '[project]\nname = "mypkg"\nversion = "0.1"\n')
+        assert (
+            backend._project_metadata(
+                backend._load_pyproject(tmp_path), tmp_path, str(tmp_path / "none")
+            )[1]
+            == "0.1"
+        )
+
+    def test_metadata_directory_without_metadata_is_an_error(
+        self, tmp_path: Path, provider: Callable[..., str]
+    ) -> None:
+        _dynamic_project(tmp_path, provider(_RAISING_PROVIDER))
+        dist_info = tmp_path / "meta" / "mypkg-1.0.dist-info"
+        dist_info.mkdir(parents=True)
+        with pytest.raises(RuntimeError, match="METADATA"):
+            backend._project_metadata(
+                backend._load_pyproject(tmp_path), tmp_path, str(dist_info)
+            )
+
+    def test_static_version_wins_over_pkg_info(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _make_pyproject(tmp_path, '[project]\nname = "mypkg"\nversion = "0.1"\n')
+        (tmp_path / "PKG-INFO").write_text("Version: 9.9\n")
+        monkeypatch.chdir(tmp_path)
+        assert backend.build_sdist(str(tmp_path / "dist")) == "mypkg-0.1.tar.gz"
+
+    def test_provider_imports_a_project_module_lazily(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        helper = provider(_returning("3.1"))
+        lazy = (
+            "def get_version(source_dir):\n"
+            f"    import {helper.split(':')[0]} as helper\n"
+            "    return helper.get_version(source_dir)\n"
+        )
+        _dynamic_project(tmp_path, provider(lazy))
+        monkeypatch.chdir(tmp_path)
+        name = backend.prepare_metadata_for_build_wheel(str(tmp_path / "meta"))
+        assert name == "mypkg-3.1.dist-info"
+
+    def test_provider_gets_the_source_dir(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        body = (
+            "def get_version(source_dir):\n"
+            "    return (source_dir / 'VERSION').read_text().strip()\n"
+        )
+        _dynamic_project(tmp_path, provider(body))
+        (tmp_path / "VERSION").write_text("2.5\n")
+        monkeypatch.chdir(tmp_path)
+        name = backend.prepare_metadata_for_build_wheel(str(tmp_path / "meta"))
+        assert name == "mypkg-2.5.dist-info"
+
+    @pytest.mark.parametrize(
+        "body", [_returning("1.0"), _RAISING_PROVIDER], ids=["returns", "raises"]
+    )
+    def test_sys_path_is_restored(
+        self,
+        body: str,
+        tmp_path: Path,
+        provider: Callable[..., str],
+    ) -> None:
+        _dynamic_project(tmp_path, provider(body))
+        before = list(sys.path)
+        try:
+            backend._project_metadata(backend._load_pyproject(tmp_path), tmp_path)
+        except RuntimeError:
+            pass
+        assert sys.path == before
+
+    @pytest.mark.parametrize(
+        ("pyproject", "match"),
+        [
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["version"]\n',
+                "needs \\[tool.pcons\\] version-provider",
+            ),
+            (
+                '[project]\nname = "mypkg"\nversion = "1.0"\n'
+                '[tool.pcons]\nversion-provider = "m:f"\n',
+                'needs \\[project\\] dynamic = \\["version"\\]',
+            ),
+            (
+                '[project]\nname = "mypkg"\nversion = "1.0"\ndynamic = ["version"]\n'
+                '[tool.pcons]\nversion-provider = "m:f"\n',
+                "both static and listed in dynamic",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["version", "description"]\n'
+                '[tool.pcons]\nversion-provider = "m:f"\n',
+                "\\['description'\\] is not supported: only 'version' may be dynamic",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["description"]\n',
+                "\\['description'\\] is not supported: only 'version' may be dynamic",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["version", 1]\n',
+                "\\['1'\\] is not supported",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = "version"\n',
+                "dynamic must be a list",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["version"]\n'
+                '[tool.pcons]\nversion-provider = "nocolon"\n',
+                "after the colon, got 'nocolon'",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["version"]\n'
+                '[tool.pcons]\nversion-provider = "a:b:c"\n',
+                "after the colon, got 'a:b:c'",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["version"]\n'
+                '[tool.pcons]\nversion-provider = "pkg.mod:ns.get_version"\n',
+                "after the colon, got 'pkg.mod:ns.get_version'",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["version"]\n'
+                "[tool.pcons]\nversion-provider = 3\n",
+                "after the colon, got 3",
+            ),
+            (
+                '[project]\nname = "mypkg"\ndynamic = ["version"]\n'
+                '[tool.pcons]\nversion-provider = "vprov_no_such_module:f"\n',
+                "'vprov_no_such_module:f' failed: No module named",
+            ),
+        ],
+        ids=[
+            "no-provider",
+            "provider-without-dynamic",
+            "static-and-dynamic",
+            "other-dynamic-field",
+            "only-other-dynamic-field",
+            "non-string-dynamic-entry",
+            "dynamic-not-a-list",
+            "spec-without-colon",
+            "spec-with-two-colons",
+            "spec-with-dotted-attribute",
+            "spec-not-a-string",
+            "missing-module",
+        ],
+    )
+    def test_configuration_errors(
+        self, pyproject: str, match: str, tmp_path: Path
+    ) -> None:
+        _make_pyproject(tmp_path, pyproject)
+        with pytest.raises(RuntimeError, match=match):
+            backend._project_metadata(backend._load_pyproject(tmp_path), tmp_path)
+
+    @pytest.mark.parametrize(
+        ("body", "match"),
+        [
+            ("x = 1\n", "failed: module .* has no attribute 'get_version'"),
+            (_RAISING_PROVIDER, "failed: provider was called"),
+            (_returning(None), "returned None, not a str"),
+            (_returning("v1.0"), "gave 'v1.0', not a normalized PEP 440 version"),
+            (_returning("1.0-1"), "gave '1.0-1', not a normalized PEP 440 version"),
+            (_returning("not a version"), "not a normalized PEP 440 version"),
+        ],
+        ids=["no-function", "raises", "none", "v-prefix", "dash", "garbage"],
+    )
+    def test_provider_errors(
+        self,
+        body: str,
+        match: str,
+        tmp_path: Path,
+        provider: Callable[..., str],
+    ) -> None:
+        _dynamic_project(tmp_path, provider(body))
+        with pytest.raises(RuntimeError, match=match):
+            backend._project_metadata(backend._load_pyproject(tmp_path), tmp_path)
+
+    @pytest.mark.parametrize(
+        "version", ["1", "1.2.3", "1!2.0rc1.post3.dev4+abc.5", "2.0a1", "0.1.dev7"]
+    )
+    def test_normalized_versions_pass(
+        self, version: str, tmp_path: Path, provider: Callable[..., str]
+    ) -> None:
+        _dynamic_project(tmp_path, provider(_returning(version)))
+        assert (
+            backend._project_metadata(backend._load_pyproject(tmp_path), tmp_path)[1]
+            == version
+        )
+
+    def test_pkg_info_without_version_is_an_error(
+        self, tmp_path: Path, provider: Callable[..., str]
+    ) -> None:
+        _dynamic_project(tmp_path, provider(_RAISING_PROVIDER))
+        (tmp_path / "PKG-INFO").write_text("Metadata-Version: 2.4\nName: mypkg\n")
+        with pytest.raises(RuntimeError, match="PKG-INFO has no Version header"):
+            backend._project_metadata(backend._load_pyproject(tmp_path), tmp_path)
+
+    def test_pkg_info_version_is_stripped(
+        self, tmp_path: Path, provider: Callable[..., str]
+    ) -> None:
+        _dynamic_project(tmp_path, provider(_RAISING_PROVIDER))
+        (tmp_path / "PKG-INFO").write_text("Metadata-Version: 2.4\nVersion: 1.0 \n")
+        assert (
+            backend._project_metadata(backend._load_pyproject(tmp_path), tmp_path)[1]
+            == "1.0"
+        )
+
+    def test_provider_import_writes_no_bytecode(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        monkeypatch.setattr(sys, "dont_write_bytecode", False)
+        monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+        monkeypatch.delenv("PYTHONPYCACHEPREFIX", raising=False)
+        monkeypatch.setattr(sys, "pycache_prefix", None)
+        _dynamic_project(tmp_path, provider(_returning("1.0")))
+        backend._project_metadata(backend._load_pyproject(tmp_path), tmp_path)
+        assert not (tmp_path / "__pycache__").exists()
+        assert sys.dont_write_bytecode is False
+
+
+def _isolate_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    empty = tmp_path / "gitconfig"
+    empty.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+_GIT_IDENTITY = (
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@t",
+    "-c",
+    "commit.gpgsign=false",
+    "-c",
+    "tag.gpgsign=false",
+)
+
+
+@needs_git
+class TestDynamicVersionFromGit:
+    def test_pkg_info_wins_in_a_checkout(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        _isolate_git(tmp_path, monkeypatch)
+        src = tmp_path / "src"
+        src.mkdir()
+        _git(src, "init", "-q")
+        _dynamic_project(src, provider(_RAISING_PROVIDER, src))
+        (src / "PKG-INFO").write_text("Metadata-Version: 2.4\nVersion: 7.0.0\n")
+        _git(src, "add", ".")
+        monkeypatch.chdir(src)
+        name = backend.prepare_metadata_for_build_wheel(str(tmp_path / "meta"))
+        assert name == "mypkg-7.0.0.dist-info"
+        sdist = src / "dist" / backend.build_sdist(str(src / "dist"))
+        assert _pkg_info_members(sdist) == ["mypkg-7.0.0/PKG-INFO"]
+
+    def test_round_trip_through_the_sdist(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        provider: Callable[..., str],
+    ) -> None:
+        _isolate_git(tmp_path, monkeypatch)
+        src = tmp_path / "src"
+        src.mkdir()
+        body = (
+            "import subprocess\n"
+            "def get_version(source_dir):\n"
+            "    out = subprocess.run(\n"
+            "        ['git', 'describe', '--tags', '--abbrev=0'],\n"
+            "        cwd=source_dir, capture_output=True, text=True, check=True,\n"
+            "    ).stdout.strip()\n"
+            "    return out.removeprefix('v')\n"
+        )
+        _dynamic_project(src, provider(body, src))
+        _git(src, "init", "-q")
+        _git(src, "add", ".")
+        _git(src, *_GIT_IDENTITY, "commit", "-q", "-m", "init")
+        _git(src, *_GIT_IDENTITY, "tag", "-a", "-m", "v2.0.0", "v2.0.0")
+        monkeypatch.chdir(src)
+        name = backend.build_sdist(str(tmp_path / "dist"))
+        assert name == "mypkg-2.0.0.tar.gz"
+
+        _unpack(tmp_path / "dist" / name, tmp_path / "unpacked")
+        unpacked = tmp_path / "unpacked" / "mypkg-2.0.0"
+        assert not (unpacked / ".git").exists()
+        monkeypatch.chdir(unpacked)
+        meta = backend.prepare_metadata_for_build_wheel(str(tmp_path / "meta"))
+        assert meta == "mypkg-2.0.0.dist-info"
