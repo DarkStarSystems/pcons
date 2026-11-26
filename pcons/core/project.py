@@ -35,6 +35,7 @@ from pcons.core.invocation import program_name, running_as_a_program
 from pcons.core.node import AliasNode, DirNode, FileNode, Node, PathRole
 from pcons.core.paths import PathResolver
 from pcons.core.target import Target, split_target_spec
+from pcons.packages.version import satisfies
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,22 @@ class _PackageKey(NamedTuple):
     system: bool
 
 
+class _ProvidedPackage(NamedTuple):
+    """The answer provide_package() gives find_package() for one name."""
+
+    target: Target
+    version: str | None
+
+
+def _provided_for(
+    provided: Mapping[tuple[str, str | None], _ProvidedPackage],
+    name: str,
+    env_name: str | None,
+) -> _ProvidedPackage | None:
+    """The answer for *name* in that environment: its own, else the shared one."""
+    return provided.get((name, env_name)) or provided.get((name, None))
+
+
 def _refuse_duplicate(existing: Target, new: Target) -> None:
     """Raise unless *existing* and *new* are told apart.
 
@@ -367,6 +384,7 @@ class Project(_ProjectBuilders):
         "_found_packages",
         "_package_finder_chains",
         "_extra_finders",
+        "_provided_packages",
         "_configure_deps",
         "_pending_stages",
         "_scan_scopes",
@@ -465,6 +483,9 @@ class Project(_ProjectBuilders):
         # One lazily built FinderChain per environment name.
         self._package_finder_chains: dict[str | None, Any] = {}
         self._extra_finders: list[tuple[str | None, Any]] = []
+        # provide_package() answers by (name, environment name or None for
+        # every environment). Kept on the top-level project.
+        self._provided_packages: dict[tuple[str, str | None], _ProvidedPackage] = {}
         # Files the build description read while running: the generated build
         # files depend on these, so editing one re-runs pcons (see
         # add_configure_dependency / generated_input).
@@ -2117,7 +2138,9 @@ class Project(_ProjectBuilders):
     ) -> Target | None:
         """Find an external package and return it as an ImportedTarget.
 
-        Searches for the package using the configured finder chain
+        A package given a target with ``provide_package()`` returns that
+        target instead. Otherwise this searches for the package using the
+        configured finder chain
         (default: PkgConfigFinder → SystemFinder). Results are cached per
         environment, so repeated calls with the same arguments return the
         same target and two environments may hold two different answers for
@@ -2151,6 +2174,8 @@ class Project(_ProjectBuilders):
 
         Raises:
             PackageNotFoundError: If the package is not found and required=True.
+            PconsValueError: If the package is provided at a version that
+                fails *version*.
 
         Example:
             zlib = project.find_package("zlib")
@@ -2170,6 +2195,21 @@ class Project(_ProjectBuilders):
             components=tuple(components or []),
             system=system,
         )
+        provided = _provided_for(self.top._provided_packages, name, cache_key.env)
+        if provided is not None:
+            if (
+                version
+                and provided.version
+                and not satisfies(provided.version, version)
+            ):
+                raise PconsValueError(
+                    f"find_package('{name}', version='{version}') is not met: "
+                    f"'{name}' is provided by {provided.target.name!r} at "
+                    f"version {provided.version}"
+                )
+            # Kept, so a later provide_package() can tell what this got.
+            self._found_packages[cache_key] = provided.target
+            return provided.target
         # Within one environment a package is one target, so the two
         # spellings of it cannot both exist. Say which two, rather than
         # letting Target.__init__ report a name collision. A cached None is a
@@ -2215,6 +2255,84 @@ class Project(_ProjectBuilders):
 
             raise PackageNotFoundError(name, version)
         return target
+
+    def provide_package(
+        self,
+        name: str,
+        target: Target,
+        *,
+        env: Env | None = None,
+        version: str | None = None,
+    ) -> None:
+        """Make *target* the answer to every ``find_package(name)`` in the build.
+
+        A vendored dependency's build script looks up what it depends on
+        with ``find_package()``. When this build makes that dependency from
+        source, providing it hands every such lookup the in-tree target,
+        ahead of any finder, without changing the vendored script::
+
+            zlib = add_subdirectory("third_party/zlib").zlib
+            project.provide_package("zlib", zlib, version="1.3.1")
+            add_subdirectory("third_party/libpng")  # its find_package("zlib")
+
+        It covers the whole build, subdirectories included, whichever
+        project it is called on. A lookup's ``components=`` and ``system=``
+        don't apply: the target is used as if linked directly, so its include
+        directories are ordinary ones unless
+        ``target.public.make_includes_system()`` makes them system ones for
+        every dependent.
+
+        Args:
+            name: The package name ``find_package()`` is called with.
+            target: The target that answers it.
+            env: Answer lookups for that environment only, ahead of a target
+                provided for every environment. An environment scopes by its
+                name, as in ``add_package_finder()``, so an unnamed one
+                scopes to nothing.
+            version: The target's version. A lookup's ``version=``
+                requirement is checked against it, and one it fails is an
+                error. Without one, every requirement is taken as met.
+
+        Raises:
+            PconsValueError: If ``find_package(name)`` already gave an answer
+                this would change, since one build would then hold two
+                answers, or if *name* is already provided for *env*.
+        """
+        if not isinstance(target, Target):
+            raise PconsTypeError(
+                f"provide_package('{name}', ...) takes a Target, "
+                f"not {type(target).__name__}"
+            )
+        top = self.top
+        scope = env.name if env is not None and env.name else None
+        where = f" for environment '{scope}'" if scope else ""
+        existing = top._provided_packages.get((name, scope))
+        if existing is not None:
+            if existing.target is target and existing.version == version:
+                return
+            raise PconsValueError(
+                f"Package '{name}' is already provided{where} by "
+                f"{existing.target.name!r}"
+            )
+        provided = {
+            **top._provided_packages,
+            (name, scope): _ProvidedPackage(target, version),
+        }
+        for project in top._iter_tree():
+            for key, found in project._found_packages.items():
+                if key.name != name:
+                    continue
+                answer = _provided_for(provided, name, key.env)
+                if answer is not None and answer.target is not found:
+                    in_env = f" in environment '{key.env}'" if key.env else ""
+                    got = "nothing" if found is None else repr(found)
+                    raise PconsValueError(
+                        f"find_package('{name}') already ran{in_env} and found "
+                        f"{got}. Call provide_package('{name}', ...) before "
+                        f"any find_package('{name}'), so every lookup gets the "
+                        "same answer."
+                    )
+        top._provided_packages = provided
 
     def _finder_chain_for(self, env: Env | None) -> Any:
         """The chain an environment searches, built once and kept.

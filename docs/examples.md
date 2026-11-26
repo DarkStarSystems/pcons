@@ -28,6 +28,7 @@ uvx pcons
 | [`08_custom_tool`](https://github.com/DarkStarSystems/pcons/tree/main/examples/08_custom_tool) | Demonstrates creating a custom tool that concatenates files |
 | [`09_makefile`](https://github.com/DarkStarSystems/pcons/tree/main/examples/09_makefile) | Demonstrates Makefile generation with pcons |
 | [`100_inno_setup`](https://github.com/DarkStarSystems/pcons/tree/main/examples/100_inno_setup) | A Windows installer compiled by Inno Setup from a script, packing the program it builds |
+| [`101_provided_package`](https://github.com/DarkStarSystems/pcons/tree/main/examples/101_provided_package) | A vendored library's find_package() answered with another vendored library's in-tree target, through project.provide_package() |
 | [`10_paths_with_spaces`](https://github.com/DarkStarSystems/pcons/tree/main/examples/10_paths_with_spaces) | Paths with spaces throughout: a source file, its directory, an include directory, and a define whose value contains spaces |
 | [`11_windows_resource`](https://github.com/DarkStarSystems/pcons/tree/main/examples/11_windows_resource) | Demonstrates compiling Windows resource files (.rc) with MSVC |
 | [`12_env_override`](https://github.com/DarkStarSystems/pcons/tree/main/examples/12_env_override) | Demonstrates env.override() for per-file compiler settings |

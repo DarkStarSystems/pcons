@@ -4,16 +4,15 @@
 from __future__ import annotations
 
 import os
-import re
 import shlex
 import shutil
 import subprocess
 from collections.abc import Sequence
-from itertools import zip_longest
 from typing import TYPE_CHECKING
 
 from pcons.packages.description import ComponentDescription, PackageDescription
 from pcons.packages.finders.base import BaseFinder
+from pcons.packages.version import satisfies
 
 if TYPE_CHECKING:
     pass
@@ -179,31 +178,6 @@ class PkgConfigFinder(BaseFinder):
                 remaining.append(flag)
         return libs, remaining
 
-    def _version_key(self, version: str) -> list[int | str]:
-        """Convert a version string into comparable components."""
-        parts = re.findall(r"\d+|[A-Za-z]+", version)
-        key: list[int | str] = []
-        for part in parts:
-            key.append(int(part) if part.isdigit() else part.lower())
-        return key
-
-    def _compare_versions(self, left: str, right: str) -> int:
-        """Compare two version strings.
-
-        Returns:
-            -1 if left < right, 0 if equal, 1 if left > right.
-        """
-        left_parts = self._version_key(left)
-        right_parts = self._version_key(right)
-
-        for left_part, right_part in zip_longest(left_parts, right_parts, fillvalue=0):
-            if left_part == right_part:
-                continue
-            if isinstance(left_part, int) and isinstance(right_part, int):
-                return -1 if left_part < right_part else 1
-            return -1 if str(left_part) < str(right_part) else 1
-        return 0
-
     def find(
         self,
         package_name: str,
@@ -233,22 +207,8 @@ class PkgConfigFinder(BaseFinder):
         if not success:
             version_str = ""
 
-        # If version specified, check version constraint against the resolved version.
-        if version:
-            match = re.match(r"(>=|<=|=|>|<)?(.+)", version)
-            if match:
-                op = match.group(1) or "="
-                ver = match.group(2).strip()
-                cmp_result = self._compare_versions(version_str, ver)
-                satisfies = {
-                    ">=": cmp_result >= 0,
-                    ">": cmp_result > 0,
-                    "<=": cmp_result <= 0,
-                    "<": cmp_result < 0,
-                    "=": cmp_result == 0,
-                }
-                if not satisfies[op]:
-                    return None
+        if version and not satisfies(version_str, version):
+            return None
 
         # Get cflags
         success, cflags_str = self._run_pkg_config("--cflags", package_name)
