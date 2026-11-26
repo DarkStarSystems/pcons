@@ -6,7 +6,8 @@ from __future__ import annotations
 import re
 from itertools import zip_longest
 
-_REQUIREMENT = re.compile(r"(>=|<=|=|>|<)?(.+)")
+# Longest first, so ">=1.2" is not read as ">" and "=1.2".
+_OPERATORS = (">=", "<=", ">", "<", "=")
 
 
 def _version_key(version: str) -> list[int | str]:
@@ -34,11 +35,10 @@ def compare_versions(left: str, right: str) -> int:
 
 def satisfies(version: str, requirement: str) -> bool:
     """Whether *version* meets *requirement*; a bare version means "=" it."""
-    match = _REQUIREMENT.match(requirement.strip())
-    if match is None:
-        return True
-    op = match.group(1) or "="
-    order = compare_versions(version, match.group(2).strip())
+    requirement = requirement.strip()
+    op = next((op for op in _OPERATORS if requirement.startswith(op)), "=")
+    wanted = requirement.removeprefix(op).strip()
+    order = compare_versions(version, wanted)
     return {
         ">=": order >= 0,
         ">": order > 0,
