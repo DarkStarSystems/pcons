@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[tool.pcons] version-provider = "module:function"`, such as one that
   reads a git tag. The sdist records it in `PKG-INFO`. See "Dynamic
   version" in the user guide and `examples/50_pyproject`. (#294)
+- **An in-tree target can answer `find_package()`.**
+  `project.provide_package("zlib", zlib, version="1.3.1")` makes every
+  `find_package("zlib")` in the build return your vendored zlib, ahead of
+  any finder, so another vendored project's script finds it without changes.
+  A lookup's version requirement is checked against `version=`. Calling it
+  after a lookup of that name already ran is an error. See
+  `examples/101_provided_package`. (#311)
 
 ### Fixed
 

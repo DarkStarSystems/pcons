@@ -1,0 +1,15 @@
+# Test configuration for the provided-package example
+
+[test]
+description = "A vendored library's find_package() answered with another vendored library's in-tree target, through project.provide_package()"
+
+expected_outputs = [
+    "build/app",
+    "build/third_party/zlite/libzlite.a",
+    "build/third_party/pngish/libpngish.a",
+]
+
+[verify]
+commands = [
+    { run = "./build/app", expect_stdout = "pngish for app, using zlite 1.3.1 (in-tree)" },
+]

@@ -1050,6 +1050,10 @@ builds) or when you ask for them, like CMake's `EXCLUDE_FROM_ALL`; with
 `"all"`, `ninja all` builds them too. A `Default()` in your script can still
 name any of them. See `examples/93_vendored_subdirectory`.
 
+When one vendored project finds another with `find_package()`, hand it your
+in-tree target with `project.provide_package()`; see
+[A package your build makes](#a-package-your-build-makes).
+
 A subdirectory script imports Python modules sitting next to it, the way a root
 build script does:
 
@@ -2292,6 +2296,39 @@ behaves as before. Environments are told apart by their name, so scoping
 needs a named environment.
 
 See [Using Conan Packages](#using-conan-packages) below for more details about using Conan with pcons.
+
+### A package your build makes
+
+When you vendor a library and another vendored project's script finds it with
+`find_package()`, that lookup should get your in-tree target, not a copy from
+the system. `provide_package()` makes it so, with no change to the other
+script:
+
+```python
+zlib = add_subdirectory("third_party/zlib")
+project.provide_package("zlib", zlib.lib, version="1.3.1")
+add_subdirectory("third_party/libpng")  # its find_package("zlib") gets zlib.lib
+```
+
+From then on every `find_package("zlib")` in the build, in any subdirectory,
+returns that target, ahead of any finder. It's CMake's `FetchContent`
+`OVERRIDE_FIND_PACKAGE`, without the `CACHE ... FORCE` of a find module's
+variables that came before it.
+
+- `version=` is the target's version. A lookup's `version=` requirement is
+  checked against it, and one it fails is an error. Leave it out and every
+  requirement is taken as met.
+- A lookup's `components=` and `system=` don't apply: the target is used as if
+  linked directly, so its include directories are ordinary ones. To keep its
+  warnings out of every dependent, yours included, call
+  `zlib.lib.public.make_includes_system()`.
+- `env=` provides it in that environment only, ahead of one provided for every
+  environment, as with `add_package_finder()`.
+- Call it before any `find_package()` of that name. A lookup that already ran
+  got another answer, even if that answer was "not found", so calling it
+  afterwards is an error rather than a build with two answers.
+
+See `examples/101_provided_package`.
 
 ### Header-Only and Manual Packages
 

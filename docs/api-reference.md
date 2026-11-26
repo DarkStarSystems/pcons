@@ -24,6 +24,8 @@ API:
 | `project.find_package(name, env=env)` | Same, searching and caching for that environment only |
 | `project.add_package_finder(finder)` | Prepend a custom package finder |
 | `project.add_package_finder(finder, env=env)` | Same, used in that environment only |
+| `project.provide_package(name, target, version=)` | Make an in-tree target the answer to every `find_package(name)` in the build, with its version checked against what a lookup asks for |
+| `project.provide_package(name, target, env=env)` | Same, in that environment only |
 | `project.add_subdirectory(subdir, pick=None)` | Run a subdirectory's `pcons-build.py` as part of this project (also available as a bare `add_subdirectory()`) |
 | `project.add_subdirectory(subdir, env=, vars=, imports=)` | Same, choosing the environment it builds in, the build variables it reads, and the objects it reads as `project.imports` |
 | `project.imports` | The objects this directory's inclusion was handed; empty for a top-level project |
