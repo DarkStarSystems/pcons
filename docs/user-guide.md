@@ -2254,6 +2254,10 @@ recorded on the package as a `found_by` property (e.g. `"pkg-config"`, `"rez+pkg
 `"system"`). A finder whose tool isn't installed is skipped with a warning. Run with `--debug configure` (see [debug logging](cli.md#options)) to
 see which finder answered (or passed on) each package.
 
+Finders and results belong to the whole build: a subdirectory script's
+`find_package()` uses the finders you added and gets the same target your own
+lookup did.
+
 Results are cached per `(environment, name, version, components)` — including
 *negative* results, so repeated `find_package(..., required=False)` probes
 don't re-run the finder chain and its subprocesses; a later `required=True`

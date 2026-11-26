@@ -478,13 +478,15 @@ class Project(_ProjectBuilders):
         self._tier_floors: dict[Path, TierFloor] = {}
         self._config = config
         self._resolved = False
-        # None caches a negative find_package result for the key.
+        # Package lookups, kept on the top-level project so that a build
+        # gives one answer per package and environment, whichever script
+        # asks. None caches a negative find_package result for the key.
         self._found_packages: dict[_PackageKey, Target | None] = {}
         # One lazily built FinderChain per environment name.
         self._package_finder_chains: dict[str | None, Any] = {}
         self._extra_finders: list[tuple[str | None, Any]] = []
         # provide_package() answers by (name, environment name or None for
-        # every environment). Kept on the top-level project.
+        # every environment).
         self._provided_packages: dict[tuple[str, str | None], _ProvidedPackage] = {}
         # Files the build description read while running: the generated build
         # files depend on these, so editing one re-runs pcons (see
@@ -2142,9 +2144,9 @@ class Project(_ProjectBuilders):
         target instead. Otherwise this searches for the package using the
         configured finder chain
         (default: PkgConfigFinder → SystemFinder). Results are cached per
-        environment, so repeated calls with the same arguments return the
-        same target and two environments may hold two different answers for
-        one package name.
+        environment for the whole build, subdirectory scripts included, so
+        repeated calls with the same arguments return the same target and two
+        environments may hold two different answers for one package name.
 
         The returned target can be used as a dependency via target.link()
         or applied directly to an environment via env.use().
@@ -2195,7 +2197,8 @@ class Project(_ProjectBuilders):
             components=tuple(components or []),
             system=system,
         )
-        provided = _provided_for(self.top._provided_packages, name, cache_key.env)
+        top = self.top
+        provided = _provided_for(top._provided_packages, name, cache_key.env)
         if provided is not None:
             if (
                 version
@@ -2208,7 +2211,7 @@ class Project(_ProjectBuilders):
                     f"version {provided.version}"
                 )
             # Kept, so a later provide_package() can tell what this got.
-            self._found_packages[cache_key] = provided.target
+            top._found_packages[cache_key] = provided.target
             return provided.target
         # Within one environment a package is one target, so the two
         # spellings of it cannot both exist. Say which two, rather than
@@ -2219,7 +2222,7 @@ class Project(_ProjectBuilders):
         conflicting = next(
             (
                 k
-                for k, found in self._found_packages.items()
+                for k, found in top._found_packages.items()
                 if k._replace(system=False) == lookup
                 and k.system != system
                 and found is not None
@@ -2235,21 +2238,21 @@ class Project(_ProjectBuilders):
                 f"system={conflicting.system}; requesting system={system} would "
                 f"need a second target of the same name. Pick one spelling."
             )
-        if cache_key not in self._found_packages:
-            chain = self._finder_chain_for(env)
+        if cache_key not in top._found_packages:
+            chain = top._finder_chain_for(env)
             pkg = chain.find(name, version, components)
             if pkg is None:
                 # Cache the negative result too: don't re-run the finder
                 # chain (and its subprocesses) for every repeat probe.
-                self._found_packages[cache_key] = None
+                top._found_packages[cache_key] = None
             else:
                 from pcons.packages.imported import ImportedTarget
 
-                self._found_packages[cache_key] = ImportedTarget.from_package(
+                top._found_packages[cache_key] = ImportedTarget.from_package(
                     pkg, components=components, system=system, env=env
                 )
 
-        target = self._found_packages[cache_key]
+        target = top._found_packages[cache_key]
         if target is None and required:
             from pcons.core.errors import PackageNotFoundError
 
@@ -2318,20 +2321,19 @@ class Project(_ProjectBuilders):
             **top._provided_packages,
             (name, scope): _ProvidedPackage(target, version),
         }
-        for project in top._iter_tree():
-            for key, found in project._found_packages.items():
-                if key.name != name:
-                    continue
-                answer = _provided_for(provided, name, key.env)
-                if answer is not None and answer.target is not found:
-                    in_env = f" in environment '{key.env}'" if key.env else ""
-                    got = "nothing" if found is None else repr(found)
-                    raise PconsValueError(
-                        f"find_package('{name}') already ran{in_env} and found "
-                        f"{got}. Call provide_package('{name}', ...) before "
-                        f"any find_package('{name}'), so every lookup gets the "
-                        "same answer."
-                    )
+        for key, found in top._found_packages.items():
+            if key.name != name:
+                continue
+            answer = _provided_for(provided, name, key.env)
+            if answer is not None and answer.target is not found:
+                in_env = f" in environment '{key.env}'" if key.env else ""
+                got = "nothing" if found is None else repr(found)
+                raise PconsValueError(
+                    f"find_package('{name}') already ran{in_env} and found "
+                    f"{got}. Call provide_package('{name}', ...) before "
+                    f"any find_package('{name}'), so every lookup gets the "
+                    "same answer."
+                )
         top._provided_packages = provided
 
     def _finder_chain_for(self, env: Env | None) -> Any:
@@ -2343,8 +2345,9 @@ class Project(_ProjectBuilders):
         """
         from pcons.packages.finders import FinderChain, host_finders, sysroot_finders
 
+        top = self.top
         key = env.name if env is not None else None
-        chain = self._package_finder_chains.get(key)
+        chain = top._package_finder_chains.get(key)
         if chain is None:
             cross = env.cross if env is not None else None
             if cross is None:
@@ -2353,11 +2356,11 @@ class Project(_ProjectBuilders):
                 defaults = sysroot_finders(Path(cross.sysroot).expanduser())
             else:
                 defaults = []
-            added = list(reversed(self._extra_finders))
+            added = list(reversed(top._extra_finders))
             scoped = [f for scope, f in added if scope is not None and scope == key]
             shared = [f for scope, f in added if scope is None]
             chain = FinderChain([*scoped, *shared, *defaults])
-            self._package_finder_chains[key] = chain
+            top._package_finder_chains[key] = chain
         return chain
 
     def add_package_finder(self, finder: Any, *, env: Env | None = None) -> None:
@@ -2365,7 +2368,8 @@ class Project(_ProjectBuilders):
 
         Custom finders are tried before the default finders (PkgConfig,
         System), most recently added first. Use this to add Conan, vcpkg, or
-        custom finders.
+        custom finders. A finder serves the whole build, so a subdirectory
+        script's ``find_package()`` uses it too, whichever project added it.
 
         A finder added after a package was already looked up still applies to
         every later lookup: whether it is consulted must not depend on where
@@ -2394,8 +2398,9 @@ class Project(_ProjectBuilders):
                 type(finder).__name__,
             )
             return
-        self._extra_finders.append((env.name if env is not None else None, finder))
-        self._package_finder_chains.clear()
+        top = self.top
+        top._extra_finders.append((env.name if env is not None else None, finder))
+        top._package_finder_chains.clear()
 
     # Command is kept as a wrapper since it delegates to env.Command()
     # and doesn't fit the registry pattern well
