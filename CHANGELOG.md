@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Previously every package had a blank 1x1 placeholder icon. The user guide
   now explains how this icon differs from the `.exe`'s own icon, which comes
   from a `.rc` file. Examples 11 and 19 show both.
+- **Dynamic versions in the Python build backend.** With
+  `dynamic = ["version"]`, the version comes from a function you give in
+  `[tool.pcons] version-provider = "module:function"`, such as one that
+  reads a git tag. The sdist records it in `PKG-INFO`. See "Dynamic
+  version" in the user guide and `examples/50_pyproject`. (#294)
 
 ### Fixed
 
@@ -54,6 +59,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for uv and pip, regenerating `build.ninja` after the install now says why
   it can't and how to fix it, instead of failing with "No such file or
   directory" or "No module named pcons". (#299)
+- On Windows, a test that times out while a process it started still holds
+  its output no longer hangs `pcons test`. The runner kills every process
+  the test started and keeps what the test printed. (#301)
+- Strict pyright no longer reports `get_var` as partially unknown. (#295)
+- An sdist built from an unpacked sdist has one `PKG-INFO`, not two.
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20): #308, #309 and #310, and raised #292–#301
 
 ## [0.33.0] - 2026-11-14
 
