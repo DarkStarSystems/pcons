@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from pcons.util.process_tree import ProcessTree
-from tests.support import gone, kill_pid, read_pid, write_spawner
+from tests.support import gone, kill_pid, read_pid, write_spawner, zombie
 
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 # The venv launcher runs the interpreter in a job of its own that allows breakaway,
@@ -151,7 +151,9 @@ def test_group_alive_while_a_left_process_runs(tmp_path: Path) -> None:
             assert tree.group_alive()
             kill_pid(pid)
             assert gone(pid, 10)
-            assert not tree.group_alive()
+            # Without an init to reap it, the killed orphan is a zombie,
+            # and a zombie still answers for its group.
+            assert not tree.group_alive() or zombie(pid)
         finally:
             kill_pid(pid)
 

@@ -258,9 +258,25 @@ def gone(pid: int, deadline: float) -> bool:
             os.kill(pid, 0)
         except ProcessLookupError:
             return True
+        if zombie(pid):
+            return True
         if time.monotonic() >= end:
             return False
         time.sleep(0.05)
+
+
+def zombie(pid: int) -> bool:
+    """Whether process *pid* exited but was never reaped.
+
+    An orphan is reaped by init, but a container may run without one, and
+    there a killed orphan stays a zombie. Linux only: elsewhere ``False``.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    # The state follows the command name, which is in parentheses.
+    return stat.rpartition(")")[2].split()[0] == "Z"
 
 
 _SPAWNER_PREFIX = """\
