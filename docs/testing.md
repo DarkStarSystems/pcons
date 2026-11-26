@@ -37,7 +37,7 @@ The full set of fields (all keyword-only):
 | `cwd` | `Path \| str \| None` | Working directory; defaults to the build dir. |
 | `env` | `dict[str, str] \| None` | Extra environment variables for the test process. |
 | `labels` | `Sequence[str]` | Tags for filtering (`unit`, `integration`, `slow`, `fuzz`, ...). |
-| `timeout` | `float \| None` | Seconds before the runner kills the test. On Windows it also kills every process the test started. |
+| `timeout` | `float \| None` | Seconds before the runner kills the test and every process it started. The report keeps what the test printed. |
 | `should_fail` | `bool` | If True, a non-zero exit code is a pass. |
 | `skip_returncode` | `int \| None` | Exit code that means "skipped", not "failed". |
 | `serial` | `bool` | Don't run in parallel with other tests. |
@@ -110,6 +110,14 @@ project.Test(
 
 A test that exits on its own leaves the processes it started running, so
 `server.start` can leave its server up for the tests after it.
+
+Each test runs in a group of its own: a job object on Windows, a new session
+elsewhere. That's how a timeout reaches every process the test started. A
+process that leaves the group on purpose, with `setsid` or by breaking away
+from the job, outlives the kill. Ctrl-C, `SIGTERM` and `SIGHUP` sent to
+`pcons test` are passed on to the tests that are running, and to what
+finished tests left running, so an interrupted run stops a fixture's server
+too.
 
 When you filter with `-L` / `-R`, deps of selected tests are
 auto-included so fixtures keep working:

@@ -11,6 +11,8 @@ The runner contract is exit-code only: exit 0 means pass.
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
+import io
 import json
 import logging
 import os
@@ -18,11 +20,14 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 import click
 
@@ -418,11 +423,14 @@ def _resolve_cwd(test: dict, build_dir: Path) -> Path:
     return build_dir
 
 
-def run_one_test(test: dict, build_dir: Path) -> TestResult:
+def run_one_test(
+    test: dict, build_dir: Path, in_flight: _InFlight | None = None
+) -> TestResult:
     """Execute one test and return its TestResult.
 
     Relative program paths are resolved against the build dir; absolute
-    paths are left alone.
+    paths are left alone. The test's process tree is in *in_flight* while
+    the test runs.
     """
     name = test["name"]
     labels = tuple(test.get("labels", []) or [])
@@ -458,16 +466,18 @@ def run_one_test(test: dict, build_dir: Path) -> TestResult:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            errors="replace",
         ) as tree:
-            stdout, stderr = _communicate(tree, timeout)
+            with in_flight.track(tree) if in_flight else contextlib.nullcontext():
+                stdout, stderr = _communicate(tree, timeout)
     except subprocess.TimeoutExpired as e:
         duration = time.monotonic() - start
         return TestResult(
             name=name,
             status=TIMEOUT,
             duration=duration,
-            stdout=e.stdout or "" if isinstance(e.stdout, str) else "",
-            stderr=e.stderr or "" if isinstance(e.stderr, str) else "",
+            stdout=_as_text(e.stdout),
+            stderr=_as_text(e.stderr),
             message=f"Killed after {timeout}s",
             labels=labels,
         )
@@ -538,21 +548,117 @@ def _finish_killed(
     """Kill a timed-out test and collect what it wrote.
 
     When the kill reaches every descendant, the pipes close with it and the
-    output is drained in full. Otherwise a descendant may hold the pipes for
-    as long as it lives, so the child is only reaped and *e* is returned.
+    output is drained in full. A descendant the kill missed may hold the
+    pipes for as long as it lives, so then the child is only reaped, and the
+    output is what was read before the drain gave up.
     """
     tree.kill()
     if tree.reaches_descendants:
         try:
             stdout, stderr = tree.proc.communicate(timeout=_DRAIN_SECONDS)
-        except subprocess.TimeoutExpired:
-            pass
+        except subprocess.TimeoutExpired as drain:
+            e = subprocess.TimeoutExpired(
+                e.cmd, e.timeout, output=drain.output, stderr=drain.stderr
+            )
         else:
             return subprocess.TimeoutExpired(
                 e.cmd, e.timeout, output=stdout, stderr=stderr
             )
     tree.proc.wait()
     return e
+
+
+def _as_text(output: str | bytes | None) -> str:
+    """A timed-out test's output as text.
+
+    On POSIX, output read before a timeout comes back as bytes, which may
+    end partway through a character.
+    """
+    if isinstance(output, bytes):
+        stream = io.TextIOWrapper(
+            io.BytesIO(output), encoding="locale", errors="replace"
+        )
+        return stream.read()
+    return output or ""
+
+
+class _InFlight:
+    """The process trees of the tests in flight, to pass a signal on to.
+
+    On POSIX each test leads a session of its own, so a signal sent to the
+    process group of ``pcons test``, as Ctrl-C and GNU ``timeout`` send one,
+    doesn't reach it unless passed on. A test that starts after a signal
+    was passed on gets it too, and so does the group of a test that ended
+    but left processes running, such as a fixture's server.
+    """
+
+    def __init__(self) -> None:
+        # Reentrant: a second signal can arrive while the handler holds it.
+        self._lock = threading.RLock()
+        self._trees: set[ProcessTree] = set()
+        self._left: list[ProcessTree] = []
+        self._sent: list[int] = []
+
+    @contextlib.contextmanager
+    def track(self, tree: ProcessTree) -> Generator[None]:
+        """Hold *tree* while the block runs."""
+        with self._lock:
+            self._trees.add(tree)
+            for sig in self._sent:
+                tree.send_signal(sig)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._trees.discard(tree)
+                if tree.group_alive():
+                    self._left.append(tree)
+
+    def send_signal(self, sig: int) -> None:
+        """Pass *sig* on to every test in flight, and to any started later."""
+        with self._lock:
+            self._sent.append(sig)
+            for tree in [*self._trees, *self._left]:
+                tree.send_signal(sig)
+
+
+@contextlib.contextmanager
+def _passing_on_signals(in_flight: _InFlight) -> Generator[None]:
+    """Pass the signals that stop ``pcons test`` on to the tests, on POSIX.
+
+    Each signal is passed on, then handled as it would have been, so Ctrl-C
+    still raises KeyboardInterrupt and SIGTERM still ends the process. A
+    signal ``pcons test`` ignores is left alone, as the tests inherited
+    that. Only the main thread can set handlers, so elsewhere nothing
+    changes.
+    """
+    if sys.platform == "win32" or threading.current_thread() is not (
+        threading.main_thread()
+    ):
+        yield
+        return
+
+    def pass_on(sig: int, frame: FrameType | None) -> None:
+        in_flight.send_signal(sig)
+        previous = saved[sig]
+        if callable(previous):
+            previous(sig, frame)
+        else:
+            signal.signal(sig, signal.SIG_DFL)
+            os.kill(os.getpid(), sig)
+
+    saved: dict[int, Any] = {}
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        previous = signal.getsignal(sig)
+        if previous in (signal.SIG_IGN, None):
+            continue
+        saved[sig] = previous
+        signal.signal(sig, pass_on)
+    try:
+        yield
+    finally:
+        for sig, previous in saved.items():
+            signal.signal(sig, previous)
 
 
 def _exit_description(returncode: int) -> str:
@@ -678,6 +784,7 @@ def run_all(
     blocked_by: dict[str, list[str]] = {}
     pending: set[str] = set(by_name)
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=effective_jobs)
+    in_flight = _InFlight()
     running: dict[concurrent.futures.Future, str] = {}
     serial_in_flight = False
     stopped = False
@@ -737,7 +844,7 @@ def run_all(
                 pending.discard(name)
                 serial_in_flight = True
                 on_start(test)
-                fut = pool.submit(run_one_test, test, build_dir)
+                fut = pool.submit(run_one_test, test, build_dir, in_flight)
                 running[fut] = name
                 # Don't launch anything else this pass — serial is exclusive.
                 return
@@ -747,31 +854,32 @@ def run_all(
                 break
             pending.discard(name)
             on_start(test)
-            fut = pool.submit(run_one_test, test, build_dir)
+            fut = pool.submit(run_one_test, test, build_dir, in_flight)
             running[fut] = name
 
-    try:
-        while pending or running:
-            schedule()
-            if not running:
-                # No tests running and we couldn't schedule any — every
-                # remaining test must be blocked by something. The deps
-                # validator already ruled out cycles, so this only fires
-                # under stop_on_fail bookkeeping; safe to exit.
-                break
-            done, _ = concurrent.futures.wait(
-                running, return_when=concurrent.futures.FIRST_COMPLETED
-            )
-            for fut in done:
-                name = running.pop(fut)
-                test = by_name[name]
-                result = fut.result()
-                if test.get("serial"):
-                    serial_in_flight = False
-                results[name] = result
-                on_finish(test, result)
-    finally:
-        pool.shutdown(wait=True)
+    with _passing_on_signals(in_flight):
+        try:
+            while pending or running:
+                schedule()
+                if not running:
+                    # No tests running and we couldn't schedule any — every
+                    # remaining test must be blocked by something. The deps
+                    # validator already ruled out cycles, so this only fires
+                    # under stop_on_fail bookkeeping; safe to exit.
+                    break
+                done, _ = concurrent.futures.wait(
+                    running, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                for fut in done:
+                    name = running.pop(fut)
+                    test = by_name[name]
+                    result = fut.result()
+                    if test.get("serial"):
+                        serial_in_flight = False
+                    results[name] = result
+                    on_finish(test, result)
+        finally:
+            pool.shutdown(wait=True)
 
     # Preserve manifest order in the output; any test still missing is a
     # defensive "didn't run" entry rather than a crash.
