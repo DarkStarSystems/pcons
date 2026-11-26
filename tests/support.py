@@ -258,9 +258,25 @@ def gone(pid: int, deadline: float) -> bool:
             os.kill(pid, 0)
         except ProcessLookupError:
             return True
+        if zombie(pid):
+            return True
         if time.monotonic() >= end:
             return False
         time.sleep(0.05)
+
+
+def zombie(pid: int) -> bool:
+    """Whether process *pid* exited but was never reaped.
+
+    An orphan is reaped by init, but a container may run without one, and
+    there a killed orphan stays a zombie. Linux only: elsewhere ``False``.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    # The state follows the command name, which is in parentheses.
+    return stat.rpartition(")")[2].split()[0] == "Z"
 
 
 _SPAWNER_PREFIX = """\
@@ -291,6 +307,11 @@ time.sleep(60)
 print("partial", flush=True)
 record(subprocess.Popen(SLEEPER).pid)
 """,
+    "escaped": """\
+print("partial", flush=True)
+record(subprocess.Popen(SLEEPER, start_new_session=True).pid)
+time.sleep(60)
+""",
     "daemon": """\
 quiet = subprocess.DEVNULL
 record(subprocess.Popen(SLEEPER, stdin=quiet, stdout=quiet, stderr=quiet).pid)
@@ -310,6 +331,8 @@ def write_spawner(script: Path, pid_file: Path, how: str) -> Path:
             with its stdout and stderr, and sleeps 60 s. ``orphan``: the same,
             but a middle process starts the sleeper and exits first.
             ``exited``: the same as ``direct``, but the script exits at once.
+            ``escaped``: the same as ``direct``, but the sleeper leads a new
+            session (POSIX only).
             ``daemon``: the sleeper gets no stdio and the script exits 0.
             Each script prints ``partial`` before the pid is recorded.
 

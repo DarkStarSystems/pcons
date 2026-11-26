@@ -59,9 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for uv and pip, regenerating `build.ninja` after the install now says why
   it can't and how to fix it, instead of failing with "No such file or
   directory" or "No module named pcons". (#299)
-- On Windows, a test that times out while a process it started still holds
-  its output no longer hangs `pcons test`. The runner kills every process
-  the test started and keeps what the test printed. (#301)
+- A test's `timeout` kills every process the test started, not just the
+  test. Before, a child left holding the test's output hung `pcons test` on
+  Windows, and kept running on Linux and macOS. Ctrl-C and `SIGTERM` still
+  reach the tests. (#301)
+- A test that times out keeps what it printed. On Linux and macOS its
+  output was lost. (#300)
+- A test whose output isn't valid text no longer crashes `pcons test`. The
+  bytes that can't be decoded show as `�`.
 - Strict pyright no longer reports `get_var` as partially unknown. (#295)
 - An sdist built from an unpacked sdist has one `PKG-INFO`, not two.
 

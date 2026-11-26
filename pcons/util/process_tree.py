@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import signal
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -171,8 +173,12 @@ class ProcessTree:
     """A child process and every descendant the platform lets us reach.
 
     On Windows the child starts in a job object, so every process it starts
-    joins the job and dies with it, unless it breaks away on purpose. On
-    other platforms only the child itself is reached for now.
+    joins the job and dies with it, unless it breaks away on purpose.
+    Elsewhere the child leads a new session, so every process it starts is
+    in its process group, unless it leaves on purpose (``setsid``,
+    ``setpgid``). A new session also leaves the child out of signals sent to
+    the caller's process group, such as Ctrl-C's; :meth:`send_signal` passes
+    one on.
 
     Closing the tree releases its resources and never kills anything, so a
     process the child left running on purpose outlives the tree.
@@ -199,8 +205,10 @@ class ProcessTree:
             self.proc = self._spawn_in_job(command, popen_kwargs)
             self.reaches_descendants = self._job is not None
         else:
-            self.proc = subprocess.Popen(command, **popen_kwargs)
-            self.reaches_descendants = False
+            self.proc = subprocess.Popen(
+                command, start_new_session=True, **popen_kwargs
+            )
+            self.reaches_descendants = True
 
     if sys.platform == "win32":
 
@@ -232,11 +240,43 @@ class ProcessTree:
         The descendants die even when the child itself already exited. Only
         call it on a tree whose processes should all stop. Never raises.
         """
-        if sys.platform == "win32" and self._job is not None:
-            _kernel32.TerminateJobObject(self._job, 1)
+        if sys.platform == "win32":
+            if self._job is not None:
+                _kernel32.TerminateJobObject(self._job, 1)
+        else:
+            self.send_signal(signal.SIGKILL)
         if self.proc.poll() is None:
             with contextlib.suppress(OSError):
                 self.proc.kill()
+
+    def send_signal(self, sig: int) -> None:
+        """Send *sig* to the child's process group on POSIX, or to the child
+        alone on Windows. Never raises.
+
+        On POSIX the group outlives the child while any process in it lives,
+        and its id isn't reused until then, so this reaches the descendants
+        even after the child was reaped.
+        """
+        with contextlib.suppress(OSError):
+            if sys.platform == "win32":
+                self.proc.send_signal(sig)
+            else:
+                # macOS refuses a group of zombies with EPERM, not ESRCH.
+                os.killpg(self.proc.pid, sig)
+
+    def group_alive(self) -> bool:
+        """Whether any process is left in the child's process group, such as
+        a server the child started and left running. Always False on
+        Windows, which has no process groups to signal."""
+        if sys.platform == "win32":
+            return False
+        try:
+            os.killpg(self.proc.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:  # macOS, for a group of zombies
+            return True
+        return True
 
     def close(self) -> None:
         """Release what the tree holds. Descendants keep running.

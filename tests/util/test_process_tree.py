@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from pcons.util.process_tree import ProcessTree
-from tests.support import gone, kill_pid, read_pid, write_spawner
+from tests.support import gone, kill_pid, read_pid, write_spawner, zombie
 
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 # The venv launcher runs the interpreter in a job of its own that allows breakaway,
@@ -18,13 +19,12 @@ CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 BASE_PYTHON: str = getattr(sys, "_base_executable", sys.executable)
 
 
-def test_reaches_descendants_matches_the_platform() -> None:
+def test_reaches_descendants() -> None:
     with ProcessTree([sys.executable, "-c", "pass"]) as tree:
         tree.proc.wait()
-        assert tree.reaches_descendants == (sys.platform == "win32")
+        assert tree.reaches_descendants
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="POSIX kill not implemented")
 def test_kill_reaches_an_orphaned_grandchild(tmp_path: Path) -> None:
     pid_file = tmp_path / "pid"
     script = write_spawner(tmp_path / "child.py", pid_file, "orphan")
@@ -43,7 +43,6 @@ def test_kill_reaches_an_orphaned_grandchild(tmp_path: Path) -> None:
             kill_pid(pid)
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="POSIX kill not implemented")
 def test_kill_reaches_the_descendants_of_an_exited_child(tmp_path: Path) -> None:
     pid_file = tmp_path / "pid"
     script = write_spawner(tmp_path / "child.py", pid_file, "exited")
@@ -125,3 +124,41 @@ def test_close_closes_the_pipes_of_a_killed_child() -> None:
     tree.close()
     assert tree.proc.stdout is not None and tree.proc.stdout.closed
     assert tree.proc.stderr is not None and tree.proc.stderr.closed
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX only")
+def test_send_signal_reaches_the_process_group(tmp_path: Path) -> None:
+    pid_file = tmp_path / "pid"
+    script = write_spawner(tmp_path / "child.py", pid_file, "direct")
+    with ProcessTree([sys.executable, str(script)], stdout=subprocess.DEVNULL) as tree:
+        pid = read_pid(pid_file, 30)
+        try:
+            tree.send_signal(signal.SIGTERM)
+            assert tree.proc.wait(timeout=10) == -signal.SIGTERM
+            assert gone(pid, 10)
+        finally:
+            kill_pid(pid)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX only")
+def test_group_alive_while_a_left_process_runs(tmp_path: Path) -> None:
+    pid_file = tmp_path / "pid"
+    script = write_spawner(tmp_path / "child.py", pid_file, "daemon")
+    with ProcessTree([sys.executable, str(script)]) as tree:
+        tree.proc.wait(timeout=30)
+        pid = read_pid(pid_file, 30)
+        try:
+            assert tree.group_alive()
+            kill_pid(pid)
+            assert gone(pid, 10)
+            # Without an init to reap it, the killed orphan is a zombie,
+            # and a zombie still answers for its group.
+            assert not tree.group_alive() or zombie(pid)
+        finally:
+            kill_pid(pid)
+
+
+def test_group_is_not_alive_once_a_lone_child_exits() -> None:
+    with ProcessTree([sys.executable, "-c", "pass"]) as tree:
+        tree.proc.wait(timeout=30)
+        assert not tree.group_alive()
