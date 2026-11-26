@@ -9,11 +9,11 @@ workflows:
     '.github/workflows/fuzz.yml':
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'
-        - 'astral-sh/setup-uv@v10.3.3'
+        - 'astral-sh/setup-uv@v10.4.0'
     '.github/workflows/main.yml':
         - 'actions/cache@v6.1.0'
         - 'actions/checkout@v7.0.1'
-        - 'astral-sh/setup-uv@v10.3.3'
+        - 'astral-sh/setup-uv@v10.4.0'
         - 'codecov/codecov-action@v7.1.1'
         - 'emscripten-core/setup-emsdk@v16'
         - 'ilammy/msvc-dev-cmd@v1.13.0'
@@ -49,9 +49,9 @@ dependencies:
         commit: 'sha1-043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
         owner_id: 44036562
         repo_id: 192625955
-    'astral-sh/setup-uv@v10.3.3':
-        ref: 'v10.3.3'
-        commit: 'sha1-68559e99cc807c1eb7e9238fd43a15bba460eec2'
+    'astral-sh/setup-uv@v10.4.0':
+        ref: 'v10.4.0'
+        commit: 'sha1-1db35dd8eee11c5894872e0b383ae6c406cf738d'
         owner_id: 115962839
         repo_id: 846733598
     'cloudflare/wrangler-action@v4.1.3':
