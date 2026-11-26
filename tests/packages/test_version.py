@@ -16,6 +16,7 @@ from pcons.packages.version import compare_versions, satisfies
         ("1.10", "1.9", 1),
         ("1.2.13", "1.3", -1),
         ("2.0rc1", "2.0RC1", 0),
+        ("2.0a", "2.0b", -1),
     ],
 )
 def test_compare_versions(left: str, right: str, order: int) -> None:
