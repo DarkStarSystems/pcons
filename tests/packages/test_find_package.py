@@ -572,3 +572,32 @@ class TestFinderChainPerEnvironment:
         warnings = [r for r in caplog.records if "not available" in r.getMessage()]
         assert len(warnings) == 1
         assert "AlwaysUnavailableFinder" in warnings[0].getMessage()
+
+
+class TestAcrossSubdirectories:
+    """Finders and answers belong to the build, not to one script's project."""
+
+    @staticmethod
+    def _child(top: Project) -> Project:
+        with top._enter_subdir("sub"):
+            return Project("child")
+
+    def test_a_finder_added_at_the_top_serves_a_subdirectory(self) -> None:
+        top = Project("top")
+        top.add_package_finder(MockFinder({"zlib": _make_pkg("zlib")}))
+
+        assert self._child(top).find_package("zlib", required=False) is not None
+
+    def test_a_finder_added_in_a_subdirectory_serves_the_build(self) -> None:
+        top = Project("top")
+        self._child(top).add_package_finder(MockFinder({"zlib": _make_pkg("zlib")}))
+
+        assert top.find_package("zlib", required=False) is not None
+
+    def test_the_top_and_a_subdirectory_get_one_target(self) -> None:
+        top = Project("top")
+        finder = CountingMockFinder({"zlib": _make_pkg("zlib")})
+        top.add_package_finder(finder)
+
+        assert self._child(top).find_package("zlib") is top.find_package("zlib")
+        assert finder.calls == 1
