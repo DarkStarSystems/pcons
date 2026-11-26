@@ -6,6 +6,8 @@ Kept apart from ``tests/test_runner.py``, which is skipped on Windows.
 
 from __future__ import annotations
 
+import codecs
+import io
 import locale
 import os
 import signal
@@ -140,9 +142,14 @@ def test_output_that_is_not_text_is_replaced(tmp_path: Path) -> None:
     assert " bad" in result.stdout
 
 
+# What Popen's text mode decodes with: UTF-8 in UTF-8 mode, else the locale's.
+TEXT_ENCODING = io.text_encoding(None)
+if TEXT_ENCODING == "locale":
+    TEXT_ENCODING = locale.getencoding()
+
+
 @pytest.mark.skipif(
-    locale.getpreferredencoding(False).lower().replace("-", "") != "utf8",
-    reason="needs a UTF-8 locale",
+    codecs.lookup(TEXT_ENCODING).name != "utf-8", reason="needs UTF-8 text"
 )
 def test_output_cut_partway_through_a_character_is_kept() -> None:
     assert _as_text("café".encode()[:-1]) == "caf�"

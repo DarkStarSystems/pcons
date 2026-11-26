@@ -575,9 +575,9 @@ def _as_text(output: str | bytes | None) -> str:
     end partway through a character.
     """
     if isinstance(output, bytes):
-        stream = io.TextIOWrapper(
-            io.BytesIO(output), encoding="locale", errors="replace"
-        )
+        # The encoding Popen's text mode picks, which is UTF-8 in UTF-8 mode.
+        encoding = io.text_encoding(None)
+        stream = io.TextIOWrapper(io.BytesIO(output), encoding, errors="replace")
         return stream.read()
     return output or ""
 
