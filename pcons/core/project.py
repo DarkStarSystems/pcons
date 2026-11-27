@@ -485,7 +485,8 @@ class Project(_ProjectBuilders):
         self._found_packages: dict[_PackageKey, Target | None] = {}
         # One lazily built FinderChain per environment name.
         self._package_finder_chains: dict[str | None, Any] = {}
-        self._extra_finders: list[tuple[str | None, Any]] = []
+        # (depth of the adding project, environment name or None, finder)
+        self._extra_finders: list[tuple[int, str | None, Any]] = []
         # provide_package() answers by (name, environment name or None for
         # every environment).
         self._provided_packages: dict[tuple[str, str | None], _ProvidedPackage] = {}
@@ -2367,10 +2368,18 @@ class Project(_ProjectBuilders):
                 defaults = sysroot_finders(Path(cross.sysroot).expanduser())
             else:
                 defaults = []
-            added = list(reversed(top._extra_finders))
-            scoped = [f for scope, f in added if scope is not None and scope == key]
-            shared = [f for scope, f in added if scope is None]
-            chain = FinderChain([*scoped, *shared, *defaults])
+            # Nearest the top first, so a vendored project's finder never
+            # answers ahead of yours; then scoped before shared, then the
+            # most recently added.
+            added = sorted(
+                (
+                    (depth, scope is None, -order, finder)
+                    for order, (depth, scope, finder) in enumerate(top._extra_finders)
+                    if scope is None or scope == key
+                ),
+                key=lambda entry: entry[:3],
+            )
+            chain = FinderChain([*(entry[3] for entry in added), *defaults])
             top._package_finder_chains[key] = chain
         return chain
 
@@ -2381,6 +2390,8 @@ class Project(_ProjectBuilders):
         System), most recently added first. Use this to add Conan, vcpkg, or
         custom finders. A finder serves the whole build, so a subdirectory
         script's ``find_package()`` uses it too, whichever project added it.
+        Finders added nearer the top of the build are tried first, so one a
+        vendored project adds answers only what yours don't.
 
         A finder added after a package was already looked up still applies to
         every later lookup: whether it is consulted must not depend on where
@@ -2394,7 +2405,7 @@ class Project(_ProjectBuilders):
                 a single-environment project wants. An environment scopes by
                 its name, so an unnamed one scopes to nothing and the finder
                 is used everywhere. A finder scoped to an environment is
-                tried before the project-wide ones.
+                tried before the project-wide ones that one project added.
 
         Example:
             from pcons.packages.finders import ConanFinder
@@ -2409,8 +2420,11 @@ class Project(_ProjectBuilders):
                 type(finder).__name__,
             )
             return
-        top = self.top
-        top._extra_finders.append((env.name if env is not None else None, finder))
+        top, depth, project = self.top, 0, self
+        while project._parent is not None:
+            depth, project = depth + 1, project._parent
+        scope = env.name if env is not None else None
+        top._extra_finders.append((depth, scope, finder))
         top._package_finder_chains.clear()
 
     # Command is kept as a wrapper since it delegates to env.Command()

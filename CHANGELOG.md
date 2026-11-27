@@ -42,7 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A finder added with `add_package_finder()` is used by `find_package()` in
   subdirectory scripts too, and a package found twice in one environment is
   one target. A subdirectory script used to search only pkg-config and the
-  system, and got a target of its own.
+  system, and got a target of its own. Finders added nearer the top are
+  tried first, so one a vendored project adds answers only what yours don't.
 - `create_msix(processor_architecture=...)` reaches the package manifest;
   every package used to claim `x64`.
 - `create_appx()` takes every `create_msix()` option (`executable`,

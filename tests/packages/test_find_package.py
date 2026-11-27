@@ -17,6 +17,7 @@ from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.base import BaseFinder
+from pcons.packages.imported import ImportedTarget
 
 
 class MockFinder(BaseFinder):
@@ -628,3 +629,18 @@ class TestAcrossSubdirectories:
 
         with pytest.raises(PconsValueError, match="Pick one spelling"):
             child.find_package("zlib")
+
+    def test_a_vendored_finder_answers_only_what_yours_dont(self) -> None:
+        """A subdirectory's finder, added after yours, still comes after it."""
+        top = Project("top")
+        top.add_package_finder(MockFinder({"zlib": _make_pkg("zlib", "1.3")}))
+        vendored = self._child(top)
+        vendored.add_package_finder(
+            MockFinder({"zlib": _make_pkg("zlib", "1.2"), "png": _make_pkg("png")})
+        )
+
+        zlib = top.find_package("zlib")
+        png = vendored.find_package("png")
+
+        assert isinstance(zlib, ImportedTarget) and zlib.version == "1.3"
+        assert png is not None
