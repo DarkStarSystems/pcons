@@ -32,7 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `find_package("zlib")` in the build return your vendored zlib, ahead of
   any finder, so another vendored project's script finds it without changes.
   A lookup's version requirement is checked against `version=`. Calling it
-  after a lookup of that name already ran is an error. See
+  after another script already looked the name up is an error, but your own
+  script can fall back to it when its `find_package(..., required=False)`
+  found nothing. See
   `examples/101_provided_package`. (#311)
 
 ### Fixed

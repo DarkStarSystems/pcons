@@ -385,6 +385,7 @@ class Project(_ProjectBuilders):
         "_package_finder_chains",
         "_extra_finders",
         "_provided_packages",
+        "_not_found_by",
         "_configure_deps",
         "_pending_stages",
         "_scan_scopes",
@@ -488,6 +489,8 @@ class Project(_ProjectBuilders):
         # provide_package() answers by (name, environment name or None for
         # every environment).
         self._provided_packages: dict[tuple[str, str | None], _ProvidedPackage] = {}
+        # The projects each negative find_package() answer was given to.
+        self._not_found_by: dict[_PackageKey, set[Project]] = {}
         # Files the build description read while running: the generated build
         # files depend on these, so editing one re-runs pcons (see
         # add_configure_dependency / generated_input).
@@ -2252,10 +2255,12 @@ class Project(_ProjectBuilders):
                 )
 
         target = top._found_packages[cache_key]
-        if target is None and required:
-            from pcons.core.errors import PackageNotFoundError
+        if target is None:
+            top._not_found_by.setdefault(cache_key, set()).add(self)
+            if required:
+                from pcons.core.errors import PackageNotFoundError
 
-            raise PackageNotFoundError(name, version)
+                raise PackageNotFoundError(name, version)
         return target
 
     def provide_package(
@@ -2298,7 +2303,10 @@ class Project(_ProjectBuilders):
         Raises:
             PconsValueError: If ``find_package(name)`` already gave an answer
                 this would change, since one build would then hold two
-                answers, or if *name* is already provided for *env*.
+                answers, or if *name* is already provided for *env*. A
+                lookup that found nothing doesn't count when it was this
+                project's own, so a script can fall back to building a
+                package it didn't find.
         """
         if not isinstance(target, Target):
             raise PconsTypeError(
@@ -2324,6 +2332,10 @@ class Project(_ProjectBuilders):
             if key.name != name:
                 continue
             answer = _provided_for(provided, name, key.env)
+            # A script that found nothing and now provides the package has
+            # seen both answers: that's the "system copy, else ours" pattern.
+            if found is None and top._not_found_by.get(key, set()) <= {self}:
+                continue
             if answer is not None and answer.target is not found:
                 in_env = f" in environment '{key.env}'" if key.env else ""
                 got = "nothing" if found is None else repr(found)
