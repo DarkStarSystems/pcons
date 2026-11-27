@@ -2931,6 +2931,25 @@ env.Command(
 
 The variables are written into the generated build file, in front of the one command they belong to: `env NAME=VALUE` on POSIX, a small pcons helper on Windows (which has no `env`). So they survive a direct `ninja` or `make` run, and no other command sees them. Setting `os.environ` in the build script would do neither — it reaches every command, and only while pcons itself runs. See `examples/73_command_env`.
 
+### Precompiled Headers
+
+In a large C++ build, much of each compile goes to parsing the same big headers: the standard library, a framework, your own common ones. The `precompile_headers` option compiles them once per target and has each source compile with the result:
+
+```python
+app = project.Program("app", env, sources=[...])
+app.set_option("precompile_headers", ["src/common.h", "<vector>", "<string>"])
+```
+
+List project headers as paths, read from the script's directory like sources, and system headers as `<name>`. pcons writes a header that includes them, compiles it with exactly the flags the target's sources compile with, and includes it ahead of every C and C++ source. Sources don't change: each still includes what it uses, which costs nothing once the header is precompiled.
+
+- **C and C++.** Each gets its own precompiled header, from the same list. If they need different ones (C++ headers mean nothing to C), give a dict: `{"cxx": [...], "c": [...]}`. A language missing from it gets none.
+- **Sharing one.** A target set to another target, `tests.set_option("precompile_headers", app)`, compiles with app's precompiled headers rather than making its own. Its sources must compile with the same defines and flags, which is checked when pcons runs: a difference is an error naming it, not a compiler refusal halfway through the build. Include directories may differ.
+- **What's left out.** Sources added with their own environment (`add_sources(..., env=...)`) compile with other flags, so they don't use it. Neither do Objective-C, Fortran, CUDA or Swift sources.
+- **Turning them off.** `pcons PCONS_PRECOMPILE_HEADERS=0` builds without them, and without including the listed headers, so a CI job can check that every source includes what it uses.
+- **compile_commands.json** shows the listed headers as plain force-includes (`-include`, `/FI`), so tools like clangd see what is compiled, without the precompiled header they couldn't load.
+
+Each toolchain does it its own way: GCC and clang compile the header itself (`-x c++-header`) and find the result beside it, and MSVC and clang-cl compile a source with `/Yc`, whose object every target using the header links. Changing a listed header rebuilds the precompiled header, then the sources that use it. This is CMake's `target_precompile_headers()`, with `REUSE_FROM` as a target in place of the list. See `examples/102_precompiled_headers`.
+
 ### Linking a Whole Static Library
 
 A linker takes an object out of a static library only when something needs one of its symbols. An object that registers itself from a static constructor (a plugin, a factory, a test case) is needed by nothing, so it's left out, and the program never finds it. The `whole_archive` option on the library links every one of its objects into whatever links it:

@@ -291,6 +291,9 @@ class GccToolchain(UnixToolchain):
 
     ENV_COMPILER_FAMILY = "gcc"
     WINDOWS_ABI = "mingw"
+    # GCC quietly compiles the header instead of a precompiled one it can't
+    # use (different flags); say so, since the build is then slower.
+    PCH_USE_FLAGS = ("-Winvalid-pch",)
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link")
 

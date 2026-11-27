@@ -152,10 +152,15 @@ class MakefileGenerator(BaseGenerator):
         for target in project.targets:
             self._write_target_builds(f, target, project, written_nodes)
 
-        # Also write builds for nodes tracked in environments
+        # Also write builds for nodes tracked in environments: a builder's,
+        # or a step a factory declared beside a target's own (a precompiled
+        # header), as ninja does.
         for env in project.environments:
             for node in getattr(env, "_created_nodes", []):
-                if isinstance(node, FileNode) and node.builder is not None:
+                if isinstance(node, FileNode) and (
+                    node.builder is not None
+                    or getattr(node, "_build_info", None) is not None
+                ):
                     if node.path not in written_nodes:
                         self._write_build_rule(f, node, None, project)
                         written_nodes.add(node.path)

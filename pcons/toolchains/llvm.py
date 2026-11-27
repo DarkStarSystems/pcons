@@ -383,6 +383,7 @@ class LlvmToolchain(UnixToolchain):
     """
 
     ENV_COMPILER_FAMILY = "llvm"
+    PCH_SUFFIX = ".pch"
     # Clang's default target on Windows, unless its triple says otherwise
     # (MSYS2's clang64 targets MinGW).
     WINDOWS_ABI = "msvc"

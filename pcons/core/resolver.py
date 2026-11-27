@@ -454,6 +454,7 @@ class Resolver:
             if (
                 not isinstance(dep, FileNode)
                 or dep is node
+                or (dep._build_info or {}).get("primary_node") is node
                 or dep in node.explicit_deps
                 or project.has_child_nodes(dep.path)
             ):

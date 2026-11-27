@@ -1,0 +1,38 @@
+# Test configuration for the precompiled-headers example
+
+[test]
+description = "Precompiled headers: a program's C++ and C headers each compiled once with its sources' flags, and a test program reusing its C++ one"
+
+expected_outputs = [
+    "build/app",
+    "build/tests",
+]
+
+[verify]
+commands = [
+    { run = "./build/app", expect_stdout = "to: 2, checksum: 106493857" },
+    { run = "./build/tests", expect_stdout = "tests passed" },
+]
+
+[[rebuild]]
+description = "Touching a precompiled header rebuilds the precompiled header, then every compile using it"
+touch = "src/words.h"
+expect_rebuild = [
+    "obj.app/pch/cxx_pch.*",
+    "obj.app/src/main.cpp.o",
+    "obj.tests/tests/test_words.cpp.o",
+    "app",
+    "tests",
+]
+expect_no_rebuild = [
+    "obj.app/src/checksum.c.o",
+]
+
+[[rebuild]]
+description = "Nothing changed, nothing rebuilt"
+expect_no_work = true
+
+[skip]
+# Xcode builds the targets itself, from their settings, not pcons's build
+# steps, so it has no step to precompile them.
+generators = ["xcode"]

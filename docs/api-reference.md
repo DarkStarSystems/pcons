@@ -50,6 +50,7 @@ API:
 | `target.pre_build(command)` | Shell command to run before this target is built |
 | `target.post_build(command)` | Shell command to run after this target is built |
 | `target.get_option(key, default=None)` | Read an option set with `set_option()` |
+| `target.set_option("precompile_headers", [...])` | Precompile these headers once and include them ahead of every C and C++ source; a `{"c": [...], "cxx": [...]}` dict for different ones per language, or another target to reuse its |
 | `target.output_name` / `output_prefix` / `output_suffix` | Override the parts of the artifact's filename; the toolchain supplies the rest |
 | `target.output_filename` | The artifact's filename exactly, toolchain prefix and suffix bypassed (not with the three above) |
 | `target.public.include_dirs` | Include dirs for consumers |

@@ -1073,14 +1073,17 @@ class Target:
 
         return self
 
-    def _apply_dependencies(self) -> None:
-        """Wire the depends() edges onto this target's nodes.
+    def _apply_dependencies(self, nodes: Sequence[FileNode] | None = None) -> None:
+        """Wire the depends() edges onto this target's nodes, or onto
+        *nodes*: another step the target makes that is neither linked nor
+        an output.
 
         Called by the resolver once this target's nodes exist and its
         dependencies are resolved; see :meth:`depends` and
         :meth:`FileNode.wait_for`.
         """
-        nodes = self.intermediate_nodes + self.output_nodes
+        if nodes is None:
+            nodes = self.intermediate_nodes + self.output_nodes
         for dep in self._dependencies:
             outputs = self._waited_outputs(dep)
             on_change = self._on_change.get(dep)

@@ -14,6 +14,7 @@ from pcons.tools.toolchain import BaseToolchain, LinkNeeds, declares_import_libr
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
     from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
@@ -21,7 +22,11 @@ if TYPE_CHECKING:
     from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.toolchains.build_context import CompileLinkContext
-    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
+    from pcons.tools.toolchain import (
+        AuxiliaryInputHandler,
+        PrecompiledHeader,
+        SourceHandler,
+    )
 
 
 def msvc_crt(linkage: str, variant: str) -> str:
@@ -120,6 +125,39 @@ class MsvcCompatibleToolchain(BaseToolchain):
         from pcons.toolchains.build_context import MsvcCompileLinkContext
 
         return MsvcCompileLinkContext
+
+    def precompiled_header(
+        self, language: str, wrapper: Path
+    ) -> PrecompiledHeader | None:
+        """Compile a source that includes *wrapper* with ``/Yc``, which
+        writes the precompiled header and an object that must be linked;
+        each compile then uses it with ``/Yu``. Both include the wrapper
+        with ``/FI``, so the name each gives it is the same. The paths are
+        absolute, as CMake writes them: cl.exe looks a relative ``/FI`` up
+        from the source's directory, not the one it runs in.
+
+        The precompiled header is named ``cxx_pch.pch``, not after the
+        whole header name: clang-cl, like clang, swaps a ``/FI`` header for
+        a ``cxx_pch.hxx.pch`` beside it, so ``/Yc`` and ``/Yu`` would never
+        see the header they name once one existed."""
+        from pcons.core.subst import PathToken
+        from pcons.tools.toolchain import PrecompiledHeader
+
+        if language not in ("c", "cxx"):
+            return None
+        pch = wrapper.with_suffix(".pch")
+
+        def flag(prefix: str, path: Path) -> PathToken:
+            return PathToken(prefix=prefix, path=str(path), path_type="absolute")
+
+        named = (flag("/FI", wrapper), flag("/Fp", pch))
+        return PrecompiledHeader(
+            path=pch,
+            build_flags=(flag("/Yc", wrapper), *named),
+            use_flags=(flag("/Yu", wrapper), *named),
+            include_flag="/FI",
+            from_source=True,
+        )
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for C, C++, resource (.rc), or assembly (.asm) files."""
