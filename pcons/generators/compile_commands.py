@@ -254,7 +254,10 @@ class CompileCommandsGenerator(BaseGenerator):
                     build_info.get("vars") if build_info else None,
                 ),
             )
-            return to_shell_command(expanded, shell="bash")
+            database_flags = (build_info or {}).get("database_flags") or []
+            return to_shell_command(
+                [*expanded, *cast("list[str]", database_flags)], shell="bash"
+            )
 
         return self._format_command_fallback(
             tool_name, command_var, source, output, build_info

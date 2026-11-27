@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[tool.pcons] version-provider = "module:function"`, such as one that
   reads a git tag. The sdist records it in `PKG-INFO`. See "Dynamic
   version" in the user guide and `examples/50_pyproject`. (#294)
+- **Precompiled headers.** `target.set_option("precompile_headers",
+  ["src/common.h", "<vector>"])` compiles the headers once per target and
+  language, with the flags its sources compile with, and includes them ahead
+  of every C and C++ source. Another target can reuse them by setting the
+  option to that target; a mismatch in defines or flags is an error when
+  pcons runs. GCC, clang, MSVC and clang-cl. `PCONS_PRECOMPILE_HEADERS=0`
+  turns them off. See `examples/102_precompiled_headers`.
 - **An in-tree target can answer `find_package()`.**
   `project.provide_package("zlib", zlib, version="1.3.1")` makes every
   `find_package("zlib")` in the build return your vendored zlib, ahead of

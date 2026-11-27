@@ -31,11 +31,12 @@ from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
     from pcons.core.environment import Environment
     from pcons.core.subst import FlagToken
     from pcons.core.target import Target
-    from pcons.tools.toolchain import SourceHandler
+    from pcons.tools.toolchain import PrecompiledHeader, SourceHandler
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,11 @@ class UnixToolchain(BaseToolchain):
     # MinGW ("mingw") and MSVC ("msvc") objects can't be linked together.
     # Elsewhere every Unix toolchain links with every other: no tag.
     WINDOWS_ABI: ClassVar[str | None] = None
+
+    # What a precompiled header is named after its header (GCC's; clang's
+    # is ".pch"), and the warnings a compile that uses one turns on.
+    PCH_SUFFIX: ClassVar[str] = ".gch"
+    PCH_USE_FLAGS: ClassVar[tuple[str, ...]] = ()
 
     @property
     def abi(self) -> str | None:
@@ -442,6 +448,26 @@ class UnixToolchain(BaseToolchain):
     # =========================================================================
     # Source Handler Methods
     # =========================================================================
+
+    def precompiled_header(
+        self, language: str, wrapper: Path
+    ) -> PrecompiledHeader | None:
+        """Compile the header itself (``-x c++-header``); a compile that
+        includes it with ``-include`` finds the precompiled one beside it.
+        GCC and clang both look there, and fall back to the header when
+        it can't be used."""
+        from pcons.tools.toolchain import PrecompiledHeader
+
+        kind = {"c": "c-header", "cxx": "c++-header"}.get(language)
+        if kind is None:
+            return None
+        include = PathToken(prefix="-include", path=str(wrapper))
+        return PrecompiledHeader(
+            path=wrapper.with_name(wrapper.name + self.PCH_SUFFIX),
+            build_flags=("-x", kind),
+            use_flags=(include, *self.PCH_USE_FLAGS),
+            include_flag="-include",
+        )
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for C/C++/Objective-C/assembly suffixes, or None."""

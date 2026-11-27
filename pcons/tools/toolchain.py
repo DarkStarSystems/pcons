@@ -48,6 +48,13 @@ register_target_option(
     "MSVC a .def file adds to __declspec(dllexport) rather than replacing it",
 )
 register_target_option(
+    "precompile_headers",
+    "headers compiled once and included ahead of every C and C++ source: a "
+    "list of paths or <system> names, a {language: headers} dict for "
+    "different ones per language, or another target whose precompiled "
+    "headers to reuse",
+)
+register_target_option(
     "import_library",
     "False declares no import library for a Windows DLL that exports nothing, "
     "such as a resource-only DLL, for which link.exe writes none; nothing can "
@@ -242,6 +249,35 @@ class SourceHandler:
     deps_style: str | None = None
     command_var: str = "objcmd"
     group_sources: bool = False
+
+
+@dataclass(frozen=True)
+class PrecompiledHeader:
+    """How a toolchain precompiles a header for one language, and uses it.
+
+    The header is a wrapper pcons writes into the build directory, which
+    includes the headers a target listed.
+
+    Attributes:
+        path: The precompiled header the toolchain writes, beside the
+            wrapper.
+        build_flags: Added to the compile that makes it.
+        use_flags: Added to each compile that uses it. They stay out of
+            compile_commands.json, whose readers can't load another
+            compiler's precompiled header.
+        include_flag: Includes one header ahead of a source (``-include``,
+            ``/FI``), joined to its path. compile_commands.json gets one per
+            header, so it sees what is compiled.
+        from_source: The precompiled header is written by compiling a source
+            that includes the wrapper, whose object must be linked (MSVC's
+            ``/Yc``), rather than by compiling the wrapper itself.
+    """
+
+    path: Path
+    build_flags: tuple[str | PathToken, ...]
+    use_flags: tuple[str | PathToken, ...]
+    include_flag: str
+    from_source: bool = False
 
 
 @dataclass
@@ -905,6 +941,13 @@ class Toolchain(Protocol):
 
     def setup_group_node(self, node: Any, target: Target, env: Environment) -> None:
         """Augment a grouped (whole-module) compile node; usually a no-op."""
+        ...
+
+    def precompiled_header(
+        self, language: str, wrapper: Path
+    ) -> PrecompiledHeader | None:
+        """How this toolchain precompiles *wrapper* for *language*, or None
+        (see BaseToolchain)."""
         ...
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
@@ -1595,6 +1638,14 @@ class BaseToolchain:
         (``node._build_info["vars"]``), extra outputs, or implicit deps —
         e.g. Swift's ``-module-name`` and ``.swiftmodule`` emission.
         """
+
+    def precompiled_header(
+        self, language: str, wrapper: Path
+    ) -> PrecompiledHeader | None:
+        """How this toolchain precompiles the header *wrapper*, an absolute
+        path, for *language* ("c", "cxx"), and how a compile uses it. Base:
+        it doesn't, and the target's headers are left out."""
+        return None
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
         """Return handler for an auxiliary input suffix (".def"), or None.

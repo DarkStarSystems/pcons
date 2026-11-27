@@ -20,6 +20,7 @@ from pcons.core.node import BuildInfo, FileNode, Node, OutputInfo
 from pcons.core.paths import affix_filename
 from pcons.core.subst import PathToken, TargetPath
 from pcons.toolchains.build_context import CompileLinkContext
+from pcons.tools.pch import PrecompiledHeaderBuild, PrecompiledHeaders
 from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
@@ -34,6 +35,8 @@ from pcons.tools.toolchain import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.core.subst import FlagToken
@@ -381,7 +384,9 @@ class CompileLinkFactory:
         self.project = project
         # Object nodes shared between targets, keyed by source + compiler cmd
         # + effective requirements + environment (see _create_object_node).
-        self._object_cache: dict[tuple[Path, str, tuple, Environment], FileNode] = {}
+        self._object_cache: dict[
+            tuple[Path, str, tuple, Environment, Path | None], FileNode
+        ] = {}
         # Grouped (whole-module) compile nodes, keyed by the sorted source
         # set + compiler cmd + effective requirements + environment.
         self._grouped_object_cache: dict[
@@ -391,6 +396,7 @@ class CompileLinkFactory:
         # Maps language -> list of (source_path, obj_node) pairs.
         # Populated by _create_object_node(); passed to toolchain after_resolve() hooks.
         self._source_obj_by_language: dict[str, list[tuple[Path, FileNode]]] = {}
+        self._pch = PrecompiledHeaders(self)
 
     # -------------------------------------------------------------------------
     # NodeFactory protocol
@@ -481,6 +487,8 @@ class CompileLinkFactory:
             tuple[SourceHandler, Toolchain, Environment, list[FileNode]],
         ]
         grouped = {}
+        # Each precompiled header this target's compiles use, by identity.
+        pchs: dict[int, PrecompiledHeaderBuild] = {}
         for source in target.sources:
             if isinstance(source, FileNode):
                 source_env = target._source_envs.get(source.path, env)
@@ -503,11 +511,16 @@ class CompileLinkFactory:
                     ].append(source)
                     continue
 
+                source_effective = effective_for(source_env, found)
+                pch = (
+                    self._pch.for_source(target, found, source_effective, env)
+                    if found is not None and source_env is env
+                    else None
+                )
+                if pch is not None:
+                    pchs[id(pch)] = pch
                 obj_node = self._create_object_node(
-                    target,
-                    source,
-                    effective_for(source_env, found),
-                    source_env,
+                    target, source, source_effective, source_env, pch
                 )
                 if obj_node:
                     target.intermediate_nodes.append(obj_node)
@@ -535,7 +548,19 @@ class CompileLinkFactory:
         if auxiliary_inputs:
             target._builder_data["auxiliary_inputs"] = auxiliary_inputs
 
-        self._order_compiles_after_dependency_outputs(target)
+        # MSVC's /Yc object is linked by every target using its header. The
+        # step making a header that is not linked waits for what this
+        # target's compiles wait for, since it compiles what they include.
+        pch_steps: list[FileNode] = []
+        for pch in pchs.values():
+            if pch.link_object is not None:
+                if pch.link_object not in target.intermediate_nodes:
+                    target.intermediate_nodes.append(pch.link_object)
+            elif pch.owner is target:
+                pch_steps.append(pch.compile_node)
+        self._order_compiles_after_dependency_outputs(target, pch_steps)
+        if pch_steps:
+            target._apply_dependencies(pch_steps)
 
         trace("resolve", "  Creating output for type: %s", target.target_type)
         if target.target_type == "static_library":
@@ -716,12 +741,13 @@ class CompileLinkFactory:
         source: FileNode,
         effective: EffectiveRequirements,
         env: Environment,
+        pch: PrecompiledHeaderBuild | None = None,
     ) -> FileNode | None:
         """Create object file node with effective requirements in build_info.
 
         Implements object caching: if the same source is compiled by the same
         compiler command with the same effective requirements, the same object
-        node is reused.
+        node is reused. *pch* is the precompiled header it compiles with.
         """
         found = self._get_source_handler_with_toolchain(source.path, env)
         if found is None:
@@ -746,7 +772,8 @@ class CompileLinkFactory:
         # silently linking one architecture's objects into the other's binary.
         tool_cmd = str(getattr(getattr(env, tool_name, None), "cmd", tool_name))
         effective_hash = effective.as_hashable_tuple()
-        cache_key = (source.path.resolve(), tool_cmd, effective_hash, env)
+        pch_path = pch.pch.path if pch is not None else None
+        cache_key = (source.path.resolve(), tool_cmd, effective_hash, env, pch_path)
 
         if cache_key in self._object_cache:
             return self._object_cache[cache_key]
@@ -782,6 +809,10 @@ class CompileLinkFactory:
             "producer": target,
             "toolchain": toolchain,
         }
+        if pch is not None:
+            obj_node._build_info["extra_command_flags"] = list(pch.use_flags)
+            obj_node._build_info["database_flags"] = list(pch.database_flags)
+            obj_node.depends(pch.pch)
 
         self._object_cache[cache_key] = obj_node
 
@@ -1345,7 +1376,9 @@ class CompileLinkFactory:
             return tokens(dep_libs)
         return None
 
-    def _order_compiles_after_dependency_outputs(self, target: Target) -> None:
+    def _order_compiles_after_dependency_outputs(
+        self, target: Target, extra: Sequence[FileNode] = ()
+    ) -> None:
         """Order every compile in *target* after the non-link outputs its
         dependencies produce or wait for -- a generated header, say.
 
@@ -1360,7 +1393,7 @@ class CompileLinkFactory:
         compile_waits, _ = self._dependency_wait_outputs(target)
         if not compile_waits:
             return
-        for node in target.intermediate_nodes:
+        for node in [*target.intermediate_nodes, *extra]:
             node.wait_for(compile_waits)
 
     def _dependency_wait_outputs(self, target: Target) -> tuple[list[Node], list[Node]]:

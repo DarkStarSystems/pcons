@@ -40,6 +40,7 @@ class WasmToolchain(UnixToolchain):
     """
 
     TARGETS_WASM = True
+    PCH_SUFFIX = ".pch"  # clang's
 
     # Linked statically however the runtime linkage is set.
     STATIC_RUNTIME_LINK_FLAGS = ()

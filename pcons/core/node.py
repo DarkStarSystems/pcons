@@ -96,10 +96,17 @@ class BuildInfo(TypedDict, total=False):
     # the C++ module and Fortran module scanners.
     dyndep: str
 
-    # Extra command-line flags appended verbatim to the build command, after
-    # template expansion. Used by the GCC C++ module path to attach
-    # -fmodule-mapper=/-Mno-modules to specific object compiles.
-    extra_command_flags: list[str]
+    # Extra command-line flags appended to the build command, after template
+    # expansion; a PathToken's path is written as the generator writes
+    # paths. Used by the GCC C++ module path to attach
+    # -fmodule-mapper=/-Mno-modules to specific object compiles, and for a
+    # precompiled header.
+    extra_command_flags: list[str | PathToken]
+
+    # Flags compile_commands.json adds to this compile's command in place of
+    # extra_command_flags, which it leaves out: a precompiled header's, which
+    # its readers can't load, become including the headers themselves.
+    database_flags: list[str]
 
     # Tokens that run in front of the command (ccache, a profiler, a
     # persistent-worker client). Kept apart from `command` so a generator
