@@ -126,13 +126,24 @@ class TestOrder:
         ):
             project.provide_package("zlib", Target("zlib-src"))
 
-    def test_a_probe_that_found_nothing_is_an_error(self) -> None:
+    def test_providing_what_this_script_did_not_find_is_a_fallback(self) -> None:
+        """Use the system copy if there is one, else build ours."""
         project = Project("top")
         project._package_finder_chains[None] = FinderChain([MockFinder()])
-        assert project.find_package("zlib", required=False) is None
+        zlib = project.find_package("zlib", required=False)
+        if zlib is None:
+            zlib = Target("zlib-src")
+            project.provide_package("zlib", zlib)
+
+        assert project.find_package("zlib") is zlib
+
+    def test_another_script_that_found_nothing_counts(self) -> None:
+        top = Project("top")
+        top._package_finder_chains[None] = FinderChain([MockFinder()])
+        assert _child(top).find_package("zlib", required=False) is None
 
         with pytest.raises(PconsValueError, match="already ran and found nothing"):
-            project.provide_package("zlib", Target("zlib-src"))
+            top.provide_package("zlib", Target("zlib-src"))
 
     def test_a_lookup_in_a_subdirectory_counts(self) -> None:
         top = Project("top")

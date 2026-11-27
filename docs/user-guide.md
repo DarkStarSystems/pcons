@@ -2330,9 +2330,18 @@ variables that came before it.
   `zlib.lib.public.make_includes_system()`.
 - `env=` provides it in that environment only, ahead of one provided for every
   environment, as with `add_package_finder()`.
-- Call it before any `find_package()` of that name. A lookup that already ran
-  got another answer, even if that answer was "not found", so calling it
-  afterwards is an error rather than a build with two answers.
+- Call it before any other script's `find_package()` of that name. A lookup
+  that already ran got another answer, even if that answer was "not found",
+  so calling it afterwards is an error rather than a build with two answers.
+  The one exception is your own script's lookup that found nothing, which
+  is how you fall back to a vendored copy:
+
+  ```python
+  zlib = project.find_package("zlib", required=False)
+  if zlib is None:
+      zlib = add_subdirectory("third_party/zlib").lib
+      project.provide_package("zlib", zlib)
+  ```
 
 See `examples/101_provided_package`.
 
