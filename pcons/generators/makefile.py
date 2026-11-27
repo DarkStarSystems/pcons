@@ -836,9 +836,14 @@ class MakefileGenerator(BaseGenerator):
                 if isinstance(t, FileNode):
                     out_paths.append(text(t, output=True))
         elif outputs_info and isinstance(outputs_info, dict):
+            # $out holds the explicit outputs, as ninja's does: an implicit
+            # one (a precompiled header, a Swift module) is the rule's
+            # target too, but not a path the command's /Fo or -o names.
             for _name, info in outputs_info.items():
                 if isinstance(info, dict) and "path" in info:
                     info_dict = cast(dict[str, Any], info)
+                    if info_dict.get("implicit", False):
+                        continue
                     out_paths.append(self._text(info_dict["path"], built=True, cwd=cwd))
         if not out_paths:
             out_paths = [out_path]
