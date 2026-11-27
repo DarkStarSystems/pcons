@@ -2256,7 +2256,9 @@ see which finder answered (or passed on) each package.
 
 Finders and results belong to the whole build: a subdirectory script's
 `find_package()` uses the finders you added and gets the same target your own
-lookup did.
+lookup did. If it asks for the headers the other way (`system=`), it gets a
+target of its own for the same package, since that choice is about its own
+compiles. One script asking both ways is an error.
 
 Results are cached per `(environment, name, version, components)` — including
 *negative* results, so repeated `find_package(..., required=False)` probes

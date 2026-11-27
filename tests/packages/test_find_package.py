@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from pcons.core.environment import Environment as Env
-from pcons.core.errors import PackageNotFoundError
+from pcons.core.errors import PackageNotFoundError, PconsValueError
 from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.packages.description import PackageDescription
@@ -601,3 +601,30 @@ class TestAcrossSubdirectories:
 
         assert self._child(top).find_package("zlib") is top.find_package("zlib")
         assert finder.calls == 1
+
+    def test_a_subdirectory_may_ask_for_the_headers_the_other_way(self) -> None:
+        """A vendored script's system=False must not clash with the top's
+        default: each compiles against the headers its own way."""
+        top = Project("top")
+        finder = CountingMockFinder({"zlib": _make_pkg("zlib", include_dirs=["/z"])})
+        top.add_package_finder(finder)
+        child = self._child(top)
+
+        for_top = top.find_package("zlib")
+        for_child = child.find_package("zlib", system=False)
+
+        assert for_child is not for_top
+        assert (for_top.project, for_child.project) == (top, child)
+        assert (for_top.system, for_child.system) == (True, False)
+        assert for_child.package is for_top.package
+        assert finder.calls == 1
+
+    def test_one_script_asking_both_ways_is_still_an_error(self) -> None:
+        top = Project("top")
+        top.add_package_finder(MockFinder({"zlib": _make_pkg("zlib")}))
+        child = self._child(top)
+        top.find_package("zlib")
+        child.find_package("zlib", system=False)
+
+        with pytest.raises(PconsValueError, match="Pick one spelling"):
+            child.find_package("zlib")

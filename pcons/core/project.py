@@ -2213,43 +2213,42 @@ class Project(_ProjectBuilders):
             # Kept, so a later provide_package() can tell what this got.
             top._found_packages[cache_key] = provided.target
             return provided.target
-        # Within one environment a package is one target, so the two
-        # spellings of it cannot both exist. Say which two, rather than
-        # letting Target.__init__ report a name collision. A cached None is a
-        # package that was never found, so it owns no target and conflicts
-        # with nothing.
-        lookup = cache_key._replace(system=False)
-        conflicting = next(
-            (
-                k
-                for k, found in top._found_packages.items()
-                if k._replace(system=False) == lookup
-                and k.system != system
-                and found is not None
-            ),
-            None,
-        )
-        if conflicting is not None:
+        from pcons.packages.imported import ImportedTarget
+
+        # system= is how the asking script compiles against the package's
+        # headers. One script can't ask both ways in one environment: that
+        # would be two targets of one name in its project. Another script,
+        # such as a vendored one, may, and gets a target of its own built from
+        # what was found, without searching again.
+        other = top._found_packages.get(cache_key._replace(system=not system))
+        if isinstance(other, ImportedTarget) and other.project is self:
             where = (
                 f" in environment '{env.name}'" if env is not None and env.name else ""
             )
             raise PconsValueError(
                 f"Package '{name}' was already found{where} with "
-                f"system={conflicting.system}; requesting system={system} would "
+                f"system={not system}; requesting system={system} would "
                 f"need a second target of the same name. Pick one spelling."
             )
         if cache_key not in top._found_packages:
-            chain = top._finder_chain_for(env)
-            pkg = chain.find(name, version, components)
-            if pkg is None:
+            if isinstance(other, ImportedTarget):
+                top._found_packages[cache_key] = ImportedTarget(
+                    other.name,
+                    package=other.package,
+                    requested_components=components,
+                    system=system,
+                    env=env,
+                    project=self,
+                )
+            elif (
+                pkg := top._finder_chain_for(env).find(name, version, components)
+            ) is None:
                 # Cache the negative result too: don't re-run the finder
                 # chain (and its subprocesses) for every repeat probe.
                 top._found_packages[cache_key] = None
             else:
-                from pcons.packages.imported import ImportedTarget
-
                 top._found_packages[cache_key] = ImportedTarget.from_package(
-                    pkg, components=components, system=system, env=env
+                    pkg, components=components, system=system, env=env, project=self
                 )
 
         target = top._found_packages[cache_key]

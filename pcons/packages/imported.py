@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from pcons.core.environment import Environment
+    from pcons.core.project import Project
     from pcons.packages.description import PackageDescription
 
 
@@ -88,6 +89,7 @@ class ImportedTarget(Target):
         requested_components: Sequence[str] | None = None,
         system: bool = True,
         env: Environment | None = None,
+        project: Project | None = None,
     ) -> None:
         """Create an imported target.
 
@@ -102,8 +104,10 @@ class ImportedTarget(Target):
             env: The environment the package was located for. Two
                 environments may hold two different results for one
                 package name, and this is what tells the targets apart.
+            project: The project that owns the target; the current one if
+                left out.
         """
-        super().__init__(name, env=env)
+        super().__init__(name, env=env, project=project)
         self.system = system
         self.package = package
         self.is_imported = True
@@ -140,6 +144,7 @@ class ImportedTarget(Target):
         *,
         system: bool = True,
         env: Environment | None = None,
+        project: Project | None = None,
     ) -> ImportedTarget:
         """Create an imported target from a package description.
 
@@ -150,6 +155,8 @@ class ImportedTarget(Target):
                 (``-isystem``, ``/external:I``), so their warnings are
                 suppressed in every dependent (the default).
             env: The environment the package was located for.
+            project: The project that owns the target; the current one if
+                left out.
 
         Returns:
             ImportedTarget instance.
@@ -168,6 +175,7 @@ class ImportedTarget(Target):
             requested_components=components,
             system=system,
             env=env,
+            project=project,
         )
 
     @property
