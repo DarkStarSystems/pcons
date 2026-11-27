@@ -164,6 +164,23 @@ class TestGnuAndClang:
         assert all(_pch_flag(n) is None for n in app.intermediate_nodes)
         assert not (project.root_dir / "build/obj.app/pch").exists()
 
+    def test_one_header_may_be_given_alone(
+        self, project: Project, gcc_toolchain: Any
+    ) -> None:
+        app = _app(project, gcc_toolchain, "src/common.h")
+        project.resolve()
+
+        assert _pch_flag(_object(app, "main.cpp")) is not None
+
+    def test_a_toolchain_that_makes_none_leaves_the_sources_alone(
+        self, project: Project, gcc_toolchain: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(gcc_toolchain, "precompiled_header", lambda *_: None)
+        app = _app(project, gcc_toolchain, ["src/common.h"])
+        project.resolve()
+
+        assert all(_pch_flag(n) is None for n in app.intermediate_nodes)
+
 
 class TestMsvcFamily:
     def test_a_source_compiled_with_yc_makes_it_and_is_linked(
@@ -258,6 +275,30 @@ class TestReuse:
         ):
             project.resolve()
 
+    def test_a_language_the_other_has_no_sources_in_gets_none(
+        self, project: Project, gcc_toolchain: Any
+    ) -> None:
+        env = project.Environment(toolchain=gcc_toolchain)
+        app = project.Program("app", env, sources=["src/main.cpp"])
+        app.set_option("precompile_headers", ["src/common.h"])
+        tool = project.Program("tool", env, sources=["src/test.cpp", "src/legacy.c"])
+        tool.set_option("precompile_headers", app)
+        project.resolve()
+
+        assert _pch_flag(_object(tool, "test.cpp")) is not None
+        assert _pch_flag(_object(tool, "legacy.c")) is None
+
+    def test_another_compiler_is_refused(
+        self, project: Project, gcc_toolchain: Any, llvm_toolchain: LlvmToolchain
+    ) -> None:
+        app = _app(project, gcc_toolchain, ["src/common.h"])
+        clang = project.Environment(toolchain=llvm_toolchain, name="clang")
+        tests = project.Program("tests", clang, sources=["src/test.cpp"])
+        tests.set_option("precompile_headers", app)
+
+        with pytest.raises(PconsValueError, match="compiler: llvm here, gcc in 'app'"):
+            project.resolve()
+
     def test_a_target_with_none_to_reuse_is_refused(
         self, project: Project, gcc_toolchain: Any
     ) -> None:
@@ -325,3 +366,17 @@ class TestGenerators:
 
         makefile = (project.root_dir / "build/Makefile").read_text()
         assert "obj.app/pch/cxx_pch.hxx.gch:" in makefile
+
+    def test_make_writes_the_object_where_yc_puts_it(
+        self, project: Project, clang_cl_toolchain: Any
+    ) -> None:
+        """/Fo names the object only: the .pch is an implicit output."""
+        _app(project, clang_cl_toolchain, {"cxx": ["src/common.h"]})
+        project.resolve()
+        MakefileGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        makefile = (project.root_dir / "build/Makefile").read_text()
+        [recipe] = [line for line in makefile.splitlines() if "/Yc" in line]
+        assert "/Foobj.app/pch/cxx_pch.cxx.obj" in recipe
+        assert "/Foobj.app/pch/cxx_pch.pch" not in recipe
